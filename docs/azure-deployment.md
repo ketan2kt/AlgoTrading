@@ -2,7 +2,7 @@
 
 ## Promotion status
 
-This deployment is a **monitoring/demo paper environment only**. It must not be used for unattended paper trading until durable paper-order/position persistence and restart reconstruction pass the Phase 7 gate. Live mode is rejected by application startup validation and is not accepted by the Bicep template.
+This deployment is a **monitoring/demo paper environment only**. Durable paper-broker order/position recovery is implemented, but unattended paper trading remains prohibited until the remaining Phase 7 audit, fee/slippage, replay, and soak-test gates pass. Live mode is rejected by application startup validation and is not accepted by the Bicep template.
 
 ## Architecture
 
@@ -54,6 +54,6 @@ Both custom hostnames were verified through their public HTTPS endpoints. Mailgu
 
 ## Known limitations
 
-- Paper broker state remains process-local and is lost on restart.
+- Paper broker recovery assumes the configured single App Service instance; concurrent journal writers are not supported yet.
 - Subsequent EF migrations remain controlled manual operations and must not run automatically at application startup.
 - No Groww token is provisioned, and no live/order-capable gateway exists.

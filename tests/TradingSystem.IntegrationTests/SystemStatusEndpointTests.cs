@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using TradingSystem.Application.Broker;
 
 namespace TradingSystem.IntegrationTests;
 
@@ -17,6 +21,11 @@ public sealed class SystemStatusEndpointTests :
             builder.UseSetting(
                 "ConnectionStrings:TradingDatabase",
                 "Host=localhost;Database=trading_system_tests;Username=trading_tests");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IPaperBrokerJournal>();
+                services.AddSingleton<IPaperBrokerJournal>(new TestPaperBrokerJournal());
+            });
         }).CreateClient(
             new WebApplicationFactoryClientOptions
             {

@@ -11,6 +11,7 @@ using TradingSystem.Infrastructure.SystemStatus;
 using TradingSystem.Application.Broker;
 using TradingSystem.Infrastructure.Broker;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TradingSystem.Infrastructure.Broker.Groww;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Infrastructure.MarketData;
@@ -71,6 +72,7 @@ public static class DependencyInjection
         services.AddSingleton<ISystemStatusReader, FoundationSystemStatusReader>();
         services.AddScoped<IAuditWriter, EfAuditWriter>();
         services.AddSingleton<PaperBrokerStateStore>();
+        services.TryAddSingleton<IPaperBrokerJournal, EfPaperBrokerJournal>();
         services.AddSingleton<PaperBrokerGateway>();
         services.AddSingleton<IBrokerGateway>(provider =>
         {
@@ -88,6 +90,7 @@ public static class DependencyInjection
             _ = provider.GetRequiredService<IBrokerGateway>();
             return provider.GetRequiredService<PaperBrokerGateway>();
         });
+        services.AddHostedService<PaperBrokerRecoveryService>();
 
         services.AddOptions<GrowwOptions>()
             .Bind(configuration.GetSection(GrowwOptions.SectionName))

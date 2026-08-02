@@ -178,7 +178,7 @@ Groww documents that manually generated access tokens expire daily at 06:00. API
 - Native time-series partitions and retention jobs wait for measured Phase 5 ingestion volume.
 - SignalR has a secured hub boundary but no operational projections.
 - The worker emits only a safe foundation heartbeat.
-- The Phase 3 paper store is intentionally in-memory. Durable event persistence and process-restart recovery are Phase 7/8 hardening work; paper state is lost when the process exits.
+- Paper orders, fills, cancellations, idempotency keys, order numbering, and positions are reconstructed from an append-only PostgreSQL journal after restart.
 - Fill prices are explicit deterministic test/replay inputs. They are not a claim of realistic spread, latency, fees, or slippage modeling.
 - Backtest and Groww execution gateways are not implemented, and resolving an execution gateway outside Paper mode fails closed.
 - Groww streaming feed support is not implemented: official documentation describes the Python SDK but does not publish a .NET or wire-level feed contract.
@@ -186,8 +186,8 @@ Groww documents that manually generated access tokens expire daily at 06:00. API
 - There is no scheduled live polling loop yet; Phase 5 provides the validated processing pipeline consumed by later scheduling/feed work.
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
-- Paper lifecycle state and reports remain process-local; durable restart reconstruction and append-only lifecycle persistence must be completed before Phase 8 promotion.
-- The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until durable paper-state restart recovery and the remaining promotion gates are complete.
+- Strategy signal, risk-decision, and final paper-report persistence remain incomplete even though broker orders and positions now recover after restart.
+- The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until the remaining promotion gates are complete.
 - npm reports three moderate development-only transitive findings through Angular CLI's MCP dependency; CI rejects high/critical findings.
 
 ## Disclaimer

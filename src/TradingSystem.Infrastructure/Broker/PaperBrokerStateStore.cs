@@ -4,10 +4,12 @@ namespace TradingSystem.Infrastructure.Broker;
 
 internal sealed class PaperBrokerStateStore
 {
-    internal object SyncRoot { get; } = new();
+    internal SemaphoreSlim Gate { get; } = new(1, 1);
     internal Dictionary<string, PaperOrderState> Orders { get; } =
         new(StringComparer.Ordinal);
     internal Dictionary<(Guid InstrumentId, Direction Direction), PaperPositionState> Positions { get; } = [];
+    internal bool IsRestored { get; set; }
+    internal long NextEventSequence { get; set; }
     internal long NextOrderSequence { get; set; }
 }
 

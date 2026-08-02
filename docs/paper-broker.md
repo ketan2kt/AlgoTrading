@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 3 defines `IBrokerGateway` in the application layer and implements only an in-process `PaperBrokerGateway`. It has no HTTP client, authentication, secrets, Groww model, market feed, or live-order route.
+Phase 3 defines `IBrokerGateway` in the application layer and implements a deterministic `PaperBrokerGateway`. It has no HTTP client, authentication, secrets, Groww model, market feed, or live-order route.
 
 The sandbox proves a deterministic order and position lifecycle before any external broker adapter exists:
 
@@ -18,11 +18,13 @@ The sandbox proves a deterministic order and position lifecycle before any exter
 
 The dependency-injection composition exposes this gateway only when the server-authoritative mode is `Paper`. Backtest mode has no gateway in Phase 3 and fails resolution. Live mode is rejected during startup validation. `IPaperBrokerControl` is a replay/test control surface and must not be exposed through an API controller.
 
-## Determinism and limitations
+## Durability and recovery
 
 The paper broker uses no randomness, wall-clock delay, network request, or background race. Fill progression occurs only when explicitly advanced. Execution price is supplied by a trusted future replay/market-data orchestrator; the gateway validates it but does not invent market prices.
 
-State is process-local in Phase 3. Durable order events, restart reconstruction, database concurrency across processes, realistic spread/slippage/fees, broker-unknown outcomes, and crash-point recovery remain mandatory Phase 7/8 work. Until those controls exist, the paper sandbox is a lifecycle test component, not a production execution engine.
+Submissions, partial fills, completed fills, and cancellations are written to an append-only PostgreSQL journal before the in-memory projection changes. Startup replays that journal in strict sequence to reconstruct orders, idempotency keys, broker-order numbering, and open positions. A missing, duplicate, unknown, or inconsistent event fails recovery and prevents normal startup. A journal write failure leaves the in-memory projection unchanged.
+
+The current Azure topology is deliberately one App Service instance. Cross-process journal writers, realistic spread/slippage/fees, broker-unknown outcomes, and crash testing at every persistence boundary remain Phase 8 hardening work. Strategy signals, risk decisions, and final lifecycle reports still require their complete durable audit chain before shadow-mode promotion.
 
 ## Manual verification
 
@@ -31,4 +33,4 @@ dotnet test tests/TradingSystem.UnitTests --configuration Release `
   --filter "FullyQualifiedName~PaperBrokerGatewayTests|FullyQualifiedName~TradingOrderStateTests"
 ```
 
-Expected coverage includes identical duplicate submission, conflicting duplicate rejection, partial and complete fills, cancellation, entry-to-exit closure, mismatch blocking, and Backtest-mode isolation.
+Expected coverage includes identical duplicate submission, conflicting duplicate rejection, partial and complete fills, cancellation, entry-to-exit closure, mismatch blocking, restart reconstruction, persistence failure, and Backtest-mode isolation.

@@ -103,6 +103,31 @@ public sealed class SystemEvent : Entity, IAppendOnlyEntity
     public DateTimeOffset OccurredAtUtc { get; private init; }
 }
 
+public sealed class PaperBrokerEvent : Entity, IAppendOnlyEntity
+{
+    public PaperBrokerEvent(
+        Guid id,
+        long sequence,
+        string eventType,
+        string clientReference,
+        string payloadJson,
+        DateTimeOffset occurredAtUtc) : base(id)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sequence);
+        Sequence = sequence;
+        EventType = eventType;
+        ClientReference = clientReference;
+        PayloadJson = payloadJson;
+        OccurredAtUtc = occurredAtUtc.ToUniversalTime();
+    }
+
+    public long Sequence { get; private init; }
+    public string EventType { get; private init; }
+    public string ClientReference { get; private init; }
+    public string PayloadJson { get; private init; }
+    public DateTimeOffset OccurredAtUtc { get; private init; }
+}
+
 public sealed class AuditLog : Entity, IAppendOnlyEntity
 {
     public AuditLog(

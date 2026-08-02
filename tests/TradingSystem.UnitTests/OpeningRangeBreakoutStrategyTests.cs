@@ -111,6 +111,7 @@ public sealed class OpeningRangeBreakoutStrategyTests
         }).Build();
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IPaperBrokerJournal>(new TestPaperBrokerJournal());
         services.AddTradingSystemInfrastructure(configuration);
         return services.BuildServiceProvider();
     }

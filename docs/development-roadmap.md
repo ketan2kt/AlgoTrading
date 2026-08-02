@@ -119,7 +119,7 @@ Every phase ends with implementation, automated tests, manual verification, know
 - Duplicate/expired signals cannot execute.
 - Fees and slippage are modeled; results are reproducible and not represented as proof of profit.
 
-**Unmet promotion criteria:** durable signal/risk/order/position event persistence, process-restart recovery, fees, and slippage are not yet implemented. Phase 8 must not start until these Phase 7 gate items are explicitly resolved or re-scoped; shadow/live promotion is prohibited.
+**Status update:** append-only paper-broker order/fill/cancellation persistence and deterministic order/position restart reconstruction are implemented. Durable signal/risk/final-report persistence, fees, and slippage remain unmet promotion criteria. Phase 8 must not start until these remaining Phase 7 gate items are explicitly resolved or re-scoped; shadow/live promotion is prohibited.
 
 ## Phase 8 — Risk and execution hardening
 

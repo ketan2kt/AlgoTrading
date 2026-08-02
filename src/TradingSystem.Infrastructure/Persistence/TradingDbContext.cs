@@ -33,6 +33,7 @@ public sealed class TradingDbContext(
     public DbSet<TradingSession> TradingSessions => Set<TradingSession>();
     public DbSet<ProviderHealth> ProviderHealth => Set<ProviderHealth>();
     public DbSet<SystemEvent> SystemEvents => Set<SystemEvent>();
+    public DbSet<PaperBrokerEvent> PaperBrokerEvents => Set<PaperBrokerEvent>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -289,6 +290,15 @@ public sealed class TradingDbContext(
             entity.Property(value => value.Message).HasMaxLength(2000);
             entity.Property(value => value.DetailsJson).HasColumnType("jsonb");
             entity.HasIndex(value => new { value.EventType, value.OccurredAtUtc });
+        });
+        builder.Entity<PaperBrokerEvent>(entity =>
+        {
+            ConfigureAppendOnly(entity, "paper_broker_events");
+            entity.Property(value => value.EventType).HasMaxLength(40);
+            entity.Property(value => value.ClientReference).HasMaxLength(80);
+            entity.Property(value => value.PayloadJson).HasColumnType("jsonb");
+            entity.HasIndex(value => value.Sequence).IsUnique();
+            entity.HasIndex(value => new { value.ClientReference, value.Sequence });
         });
         builder.Entity<AuditLog>(entity =>
         {

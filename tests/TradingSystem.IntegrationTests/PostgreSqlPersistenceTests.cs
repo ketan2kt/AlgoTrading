@@ -1,7 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
+using TradingSystem.Application.Broker;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
+using TradingSystem.Infrastructure;
 using TradingSystem.Infrastructure.Persistence;
 using Xunit;
 
@@ -43,6 +47,64 @@ public sealed class PostgreSqlPersistenceTests
 
         Assert.Equal(1, await context.ApplicationSettings.CountAsync());
         Assert.Equal(1, await context.AuditLogs.CountAsync());
+    }
+
+    [DockerFact]
+    public async Task PaperBrokerStateIsReconstructedFromPostgreSqlAfterRestart()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        await using (var migrationContext = new TradingDbContext(
+                         new DbContextOptionsBuilder<TradingDbContext>()
+                             .UseNpgsql(container.GetConnectionString())
+                             .Options,
+                         TimeProvider.System))
+        {
+            await migrationContext.Database.MigrateAsync(CancellationToken.None);
+        }
+
+        var instrumentId = Guid.NewGuid();
+        await using (var firstProvider = CreatePaperProvider(container.GetConnectionString()))
+        {
+            var gateway = firstProvider.GetRequiredService<IBrokerGateway>();
+            var control = firstProvider.GetRequiredService<IPaperBrokerControl>();
+            await gateway.SubmitAsync(new BrokerOrderRequest(
+                "postgres-restart",
+                instrumentId,
+                Direction.Buy,
+                7,
+                22500m,
+                3), CancellationToken.None);
+            await control.ProcessNextFillAsync("postgres-restart", CancellationToken.None);
+        }
+
+        await using var restartedProvider = CreatePaperProvider(container.GetConnectionString());
+        var restartedGateway = restartedProvider.GetRequiredService<IBrokerGateway>();
+        var order = await restartedGateway.GetOrderAsync("postgres-restart", CancellationToken.None);
+        var position = Assert.Single(
+            await restartedGateway.GetPositionsAsync(CancellationToken.None));
+
+        Assert.NotNull(order);
+        Assert.Equal(OrderState.PartiallyFilled, order.State);
+        Assert.Equal(3, order.FilledQuantity);
+        Assert.Equal(instrumentId, position.InstrumentId);
+        Assert.Equal(3, position.Quantity);
+    }
+
+    private static ServiceProvider CreatePaperProvider(string connectionString)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:TradingDatabase"] = connectionString,
+                ["Trading:Mode"] = "Paper",
+                ["IdentityBootstrap:Enabled"] = "false"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTradingSystemInfrastructure(configuration);
+        return services.BuildServiceProvider();
     }
 }
 

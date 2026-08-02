@@ -58,7 +58,7 @@ The Phase 3 `IBrokerGateway` contract exposes mode, order submission/query/cance
 - `PaperBrokerGateway`: live/replay observations with configurable deterministic fill model; no Groww order path.
 - `GrowwBrokerGateway`: capability-gated adapter based only on official contracts; read-only until Phase 9.
 
-The implemented paper adapter is deterministic and process-local; see [paper broker](paper-broker.md). It is registered only in Paper mode. Backtest currently has no gateway, and Live mode remains rejected at startup.
+The implemented paper adapter is deterministic and reconstructs its in-memory projection from an append-only PostgreSQL journal during startup; see [paper broker](paper-broker.md). It is registered only in Paper mode. Backtest currently has no gateway, and Live mode remains rejected at startup.
 
 Other ports include `IMarketDataProvider`, `IGlobalMarketProvider`, `IInstitutionalFlowProvider`, `IEconomicCalendarProvider`, `INewsContextProvider`, `IExchangeCalendar`, `IClock`, `ITradingStrategy`, `IRiskEngine`, `IOrderExecution`, `IPositionReconciler`, `ISecretStore`, and `IAuditSink`.
 
