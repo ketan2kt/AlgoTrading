@@ -36,7 +36,6 @@ jobs:
           outputs=$(az deployment group create \
             --name "paper-${GITHUB_RUN_ID}" \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --template-file infra/main.bicep \
             --parameters infra/main.bicepparam \
             --parameters postgresAdministratorPassword="${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}" \
             --query properties.outputs -o json)
@@ -98,7 +97,7 @@ jobs:
           exit 1
 
       - name: Disable database initialization
-        if: always()
+        if: always() && steps.infrastructure.outputs.app != ''
         run: |
           az webapp config appsettings set \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
