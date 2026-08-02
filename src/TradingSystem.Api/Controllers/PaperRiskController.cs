@@ -21,6 +21,11 @@ public sealed class PaperRiskController(IPaperKillSwitchService killSwitch) : Co
             User.Identity?.Name ?? "administrator", cancellationToken));
 }
 
-public sealed record SetKillSwitchRequest(bool Active,
-    [property: System.ComponentModel.DataAnnotations.Required,
-     System.ComponentModel.DataAnnotations.StringLength(500, MinimumLength = 3)] string Reason);
+public sealed class SetKillSwitchRequest
+{
+    public bool Active { get; init; }
+
+    [System.ComponentModel.DataAnnotations.Required,
+     System.ComponentModel.DataAnnotations.StringLength(500, MinimumLength = 3)]
+    public required string Reason { get; init; }
+}

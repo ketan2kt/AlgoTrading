@@ -35,5 +35,8 @@ public sealed class GrowwTokenController(IGrowwTokenVault tokenVault) : Controll
     }
 }
 
-public sealed record StoreGrowwTokenRequest(
-    [property: Required, StringLength(8192, MinimumLength = 20)] string AccessToken);
+public sealed class StoreGrowwTokenRequest
+{
+    [Required, StringLength(8192, MinimumLength = 20)]
+    public required string AccessToken { get; init; }
+}
