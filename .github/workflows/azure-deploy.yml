@@ -1,0 +1,88 @@
+name: Azure paper deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Type DEPLOY-PAPER to confirm a paper-only deployment
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-paper-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.deploy == 'DEPLOY-PAPER'
+    runs-on: ubuntu-latest
+    environment: azure-paper
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure with workload identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy infrastructure
+        id: infrastructure
+        run: |
+          outputs=$(az deployment group create \
+            --name "paper-${GITHUB_RUN_ID}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --parameters postgresAdministratorPassword="${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}" \
+            --query properties.outputs -o json)
+          echo "app=$(jq -r '.webAppName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: trading-system-web/package-lock.json
+
+      - name: Build Angular application
+        working-directory: trading-system-web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish ASP.NET Core application
+        run: |
+          rm -rf src/TradingSystem.Api/wwwroot/*
+          cp -R trading-system-web/dist/trading-system-web/browser/. src/TradingSystem.Api/wwwroot/
+          dotnet publish src/TradingSystem.Api/TradingSystem.Api.csproj \
+            --configuration Release \
+            --output publish \
+            /p:UseAppHost=false
+          cd publish
+          zip -r ../trading-system.zip .
+
+      - name: Deploy application package
+        run: |
+          az webapp deploy \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --src-path trading-system.zip \
+            --type zip \
+            --clean true \
+            --restart true
+
+      - name: Verify paper-only configuration
+        run: |
+          mode=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --query "[?name=='Trading__Mode'].value | [0]" -o tsv)
+          test "$mode" = "Paper"

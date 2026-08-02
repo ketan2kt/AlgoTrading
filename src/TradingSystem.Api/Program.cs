@@ -90,6 +90,8 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
                        ForwardedHeaders.XForwardedProto
 });
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -104,6 +106,7 @@ app.MapHealthChecks("/health/ready", new()
     Predicate = registration => registration.Tags.Contains("ready")
 }).AllowAnonymous();
 app.MapHub<SystemHealthHub>("/hubs/system-health");
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
