@@ -38,6 +38,7 @@ The Angular workspace includes:
 - strategy markers plus entry, stop-loss and target price lines;
 - red risk and green reward regions;
 - persisted strategy/risk rows;
+- paper-automation readiness, daily P&L/trade count, active-position state, and an audited emergency kill switch;
 - explicit empty/disconnected states instead of synthetic candles.
 
 ## Current limitations
@@ -46,5 +47,8 @@ The Angular workspace includes:
 - Market holidays are not yet integrated; a holiday causes failed/no-data polling and a fail-closed disconnected state.
 - The official streaming feed is documented through Groww's Python SDK, but no supported .NET protocol/client contract was established. The system uses the documented REST quote endpoint and stays within its published category limit.
 - Polling snapshots are not equivalent to an exchange tick-by-tick feed. They are live observations sampled every two seconds.
-- Durable signals and risk decisions are displayed when present, and completed paper reports are audited. Cross-store atomicity and unattended scheduled strategy evaluation remain incomplete.
+- Durable signals and risk decisions are displayed, and completed paper reports are audited. Cross-store atomicity remains incomplete.
+- The local Phase 7 increment schedules the ORB/regime/risk/paper lifecycle, but it is disabled by default and has not been deployed. It must pass a live-market paper soak review before promotion.
 - Live Groww order placement remains absent.
+
+See `paper-trading-automation.md` for the coordinator gates and manual verification procedure.

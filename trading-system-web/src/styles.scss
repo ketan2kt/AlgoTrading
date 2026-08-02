@@ -3,6 +3,8 @@
 }
 
 html {
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
   font-family:
     Inter,
     ui-sans-serif,
@@ -16,4 +18,5 @@ html {
 
 body {
   margin: 0;
+  overscroll-behavior-y: none;
 }

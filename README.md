@@ -5,7 +5,7 @@ Safety-first automated intraday trading platform for the Indian market. The **Ph
 ## Status
 
 - Phase: 7 - opening-range breakout in paper mode
-- Current development gate: authenticated live Nifty monitoring workspace plus remaining Phase 7 durable audit wiring
+- Current development gate: local automated paper-trading coordinator complete; controlled replay and live-market soak approval required before deployment
 - Live trading: prohibited and disabled by design
 - Git repository: initialized on `main`
 
@@ -158,6 +158,7 @@ Run with `dotnet run --project src/TradingSystem.Api`. Obtain an antiforgery tok
 9. Market-data tests cover stale/future/invalid/duplicate/out-of-order/gap handling, health latching, Groww normalization, OHLCV/OI aggregation, SMA, EMA, VWAP, ATR, and persistence orchestration.
 10. Regime tests cover gap continuation/rejection/reversal, bullish/bearish trends, volatility expansion/compression, conflicting evidence, low-quality blocking, and replay persistence.
 11. Strategy tests cover breakout qualification, no-signal gates, cooldown/trade limits, risk sizing/rejection, partial fills, entry, exit, realised P&L reporting, and proof that rejection submits no order.
+12. Automated paper-position tests cover directional stop/target exits, the 15:15 intraday cutoff, and stale-price exit blocking.
 
 ## Groww read-only setup
 
@@ -176,20 +177,20 @@ Groww documents that manually generated access tokens expire daily at 06:00. The
 - Docker is absent on the current verification host, so the checked-in PostgreSQL test is skipped here.
 - Account recovery, MFA enrollment, and user-administration UI are not implemented.
 - Native time-series partitions and retention jobs wait for measured Phase 5 ingestion volume.
-- SignalR has a secured hub boundary but no operational projections.
+- SignalR publishes the authenticated live Nifty and paper-automation workspace projection.
 - The worker emits only a safe foundation heartbeat.
 - Paper orders, fills, cancellations, idempotency keys, order numbering, and positions are reconstructed from an append-only PostgreSQL journal after restart.
 - Fill prices are explicit deterministic test/replay inputs. They are not a claim of realistic spread, latency, fees, or slippage modeling.
 - Backtest and Groww execution gateways are not implemented, and resolving an execution gateway outside Paper mode fails closed.
 - Groww streaming feed support is not implemented: official documentation describes the Python SDK but does not publish a .NET or wire-level feed contract.
 - Instrument synchronization upserts documented CASH/FNO types atomically but does not deactivate missing instruments because the CSV has no documented completeness/version guarantee.
-- There is no scheduled live polling loop yet; Phase 5 provides the validated processing pipeline consumed by later scheduling/feed work.
+- The Azure paper environment polls the documented Groww Nifty quote endpoint during the NSE session and persists validated observations/candles. Streaming, holiday-calendar integration, and gap backfill remain incomplete.
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
-- Strategy signals and risk decisions are now persisted before paper submission, and completed lifecycle reports are appended to the audit log. Cross-store atomicity, fees/slippage, scheduled live evaluation, and crash testing at every boundary remain incomplete even though broker orders and positions recover after restart.
+- Strategy signals and risk decisions are persisted before paper submission. The automation coordinator reconstructs filled entry/exit state from the append-only broker journal, reconciles before acting, monitors SL/target/15:15 exits, and audits closures. Cross-store atomicity, brokerage/fees, realistic latency/slippage, and crash injection at every instruction boundary remain incomplete.
 - The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until the remaining promotion gates are complete.
-- The local next-release workspace provides authenticated live Nifty quote polling, durable accepted observations/candles, SignalR updates, a TradingView Lightweight Charts view, and strategy/SL/target overlays. Live ingestion remains disabled by default and must never substitute stored candles when Groww authentication is unavailable. See `docs/live-nifty-workspace.md`.
-- npm reports three moderate development-only transitive findings through Angular CLI's MCP dependency; CI rejects high/critical findings.
+- The currently deployed workspace does not yet contain this local Phase 7 increment. Deployment is intentionally deferred until explicit approval. See `docs/live-nifty-workspace.md` and `docs/paper-trading-automation.md`.
+- npm production dependency audit reports zero known vulnerabilities; CI rejects high/critical findings.
 
 ## Disclaimer
 

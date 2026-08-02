@@ -69,15 +69,19 @@
             <span>GROWW LIVE-DATA ACCESS</span>
             <strong>
               {{
-                !token.isConfigured
-                  ? 'Token required'
-                  : token.isExpired
-                    ? 'Token expired'
-                    : 'Token ready'
+                tokenStatusLoading
+                  ? 'Checking token status'
+                  : !token.isConfigured
+                    ? 'Token required'
+                    : token.isExpired
+                      ? 'Token expired'
+                      : 'Token ready'
               }}
             </strong>
             <p>
-              @if (token.expiresAtUtc) {
+              @if (tokenStatusLoading) {
+                The token control remains available while status is checked.
+              } @else if (token.expiresAtUtc) {
                 Protected until
                 {{ token.expiresAtUtc | date: 'dd MMM, HH:mm' : 'Asia/Kolkata' }} IST.
               } @else if (token.source === 'Environment') {
@@ -146,6 +150,38 @@
           </article>
         </section>
 
+        <section class="market-strip" aria-label="Automated paper trading status">
+          <article>
+            <span>Paper automation</span
+            ><strong [class.good]="view.paperAutomation.tradingPermitted"
+              [class.bad]="view.paperAutomation.status === 'Faulted' || view.paperAutomation.status === 'ReconciliationRequired'">
+              {{ view.paperAutomation.status }}
+            </strong>
+          </article>
+          <article>
+            <span>Trades today</span><strong>{{ view.paperAutomation.tradesToday }} / 3</strong>
+          </article>
+          <article>
+            <span>Realised P&amp;L</span
+            ><strong [class.good]="view.paperAutomation.realisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl < 0">
+              {{ view.paperAutomation.realisedPnl | number: '1.2-2' }}
+            </strong>
+          </article>
+          <article>
+            <span>Unrealised P&amp;L</span
+            ><strong>{{ view.paperAutomation.unrealisedPnl | number: '1.2-2' }}</strong>
+          </article>
+          <article>
+            <span>Active position</span
+            ><strong>{{ view.paperAutomation.activeDirection || 'None' }}
+              @if (view.paperAutomation.activeQuantity) { &times; {{ view.paperAutomation.activeQuantity }} }
+            </strong>
+          </article>
+        </section>
+        <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
+          {{ view.paperAutomation.message }}
+        </div>
+
         @if (view.statusMessage) {
           <div class="feed-notice" [class.feed-notice--warning]="!view.isLive">
             {{ view.statusMessage }}
@@ -208,6 +244,11 @@
               Live market monitoring may run, but real-order capability remains absent. Stale or
               disconnected data blocks decisions.
             </p>
+            <button type="button" [disabled]="killSwitchBusy"
+              (click)="setKillSwitch(!killSwitchActive)">
+              {{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}
+            </button>
+            @if (killSwitchMessage) { <p>{{ killSwitchMessage }}</p> }
           </article>
         </section>
       }

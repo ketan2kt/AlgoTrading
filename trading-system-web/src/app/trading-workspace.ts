@@ -35,4 +35,21 @@ export interface TradingWorkspaceSnapshot {
   statusMessage: string | null;
   candles: WorkspaceCandle[];
   overlays: WorkspaceTradeOverlay[];
+  paperAutomation: PaperAutomationSnapshot;
+}
+
+export interface PaperAutomationSnapshot {
+  status: string;
+  tradingPermitted: boolean;
+  message: string;
+  observedAtUtc: string;
+  tradesToday: number;
+  realisedPnl: number;
+  unrealisedPnl: number;
+  activeSignalId: string | null;
+  activeDirection: string | null;
+  activeQuantity: number | null;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  target: number | null;
 }

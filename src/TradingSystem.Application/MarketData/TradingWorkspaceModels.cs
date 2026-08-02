@@ -1,3 +1,5 @@
+using TradingSystem.Application.Execution;
+
 namespace TradingSystem.Application.MarketData;
 
 public sealed record WorkspaceCandle(
@@ -34,7 +36,8 @@ public sealed record TradingWorkspaceSnapshot(
     DateTimeOffset ObservedAtUtc,
     string? StatusMessage,
     IReadOnlyList<WorkspaceCandle> Candles,
-    IReadOnlyList<WorkspaceTradeOverlay> Overlays);
+    IReadOnlyList<WorkspaceTradeOverlay> Overlays,
+    PaperAutomationSnapshot PaperAutomation);
 
 public interface ITradingWorkspaceReader
 {

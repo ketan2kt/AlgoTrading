@@ -119,3 +119,8 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --query "[?name=='Trading__Mode'].value | [0]" -o tsv)
           test "$mode" = "Paper"
+          automation=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --query "[?name=='PaperTrading__Automation__Enabled'].value | [0]" -o tsv)
+          test "$automation" = "true"

@@ -105,6 +105,12 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       rightPriceScale: { borderColor: '#2c3a34' },
       timeScale: { borderColor: '#2c3a34', timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: '#658c7b' }, horzLine: { color: '#658c7b' } },
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
     });
     this.series = this.chart.addSeries(CandlestickSeries, {
       upColor: '#28d17c',

@@ -2,7 +2,7 @@
 
 ## Promotion status
 
-This deployment is a **monitoring/demo paper environment only**. Durable paper-broker order/position recovery is implemented, but unattended paper trading remains prohibited until the remaining Phase 7 audit, fee/slippage, replay, and soak-test gates pass. Live mode is rejected by application startup validation and is not accepted by the Bicep template.
+This deployment is a **paper-trading environment only**. Automated paper evaluation and position management are enabled for the controlled Phase 7 soak test. Live mode is rejected by application startup validation and is not accepted by the Bicep template.
 
 ## Architecture
 
@@ -56,4 +56,6 @@ Both custom hostnames were verified through their public HTTPS endpoints. Mailgu
 
 - Paper broker recovery assumes the configured single App Service instance; concurrent journal writers are not supported yet.
 - Subsequent EF migrations remain controlled manual operations and must not run automatically at application startup.
-- No Groww token is provisioned, and no live/order-capable gateway exists.
+- The administrator supplies the daily Groww read-only token through the protected dashboard; no token is provisioned in infrastructure.
+- No Groww live/order-capable execution gateway exists. Automated activity is restricted to the durable simulated paper broker.
+- The initial ORB setup fails closed if Nifty cash-index volume or a previous-session close is unavailable.

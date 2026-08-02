@@ -1,5 +1,5 @@
 import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
-import { Component, inject, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
 import { catchError, of, startWith, Subscription } from 'rxjs';
@@ -9,6 +9,7 @@ import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { TradingWorkspaceSnapshot } from './trading-workspace';
 import { TradingWorkspaceService } from './trading-workspace.service';
+import { PaperRiskService } from './paper-risk.service';
 
 @Component({
   selector: 'app-root',
@@ -21,6 +22,8 @@ export class App implements OnInit, OnDestroy {
   private readonly auth = inject(AuthService);
   private readonly workspaceService = inject(TradingWorkspaceService);
   private readonly growwTokenService = inject(GrowwTokenService);
+  private readonly changeDetector = inject(ChangeDetectorRef);
+  private readonly paperRisk = inject(PaperRiskService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -31,12 +34,22 @@ export class App implements OnInit, OnDestroy {
   protected password = '';
   protected workspace: TradingWorkspaceSnapshot | null = null;
   protected workspaceError = '';
-  protected tokenStatus: GrowwTokenStatus | null = null;
+  protected tokenStatus: GrowwTokenStatus = {
+    isConfigured: false,
+    isExpired: false,
+    expiresAtUtc: null,
+    updatedAtUtc: null,
+    source: 'Loading',
+  };
+  protected tokenStatusLoading = true;
   protected growwAccessToken = '';
   protected tokenBusy = false;
   protected tokenError = '';
   protected tokenSuccess = '';
   protected showTokenForm = false;
+  protected killSwitchActive = false;
+  protected killSwitchBusy = false;
+  protected killSwitchMessage = '';
 
   protected readonly status$ = this.statusService.getCurrent().pipe(
     startWith({
@@ -64,10 +77,12 @@ export class App implements OnInit, OnDestroy {
           this.user = user;
           this.checkingSession = false;
           if (user) this.startWorkspace();
+          this.refreshView();
         },
         error: () => {
           this.checkingSession = false;
           this.loginError = 'Unable to verify the application session.';
+          this.refreshView();
         },
       }),
     );
@@ -89,11 +104,13 @@ export class App implements OnInit, OnDestroy {
           this.password = '';
           this.loginBusy = false;
           this.startWorkspace();
+          this.refreshView();
         },
         error: () => {
           this.password = '';
           this.loginBusy = false;
           this.loginError = 'Sign-in failed. Check your credentials or account lockout status.';
+          this.refreshView();
         },
       }),
     );
@@ -102,6 +119,28 @@ export class App implements OnInit, OnDestroy {
   protected refreshWorkspace(): void {
     this.loadWorkspace();
     this.loadTokenStatus();
+    this.loadKillSwitch();
+  }
+
+  protected setKillSwitch(active: boolean): void {
+    this.killSwitchBusy = true;
+    this.killSwitchMessage = '';
+    const reason = active ? 'Administrator emergency stop from dashboard.' :
+      'Administrator reviewed system state and cleared emergency stop.';
+    this.subscriptions.add(this.paperRisk.setKillSwitch(active, reason).subscribe({
+      next: (status) => {
+        this.killSwitchActive = status.active;
+        this.killSwitchBusy = false;
+        this.killSwitchMessage = active ? 'Kill switch activated.' : 'Kill switch cleared.';
+        this.loadWorkspace();
+        this.refreshView();
+      },
+      error: () => {
+        this.killSwitchBusy = false;
+        this.killSwitchMessage = 'Unable to change the kill switch.';
+        this.refreshView();
+      },
+    }));
   }
 
   protected openTokenForm(): void {
@@ -130,11 +169,13 @@ export class App implements OnInit, OnDestroy {
           this.tokenSuccess =
             'Today’s Groww token is protected. The live feed will retry automatically.';
           this.loadWorkspace();
+          this.refreshView();
         },
         error: () => {
           this.growwAccessToken = '';
           this.tokenBusy = false;
           this.tokenError = 'The token could not be stored. Confirm it is complete and try again.';
+          this.refreshView();
         },
       }),
     );
@@ -142,24 +183,50 @@ export class App implements OnInit, OnDestroy {
 
   private startWorkspace(): void {
     this.loadTokenStatus();
+    this.loadKillSwitch();
     this.loadWorkspace();
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
         this.workspace = snapshot;
         this.workspaceError = '';
+        this.refreshView();
       }),
     );
     void this.workspaceService.connect().catch(() => {
       this.workspaceError =
         'Real-time dashboard connection is unavailable; manual refresh remains available.';
+      this.refreshView();
     });
   }
 
+  private loadKillSwitch(): void {
+    this.subscriptions.add(this.paperRisk.getKillSwitch().subscribe({
+      next: (status) => {
+        this.killSwitchActive = status.active;
+        this.refreshView();
+      },
+      error: () => {
+        this.killSwitchMessage = 'Kill-switch state is unavailable.';
+        this.refreshView();
+      },
+    }));
+  }
+
   private loadTokenStatus(): void {
+    this.tokenStatusLoading = true;
     this.subscriptions.add(
       this.growwTokenService.getStatus().subscribe({
-        next: (status) => (this.tokenStatus = status),
-        error: () => (this.tokenError = 'Unable to read Groww token status.'),
+        next: (status) => {
+          this.tokenStatus = status;
+          this.tokenStatusLoading = false;
+          this.tokenError = '';
+          this.refreshView();
+        },
+        error: () => {
+          this.tokenStatusLoading = false;
+          this.tokenError = 'Unable to read Groww token status. You can still add today’s token.';
+          this.refreshView();
+        },
       }),
     );
   }
@@ -170,9 +237,17 @@ export class App implements OnInit, OnDestroy {
         next: (snapshot) => {
           this.workspace = snapshot;
           this.workspaceError = '';
+          this.refreshView();
         },
-        error: () => (this.workspaceError = 'Unable to load the protected Nifty workspace.'),
+        error: () => {
+          this.workspaceError = 'Unable to load the protected Nifty workspace.';
+          this.refreshView();
+        },
       }),
     );
+  }
+
+  private refreshView(): void {
+    this.changeDetector.markForCheck();
   }
 }

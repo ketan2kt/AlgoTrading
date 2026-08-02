@@ -188,6 +188,22 @@ public static class DependencyInjection
             provider.GetRequiredService<IOptions<PreliminaryRiskOptions>>().Value));
         services.AddScoped<PaperTradeLifecycleService>();
         services.AddScoped<IPaperLifecycleAuditStore, EfPaperLifecycleAuditStore>();
+        services.AddScoped<IPaperKillSwitchService, EfPaperKillSwitchService>();
+        services.AddOptions<AutomatedPaperTradingOptions>()
+            .Bind(configuration.GetSection(AutomatedPaperTradingOptions.SectionName))
+            .Validate(options => options.EvaluationIntervalSeconds is >= 2 and <= 60 &&
+                                 options.MaximumDailyLoss > 0 &&
+                                 options.MaximumEntrySlippagePercent is > 0 and <= 1 &&
+                                 options.EstimatedRoundTripCostBasisPoints is >= 0 and <= 100 &&
+                                 TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
+                                 TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&
+                                 TimeOnly.TryParseExact(options.ForcedExit, "HH:mm", out _),
+                "Automated paper-trading settings are invalid.")
+            .ValidateOnStart();
+        services.AddSingleton<PaperAutomationState>();
+        services.AddSingleton<IPaperAutomationReader>(provider =>
+            provider.GetRequiredService<PaperAutomationState>());
+        services.AddHostedService<AutomatedPaperTradingService>();
 
         return services;
     }

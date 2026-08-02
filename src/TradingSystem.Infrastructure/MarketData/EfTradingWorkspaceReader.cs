@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using TradingSystem.Application.MarketData;
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
@@ -16,6 +17,7 @@ internal sealed class EfTradingWorkspaceReader(
     IOptions<LiveNiftyOptions> liveOptions,
     IOptions<MarketDataOptions> marketDataOptions,
     IOptions<TradingModeOptions> tradingMode,
+    IPaperAutomationReader paperAutomation,
     TimeProvider timeProvider) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
@@ -150,7 +152,8 @@ internal sealed class EfTradingWorkspaceReader(
             now,
             message,
             closed,
-            overlays);
+            overlays,
+            paperAutomation.GetCurrent());
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             options.TradingSymbol,
@@ -164,7 +167,8 @@ internal sealed class EfTradingWorkspaceReader(
             now,
             detail,
             [],
-            []);
+            [],
+            paperAutomation.GetCurrent());
     }
 
     private static FillProjection? ParseFill(string payloadJson)
