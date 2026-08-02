@@ -200,6 +200,10 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
           value: 'false'
         }
         {
+          name: 'MarketData__LiveNifty__Enabled'
+          value: 'true'
+        }
+        {
           name: 'ConnectionStrings__TradingDatabase'
           value: 'Host=${postgres.properties.fullyQualifiedDomainName};Port=5432;Database=${postgresDatabaseName};Username=${postgresAdministratorLogin};Password=${postgresAdministratorPassword};SSL Mode=Require;Trust Server Certificate=false'
         }

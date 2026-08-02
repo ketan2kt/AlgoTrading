@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Security.Claims;
 using TradingSystem.Infrastructure.Identity;
 
 namespace TradingSystem.Api.Controllers;
@@ -9,7 +10,8 @@ namespace TradingSystem.Api.Controllers;
 [ApiController]
 [Route("api/auth")]
 public sealed class AuthenticationController(
-    SignInManager<ApplicationUser> signInManager) : ControllerBase
+    SignInManager<ApplicationUser> signInManager,
+    UserManager<ApplicationUser> userManager) : ControllerBase
 {
     private static readonly string[] AdministratorRoles = ["Administrator"];
 
@@ -19,13 +21,28 @@ public sealed class AuthenticationController(
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
+        var loginName = request.Username.Trim();
+        var user = loginName.Contains('@', StringComparison.Ordinal)
+            ? await userManager.FindByEmailAsync(loginName)
+            : await userManager.FindByNameAsync(loginName);
+        if (user?.UserName is null)
+        {
+            return Unauthorized();
+        }
+
         var result = await signInManager.PasswordSignInAsync(
-            request.Username,
+            user.UserName,
             request.Password,
             isPersistent: false,
             lockoutOnFailure: true);
         if (!result.Succeeded)
         {
+            return Unauthorized();
+        }
+
+        if (!await userManager.IsInRoleAsync(user, AdministratorRoles[0]))
+        {
+            await signInManager.SignOutAsync();
             return Unauthorized();
         }
 
@@ -41,10 +58,14 @@ public sealed class AuthenticationController(
         return NoContent();
     }
 
-    [Authorize]
+    [Authorize(Roles = "Administrator")]
     [HttpGet("me")]
     public IActionResult Me() =>
-        Ok(new { username = User.Identity?.Name, roles = AdministratorRoles });
+        Ok(new
+        {
+            username = User.Identity?.Name,
+            roles = User.FindAll(ClaimTypes.Role).Select(claim => claim.Value).ToArray()
+        });
 }
 
 public sealed record LoginRequest(string Username, string Password);

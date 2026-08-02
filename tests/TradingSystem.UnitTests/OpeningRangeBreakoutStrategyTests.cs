@@ -62,10 +62,11 @@ public sealed class OpeningRangeBreakoutStrategyTests
     public async Task CompletePaperLifecycleEntersPartiallyFillsExitsAndReports()
     {
         await using var provider = CreateProvider();
+        var audit = new TestPaperLifecycleAuditStore();
         var lifecycle = new PaperTradeLifecycleService(strategy,
             new PreliminaryRiskEngine(new() { MaximumRiskPerTrade = 500m, MaximumQuantity = 10 }),
             provider.GetRequiredService<IBrokerGateway>(),
-            provider.GetRequiredService<IPaperBrokerControl>(), new FixedTimeProvider(Now));
+            provider.GetRequiredService<IPaperBrokerControl>(), audit, new FixedTimeProvider(Now));
 
         var result = await lifecycle.RunAsync(Context(), RiskContext(),
             deterministicExitPrice: 103m, maximumFillPerCycle: 3, CancellationToken.None);
@@ -74,6 +75,9 @@ public sealed class OpeningRangeBreakoutStrategyTests
         Assert.Equal(OrderState.Filled, result.Report.EntryOrder.State);
         Assert.Equal(OrderState.Filled, result.Report.ExitOrder.State);
         Assert.True(result.Report.RealisedPnl > 0);
+        Assert.Equal(1, audit.SignalWrites);
+        Assert.Equal(1, audit.DecisionWrites);
+        Assert.Equal(1, audit.ReportWrites);
         Assert.Empty(await provider.GetRequiredService<IBrokerGateway>()
             .GetPositionsAsync(CancellationToken.None));
     }
@@ -83,14 +87,18 @@ public sealed class OpeningRangeBreakoutStrategyTests
     {
         await using var provider = CreateProvider();
         var gateway = provider.GetRequiredService<IBrokerGateway>();
+        var audit = new TestPaperLifecycleAuditStore();
         var lifecycle = new PaperTradeLifecycleService(strategy, new PreliminaryRiskEngine(new()),
-            gateway, provider.GetRequiredService<IPaperBrokerControl>(), new FixedTimeProvider(Now));
+            gateway, provider.GetRequiredService<IPaperBrokerControl>(), audit, new FixedTimeProvider(Now));
 
         var result = await lifecycle.RunAsync(Context(), RiskContext() with { KillSwitchActive = true },
             103m, 3, CancellationToken.None);
 
         Assert.Null(result.Report);
         Assert.Contains(result.Reasons, reason => reason.Contains("Kill switch", StringComparison.Ordinal));
+        Assert.Equal(1, audit.SignalWrites);
+        Assert.Equal(1, audit.DecisionWrites);
+        Assert.Equal(0, audit.ReportWrites);
         Assert.Null(await gateway.GetOrderAsync($"{result.Signal!.SignalId:N}-ENTRY", CancellationToken.None));
     }
 
@@ -119,5 +127,33 @@ public sealed class OpeningRangeBreakoutStrategyTests
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => value;
+    }
+
+    private sealed class TestPaperLifecycleAuditStore : IPaperLifecycleAuditStore
+    {
+        public int SignalWrites { get; private set; }
+        public int DecisionWrites { get; private set; }
+        public int ReportWrites { get; private set; }
+
+        public Task PersistSignalAsync(StrategySignal signal, CancellationToken cancellationToken)
+        {
+            SignalWrites++;
+            return Task.CompletedTask;
+        }
+
+        public Task PersistRiskDecisionAsync(
+            Guid signalId,
+            RiskDecisionResult decision,
+            CancellationToken cancellationToken)
+        {
+            DecisionWrites++;
+            return Task.CompletedTask;
+        }
+
+        public Task PersistReportAsync(PaperTradeReport report, CancellationToken cancellationToken)
+        {
+            ReportWrites++;
+            return Task.CompletedTask;
+        }
     }
 }

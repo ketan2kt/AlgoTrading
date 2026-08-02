@@ -15,7 +15,8 @@ public sealed record PaperLifecycleResult(StrategySignal? Signal, RiskDecisionRe
 
 public sealed class PaperTradeLifecycleService(ITradingStrategy strategy,
     PreliminaryRiskEngine riskEngine, IBrokerGateway brokerGateway,
-    IPaperBrokerControl paperControl, TimeProvider timeProvider)
+    IPaperBrokerControl paperControl, IPaperLifecycleAuditStore auditStore,
+    TimeProvider timeProvider)
 {
     public async Task<PaperLifecycleResult> RunAsync(StrategyEvaluationContext strategyContext,
         RiskContext riskContext, decimal deterministicExitPrice, int maximumFillPerCycle,
@@ -25,7 +26,9 @@ public sealed class PaperTradeLifecycleService(ITradingStrategy strategy,
             throw new InvalidOperationException("Phase 7 lifecycle is restricted to Paper mode.");
         var signal = strategy.Evaluate(strategyContext);
         if (signal is null) return new(null, null, null, ["Strategy produced no signal."]);
+        await auditStore.PersistSignalAsync(signal, cancellationToken);
         var decision = riskEngine.Evaluate(signal, riskContext);
+        await auditStore.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken);
         if (!decision.Approved) return new(signal, decision, null, decision.RejectionReasons);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(deterministicExitPrice);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFillPerCycle);
@@ -43,6 +46,7 @@ public sealed class PaperTradeLifecycleService(ITradingStrategy strategy,
         var pnl = (exit.AverageFillPrice!.Value - entry.AverageFillPrice!.Value) *
                   entry.FilledQuantity * multiplier;
         var report = new PaperTradeReport(signal, decision, entry, exit, pnl, timeProvider.GetUtcNow());
+        await auditStore.PersistReportAsync(report, cancellationToken);
         return new(signal, decision, report, []);
     }
 

@@ -6,6 +6,26 @@ public sealed class MarketDataValidator(TimeProvider timeProvider, TimeSpan maxi
 {
     private readonly ConcurrentDictionary<(Guid, string), Cursor> cursors = new();
 
+    public void RestoreCursor(
+        Guid instrumentId,
+        string source,
+        DateTimeOffset sourceTimestampUtc,
+        long? sequence = null)
+    {
+        if (instrumentId == Guid.Empty || string.IsNullOrWhiteSpace(source))
+        {
+            throw new ArgumentException("A valid market-data cursor is required.");
+        }
+
+        var restored = new Cursor(sourceTimestampUtc.ToUniversalTime(), sequence);
+        cursors.AddOrUpdate(
+            (instrumentId, source),
+            restored,
+            (_, current) => sourceTimestampUtc > current.Timestamp
+                ? new(sourceTimestampUtc.ToUniversalTime(), sequence)
+                : current);
+    }
+
     public MarketDataValidationResult Validate(MarketObservation observation)
     {
         ArgumentNullException.ThrowIfNull(observation);

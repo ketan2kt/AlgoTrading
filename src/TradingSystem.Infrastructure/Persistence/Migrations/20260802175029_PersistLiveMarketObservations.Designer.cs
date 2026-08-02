@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TradingSystem.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using TradingSystem.Infrastructure.Persistence;
 namespace TradingSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(TradingDbContext))]
-    partial class TradingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260802175029_PersistLiveMarketObservations")]
+    partial class PersistLiveMarketObservations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -243,48 +246,6 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("EntityType", "EntityId", "OccurredAtUtc");
 
                     b.ToTable("audit_logs", "trading");
-                });
-
-            modelBuilder.Entity("TradingSystem.Domain.Trading.BrokerAccessTokenSecret", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ConcurrencyToken")
-                        .IsConcurrencyToken()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ProtectedValue")
-                        .IsRequired()
-                        .HasMaxLength(12000)
-                        .HasColumnType("character varying(12000)");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UpdatedBy")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Provider")
-                        .IsUnique();
-
-                    b.ToTable("broker_access_token_secrets", "trading");
                 });
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.BrokerConnection", b =>

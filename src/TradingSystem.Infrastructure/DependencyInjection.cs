@@ -19,6 +19,7 @@ using TradingSystem.Application.Regime;
 using TradingSystem.Application.Strategies;
 using TradingSystem.Application.Risk;
 using TradingSystem.Application.Execution;
+using TradingSystem.Infrastructure.Execution;
 
 namespace TradingSystem.Infrastructure;
 
@@ -106,6 +107,7 @@ public static class DependencyInjection
                 "Groww instrument size limit is invalid.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwAccessTokenProvider, EnvironmentGrowwAccessTokenProvider>();
+        services.AddScoped<IGrowwTokenVault, EfGrowwTokenVault>();
         services.AddHttpClient(GrowwReadOnlyGateway.ApiClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
@@ -141,6 +143,21 @@ public static class DependencyInjection
             return new CandleAggregator(options.CandleIntervalSeconds);
         });
         services.AddScoped<MarketDataProcessor>();
+        services.AddOptions<LiveNiftyOptions>()
+            .Bind(configuration.GetSection(LiveNiftyOptions.SectionName))
+            .Validate(options => options.PollIntervalSeconds is >= 1 and <= 30,
+                "Live Nifty poll interval must be between 1 and 30 seconds.")
+            .Validate(options => options.WorkspaceCandleCount is >= 30 and <= 1000,
+                "Live Nifty workspace candle count must be between 30 and 1000.")
+            .Validate(options => options.Exchange == "NSE" && options.Segment == "CASH" &&
+                                 options.TradingSymbol == "NIFTY",
+                "The initial live market workspace is restricted to the NSE NIFTY cash index.")
+            .ValidateOnStart();
+        services.AddSingleton<GrowwQuoteNormalizer>();
+        services.AddSingleton<LiveNiftyFeedState>();
+        services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
+        services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
+        services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddOptions<MarketRegimeOptions>()
             .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
             .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&
@@ -170,6 +187,7 @@ public static class DependencyInjection
         services.AddSingleton(provider => new PreliminaryRiskEngine(
             provider.GetRequiredService<IOptions<PreliminaryRiskOptions>>().Value));
         services.AddScoped<PaperTradeLifecycleService>();
+        services.AddScoped<IPaperLifecycleAuditStore, EfPaperLifecycleAuditStore>();
 
         return services;
     }

@@ -5,7 +5,7 @@ Safety-first automated intraday trading platform for the Indian market. The **Ph
 ## Status
 
 - Phase: 7 - opening-range breakout in paper mode
-- Next gate: Phase 7 recovery/audit limitation review before Phase 8
+- Current development gate: authenticated live Nifty monitoring workspace plus remaining Phase 7 durable audit wiring
 - Live trading: prohibited and disabled by design
 - Git repository: initialized on `main`
 
@@ -54,7 +54,7 @@ TradingSystem.slnx
 - Unknown broker outcomes will be reconciled, never blindly retried.
 - The Groww adapter exposes only profile, quote, historical-candle, and instrument-master GET operations; it contains no order mutation.
 - Append-only decisions, signals, events, snapshots, trades, and audits cannot be updated or deleted through the DbContext.
-- Broker secret columns do not exist; only opaque secret references may be persisted.
+- Daily Groww access tokens entered by an administrator are encrypted with ASP.NET Core Data Protection before PostgreSQL persistence; plaintext tokens are never returned to Angular or written to normal logs.
 - Tests cannot resolve a live broker or load production credentials.
 
 ## Documentation
@@ -161,7 +161,7 @@ Run with `dotnet run --project src/TradingSystem.Api`. Obtain an antiforgery tok
 
 ## Groww read-only setup
 
-Generate an access token using Groww's officially supported Trading API page. Supply it only to the backend process through the configured environment variable; do not put it in `appsettings.json`, `.env`, PostgreSQL, Angular, or Git:
+Generate an access token using Groww's officially supported Trading API page. An administrator can enter it in the protected dashboard workflow; the backend encrypts it before PostgreSQL persistence and automatically retries the feed without an application restart. The environment variable remains a backend-only fallback. Never put the token in `appsettings.json`, `.env`, Angular, logs, or Git:
 
 ```powershell
 $env:GROWW_ACCESS_TOKEN = '<temporary access token>'
@@ -169,7 +169,7 @@ dotnet run --project src/TradingSystem.Api
 Remove-Item Env:GROWW_ACCESS_TOKEN
 ```
 
-Groww documents that manually generated access tokens expire daily at 06:00. API-key approval and TOTP token-generation flows are not automated in Phase 4 because unattended approval and secret-retention requirements remain unresolved.
+Groww documents that manually generated access tokens expire daily at 06:00. The dashboard shows the status and next expiry, but token generation/approval is still a daily manual Groww action. API-key approval and TOTP token-generation flows are not automated because unattended approval and secret-retention requirements remain unresolved.
 
 ## Known limitations
 
@@ -186,8 +186,9 @@ Groww documents that manually generated access tokens expire daily at 06:00. API
 - There is no scheduled live polling loop yet; Phase 5 provides the validated processing pipeline consumed by later scheduling/feed work.
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
-- Strategy signal, risk-decision, and final paper-report persistence remain incomplete even though broker orders and positions now recover after restart.
+- Strategy signals and risk decisions are now persisted before paper submission, and completed lifecycle reports are appended to the audit log. Cross-store atomicity, fees/slippage, scheduled live evaluation, and crash testing at every boundary remain incomplete even though broker orders and positions recover after restart.
 - The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until the remaining promotion gates are complete.
+- The local next-release workspace provides authenticated live Nifty quote polling, durable accepted observations/candles, SignalR updates, a TradingView Lightweight Charts view, and strategy/SL/target overlays. Live ingestion remains disabled by default and must never substitute stored candles when Groww authentication is unavailable. See `docs/live-nifty-workspace.md`.
 - npm reports three moderate development-only transitive findings through Angular CLI's MCP dependency; CI rejects high/critical findings.
 
 ## Disclaimer

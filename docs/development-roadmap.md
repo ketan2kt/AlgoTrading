@@ -119,7 +119,9 @@ Every phase ends with implementation, automated tests, manual verification, know
 - Duplicate/expired signals cannot execute.
 - Fees and slippage are modeled; results are reproducible and not represented as proof of profit.
 
-**Status update:** append-only paper-broker order/fill/cancellation persistence and deterministic order/position restart reconstruction are implemented. Durable signal/risk/final-report persistence, fees, and slippage remain unmet promotion criteria. Phase 8 must not start until these remaining Phase 7 gate items are explicitly resolved or re-scoped; shadow/live promotion is prohibited.
+**Status update:** append-only paper-broker order/fill/cancellation persistence and deterministic order/position restart reconstruction are implemented. Signals and risk decisions persist before paper submission, and completed reports are appended to the audit log. Cross-store atomicity, failure recovery between lifecycle stores, fees, slippage, and scheduled live evaluation remain unmet promotion criteria. Phase 8 must not start until these remaining Phase 7 gate items are explicitly resolved or re-scoped; shadow/live promotion is prohibited.
+
+**Live workspace increment (local, awaiting deployment approval):** authenticated Angular login and Nifty command view, official Groww REST quote polling during the NSE session, accepted-observation and completed-candle persistence, restart reconstruction of the open candle, SignalR updates, feed freshness/failure display, and entry/SL/target overlays are implemented. This is live market monitoring in Paper mode; it does not add live order capability. Production live-feed activation additionally requires secure daily Groww authentication and an in-session verification.
 
 ## Phase 8 — Risk and execution hardening
 

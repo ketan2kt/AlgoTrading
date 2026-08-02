@@ -8,6 +8,16 @@ namespace TradingSystem.Infrastructure.MarketData;
 internal sealed class EfMarketDataPersistence(TradingDbContext dbContext, TimeProvider timeProvider)
     : IMarketDataPersistence
 {
+    public async Task PersistObservationAsync(
+        MarketObservation value,
+        CancellationToken cancellationToken)
+    {
+        dbContext.MarketObservations.Add(new PersistedMarketObservation(
+            Guid.NewGuid(), value.InstrumentId, value.Source, value.SourceTimestampUtc,
+            value.ReceivedAtUtc, value.Price, value.VolumeDelta, value.OpenInterest));
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task PersistCandleAsync(CompletedCandle value, CancellationToken cancellationToken)
     {
         dbContext.Candles.Add(new Candle(Guid.NewGuid(), value.InstrumentId, value.OpenTimeUtc,

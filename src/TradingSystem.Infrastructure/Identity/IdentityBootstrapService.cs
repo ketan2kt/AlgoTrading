@@ -30,12 +30,6 @@ public sealed partial class IdentityBootstrapService(
         var roleManager = scope.ServiceProvider
             .GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var dbContext = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
-        if (await userManager.FindByNameAsync(options.Value.Username) is not null)
-        {
-            throw new InvalidOperationException(
-                "Identity bootstrap is still enabled after the administrator was created.");
-        }
-
         if (!await roleManager.RoleExistsAsync(AdministratorRole))
         {
             var roleResult = await roleManager.CreateAsync(
@@ -44,24 +38,49 @@ public sealed partial class IdentityBootstrapService(
         }
 
         var now = timeProvider.GetUtcNow();
-        var user = new ApplicationUser
+        var user = await userManager.FindByNameAsync(options.Value.Username);
+        var action = "AdministratorPasswordReset";
+        if (user is null)
         {
-            Id = Guid.NewGuid(),
-            UserName = options.Value.Username,
-            Email = options.Value.Email,
-            EmailConfirmed = true,
-            CreatedAtUtc = now,
-            IsActive = true
-        };
-        var createResult = await userManager.CreateAsync(user, options.Value.Password);
-        EnsureSucceeded(createResult, "create the bootstrap administrator");
-        var roleAssignment = await userManager.AddToRoleAsync(user, AdministratorRole);
-        EnsureSucceeded(roleAssignment, "assign the Administrator role");
+            user = new ApplicationUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = options.Value.Username,
+                Email = options.Value.Email,
+                EmailConfirmed = true,
+                CreatedAtUtc = now,
+                IsActive = true
+            };
+            var createResult = await userManager.CreateAsync(user, options.Value.Password);
+            EnsureSucceeded(createResult, "create the bootstrap administrator");
+            action = "AdministratorCreated";
+        }
+        else
+        {
+            if (!string.Equals(user.Email, options.Value.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The existing administrator username belongs to a different email address.");
+            }
+
+            var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+            var resetResult = await userManager.ResetPasswordAsync(
+                user,
+                resetToken,
+                options.Value.Password);
+            EnsureSucceeded(resetResult, "reset the bootstrap administrator password");
+        }
+
+        if (!await userManager.IsInRoleAsync(user, AdministratorRole))
+        {
+            var roleAssignment = await userManager.AddToRoleAsync(user, AdministratorRole);
+            EnsureSucceeded(roleAssignment, "assign the Administrator role");
+        }
 
         dbContext.AuditLogs.Add(new AuditLog(
             Guid.NewGuid(),
             "system/bootstrap",
-            "AdministratorCreated",
+            action,
             nameof(ApplicationUser),
             user.Id.ToString(),
             "One-time identity bootstrap",
@@ -71,9 +90,9 @@ public sealed partial class IdentityBootstrapService(
             now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        LogBootstrapCompleted(logger, user.Id);
+        LogBootstrapCompleted(logger, user.Id, action);
         throw new InvalidOperationException(
-            "Administrator created. Disable IdentityBootstrap and remove its password secret before restarting.");
+            "Administrator provisioned. Disable IdentityBootstrap and remove its password secret before restarting.");
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -101,6 +120,9 @@ public sealed partial class IdentityBootstrapService(
     [LoggerMessage(
         EventId = 2000,
         Level = LogLevel.Warning,
-        Message = "Bootstrap administrator {UserId} created; bootstrap must now be disabled.")]
-    private static partial void LogBootstrapCompleted(ILogger logger, Guid userId);
+        Message = "Bootstrap administrator {UserId} provisioned via {Action}; bootstrap must now be disabled.")]
+    private static partial void LogBootstrapCompleted(
+        ILogger logger,
+        Guid userId,
+        string action);
 }

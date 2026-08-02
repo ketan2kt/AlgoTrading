@@ -40,11 +40,22 @@ public sealed class CandleAggregator(int intervalSeconds)
         public long Volume { get; private set; }
         public decimal? OpenInterest { get; private set; }
         public static BuildingCandle Start(MarketObservation value, DateTimeOffset bucket) => new()
-        { InstrumentId=value.InstrumentId, Source=value.Source, OpenTimeUtc=bucket, Open=value.Price,
-          High=value.Price, Low=value.Price, Close=value.Price, Volume=value.VolumeDelta, OpenInterest=value.OpenInterest };
+        {
+            InstrumentId = value.InstrumentId,
+            Source = value.Source,
+            OpenTimeUtc = bucket,
+            Open = value.Price,
+            High = value.Price,
+            Low = value.Price,
+            Close = value.Price,
+            Volume = value.VolumeDelta,
+            OpenInterest = value.OpenInterest
+        };
         public void Apply(MarketObservation value)
-        { High=Math.Max(High,value.Price); Low=Math.Min(Low,value.Price); Close=value.Price;
-          Volume=checked(Volume+value.VolumeDelta); OpenInterest=value.OpenInterest ?? OpenInterest; }
+        {
+            High = Math.Max(High, value.Price); Low = Math.Min(Low, value.Price); Close = value.Price;
+            Volume = checked(Volume + value.VolumeDelta); OpenInterest = value.OpenInterest ?? OpenInterest;
+        }
         public CompletedCandle Complete(int seconds) => new(InstrumentId, Source, OpenTimeUtc,
             seconds, Open, High, Low, Close, Volume, OpenInterest);
     }

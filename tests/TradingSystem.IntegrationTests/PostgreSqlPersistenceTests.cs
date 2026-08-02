@@ -91,6 +91,47 @@ public sealed class PostgreSqlPersistenceTests
         Assert.Equal(3, position.Quantity);
     }
 
+    [DockerFact]
+    public async Task GrowwTokenIsEncryptedAndCanBeRecoveredAfterRestart()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        await using (var migrationContext = new TradingDbContext(
+                         new DbContextOptionsBuilder<TradingDbContext>()
+                             .UseNpgsql(container.GetConnectionString())
+                             .Options,
+                         TimeProvider.System))
+        {
+            await migrationContext.Database.MigrateAsync(CancellationToken.None);
+        }
+
+        const string accessToken = "groww-integration-token-that-must-not-be-stored-plainly";
+        await using var provider = CreatePaperProvider(container.GetConnectionString());
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var vault = scope.ServiceProvider.GetRequiredService<IGrowwTokenVault>();
+            var status = await vault.StoreAsync(
+                accessToken,
+                "integration-test",
+                CancellationToken.None);
+
+            Assert.True(status.IsConfigured);
+            Assert.False(status.IsExpired);
+        }
+
+        await using (var verificationScope = provider.CreateAsyncScope())
+        {
+            var context = verificationScope.ServiceProvider.GetRequiredService<TradingDbContext>();
+            var persisted = await context.BrokerAccessTokenSecrets.SingleAsync();
+            Assert.DoesNotContain(accessToken, persisted.ProtectedValue, StringComparison.Ordinal);
+            Assert.NotEmpty(persisted.ProtectedValue);
+            Assert.Equal(1, await context.AuditLogs.CountAsync());
+
+            var vault = verificationScope.ServiceProvider.GetRequiredService<IGrowwTokenVault>();
+            Assert.Equal(accessToken, await vault.GetValidTokenAsync(CancellationToken.None));
+        }
+    }
+
     private static ServiceProvider CreatePaperProvider(string connectionString)
     {
         var configuration = new ConfigurationBuilder()

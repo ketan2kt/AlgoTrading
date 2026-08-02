@@ -26,7 +26,7 @@ Angular and SignalR clients are untrusted presentation endpoints. Provider and b
 
 ## 4. Broker secrets
 
-Phase 4 reads a manually generated Groww access token from the backend process environment through `IGrowwAccessTokenProvider`. Configuration stores only the environment-variable name. The token is added directly to the `Authorization` header, is never included in exception messages, and is never returned through an API controller. Normal application settings, PostgreSQL, Angular assets, and logs must not contain it.
+The backend accepts a manually generated daily Groww access token through an administrator-only, antiforgery-protected endpoint. `IGrowwTokenVault` encrypts it with ASP.NET Core Data Protection before PostgreSQL persistence; the protected value is never returned by an API. Persistent Data Protection keys must remain outside the database and be restricted to the App Service identity. `IGrowwAccessTokenProvider` uses a valid protected token first and the configured process environment variable only as a backend fallback. The token is added directly to the `Authorization` header and is never included in exception messages, Angular assets, health responses, audit details, or normal logs.
 
 Automated API-key/secret or TOTP flows are not implemented until Groww confirms unattended approval and acceptable secret custody. The user's normal Groww username and password are never requested.
 
@@ -34,7 +34,7 @@ Automated API-key/secret or TOTP flows are not implemented until Groww confirms 
 - Never send API key, API secret, access token, or TOTP material to Angular.
 - Development: .NET user-secrets or environment variables; `.env` is ignored and only `.env.example` placeholders are committed.
 - Windows deployment: prefer Windows Credential Manager/DPAPI or an approved local vault under the service identity.
-- PostgreSQL stores only a secret reference, key identifier, token expiry/status, and non-sensitive connection metadata—not plaintext secret material.
+- PostgreSQL may store the daily access token only as Data Protection ciphertext, together with expiry and non-sensitive update metadata—never as plaintext.
 - Tokens live in memory for the minimum necessary duration, are never included in exception detail, telemetry, health payloads, or audit before/after values.
 - Rotation/revocation is documented and independently testable. Process memory dumps and diagnostic endpoints are restricted.
 - Do not store a TOTP seed unless Groww explicitly permits the flow and the user approves the residual risk; prefer an official non-seed unattended mechanism.
@@ -77,6 +77,8 @@ Configuration changes cannot silently activate live trading. Activation expires 
 Serilog structured logging uses an allowlist of fields. Redact authorization headers, cookies, secrets, tokens, TOTP, account identifiers, full provider payloads containing personal data, and exception request bodies.
 
 Security audit events include login/lockout, role changes, secret reference changes, mode/activation changes, risk/configuration changes, kill switch, manual exit, reconciliation override, and log/export access. Audit records are append-only with UTC time, actor, source, correlation, reason, and redacted before/after hashes where appropriate.
+
+The one-time Azure administrator bootstrap may create an administrator or reset the password of the existing administrator only when both the configured username and email match. It runs from the protected `azure-paper` GitHub environment, records a redacted audit event, deliberately stops startup, and requires the workflow to remove all temporary bootstrap settings before normal restart.
 
 Retention is documented by data class. Export endpoints are authorised, bounded, watermarked/audited, and CSV-injection safe.
 

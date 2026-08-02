@@ -21,6 +21,8 @@ public sealed class MarketDataProcessor(
         if (!validation.Accepted)
             return new(validation, null);
 
+        await persistence.PersistObservationAsync(observation, cancellationToken);
+
         var completed = aggregator.Add(observation);
         if (completed is not null)
             await persistence.PersistCandleAsync(completed, cancellationToken);

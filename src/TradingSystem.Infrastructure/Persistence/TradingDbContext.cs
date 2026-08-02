@@ -14,8 +14,10 @@ public sealed class TradingDbContext(
 {
     public DbSet<ApplicationSetting> ApplicationSettings => Set<ApplicationSetting>();
     public DbSet<BrokerConnection> BrokerConnections => Set<BrokerConnection>();
+    public DbSet<BrokerAccessTokenSecret> BrokerAccessTokenSecrets => Set<BrokerAccessTokenSecret>();
     public DbSet<Instrument> Instruments => Set<Instrument>();
     public DbSet<Candle> Candles => Set<Candle>();
+    public DbSet<PersistedMarketObservation> MarketObservations => Set<PersistedMarketObservation>();
     public DbSet<OptionChainSnapshot> OptionChainSnapshots => Set<OptionChainSnapshot>();
     public DbSet<ExternalMarketSnapshot> ExternalMarketSnapshots => Set<ExternalMarketSnapshot>();
     public DbSet<MarketRegimeSnapshot> MarketRegimeSnapshots => Set<MarketRegimeSnapshot>();
@@ -113,6 +115,14 @@ public sealed class TradingDbContext(
             entity.Property(value => value.SecretReference).HasMaxLength(300);
             entity.HasIndex(value => new { value.Mode, value.Provider }).IsUnique();
         });
+        builder.Entity<BrokerAccessTokenSecret>(entity =>
+        {
+            ConfigureMutable(entity, "broker_access_token_secrets");
+            entity.Property(value => value.Provider).HasMaxLength(80);
+            entity.Property(value => value.ProtectedValue).HasMaxLength(12000);
+            entity.Property(value => value.UpdatedBy).HasMaxLength(160);
+            entity.HasIndex(value => value.Provider).IsUnique();
+        });
 
         builder.Entity<Instrument>(entity =>
         {
@@ -146,6 +156,20 @@ public sealed class TradingDbContext(
                 value.IntervalSeconds,
                 value.Source
             }).IsUnique();
+        });
+        builder.Entity<PersistedMarketObservation>(entity =>
+        {
+            ConfigureAppendOnly(entity, "market_observations");
+            entity.Property(value => value.Source).HasMaxLength(80);
+            entity.Property(value => value.Price).HasPrecision(18, 4);
+            entity.Property(value => value.OpenInterest).HasPrecision(24, 4);
+            entity.HasIndex(value => new
+            {
+                value.InstrumentId,
+                value.SourceTimestampUtc,
+                value.Source
+            }).IsUnique();
+            entity.HasIndex(value => value.ReceivedAtUtc);
         });
 
         ConfigureSnapshot<OptionChainSnapshot>(builder, "option_chain_snapshots");

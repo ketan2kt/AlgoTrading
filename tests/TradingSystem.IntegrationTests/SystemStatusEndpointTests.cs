@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.AspNetCore.Authorization;
+using TradingSystem.Api.Controllers;
+using TradingSystem.Api.Hubs;
 using TradingSystem.Application.Broker;
 
 namespace TradingSystem.IntegrationTests;
@@ -61,6 +64,31 @@ public sealed class SystemStatusEndpointTests :
     }
 
     [Fact]
+    public async Task TradingWorkspaceRequiresAuthentication()
+    {
+        var response = await _client.GetAsync(
+            "/api/trading-workspace/nifty",
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GrowwTokenVaultRequiresAuthentication()
+    {
+        var status = await _client.GetAsync(
+            "/api/broker/groww/access-token/status",
+            CancellationToken.None);
+        var store = await _client.PostAsJsonAsync(
+            "/api/broker/groww/access-token",
+            new { accessToken = new string('x', 40) },
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, store.StatusCode);
+    }
+
+    [Fact]
     public async Task AntiforgeryEndpointIssuesRequestToken()
     {
         var response = await _client.GetAsync(
@@ -85,6 +113,21 @@ public sealed class SystemStatusEndpointTests :
             CancellationToken.None);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public void TradingWorkspaceAndRealtimeHubRequireAdministratorRole()
+    {
+        AssertAdministratorOnly(typeof(TradingWorkspaceController));
+        AssertAdministratorOnly(typeof(SystemHealthHub));
+    }
+
+    private static void AssertAdministratorOnly(Type protectedType)
+    {
+        var authorization = Assert.Single(
+            protectedType.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>());
+        Assert.Equal("Administrator", authorization.Roles);
     }
 
     private sealed record SystemStatusResponse(

@@ -45,6 +45,8 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 });
 builder.Services.AddTradingSystemInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<TradingSystem.Application.MarketData.ILiveMarketDataPublisher,
+    SignalRLiveMarketDataPublisher>();
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.Name = "__Host-TradingSystem";

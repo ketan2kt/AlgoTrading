@@ -18,6 +18,6 @@ Defaults are deliberately conservative: one ORB trade per day, maximum three sys
 
 ## Gate limitation
 
-Paper broker orders and positions now survive process restarts through deterministic append-only journal replay. The lifecycle result is not yet written as a complete durable signal/risk/report chain, and realistic fees and slippage are not modeled. Therefore the Phase 7 functional lifecycle and broker restart-recovery criteria are proven, but the full durable-audit promotion criteria remain open. Do not promote this strategy to shadow or live operation.
+Paper broker orders and positions survive process restarts through deterministic append-only journal replay. Signals and risk decisions are persisted before broker submission, and a completed paper report is appended to the audit log. Cross-store atomicity and recovery between lifecycle writes are not yet proven, and realistic fees and slippage are not modeled. Therefore the functional lifecycle and broker restart-recovery criteria are proven, but the full promotion gate remains open. Do not promote this strategy to shadow or live operation.
 
 No profitability claim is made. Historical, out-of-sample, fee/slippage, and paper-soak evidence do not yet exist.

@@ -21,6 +21,23 @@ public sealed class MarketDataEngineTests
     }
 
     [Fact]
+    public void ValidatorRestoresPersistedCursorAndRejectsRestartDuplicate()
+    {
+        var validator = new MarketDataValidator(
+            new FixedTimeProvider(Now),
+            TimeSpan.FromSeconds(5));
+        var instrument = Guid.NewGuid();
+        var timestamp = Now.AddSeconds(-1);
+        validator.RestoreCursor(instrument, "Groww", timestamp);
+
+        var result = validator.Validate(new MarketObservation(
+            instrument, "Groww", timestamp, Now, 100m, 1, null));
+
+        Assert.False(result.Accepted);
+        Assert.Equal(MarketDataRejectionReason.Duplicate, result.Reason);
+    }
+
+    [Fact]
     public void ValidatorRejectsStaleFutureInvalidAndSequenceGap()
     {
         var validator = new MarketDataValidator(new FixedTimeProvider(Now), TimeSpan.FromSeconds(5));
@@ -55,11 +72,11 @@ public sealed class MarketDataEngineTests
         var aggregator = new CandleAggregator(60);
         var instrument = Guid.NewGuid();
         Assert.Null(aggregator.Add(Observation(instrument, Now.AddSeconds(1), 1) with
-            { Price = 100m, VolumeDelta = 10, OpenInterest = 1000 }));
+        { Price = 100m, VolumeDelta = 10, OpenInterest = 1000 }));
         Assert.Null(aggregator.Add(Observation(instrument, Now.AddSeconds(20), 2) with
-            { Price = 105m, VolumeDelta = 15, OpenInterest = 1010 }));
+        { Price = 105m, VolumeDelta = 15, OpenInterest = 1010 }));
         Assert.Null(aggregator.Add(Observation(instrument, Now.AddSeconds(40), 3) with
-            { Price = 98m, VolumeDelta = 5, OpenInterest = 1020 }));
+        { Price = 98m, VolumeDelta = 5, OpenInterest = 1020 }));
 
         var candle = aggregator.Add(Observation(instrument, Now.AddMinutes(1), 4) with { Price = 101m });
 
@@ -126,6 +143,7 @@ public sealed class MarketDataEngineTests
 
         Assert.NotNull(completed.CompletedCandle);
         Assert.False(rejected.Validation.Accepted);
+        Assert.Equal(2, persistence.Observations.Count);
         Assert.Single(persistence.Candles);
         Assert.Equal(3, persistence.HealthWrites);
     }
@@ -146,8 +164,11 @@ public sealed class MarketDataEngineTests
 
     private sealed class StubPersistence : IMarketDataPersistence
     {
+        public List<MarketObservation> Observations { get; } = [];
         public List<CompletedCandle> Candles { get; } = [];
         public int HealthWrites { get; private set; }
+        public Task PersistObservationAsync(MarketObservation observation, CancellationToken cancellationToken)
+        { Observations.Add(observation); return Task.CompletedTask; }
         public Task PersistCandleAsync(CompletedCandle candle, CancellationToken cancellationToken)
         { Candles.Add(candle); return Task.CompletedTask; }
         public Task RecordProviderHealthAsync(string provider, MarketDataValidationResult result,

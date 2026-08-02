@@ -24,7 +24,7 @@ The paper broker uses no randomness, wall-clock delay, network request, or backg
 
 Submissions, partial fills, completed fills, and cancellations are written to an append-only PostgreSQL journal before the in-memory projection changes. Startup replays that journal in strict sequence to reconstruct orders, idempotency keys, broker-order numbering, and open positions. A missing, duplicate, unknown, or inconsistent event fails recovery and prevents normal startup. A journal write failure leaves the in-memory projection unchanged.
 
-The current Azure topology is deliberately one App Service instance. Cross-process journal writers, realistic spread/slippage/fees, broker-unknown outcomes, and crash testing at every persistence boundary remain Phase 8 hardening work. Strategy signals, risk decisions, and final lifecycle reports still require their complete durable audit chain before shadow-mode promotion.
+The current Azure topology is deliberately one App Service instance. Cross-process journal writers, realistic spread/slippage/fees, broker-unknown outcomes, and crash testing at every persistence boundary remain Phase 8 hardening work. Strategy signals and risk decisions persist before submission and completed reports are audited, but cross-store atomicity and recovery between those writes remain required before shadow-mode promotion.
 
 ## Manual verification
 

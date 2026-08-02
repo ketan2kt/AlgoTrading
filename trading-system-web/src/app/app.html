@@ -1,36 +1,217 @@
 @if (status$ | async; as status) {
-  <header class="mode-banner" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
-    <span class="mode-banner__label">Operating mode</span>
-    <strong>{{ status.mode }}</strong>
-    <span>{{ status.status }}</span>
-    <span>Trading {{ status.tradingEnabled ? 'enabled' : 'disabled' }}</span>
-  </header>
+  @if (user) {
+    <header class="mode-banner" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
+      <span class="mode-banner__label">Operating mode</span>
+      <strong>{{ status.mode }}</strong>
+      <span>{{ status.status }}</span>
+      <span>Live orders {{ status.liveTradingAvailable ? 'available' : 'prohibited' }}</span>
+    </header>
+  }
 
   <main>
-    <section class="hero">
-      <p class="eyebrow">AUTOMATED NIFTY TRADING SYSTEM</p>
-      <h1>Safety-first control plane</h1>
-      <p>
-        Phase 1 establishes monitoring, authentication, health, and mode boundaries.
-        Strategy and broker execution are not available.
-      </p>
-    </section>
+    @if (checkingSession) {
+      <section class="session-card"><span class="pulse"></span>Checking secure session…</section>
+    } @else if (!user) {
+      <section class="login-layout">
+        <div class="login-copy">
+          <p class="eyebrow">SARTHI TRADING CONTROL</p>
+          <h1>Live market visibility.<br />Paper-only execution.</h1>
+          <p>
+            Sign in to view the protected Nifty feed, strategy signals, risk levels and paper
+            positions.
+          </p>
+        </div>
+        <form class="login-card" (ngSubmit)="login()">
+          <h2>Administrator sign in</h2>
+          <label
+            >Email or username<input
+              name="username"
+              autocomplete="username"
+              [(ngModel)]="username"
+              required
+          /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              [(ngModel)]="password"
+              required
+          /></label>
+          @if (loginError) {
+            <p class="form-error" role="alert">{{ loginError }}</p>
+          }
+          <button type="submit" [disabled]="loginBusy">
+            {{ loginBusy ? 'Signing in…' : 'Open workspace' }}
+          </button>
+        </form>
+      </section>
+    } @else {
+      <section class="workspace-heading">
+        <div>
+          <p class="eyebrow">LIVE TRADING WORKSPACE</p>
+          <h1>Nifty command view</h1>
+          <p>
+            Signed in as {{ user.username }} · Chart data is accepted only from the configured Groww
+            live source.
+          </p>
+        </div>
+        <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>
+      </section>
 
-    <section class="status-grid" aria-label="Foundation status">
-      <article>
-        <span>Live trading capability</span>
-        <strong>{{ status.liveTradingAvailable ? 'Available' : 'Absent' }}</strong>
-      </article>
-      <article>
-        <span>Execution state</span>
-        <strong>{{ status.tradingEnabled ? 'Enabled' : 'Fail-closed' }}</strong>
-      </article>
-      <article>
-        <span>Foundation health</span>
-        <strong>{{ status.status }}</strong>
-      </article>
-    </section>
+      @if (tokenStatus; as token) {
+        <section
+          class="token-card"
+          [class.token-card--required]="!token.isConfigured || token.isExpired"
+          aria-label="Groww daily access token"
+        >
+          <div class="token-card__status">
+            <span>GROWW LIVE-DATA ACCESS</span>
+            <strong>
+              {{
+                !token.isConfigured
+                  ? 'Token required'
+                  : token.isExpired
+                    ? 'Token expired'
+                    : 'Token ready'
+              }}
+            </strong>
+            <p>
+              @if (token.expiresAtUtc) {
+                Protected until
+                {{ token.expiresAtUtc | date: 'dd MMM, HH:mm' : 'Asia/Kolkata' }} IST.
+              } @else if (token.source === 'Environment') {
+                Managed through protected server configuration.
+              } @else {
+                Add today’s Groww token to allow the live feed to start.
+              }
+            </p>
+          </div>
+          @if (!showTokenForm) {
+            <button type="button" class="secondary-button" (click)="openTokenForm()">
+              {{ token.isConfigured && !token.isExpired ? 'Replace token' : 'Add today’s token' }}
+            </button>
+          } @else {
+            <form class="token-form" (ngSubmit)="saveGrowwToken()">
+              <label>
+                Groww access token
+                <input
+                  name="growwAccessToken"
+                  type="password"
+                  autocomplete="off"
+                  [(ngModel)]="growwAccessToken"
+                  minlength="20"
+                  maxlength="8192"
+                  required
+                />
+              </label>
+              <button type="submit" [disabled]="tokenBusy">
+                {{ tokenBusy ? 'Protecting…' : 'Save and reconnect' }}
+              </button>
+            </form>
+          }
+        </section>
+      }
+      @if (tokenError) {
+        <div class="feed-notice feed-notice--warning" role="alert">{{ tokenError }}</div>
+      }
+      @if (tokenSuccess) {
+        <div class="feed-notice" role="status">{{ tokenSuccess }}</div>
+      }
 
-    <router-outlet />
+      @if (workspace; as view) {
+        <section class="market-strip" aria-label="Live Nifty feed status">
+          <article>
+            <span>Instrument</span><strong>{{ view.exchange }} · {{ view.instrument }}</strong>
+          </article>
+          <article>
+            <span>Feed</span
+            ><strong [class.good]="view.isLive && view.isFresh" [class.bad]="!view.isLive">{{
+              view.feedStatus
+            }}</strong>
+          </article>
+          <article>
+            <span>Data state</span><strong>{{ view.isFresh ? 'Fresh' : 'Trading blocked' }}</strong>
+          </article>
+          <article>
+            <span>Last market update</span
+            ><strong>{{
+              view.lastMarketTimestampUtc
+                ? (view.lastMarketTimestampUtc | date: 'HH:mm:ss' : 'Asia/Kolkata') + ' IST'
+                : '—'
+            }}</strong>
+          </article>
+          <article>
+            <span>Timeframe</span><strong>{{ view.timeframe }}</strong>
+          </article>
+        </section>
+
+        @if (view.statusMessage) {
+          <div class="feed-notice" [class.feed-notice--warning]="!view.isLive">
+            {{ view.statusMessage }}
+          </div>
+        }
+        @if (workspaceError) {
+          <div class="feed-notice feed-notice--warning">{{ workspaceError }}</div>
+        }
+
+        <section class="chart-panel">
+          <div class="panel-heading">
+            <div><span>NIFTY 50</span><strong>Live one-minute candles</strong></div>
+            <div class="legend">
+              <span class="dot dot--entry"></span>Entry <span class="dot dot--risk"></span>SL
+              <span class="dot dot--reward"></span>Target
+            </div>
+          </div>
+          <app-nifty-chart [snapshot]="view" />
+          <p class="chart-attribution">
+            Charts by TradingView Lightweight Charts™. Market data source: Groww.
+          </p>
+        </section>
+
+        <section class="detail-grid">
+          <article class="positions-panel">
+            <div class="panel-heading">
+              <div><span>STRATEGY EVENTS</span><strong>Signals and risk decisions</strong></div>
+            </div>
+            @if (view.overlays.length) {
+              @for (overlay of view.overlays; track overlay.signalId) {
+                <div class="signal-row">
+                  <div>
+                    <strong>{{ overlay.direction }} · {{ overlay.strategy }}</strong
+                    ><span>{{ overlay.status }}</span>
+                  </div>
+                  <div>
+                    <span>{{ overlay.fillPrice ? 'Fill' : 'Entry' }}</span
+                    ><strong>{{ overlay.fillPrice || overlay.entry | number: '1.2-2' }}</strong>
+                  </div>
+                  <div>
+                    <span>SL</span
+                    ><strong class="bad">{{ overlay.stopLoss | number: '1.2-2' }}</strong>
+                  </div>
+                  <div>
+                    <span>Target</span
+                    ><strong class="good">{{ overlay.target | number: '1.2-2' }}</strong>
+                  </div>
+                </div>
+              }
+            } @else {
+              <p class="empty-copy">
+                No persisted strategy signals for this instrument. The system will never invent or
+                force one.
+              </p>
+            }
+          </article>
+          <article class="safety-panel">
+            <span>SAFETY STATE</span><strong>{{ view.mode }} mode</strong>
+            <p>
+              Live market monitoring may run, but real-order capability remains absent. Stale or
+              disconnected data blocks decisions.
+            </p>
+          </article>
+        </section>
+      }
+      <router-outlet />
+    }
   </main>
 }
