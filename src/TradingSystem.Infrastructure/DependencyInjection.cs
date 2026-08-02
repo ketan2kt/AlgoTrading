@@ -38,6 +38,10 @@ public static class DependencyInjection
             options.UseNpgsql(connectionString, npgsql =>
                 npgsql.EnableRetryOnFailure(3)));
         services
+            .AddOptions<DatabaseInitializationOptions>()
+            .Bind(configuration.GetSection(DatabaseInitializationOptions.SectionName));
+        services.AddHostedService<DatabaseInitializationService>();
+        services
             .AddIdentity<ApplicationUser, IdentityRole<Guid>>(options =>
             {
                 options.Password.RequiredLength = 14;

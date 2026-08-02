@@ -71,6 +71,11 @@ jobs:
 
       - name: Deploy application package
         run: |
+          az webapp config appsettings set \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --settings DatabaseInitialization__ApplyMigrations=true \
+            --output none
           az webapp deploy \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
@@ -78,6 +83,31 @@ jobs:
             --type zip \
             --clean true \
             --restart true
+
+      - name: Wait for database initialization
+        run: |
+          app="${{ steps.infrastructure.outputs.app }}"
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              "https://${app}.azurewebsites.net/health/ready" > /dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Application did not become ready after controlled migration." >&2
+          exit 1
+
+      - name: Disable database initialization
+        if: always()
+        run: |
+          az webapp config appsettings set \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --settings DatabaseInitialization__ApplyMigrations=false \
+            --output none
+          az webapp restart \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}"
 
       - name: Verify paper-only configuration
         run: |
