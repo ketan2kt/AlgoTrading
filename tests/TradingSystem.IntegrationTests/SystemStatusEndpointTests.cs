@@ -67,6 +67,17 @@ public sealed class SystemStatusEndpointTests :
                 StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task LoginWithoutAntiforgeryTokenIsRejectedWithoutServerError()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { username = "nobody", password = "not-a-real-password" },
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private sealed record SystemStatusResponse(
         string Mode,
         bool LiveTradingAvailable,
