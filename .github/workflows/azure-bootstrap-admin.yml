@@ -73,7 +73,10 @@ jobs:
           az webapp restart \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.application.outputs.name }}"
-          sleep 30
+          # A successful bootstrap deliberately stops application startup. Allow
+          # enough time for App Service cold start and database initialization
+          # before removing the one-time settings and restarting normally.
+          sleep 300
 
       - name: Remove bootstrap configuration
         if: always() && inputs.confirm == 'CREATE-ADMIN' && steps.application.outputs.name != ''
@@ -99,7 +102,7 @@ jobs:
           app="${{ steps.application.outputs.name }}"
           base_url="https://${app}.azurewebsites.net"
           ready=false
-          for attempt in {1..30}; do
+          for attempt in {1..60}; do
             if curl --fail --silent --show-error \
               "$base_url/health/ready" > /dev/null; then
               ready=true
@@ -124,5 +127,6 @@ jobs:
               --arg password "$BOOTSTRAP_PASSWORD" \
               '{username: $username, password: $password}')" \
             "$base_url/api/auth/login")
+          echo "Administrator login returned HTTP $status"
           test "$status" = "204"
           rm -f cookies.txt token.json
