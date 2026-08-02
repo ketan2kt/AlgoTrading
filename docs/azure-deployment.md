@@ -14,7 +14,13 @@ This deployment is a **monitoring/demo paper environment only**. It must not be 
 - PostgreSQL on a delegated subnet with public access disabled and private DNS
 - Angular production files served by ASP.NET Core from the same container and origin
 
-The application, database and network resources default to Central India. Azure rejected affordable Container Registry SKUs for this subscription, so the deployment uses registry-free App Service ZIP publishing. The custom hostname is intended to be `trading.sarthico.com`, but DNS and certificate binding are deliberately separate because the App Service hostname must exist first.
+The application, database and network resources are deployed in Central India. Azure rejected affordable Container Registry SKUs for this subscription, so the deployment uses registry-free App Service ZIP publishing.
+
+Public paper-environment URLs:
+
+- `https://sarthico.com`
+- `https://www.sarthico.com`
+- Azure fallback: `https://sarthitradingweb5amvyarepxaci.azurewebsites.net`
 
 ## Cost boundary
 
@@ -33,23 +39,21 @@ The workflow uses OpenID Connect; it does not store an Azure client secret. The 
 
 ## Database migration and administrator bootstrap
 
-The application intentionally does not migrate the database automatically. Before the first application revision is considered ready, run the checked-in EF Core migration from an approved one-off job with private network access. Administrator bootstrap must likewise be a one-time controlled job, followed by removal of all bootstrap settings. These jobs are not automated yet.
+The application intentionally does not migrate the database automatically. The initial checked-in EF Core migration was applied through the controlled Azure workflow and automatic migration was disabled afterward. The administrator was created through the one-time bootstrap workflow; its temporary App Service settings and GitHub bootstrap-password secret were removed after successful login verification.
 
 ## Domain setup
 
-After the App Service is healthy:
+GoDaddy DNS and Azure App Service are configured as follows:
 
-1. Add `trading.sarthico.com` as a custom domain on the App Service.
-2. Add the Azure-provided DNS verification record and CNAME in GoDaddy.
-3. Bind an Azure managed certificate.
-4. Verify HTTPS, cookie authentication, antiforgery, SignalR, and health endpoints.
+- Apex A records: `20.192.171.19` and `20.192.170.138`
+- Apex ownership TXT: `asuid` with the Azure Custom Domain Verification ID
+- `www` CNAME: `sarthitradingweb5amvyarepxaci.azurewebsites.net`
+- Azure App Service managed certificates with SNI SSL for both hostnames
 
-Do not redirect the apex `sarthico.com` until its existing use is confirmed.
+Both custom hostnames were verified through their public HTTPS endpoints. Mailgun MX, SPF and `email` records, GoDaddy nameservers, and Domain Connect records were preserved.
 
 ## Known limitations
 
 - Paper broker state remains process-local and is lost on restart.
-- EF migration and one-time administrator bootstrap require a private-network job design.
-- ASP.NET Core Data Protection keys are not yet durable across revisions, so login cookies can be invalidated after deployment.
+- Subsequent EF migrations remain controlled manual operations and must not run automatically at application startup.
 - No Groww token is provisioned, and no live/order-capable gateway exists.
-- GitHub workload identity and environment protection are not configured yet; the deployment workflow cannot run until that one-time setup is complete.

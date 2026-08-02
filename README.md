@@ -187,7 +187,7 @@ Groww documents that manually generated access tokens expire daily at 06:00. API
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
 - Paper lifecycle state and reports remain process-local; durable restart reconstruction and append-only lifecycle persistence must be completed before Phase 8 promotion.
-- Azure deployment code is prepared but not provisioned. It is restricted to paper mode and remains monitoring/demo-only until database migration/bootstrap jobs, durable Data Protection keys, and paper-state restart recovery are complete.
+- The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until durable paper-state restart recovery and the remaining promotion gates are complete.
 - npm reports three moderate development-only transitive findings through Angular CLI's MCP dependency; CI rejects high/critical findings.
 
 ## Disclaimer
