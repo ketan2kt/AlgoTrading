@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type CREATE-ADMIN to confirm one-time administrator creation
+        description: Type CREATE-ADMIN for creation or VERIFY-ADMIN to verify an existing administrator
         required: true
       username:
         description: Administrator username
@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   bootstrap:
-    if: inputs.confirm == 'CREATE-ADMIN'
+    if: inputs.confirm == 'CREATE-ADMIN' || inputs.confirm == 'VERIFY-ADMIN'
     runs-on: ubuntu-latest
     environment: azure-paper
     steps:
@@ -55,6 +55,7 @@ jobs:
           echo "name=$app" >> "$GITHUB_OUTPUT"
 
       - name: Run one-time administrator bootstrap
+        if: inputs.confirm == 'CREATE-ADMIN'
         env:
           ADMIN_EMAIL: ${{ inputs.email }}
           ADMIN_USERNAME: ${{ inputs.username }}
@@ -75,7 +76,7 @@ jobs:
           sleep 30
 
       - name: Remove bootstrap configuration
-        if: always() && steps.application.outputs.name != ''
+        if: always() && inputs.confirm == 'CREATE-ADMIN' && steps.application.outputs.name != ''
         run: |
           az webapp config appsettings delete \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
