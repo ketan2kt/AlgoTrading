@@ -1,0 +1,36 @@
+@if (status$ | async; as status) {
+  <header class="mode-banner" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
+    <span class="mode-banner__label">Operating mode</span>
+    <strong>{{ status.mode }}</strong>
+    <span>{{ status.status }}</span>
+    <span>Trading {{ status.tradingEnabled ? 'enabled' : 'disabled' }}</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">AUTOMATED NIFTY TRADING SYSTEM</p>
+      <h1>Safety-first control plane</h1>
+      <p>
+        Phase 1 establishes monitoring, authentication, health, and mode boundaries.
+        Strategy and broker execution are not available.
+      </p>
+    </section>
+
+    <section class="status-grid" aria-label="Foundation status">
+      <article>
+        <span>Live trading capability</span>
+        <strong>{{ status.liveTradingAvailable ? 'Available' : 'Absent' }}</strong>
+      </article>
+      <article>
+        <span>Execution state</span>
+        <strong>{{ status.tradingEnabled ? 'Enabled' : 'Fail-closed' }}</strong>
+      </article>
+      <article>
+        <span>Foundation health</span>
+        <strong>{{ status.status }}</strong>
+      </article>
+    </section>
+
+    <router-outlet />
+  </main>
+}

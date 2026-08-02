@@ -1,0 +1,169 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
+using TradingSystem.Application.Auditing;
+using TradingSystem.Application.SystemStatus;
+using TradingSystem.Infrastructure.Auditing;
+using TradingSystem.Infrastructure.Identity;
+using TradingSystem.Infrastructure.Persistence;
+using TradingSystem.Infrastructure.SystemStatus;
+using TradingSystem.Application.Broker;
+using TradingSystem.Infrastructure.Broker;
+using Microsoft.Extensions.Options;
+using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Application.MarketData;
+using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Application.Regime;
+using TradingSystem.Application.Strategies;
+using TradingSystem.Application.Risk;
+using TradingSystem.Application.Execution;
+
+namespace TradingSystem.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddTradingSystemInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("TradingDatabase");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "ConnectionStrings:TradingDatabase must be supplied securely.");
+        }
+
+        services.AddDbContext<TradingDbContext>(options =>
+            options.UseNpgsql(connectionString, npgsql =>
+                npgsql.EnableRetryOnFailure(3)));
+        services
+            .AddIdentity<ApplicationUser, IdentityRole<Guid>>(options =>
+            {
+                options.Password.RequiredLength = 14;
+                options.Password.RequireDigit = true;
+                options.Password.RequireLowercase = true;
+                options.Password.RequireUppercase = true;
+                options.Password.RequireNonAlphanumeric = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.User.RequireUniqueEmail = true;
+            })
+            .AddEntityFrameworkStores<TradingDbContext>()
+            .AddDefaultTokenProviders();
+        services
+            .AddOptions<IdentityBootstrapOptions>()
+            .Bind(configuration.GetSection(IdentityBootstrapOptions.SectionName));
+        services.AddHostedService<IdentityBootstrapService>();
+
+        services
+            .AddOptions<TradingModeOptions>()
+            .Bind(configuration.GetSection(TradingModeOptions.SectionName))
+            .Validate(options => options.Mode is not Domain.TradingMode.Live,
+                "Live mode is not available in Phase 1.")
+            .ValidateOnStart();
+
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<ISystemStatusReader, FoundationSystemStatusReader>();
+        services.AddScoped<IAuditWriter, EfAuditWriter>();
+        services.AddSingleton<PaperBrokerStateStore>();
+        services.AddSingleton<PaperBrokerGateway>();
+        services.AddSingleton<IBrokerGateway>(provider =>
+        {
+            var mode = provider.GetRequiredService<IOptions<TradingModeOptions>>().Value.Mode;
+            if (mode != Domain.TradingMode.Paper)
+            {
+                throw new InvalidOperationException(
+                    $"No broker gateway is available for {mode} mode in Phase 3.");
+            }
+
+            return provider.GetRequiredService<PaperBrokerGateway>();
+        });
+        services.AddSingleton<IPaperBrokerControl>(provider =>
+        {
+            _ = provider.GetRequiredService<IBrokerGateway>();
+            return provider.GetRequiredService<PaperBrokerGateway>();
+        });
+
+        services.AddOptions<GrowwOptions>()
+            .Bind(configuration.GetSection(GrowwOptions.SectionName))
+            .Validate(options => Uri.TryCreate(options.ApiBaseUrl, UriKind.Absolute, out var api) &&
+                                 api.Scheme == Uri.UriSchemeHttps,
+                "Groww API base URL must be an absolute HTTPS URL.")
+            .Validate(options => Uri.TryCreate(options.InstrumentMasterUrl, UriKind.Absolute, out var instruments) &&
+                                 instruments.Scheme == Uri.UriSchemeHttps,
+                "Groww instrument URL must be an absolute HTTPS URL.")
+            .Validate(options => options.TimeoutSeconds is >= 1 and <= 60,
+                "Groww timeout must be between 1 and 60 seconds.")
+            .Validate(options => options.MaximumInstrumentBytes is >= 1_000_000 and <= 128 * 1024 * 1024,
+                "Groww instrument size limit is invalid.")
+            .ValidateOnStart();
+        services.AddSingleton<IGrowwAccessTokenProvider, EnvironmentGrowwAccessTokenProvider>();
+        services.AddHttpClient(GrowwReadOnlyGateway.ApiClientName, (provider, client) =>
+        {
+            var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
+            client.BaseAddress = new Uri(groww.ApiBaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
+        }).AddStandardResilienceHandler();
+        services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
+        {
+            var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
+            client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
+        }).AddStandardResilienceHandler();
+        services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
+        services.AddScoped<IGrowwInstrumentSynchronizer, GrowwInstrumentSynchronizer>();
+        services.AddSingleton<MarketDataHealthMonitor>();
+        services.AddSingleton<IMarketDataHealthReader>(provider => provider.GetRequiredService<MarketDataHealthMonitor>());
+        services.AddScoped<IMarketDataPersistence, EfMarketDataPersistence>();
+        services.AddOptions<MarketDataOptions>()
+            .Bind(configuration.GetSection(MarketDataOptions.SectionName))
+            .Validate(options => options.MaximumAgeSeconds is >= 1 and <= 300,
+                "Market-data maximum age must be between 1 and 300 seconds.")
+            .Validate(options => options.CandleIntervalSeconds is >= 1 and <= 86400,
+                "Candle interval must be between 1 second and 1 day.")
+            .ValidateOnStart();
+        services.AddSingleton(provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<MarketDataOptions>>().Value;
+            return new MarketDataValidator(provider.GetRequiredService<TimeProvider>(),
+                TimeSpan.FromSeconds(options.MaximumAgeSeconds));
+        });
+        services.AddSingleton(provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<MarketDataOptions>>().Value;
+            return new CandleAggregator(options.CandleIntervalSeconds);
+        });
+        services.AddScoped<MarketDataProcessor>();
+        services.AddOptions<MarketRegimeOptions>()
+            .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
+            .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&
+                                 options.MinimumTradingConfidence is >= 0 and <= 1,
+                "Market-regime quality and confidence thresholds must be between 0 and 1.")
+            .ValidateOnStart();
+        services.AddSingleton(provider => new MarketRegimeEngine(
+            provider.GetRequiredService<IOptions<MarketRegimeOptions>>().Value));
+        services.AddSingleton<MarketRegimeMonitor>();
+        services.AddSingleton<IMarketRegimeReader>(provider => provider.GetRequiredService<MarketRegimeMonitor>());
+        services.AddScoped<IMarketRegimePersistence, EfMarketRegimePersistence>();
+        services.AddScoped<MarketRegimeService>();
+        services.AddOptions<OpeningRangeBreakoutOptions>()
+            .Bind(configuration.GetSection("Strategies:OpeningRangeBreakout"))
+            .Validate(options => options.RewardToRiskRatio >= 1m &&
+                                 options.MaximumTradesPerDay is >= 1 and <= 3,
+                "Opening-range strategy settings are invalid.")
+            .ValidateOnStart();
+        services.AddSingleton<ITradingStrategy>(provider => new OpeningRangeBreakoutStrategy(
+            provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value));
+        services.AddOptions<PreliminaryRiskOptions>()
+            .Bind(configuration.GetSection("Risk:Preliminary"))
+            .Validate(options => options.MaximumRiskPerTrade > 0 && options.MaximumQuantity > 0 &&
+                                 options.MaximumTradesPerDay is >= 1 and <= 3,
+                "Preliminary risk settings are invalid.")
+            .ValidateOnStart();
+        services.AddSingleton(provider => new PreliminaryRiskEngine(
+            provider.GetRequiredService<IOptions<PreliminaryRiskOptions>>().Value));
+        services.AddScoped<PaperTradeLifecycleService>();
+
+        return services;
+    }
+}

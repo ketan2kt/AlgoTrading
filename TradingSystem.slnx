@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TradingSystem.Api/TradingSystem.Api.csproj" />
+    <Project Path="src/TradingSystem.Application/TradingSystem.Application.csproj" />
+    <Project Path="src/TradingSystem.Domain/TradingSystem.Domain.csproj" />
+    <Project Path="src/TradingSystem.Infrastructure/TradingSystem.Infrastructure.csproj" />
+    <Project Path="src/TradingSystem.Worker/TradingSystem.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TradingSystem.ArchitectureTests/TradingSystem.ArchitectureTests.csproj" />
+    <Project Path="tests/TradingSystem.ContractTests/TradingSystem.ContractTests.csproj" />
+    <Project Path="tests/TradingSystem.IntegrationTests/TradingSystem.IntegrationTests.csproj" />
+    <Project Path="tests/TradingSystem.UnitTests/TradingSystem.UnitTests.csproj" />
+  </Folder>
+</Solution>
