@@ -1,0 +1,127 @@
+name: Azure administrator bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type CREATE-ADMIN to confirm one-time administrator creation
+        required: true
+      username:
+        description: Administrator username
+        required: true
+      email:
+        description: Administrator email address
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-paper-administrator-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: inputs.confirm == 'CREATE-ADMIN'
+    runs-on: ubuntu-latest
+    environment: azure-paper
+    steps:
+      - name: Validate bootstrap secret
+        env:
+          ADMIN_EMAIL: ${{ inputs.email }}
+          ADMIN_USERNAME: ${{ inputs.username }}
+          BOOTSTRAP_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+        run: |
+          test ${#BOOTSTRAP_PASSWORD} -ge 14
+          [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{3,64}$ ]]
+          [[ "$ADMIN_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+
+      - name: Sign in to Azure with workload identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve paper web application
+        id: application
+        run: |
+          app=$(az webapp list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --query "[?starts_with(name, 'sarthitradingweb')].name | [0]" \
+            --output tsv)
+          test -n "$app"
+          echo "name=$app" >> "$GITHUB_OUTPUT"
+
+      - name: Run one-time administrator bootstrap
+        env:
+          ADMIN_EMAIL: ${{ inputs.email }}
+          ADMIN_USERNAME: ${{ inputs.username }}
+          BOOTSTRAP_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+        run: |
+          az webapp config appsettings set \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.application.outputs.name }}" \
+            --settings \
+              IdentityBootstrap__Enabled=true \
+              IdentityBootstrap__Username="$ADMIN_USERNAME" \
+              IdentityBootstrap__Email="$ADMIN_EMAIL" \
+              IdentityBootstrap__Password="$BOOTSTRAP_PASSWORD" \
+            --output none
+          az webapp restart \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.application.outputs.name }}"
+          sleep 30
+
+      - name: Remove bootstrap configuration
+        if: always() && steps.application.outputs.name != ''
+        run: |
+          az webapp config appsettings delete \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.application.outputs.name }}" \
+            --setting-names \
+              IdentityBootstrap__Enabled \
+              IdentityBootstrap__Username \
+              IdentityBootstrap__Email \
+              IdentityBootstrap__Password \
+            --output none
+          az webapp restart \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.application.outputs.name }}"
+
+      - name: Verify administrator login
+        env:
+          ADMIN_USERNAME: ${{ inputs.username }}
+          BOOTSTRAP_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+        run: |
+          app="${{ steps.application.outputs.name }}"
+          base_url="https://${app}.azurewebsites.net"
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              "$base_url/health/ready" > /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = "true"
+          curl --fail --silent --show-error \
+            --cookie-jar cookies.txt \
+            "$base_url/api/security/antiforgery-token" > token.json
+          token=$(jq -r '.token' token.json)
+          test -n "$token"
+          status=$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --cookie cookies.txt \
+            --header 'Content-Type: application/json' \
+            --header "X-CSRF-TOKEN: $token" \
+            --data "$(jq -n \
+              --arg username "$ADMIN_USERNAME" \
+              --arg password "$BOOTSTRAP_PASSWORD" \
+              '{username: $username, password: $password}')" \
+            "$base_url/api/auth/login")
+          test "$status" = "204"
+          rm -f cookies.txt token.json

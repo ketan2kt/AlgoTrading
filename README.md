@@ -128,6 +128,12 @@ dotnet user-secrets set "ConnectionStrings:TradingDatabase" "<local connection s
 
 Set `IdentityBootstrap:Enabled`, `Username`, `Email`, and `Password` through .NET user-secrets, then start the API once. ASP.NET Core Identity hashes the password and assigns the Administrator role. The process intentionally stops after success so bootstrap cannot remain silently enabled.
 
+For Azure, use the manually dispatched `Azure administrator bootstrap` workflow. Add
+`BOOTSTRAP_ADMIN_PASSWORD` as an `azure-paper` environment secret first. The workflow
+temporarily supplies the bootstrap settings to App Service, removes all four settings,
+restarts the application, and verifies the administrator through the antiforgery-protected
+login endpoint. Delete the GitHub environment secret after the workflow succeeds.
+
 Remove all bootstrap secrets before restarting:
 
 ```powershell
