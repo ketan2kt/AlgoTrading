@@ -22,6 +22,7 @@ import {
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { aggregateCandles } from './chart-candles';
+import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -107,7 +108,13 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       layout: { background: { type: ColorType.Solid, color: '#0d1512' }, textColor: '#9caea5' },
       grid: { vertLines: { color: '#1c2924' }, horzLines: { color: '#1c2924' } },
       rightPriceScale: { borderColor: '#2c3a34' },
-      timeScale: { borderColor: '#2c3a34', timeVisible: true, secondsVisible: false },
+      localization: { timeFormatter: formatCrosshairTimeIst },
+      timeScale: {
+        borderColor: '#2c3a34',
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: formatChartTimeIst,
+      },
       crosshair: { vertLine: { color: '#658c7b' }, horzLine: { color: '#658c7b' } },
       handleScroll: {
         mouseWheel: false,
