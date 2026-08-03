@@ -20,7 +20,8 @@ export interface GrowwInstrumentSyncResult {
 
 export interface StoreGrowwTokenResponse {
   token: GrowwTokenStatus;
-  instrumentSynchronization: GrowwInstrumentSyncResult;
+  instrumentSynchronization: GrowwInstrumentSyncResult | null;
+  instrumentSynchronizationError: string | null;
 }
 
 @Injectable({ providedIn: 'root' })

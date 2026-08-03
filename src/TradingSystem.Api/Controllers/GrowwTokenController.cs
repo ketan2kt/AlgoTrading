@@ -8,9 +8,10 @@ namespace TradingSystem.Api.Controllers;
 [Authorize(Roles = "Administrator")]
 [ApiController]
 [Route("api/broker/groww/access-token")]
-public sealed class GrowwTokenController(
+public sealed partial class GrowwTokenController(
     IGrowwTokenVault tokenVault,
-    IGrowwInstrumentSynchronizer instrumentSynchronizer) : ControllerBase
+    IGrowwInstrumentSynchronizer instrumentSynchronizer,
+    ILogger<GrowwTokenController> logger) : ControllerBase
 {
     [HttpGet("status")]
     public async Task<ActionResult<GrowwTokenStatus>> GetStatus(
@@ -32,11 +33,22 @@ public sealed class GrowwTokenController(
 
         var status = await tokenVault.StoreAsync(
             request.AccessToken,
-            User.Identity?.Name ?? "administrator",
+            User?.Identity?.Name ?? "administrator",
             cancellationToken);
-        var synchronization = await instrumentSynchronizer.SynchronizeAsync(cancellationToken);
+        GrowwInstrumentSyncResult? synchronization = null;
+        string? synchronizationError = null;
+        try
+        {
+            synchronization = await instrumentSynchronizer.SynchronizeAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            LogInstrumentSynchronizationFailure(logger, exception);
+            synchronizationError =
+                "The token was stored, but Groww instruments could not be synchronized.";
+        }
 
-        return Ok(new StoreGrowwTokenResponse(status, synchronization));
+        return Ok(new StoreGrowwTokenResponse(status, synchronization, synchronizationError));
     }
 
     [ValidateAntiForgeryToken]
@@ -44,11 +56,20 @@ public sealed class GrowwTokenController(
     public async Task<ActionResult<GrowwInstrumentSyncResult>> SynchronizeInstruments(
         CancellationToken cancellationToken) =>
         Ok(await instrumentSynchronizer.SynchronizeAsync(cancellationToken));
+
+    [LoggerMessage(
+        EventId = 1301,
+        Level = LogLevel.Error,
+        Message = "Groww token was stored, but instrument synchronization failed.")]
+    private static partial void LogInstrumentSynchronizationFailure(
+        ILogger logger,
+        Exception exception);
 }
 
 public sealed record StoreGrowwTokenResponse(
     GrowwTokenStatus Token,
-    GrowwInstrumentSyncResult InstrumentSynchronization);
+    GrowwInstrumentSyncResult? InstrumentSynchronization,
+    string? InstrumentSynchronizationError);
 
 public sealed class StoreGrowwTokenRequest
 {

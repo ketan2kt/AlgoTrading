@@ -15,10 +15,10 @@ internal sealed class GrowwInstrumentSynchronizer(
         CancellationToken cancellationToken)
     {
         var downloaded = await gateway.GetInstrumentMasterAsync(cancellationToken);
-        var supported = downloaded
+        var supported = SelectSupportedUniqueRecords(downloaded)
             .Select(record => (Record: record, Mapping: TryMap(record)))
-            .Where(value => value.Mapping is not null)
             .ToArray();
+
         var exchanges = supported.Select(value => value.Record.Exchange).Distinct().ToArray();
         var existing = await dbContext.Instruments
             .Where(instrument => exchanges.Contains(instrument.Exchange))
@@ -70,6 +70,30 @@ internal sealed class GrowwInstrumentSynchronizer(
             updated,
             downloaded.Count - supported.Length,
             timeProvider.GetUtcNow());
+    }
+
+    internal static IReadOnlyList<GrowwInstrumentRecord> SelectSupportedUniqueRecords(
+        IReadOnlyList<GrowwInstrumentRecord> downloaded)
+    {
+        var mapped = downloaded
+            .Select(record => (Record: record, Mapping: TryMap(record)))
+            .Where(value => value.Mapping is not null)
+            .ToArray();
+        // Groww's master can contain distinct securities which collapse to the same
+        // key supported by our current domain model (for example, bonds sharing a
+        // trading symbol but having different ISINs). Select one deterministically
+        // so an unrelated duplicate cannot block synchronisation of NIFTY.
+        return mapped
+            .GroupBy(value => (
+                value.Record.Exchange,
+                value.Record.TradingSymbol,
+                value.Mapping!.Value.Type,
+                value.Mapping.Value.ExpiryDate,
+                StrikePrice: value.Record.StrikePrice is > 0 ? value.Record.StrikePrice : null))
+            .Select(group => group
+                .OrderBy(value => value.Record.ExchangeToken, StringComparer.Ordinal)
+                .First().Record)
+            .ToArray();
     }
 
     private static (InstrumentSegment Segment, InstrumentType Type, DateOnly? ExpiryDate)? TryMap(

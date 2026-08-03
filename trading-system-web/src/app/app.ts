@@ -167,7 +167,11 @@ export class App implements OnInit, OnDestroy {
           this.tokenStatus = response.token;
           this.tokenBusy = false;
           this.showTokenForm = false;
-          this.tokenSuccess = `Today’s Groww token is protected and instruments are synchronised (${response.instrumentSynchronization.inserted} added, ${response.instrumentSynchronization.updated} refreshed).`;
+          const sync = response.instrumentSynchronization;
+          this.tokenSuccess = sync
+            ? `Today’s Groww token is protected and instruments are synchronised (${sync.inserted} added, ${sync.updated} refreshed).`
+            : 'Today’s Groww token is protected. Instrument synchronisation still needs attention.';
+          this.tokenError = response.instrumentSynchronizationError ?? '';
           this.loadWorkspace();
           this.refreshView();
         },

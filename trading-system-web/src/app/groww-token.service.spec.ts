@@ -29,6 +29,7 @@ describe('GrowwTokenService', () => {
         skipped: 10,
         completedAtUtc: '2026-08-02T18:30:01Z',
       },
+      instrumentSynchronizationError: null,
     };
 
     service.store(accessToken).subscribe((status) => expect(status).toEqual(expected));

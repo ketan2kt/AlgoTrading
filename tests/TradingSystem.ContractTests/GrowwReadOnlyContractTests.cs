@@ -127,6 +127,23 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public void InstrumentSynchronizationDeduplicatesKeysFromOfficialMaster()
+    {
+        var records = new[]
+        {
+            Instrument("14224", "IMC1", "INE00QS24027"),
+            Instrument("14219", "IMC1", "INE00QS24043"),
+            Instrument("NIFTY", "NIFTY", null, "IDX")
+        };
+
+        var selected = GrowwInstrumentSynchronizer.SelectSupportedUniqueRecords(records);
+
+        Assert.Equal(2, selected.Count);
+        Assert.Equal("14219", Assert.Single(selected, value => value.TradingSymbol == "IMC1").ExchangeToken);
+        Assert.Contains(selected, value => value.TradingSymbol == "NIFTY");
+    }
+
+    [Fact]
     public async Task CancellationIsPropagatedBeforeNetworkCall()
     {
         var calls = 0;
@@ -168,6 +185,14 @@ public sealed class GrowwReadOnlyContractTests
     {
         Content = new StringContent(body, Encoding.UTF8, "application/json")
     };
+
+    private static GrowwInstrumentRecord Instrument(
+        string exchangeToken,
+        string tradingSymbol,
+        string? isin,
+        string instrumentType = "EQ") =>
+        new("NSE", exchangeToken, tradingSymbol, $"NSE-{tradingSymbol}", instrumentType,
+            "CASH", isin, null, null, null, 1, 0.05m, true, true);
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
         : HttpMessageHandler
