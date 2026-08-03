@@ -66,11 +66,11 @@ internal static class GrowwInstrumentCsvParser
             }
             catch (Exception exception) when (exception is FormatException or IndexOutOfRangeException)
             {
-                throw new GrowwApiException(
-                    $"Groww instrument row {rowIndex + 1} is malformed.",
-                    "MALFORMED_RESPONSE",
-                    null,
-                    exception);
+                // A malformed contract unrelated to the instrument being synchronized
+                // must not make the complete master unusable. Required instruments are
+                // validated by the synchronizer after parsing.
+                _ = exception;
+                continue;
             }
         }
 

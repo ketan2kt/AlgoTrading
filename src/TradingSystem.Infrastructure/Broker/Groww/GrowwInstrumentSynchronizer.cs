@@ -19,6 +19,12 @@ internal sealed class GrowwInstrumentSynchronizer(
             .Where(IsRequiredNiftyInstrument)
             .Select(record => (Record: record, Mapping: TryMap(record)))
             .ToArray();
+        if (supported.Length != 1)
+        {
+            throw new GrowwApiException(
+                "Groww instrument master did not contain exactly one valid NSE NIFTY cash index.",
+                "MALFORMED_RESPONSE");
+        }
 
         var exchanges = supported.Select(value => value.Record.Exchange).Distinct().ToArray();
         var existing = await dbContext.Instruments
