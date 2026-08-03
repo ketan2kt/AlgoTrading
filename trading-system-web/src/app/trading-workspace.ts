@@ -57,4 +57,12 @@ export interface PaperAutomationSnapshot {
   selectedOptionExpiry: string | null;
   selectedOptionStrike: number | null;
   selectedOptionLotSize: number | null;
+  readinessChecks: PaperReadinessCheck[] | null;
+}
+
+export interface PaperReadinessCheck {
+  code: string;
+  label: string;
+  ready: boolean;
+  detail: string;
 }

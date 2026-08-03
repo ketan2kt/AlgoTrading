@@ -159,6 +159,8 @@ public static class DependencyInjection
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
+        services.AddScoped<GrowwHistoricalCandleImporter>();
+        services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
         services.AddOptions<MarketRegimeOptions>()
             .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
             .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&

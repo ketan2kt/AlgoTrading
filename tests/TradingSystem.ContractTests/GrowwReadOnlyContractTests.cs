@@ -4,6 +4,7 @@ using System.Globalization;
 using Microsoft.Extensions.Options;
 using TradingSystem.Application.Broker;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.ContractTests;
 
@@ -183,7 +184,7 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
-    public void InstrumentSynchronizationIncludesNiftyIndexCallsAndPutsOnly()
+    public void InstrumentSynchronizationIncludesNiftyIndexFutureCallsAndPutsOnly()
     {
         var records = new[]
         {
@@ -192,14 +193,25 @@ public sealed class GrowwReadOnlyContractTests
                 "CE", "FNO", null, "NIFTY", "2026-08-06", 25000m, 75, 0.05m, true, true),
             new GrowwInstrumentRecord("NSE", "102", "NIFTY26AUG25000PE", "NSE-NIFTY-PE",
                 "PE", "FNO", null, "NIFTY", "2026-08-06", 25000m, 75, 0.05m, true, true),
+            new GrowwInstrumentRecord("NSE", "104", "NIFTY26AUGFUT", "NSE-NIFTY-27Aug26-FUT",
+                "FUT", "FNO", null, "NIFTY", "2026-08-27", null, 75, 0.05m, true, true),
             new GrowwInstrumentRecord("NSE", "103", "BANKNIFTY26AUG50000CE", "NSE-BANKNIFTY-CE",
                 "CE", "FNO", null, "BANKNIFTY", "2026-08-06", 50000m, 30, 0.05m, true, true)
         };
 
         var selected = GrowwInstrumentSynchronizer.SelectRequiredNiftyRecords(records);
 
-        Assert.Equal(3, selected.Count);
+        Assert.Equal(4, selected.Count);
+        Assert.Contains(selected, value => value.InstrumentType == "FUT");
         Assert.DoesNotContain(selected, value => value.UnderlyingSymbol == "BANKNIFTY");
+    }
+
+    [Fact]
+    public void HistoricalCandleTimestampsAreInterpretedAsAsiaKolkata()
+    {
+        var utc = GrowwHistoricalCandleImporter.ParseIndiaTimestamp("2026-08-03T09:15:00");
+
+        Assert.Equal(DateTimeOffset.Parse("2026-08-03T03:45:00Z", CultureInfo.InvariantCulture), utc);
     }
 
     [Fact]

@@ -12,10 +12,11 @@ New entries require all of the following:
 
 - Paper mode, automation enabled, weekday session, and inactive kill switch;
 - fresh validated Groww data within the configured staleness limit;
-- at least 21 completed one-minute candles;
+- at least 21 completed Nifty spot one-minute candles;
+- at least 21 aligned nearest-expiry Nifty futures candles for relative-volume confirmation;
 - a completed 09:15-09:30 opening range;
 - a persisted previous-session close;
-- positive validated volume for VWAP and relative-volume confirmation;
+- positive validated futures volume for relative-volume confirmation;
 - a permitted deterministic market regime;
 - a qualifying Opening Range Breakout signal;
 - a deterministically selected near-expiry ATM Nifty call for bullish bias or put for bearish bias;
@@ -24,7 +25,7 @@ New entries require all of the following:
 - a risk-approved quantity rounded down to complete option lots;
 - entry before 14:30 Asia/Kolkata.
 
-Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. The paper option entry fills at the validated offer. One long option position is allowed. Its immutable premium stop and target are monitored against the live bid and it closes at that liquidation reference when either is crossed, when the administrator activates the kill switch, or at/after 15:15. A missing bid never fabricates an exit. Reported realised P&L deducts a configurable conservative round-trip turnover cost (5 basis points by default); it is an estimate, not an exact Indian tax/brokerage calculator.
+Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. At session startup the system imports up to seven days of official Groww one-minute spot and nearest-future history, then continues polling both live quotes. Spot OHLC drives strategy price levels while futures volume supplies relative-volume confirmation. The paper option entry fills at the validated offer. One long option position is allowed. Its immutable premium stop and target are monitored against the live bid and it closes at that liquidation reference when either is crossed, when the administrator activates the kill switch, or at/after 15:15. A missing bid never fabricates an exit.
 
 ## Recovery and audit
 
@@ -32,7 +33,7 @@ Underlying signals and option-premium risk decisions are persisted before submis
 
 ## Dashboard
 
-The protected Angular dashboard shows automation state, its current blocking/readiness reason, trades today, realised/unrealised P&L, active direction/quantity, and signal overlays. The administrator-only kill switch uses antiforgery protection and records each change in the audit log.
+The protected Angular dashboard shows automation state, trades today, realised/unrealised P&L, active direction/quantity, signal overlays, and an explicit readiness grid for spot candles, previous-session context, futures confirmation, freshness, entry window, and risk controls. The administrator-only kill switch uses antiforgery protection and records each change in the audit log.
 
 ## Manual verification before deployment
 
@@ -49,8 +50,7 @@ The protected Angular dashboard shows automation state, its current blocking/rea
 
 ## Known limitations
 
-- Nifty cash index quote volume may be absent from the provider. The strategy intentionally remains blocked rather than substituting synthetic volume; a validated Nifty futures volume source is the likely next data improvement.
-- The first persisted day cannot evaluate because a previous-session close is unavailable. Historical gap backfill is not yet part of startup.
+- Historical bootstrap depends on a current Groww token and a successfully synchronised Groww symbol for both Nifty spot and the nearest future. Failure remains visible and blocks entry.
 - Exchange holidays and exceptional closures are not integrated yet.
 - Simulated fills cross the visible option spread (offer entry/bid exit) and include a configurable turnover-cost estimate, but do not model an exact broker tariff, tax schedule, queue position, changing quote during submission, or latency. Results must not be treated as profitability evidence.
 - PostgreSQL integration/restart tests are checked in but remain opt-in on this workstation because Docker is unavailable.

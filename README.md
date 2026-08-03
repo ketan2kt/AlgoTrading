@@ -5,7 +5,7 @@ Safety-first automated intraday trading platform for the Indian market. The **Ph
 ## Status
 
 - Phase: 7 - opening-range breakout in paper mode
-- Current development gate: live Nifty signals are mapped to liquid Nifty CE/PE contracts and executed only in the durable paper broker; controlled replay and live-market soak approval are required before further promotion
+- Current development gate: live Nifty spot signals use Nifty futures volume confirmation, map to liquid Nifty CE/PE contracts, and execute only in the durable paper broker; controlled replay and live-market soak approval are required before further promotion
 - Live trading: prohibited and disabled by design
 - Git repository: initialized on `main`
 
@@ -188,6 +188,7 @@ Groww documents that manually generated access tokens expire daily at 06:00. The
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
 - Strategy signals and risk decisions are persisted before paper submission. Nifty is the signal instrument; qualifying bullish/bearish signals deterministically select a near-expiry ATM call/put, validate its live bid/offer, volume, open interest, spread and premium, size in whole lots, and submit only to the paper broker. The coordinator reconstructs the actual option entry after restart, reconciles before acting, monitors option-premium SL/target/15:15 exits, and audits closures. Cross-store atomicity, realistic latency/slippage, and crash injection at every instruction boundary remain incomplete.
+- Session startup imports up to seven days of official Groww one-minute candles for Nifty spot and the nearest Nifty future. Spot OHLC drives the chart and strategy levels; futures volume/OI supplies tradable-market confirmation. The dashboard exposes each readiness prerequisite independently.
 - The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until the remaining promotion gates are complete.
 - The currently deployed workspace does not yet contain this local Phase 7 increment. Deployment is intentionally deferred until explicit approval. See `docs/live-nifty-workspace.md` and `docs/paper-trading-automation.md`.
 - npm production dependency audit reports zero known vulnerabilities; CI rejects high/critical findings.

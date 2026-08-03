@@ -14,6 +14,12 @@ internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAu
         lock (gate) return snapshot;
     }
 
+    public void RecordReadiness(IReadOnlyList<PaperReadinessCheck> checks)
+    {
+        ArgumentNullException.ThrowIfNull(checks);
+        lock (gate) snapshot = snapshot with { ReadinessChecks = checks };
+    }
+
     public void Record(string status, bool permitted, string message, int tradesToday = 0,
         decimal realisedPnl = 0m, decimal unrealisedPnl = 0m, Guid? signalId = null,
         string? direction = null, int? quantity = null, decimal? entry = null,
@@ -25,7 +31,8 @@ internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAu
         {
             snapshot = new(status, permitted, message, timeProvider.GetUtcNow(), tradesToday,
                 realisedPnl, unrealisedPnl, signalId, direction, quantity, entry, stop, target,
-                optionSymbol, optionType, optionExpiry, optionStrike, optionLotSize);
+                optionSymbol, optionType, optionExpiry, optionStrike, optionLotSize,
+                snapshot.ReadinessChecks);
         }
     }
 }

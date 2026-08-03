@@ -20,6 +20,7 @@ public sealed class Instrument : MutableEntity
 
     public string Exchange { get; private init; }
     public string TradingSymbol { get; private init; }
+    public string? GrowwSymbol { get; private set; }
     public InstrumentSegment Segment { get; private init; }
     public InstrumentType Type { get; private init; }
     public string? ExchangeToken { get; private set; }
@@ -31,6 +32,7 @@ public sealed class Instrument : MutableEntity
 
     public void UpdateBrokerMetadata(
         string exchangeToken,
+        string growwSymbol,
         DateOnly? expiryDate,
         decimal? strikePrice,
         int lotSize,
@@ -40,10 +42,13 @@ public sealed class Instrument : MutableEntity
         {
             throw new ArgumentException("Exchange token is required.", nameof(exchangeToken));
         }
+        if (string.IsNullOrWhiteSpace(growwSymbol))
+            throw new ArgumentException("Groww symbol is required.", nameof(growwSymbol));
 
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lotSize);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tickSize);
         ExchangeToken = exchangeToken;
+        GrowwSymbol = growwSymbol;
         ExpiryDate = expiryDate;
         StrikePrice = strikePrice;
         LotSize = lotSize;
@@ -51,7 +56,7 @@ public sealed class Instrument : MutableEntity
         IsActive = true;
     }
 
-    public void UpdateIndexBrokerMetadata(string exchangeToken)
+    public void UpdateIndexBrokerMetadata(string exchangeToken, string growwSymbol)
     {
         if (Type != InstrumentType.Index)
         {
@@ -62,8 +67,11 @@ public sealed class Instrument : MutableEntity
         {
             throw new ArgumentException("Exchange token is required.", nameof(exchangeToken));
         }
+        if (string.IsNullOrWhiteSpace(growwSymbol))
+            throw new ArgumentException("Groww symbol is required.", nameof(growwSymbol));
 
         ExchangeToken = exchangeToken;
+        GrowwSymbol = growwSymbol;
         IsActive = true;
     }
 }

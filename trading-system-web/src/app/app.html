@@ -195,6 +195,22 @@
         <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
           {{ view.paperAutomation.message }}
         </div>
+        <section class="readiness-panel" aria-label="Paper trading readiness">
+          <div class="panel-heading">
+            <div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div>
+          </div>
+          <div class="readiness-grid">
+            @for (check of view.paperAutomation.readinessChecks || []; track check.code) {
+              <article [class.readiness-pass]="check.ready" [class.readiness-block]="!check.ready">
+                <span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span>
+                <strong>{{ check.label }}</strong>
+                <p>{{ check.detail }}</p>
+              </article>
+            } @empty {
+              <p class="empty-copy">Readiness checks are starting.</p>
+            }
+          </div>
+        </section>
         <section class="option-routing-panel">
           <div>
             <span>OPTION ROUTING</span>

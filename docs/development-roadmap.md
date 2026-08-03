@@ -123,6 +123,8 @@ Every phase ends with implementation, automated tests, manual verification, know
 
 **Option paper-execution increment (local, 2026-08-03):** Nifty remains the monitored and charted signal instrument. A qualifying directional signal selects a deterministic near-expiry ATM Nifty call or put, requires validated live bid/offer, volume, open interest, spread and premium, applies option-premium protective prices, sizes only in complete broker lots, and enters/exits through the durable paper broker. Restart reconstruction and reconciliation use the actual option instrument. No Groww order endpoint is called.
 
+**Session-readiness increment (local, 2026-08-03):** instrument synchronisation now includes Nifty futures and persists the official Groww symbol. Startup backfills up to seven days of one-minute Nifty spot and nearest-future history, live polling continues for the nearest future, and ORB relative-volume confirmation uses aligned futures candles rather than unavailable index volume. The authenticated dashboard exposes six deterministic readiness gates.
+
 **Live workspace increment (local, awaiting deployment approval):** the authenticated Nifty command view now also shows automation readiness, daily trade/P&L state, active paper position, and an audited administrator kill switch. It does not add live order capability. Production activation additionally requires secure daily Groww authentication and an in-session paper soak.
 
 ## Phase 8 — Risk and execution hardening

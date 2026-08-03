@@ -18,7 +18,10 @@ public sealed record PaperAutomationSnapshot(
     string? SelectedOptionType = null,
     DateOnly? SelectedOptionExpiry = null,
     decimal? SelectedOptionStrike = null,
-    int? SelectedOptionLotSize = null);
+    int? SelectedOptionLotSize = null,
+    IReadOnlyList<PaperReadinessCheck>? ReadinessChecks = null);
+
+public sealed record PaperReadinessCheck(string Code, string Label, bool Ready, string Detail);
 
 public interface IPaperAutomationReader
 {

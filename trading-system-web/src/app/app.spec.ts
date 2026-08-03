@@ -1,19 +1,33 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { NEVER, Subject } from 'rxjs';
+import { Component, Input } from '@angular/core';
+import { NEVER, Subject, of } from 'rxjs';
 import { App } from './app';
 import { AuthService, CurrentUser } from './auth.service';
 import { GrowwTokenService } from './groww-token.service';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
+import { NiftyChartComponent } from './nifty-chart.component';
+import { TradingWorkspaceSnapshot } from './trading-workspace';
+
+@Component({ selector: 'app-nifty-chart', standalone: true, template: '' })
+class MockNiftyChartComponent {
+  @Input({ required: true }) snapshot!: TradingWorkspaceSnapshot;
+  @Input() timeframeMinutes = 5;
+}
 
 describe('App', () => {
   beforeEach(async () => {
-    await TestBed.configureTestingModule({
+    TestBed.configureTestingModule({
       imports: [App],
       providers: [provideHttpClient(), provideHttpClientTesting()],
-    }).compileComponents();
+    });
+    TestBed.overrideComponent(App, {
+      remove: { imports: [NiftyChartComponent] },
+      add: { imports: [MockNiftyChartComponent] },
+    });
+    await TestBed.compileComponents();
   });
 
   it('renders paper mode and requires sign-in for the live workspace', async () => {
@@ -79,5 +93,56 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Checking token status');
     expect(fixture.nativeElement.textContent).toContain('Add today’s token');
     http.verify();
+  });
+
+  it('shows deterministic paper-entry readiness checks', async () => {
+    TestBed.overrideProvider(AuthService, {
+      useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
+    });
+    TestBed.overrideProvider(GrowwTokenService, { useValue: { getStatus: () => NEVER } });
+    TestBed.overrideProvider(PaperRiskService, {
+      useValue: { getKillSwitch: () => NEVER, setKillSwitch: () => NEVER },
+    });
+    TestBed.overrideProvider(TradingWorkspaceService, {
+      useValue: {
+        getNifty: () => of({
+          instrument: 'NIFTY', exchange: 'NSE', timeframe: '1m', mode: 'Paper',
+          feedStatus: 'Live', isLive: true, isFresh: true,
+          lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: '2026-08-03T08:30:00Z',
+          statusMessage: null, candles: [], overlays: [],
+          paperAutomation: {
+            status: 'WarmingUp', tradingPermitted: false, message: 'Waiting for confirmation.',
+            observedAtUtc: '2026-08-03T08:30:00Z', tradesToday: 0, realisedPnl: 0,
+            unrealisedPnl: 0, activeSignalId: null, activeDirection: null,
+            activeQuantity: null, entryPrice: null, stopLoss: null, target: null,
+            selectedOptionSymbol: null, selectedOptionType: null, selectedOptionExpiry: null,
+            selectedOptionStrike: null, selectedOptionLotSize: null,
+            readinessChecks: [
+              { code: 'history', label: 'Previous-session context', ready: true,
+                detail: 'Previous close available' },
+              { code: 'future', label: 'Nifty futures confirmation', ready: false,
+                detail: '18/21 candles' },
+            ],
+          },
+        }),
+        updates$: () => NEVER,
+        connect: () => Promise.resolve(),
+        disconnect: () => Promise.resolve(),
+      },
+    });
+
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/api/system/status').flush({
+      mode: 'Paper', liveTradingAvailable: false, tradingEnabled: false,
+      status: 'FoundationOnly', observedAtUtc: '2026-08-03T08:30:00Z',
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('SESSION READINESS');
+    expect(fixture.nativeElement.textContent).toContain('Previous-session context');
+    expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
+    expect(fixture.nativeElement.textContent).toContain('18/21 candles');
   });
 });

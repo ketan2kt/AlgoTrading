@@ -129,6 +129,7 @@ public sealed class TradingDbContext(
             ConfigureMutable(entity, "instruments");
             entity.Property(value => value.Exchange).HasMaxLength(20);
             entity.Property(value => value.TradingSymbol).HasMaxLength(120);
+            entity.Property(value => value.GrowwSymbol).HasMaxLength(180);
             entity.Property(value => value.ExchangeToken).HasMaxLength(80);
             entity.Property(value => value.StrikePrice).HasPrecision(18, 4);
             entity.Property(value => value.TickSize).HasPrecision(18, 4);

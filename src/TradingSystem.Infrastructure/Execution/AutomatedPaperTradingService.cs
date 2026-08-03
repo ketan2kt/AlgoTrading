@@ -91,6 +91,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Mode == TradingMode.Paper && value.Key == "EmergencyKillSwitch")
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
         var killSwitchActive = bool.TryParse(killSwitch, out var active) && active;
+        await UpdateReadinessAsync(db, instrument.Id, sessionStart, sessionEnd, now, indiaNow,
+            killSwitchActive, cancellationToken);
         var tradeState = await RebuildTradeStateAsync(db, signals, cancellationToken);
         var reconciliation = await broker.ReconcileAsync(
             tradeState.Open is null ? [] : [new ExpectedBrokerPosition(tradeState.Open.Entry.InstrumentId,
@@ -173,6 +175,32 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
+        var confirmationFuture = await db.Instruments.AsNoTracking().Where(value =>
+                value.Exchange == "NSE" && value.Type == InstrumentType.Future && value.IsActive &&
+                value.ExpiryDate >= sessionDate)
+            .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (confirmationFuture is null)
+        {
+            state.Record("ConfirmationUnavailable", false,
+                "The Nifty futures confirmation instrument is not synchronised.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+        var confirmationCandles = await db.Candles.AsNoTracking().Where(value =>
+                value.InstrumentId == confirmationFuture.Id && value.Source == "Groww" &&
+                value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
+                value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
+            .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        if (confirmationCandles.Count < 21)
+        {
+            state.Record("WarmingUp", false,
+                $"Waiting for Nifty futures confirmation: {confirmationCandles.Count}/21 completed candles.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+
         var latestCandle = candles[^1];
         if (lastEvaluatedCandleUtc == latestCandle.OpenTimeUtc)
         {
@@ -205,8 +233,20 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var openingCandles = candles.Where(value =>
             TimeOnly.FromTimeSpan(TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).TimeOfDay) < openingRangeEnd).ToArray();
-        var totalVolume = candles.Sum(value => value.Volume);
-        var averageVolume = candles.Take(candles.Count - 1).Average(value => (decimal)value.Volume);
+        var alignedConfirmation = confirmationCandles
+            .Where(value => value.OpenTimeUtc <= latestCandle.OpenTimeUtc).ToArray();
+        if (alignedConfirmation.Length < 2)
+        {
+            state.Record("WarmingUp", false,
+                "Nifty futures candles are not yet aligned with the Nifty signal candle.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+        var totalVolume = alignedConfirmation.Sum(value => value.Volume);
+        var averageVolume = alignedConfirmation.Length > 1
+            ? alignedConfirmation.Take(alignedConfirmation.Length - 1)
+                .Average(value => (decimal)value.Volume)
+            : 0m;
         if (openingCandles.Length == 0 || totalVolume <= 0 || averageVolume <= 0)
         {
             state.Record("DataIncomplete", false,
@@ -215,8 +255,22 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
-        var relativeVolume = latestCandle.Volume / averageVolume;
-        var vwap = candles.Sum(value => ((value.High + value.Low + value.Close) / 3m) * value.Volume) / totalVolume;
+        var relativeVolume = alignedConfirmation[^1].Volume / averageVolume;
+        var confirmationVolume = alignedConfirmation.ToDictionary(value => value.OpenTimeUtc,
+            value => value.Volume);
+        var weightedSpotCandles = candles.Where(value => confirmationVolume.ContainsKey(value.OpenTimeUtc))
+            .ToArray();
+        var alignedVolume = weightedSpotCandles.Sum(value => confirmationVolume[value.OpenTimeUtc]);
+        if (alignedVolume <= 0)
+        {
+            state.Record("DataIncomplete", false,
+                "Spot prices and futures volume are not aligned; the strategy fails closed.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+        var vwap = weightedSpotCandles.Sum(value =>
+            ((value.High + value.Low + value.Close) / 3m) * confirmationVolume[value.OpenTimeUtc]) /
+            alignedVolume;
         var closes = candles.Select(value => value.Close).ToArray();
         var fast = Ema(closes, 9);
         var slow = Ema(closes, 21);
@@ -433,6 +487,54 @@ internal sealed partial class AutomatedPaperTradingService(
         return await db.Signals.AsNoTracking().Where(value => value.InstrumentId == instrumentId &&
             value.MarketDataTimestampUtc >= start && value.MarketDataTimestampUtc < end)
             .ToListAsync(token);
+    }
+
+    private async Task UpdateReadinessAsync(TradingDbContext db, Guid indexInstrumentId,
+        DateTimeOffset sessionStart, DateTimeOffset sessionEnd, DateTimeOffset now,
+        DateTimeOffset indiaNow, bool killSwitchActive, CancellationToken cancellationToken)
+    {
+        var interval = marketOptions.Value.CandleIntervalSeconds;
+        var indexCount = await db.Candles.AsNoTracking().CountAsync(value =>
+            value.InstrumentId == indexInstrumentId && value.Source == "Groww" &&
+            value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
+            value.OpenTimeUtc < sessionEnd, cancellationToken);
+        var priorClose = await db.Candles.AsNoTracking().AnyAsync(value =>
+            value.InstrumentId == indexInstrumentId && value.OpenTimeUtc < sessionStart,
+            cancellationToken);
+        var date = DateOnly.FromDateTime(indiaNow.Date);
+        var future = await db.Instruments.AsNoTracking().Where(value =>
+                value.Exchange == "NSE" && value.Type == InstrumentType.Future && value.IsActive &&
+                value.ExpiryDate >= date)
+            .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
+        var futureCount = future is null ? 0 : await db.Candles.AsNoTracking().CountAsync(value =>
+            value.InstrumentId == future.Id && value.Source == "Groww" &&
+            value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
+            value.OpenTimeUtc < sessionEnd, cancellationToken);
+        var latestReceived = await db.MarketObservations.AsNoTracking().Where(value =>
+                value.InstrumentId == indexInstrumentId && value.Source == "Groww")
+            .OrderByDescending(value => value.ReceivedAtUtc)
+            .Select(value => (DateTimeOffset?)value.ReceivedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        var fresh = latestReceived is not null && now - latestReceived <=
+            TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
+        var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
+        var start = ParseTime(options.Value.OpeningRangeEnd);
+        var cutoff = ParseTime(options.Value.EntryCutoff);
+        state.RecordReadiness([
+            new("index", "Nifty spot feed", indexCount > 0,
+                indexCount > 0 ? $"{indexCount} completed candles" : "Waiting for spot candles"),
+            new("history", "Previous-session context", priorClose,
+                priorClose ? "Previous close available" : "Historical backfill pending"),
+            new("future", "Nifty futures confirmation", futureCount >= 21,
+                future is null ? "Futures instrument not synchronised" :
+                $"{future.TradingSymbol}: {futureCount}/21 candles"),
+            new("freshness", "Live data freshness", fresh,
+                fresh ? "Latest Nifty quote is current" : "Live Nifty quote is stale"),
+            new("window", "Entry window", localTime >= start && localTime < cutoff,
+                $"{options.Value.OpeningRangeEnd}–{options.Value.EntryCutoff} IST"),
+            new("risk", "Risk controls", !killSwitchActive,
+                killSwitchActive ? "Kill switch active" : "Kill switch clear")
+        ]);
     }
 
     private static StrategySignal ToStrategySignal(Signal value) => new(value.Id,

@@ -61,12 +61,13 @@ internal sealed class GrowwInstrumentSynchronizer(
 
             if (mapping.Type == InstrumentType.Index)
             {
-                instrument.UpdateIndexBrokerMetadata(item.Record.ExchangeToken);
+                instrument.UpdateIndexBrokerMetadata(item.Record.ExchangeToken, item.Record.GrowwSymbol);
             }
             else
             {
                 instrument.UpdateBrokerMetadata(
                     item.Record.ExchangeToken,
+                    item.Record.GrowwSymbol,
                     mapping.ExpiryDate,
                     strikePrice,
                     item.Record.LotSize ?? throw Missing(item.Record, "lot_size"),
@@ -122,7 +123,11 @@ internal sealed class GrowwInstrumentSynchronizer(
                         string.Equals(record.InstrumentType, "PE", StringComparison.OrdinalIgnoreCase)) &&
                        string.Equals(record.UnderlyingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase) &&
                        !string.IsNullOrWhiteSpace(record.ExpiryDate);
-        return isIndex || isOption;
+        var isFuture = string.Equals(record.Segment, "FNO", StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(record.InstrumentType, "FUT", StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(record.UnderlyingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase) &&
+                       !string.IsNullOrWhiteSpace(record.ExpiryDate);
+        return isIndex || isOption || isFuture;
     }
 
     private static GrowwApiException Missing(GrowwInstrumentRecord record, string field) =>
