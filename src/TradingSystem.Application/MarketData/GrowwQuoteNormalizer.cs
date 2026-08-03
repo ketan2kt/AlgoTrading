@@ -29,7 +29,9 @@ public sealed class GrowwQuoteNormalizer
         return new MarketObservation(
             instrumentId,
             "Groww",
-            DateTimeOffset.FromUnixTimeMilliseconds(quote.LastTradeTimeEpochMilliseconds),
+            quote.LastTradeTimeEpochMilliseconds is > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(quote.LastTradeTimeEpochMilliseconds.Value)
+                : receivedAtUtc.ToUniversalTime(),
             receivedAtUtc.ToUniversalTime(),
             quote.LastPrice,
             delta,

@@ -49,9 +49,9 @@ public sealed class GrowwReadOnlyGateway(
             ("segment", request.Segment),
             ("trading_symbol", request.TradingSymbol));
         var payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
-        if (payload.LastPrice <= 0 || payload.LastTradeTime <= 0)
+        if (payload.LastPrice <= 0 || payload.LastTradeTime is <= 0)
         {
-            throw Malformed("Groww quote omitted a valid last price or trade timestamp.");
+            throw Malformed("Groww quote omitted a valid last price or supplied an invalid trade timestamp.");
         }
 
         return new GrowwQuote(
@@ -237,7 +237,7 @@ public sealed class GrowwReadOnlyGateway(
 
     private sealed record QuotePayload(
         [property: JsonPropertyName("last_price")] decimal LastPrice,
-        [property: JsonPropertyName("last_trade_time")] long LastTradeTime,
+        [property: JsonPropertyName("last_trade_time")] long? LastTradeTime,
         [property: JsonPropertyName("bid_price")] decimal? BidPrice,
         [property: JsonPropertyName("bid_quantity")] long? BidQuantity,
         [property: JsonPropertyName("offer_price")] decimal? OfferPrice,

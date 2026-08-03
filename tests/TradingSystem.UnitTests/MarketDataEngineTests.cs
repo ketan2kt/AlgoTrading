@@ -111,8 +111,19 @@ public sealed class MarketDataEngineTests
 
         Assert.Equal(0, first.VolumeDelta);
         Assert.Equal(25, second.VolumeDelta);
-        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Quote(0).LastTradeTimeEpochMilliseconds),
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Quote(0).LastTradeTimeEpochMilliseconds!.Value),
             second.SourceTimestampUtc);
+    }
+
+    [Fact]
+    public void GrowwNormalizerUsesReceiptTimeWhenIndexTradeTimeIsUnavailable()
+    {
+        var normalizer = new GrowwQuoteNormalizer();
+        var quote = Quote(0) with { LastTradeTimeEpochMilliseconds = null };
+
+        var observation = normalizer.Normalize(Guid.NewGuid(), quote, Now);
+
+        Assert.Equal(Now, observation.SourceTimestampUtc);
     }
 
     [Fact]

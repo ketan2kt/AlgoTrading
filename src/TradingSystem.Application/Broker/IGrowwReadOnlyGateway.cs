@@ -28,7 +28,7 @@ public sealed record GrowwQuoteRequest(string Exchange, string Segment, string T
 
 public sealed record GrowwQuote(
     decimal LastPrice,
-    long LastTradeTimeEpochMilliseconds,
+    long? LastTradeTimeEpochMilliseconds,
     decimal? BidPrice,
     long? BidQuantity,
     decimal? OfferPrice,

@@ -55,6 +55,21 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task CashIndexQuoteAllowsNullLastTradeTime()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"last_price":24500.25,"last_trade_time":null,"bid_price":null,"bid_quantity":null,"offer_price":null,"offer_quantity":null,"volume":null,"open_interest":null,"oi_day_change":null}}
+            """));
+
+        var quote = await gateway.GetQuoteAsync(
+            new GrowwQuoteRequest("NSE", "CASH", "NIFTY"),
+            CancellationToken.None);
+
+        Assert.Equal(24500.25m, quote.LastPrice);
+        Assert.Null(quote.LastTradeTimeEpochMilliseconds);
+    }
+
+    [Fact]
     public async Task HistoricalCandlesMapSevenFieldOfficialShape()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
