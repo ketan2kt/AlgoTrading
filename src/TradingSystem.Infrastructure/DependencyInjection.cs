@@ -121,6 +121,7 @@ public static class DependencyInjection
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
         services.AddScoped<IGrowwInstrumentSynchronizer, GrowwInstrumentSynchronizer>();
+        services.AddHostedService<GrowwInstrumentSynchronizationService>();
         services.AddSingleton<MarketDataHealthMonitor>();
         services.AddSingleton<IMarketDataHealthReader>(provider => provider.GetRequiredService<MarketDataHealthMonitor>());
         services.AddScoped<IMarketDataPersistence, EfMarketDataPersistence>();
