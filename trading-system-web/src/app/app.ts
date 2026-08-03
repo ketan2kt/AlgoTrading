@@ -51,6 +51,8 @@ export class App implements OnInit, OnDestroy {
   protected killSwitchActive = false;
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
+  protected chartTimeframeMinutes = this.readChartTimeframe();
+  protected readonly chartTimeframes = [1, 5, 15];
 
   protected readonly status$ = this.statusService.getCurrent().pipe(
     startWith({
@@ -121,6 +123,12 @@ export class App implements OnInit, OnDestroy {
     this.loadWorkspace();
     this.loadTokenStatus();
     this.loadKillSwitch();
+  }
+
+  protected setChartTimeframe(value: number): void {
+    if (!this.chartTimeframes.includes(value)) return;
+    this.chartTimeframeMinutes = value;
+    localStorage.setItem('sarthi.chartTimeframeMinutes', String(value));
   }
 
   protected setKillSwitch(active: boolean): void {
@@ -272,5 +280,10 @@ export class App implements OnInit, OnDestroy {
 
   private refreshView(): void {
     this.changeDetector.markForCheck();
+  }
+
+  private readChartTimeframe(): number {
+    const value = Number(localStorage.getItem('sarthi.chartTimeframeMinutes'));
+    return [1, 5, 15].includes(value) ? value : 5;
   }
 }

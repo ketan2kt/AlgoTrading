@@ -207,13 +207,25 @@
 
         <section class="chart-panel">
           <div class="panel-heading">
-            <div><span>NIFTY 50</span><strong>Live one-minute candles</strong></div>
+            <div><span>NIFTY 50</span><strong>Live {{ chartTimeframeMinutes }}-minute candles</strong></div>
+            <label class="timeframe-control">
+              <span>Timeframe</span>
+              <select
+                [ngModel]="chartTimeframeMinutes"
+                (ngModelChange)="setChartTimeframe($event)"
+                aria-label="Chart timeframe"
+              >
+                @for (minutes of chartTimeframes; track minutes) {
+                  <option [ngValue]="minutes">{{ minutes }}m</option>
+                }
+              </select>
+            </label>
             <div class="legend">
               <span class="dot dot--entry"></span>Entry <span class="dot dot--risk"></span>SL
               <span class="dot dot--reward"></span>Target
             </div>
           </div>
-          <app-nifty-chart [snapshot]="view" />
+          <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
           <p class="chart-attribution">
             Charts by TradingView Lightweight Charts™. Market data source: Groww.
           </p>

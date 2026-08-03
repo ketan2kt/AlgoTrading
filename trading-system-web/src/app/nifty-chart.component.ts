@@ -21,6 +21,7 @@ import {
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { aggregateCandles } from './chart-candles';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -87,6 +88,7 @@ import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-works
 })
 export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy {
   @Input({ required: true }) snapshot: TradingWorkspaceSnapshot | null = null;
+  @Input() timeframeMinutes = 5;
   @ViewChild('chart', { static: true }) chartElement!: ElementRef<HTMLDivElement>;
   @ViewChild('rewardZone', { static: true }) rewardZone!: ElementRef<HTMLDivElement>;
   @ViewChild('riskZone', { static: true }) riskZone!: ElementRef<HTMLDivElement>;
@@ -96,6 +98,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private priceLines: IPriceLine[] = [];
+  private hasFittedContent = false;
+  private renderedTimeframeMinutes = 0;
 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
@@ -125,7 +129,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['timeframeMinutes']) this.hasFittedContent = false;
     if (changes['snapshot']) this.render();
+    else if (changes['timeframeMinutes']) this.render();
   }
 
   ngOnDestroy(): void {
@@ -135,7 +141,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private render(): void {
     if (!this.series || !this.chart || !this.snapshot) return;
-    const candles: CandlestickData<Time>[] = this.snapshot.candles.map((value) => ({
+    const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
+    const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime() / 1000) as Time,
       open: value.open,
       high: value.high,
@@ -181,7 +188,11 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     } else {
       this.markerApi?.setMarkers([]);
     }
-    if (candles.length) this.chart.timeScale().fitContent();
+    if (candles.length && (!this.hasFittedContent || this.renderedTimeframeMinutes !== this.timeframeMinutes)) {
+      this.chart.timeScale().fitContent();
+      this.hasFittedContent = true;
+      this.renderedTimeframeMinutes = this.timeframeMinutes;
+    }
     this.positionZones(overlay);
   }
 

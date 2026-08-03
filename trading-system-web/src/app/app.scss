@@ -273,6 +273,20 @@ article > span,
   color: #8fa198;
   font-size: 0.72rem;
 }
+.timeframe-control {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #8fa198;
+  font-size: 0.72rem;
+}
+.timeframe-control select {
+  padding: 0.4rem 1.8rem 0.4rem 0.65rem;
+  color: #e9f2ed;
+  background: #111d18;
+  border: 1px solid #33483e;
+  border-radius: 0.35rem;
+}
 .dot {
   width: 0.55rem;
   height: 0.55rem;
