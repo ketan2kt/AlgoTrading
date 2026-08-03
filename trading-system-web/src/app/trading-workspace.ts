@@ -52,4 +52,9 @@ export interface PaperAutomationSnapshot {
   entryPrice: number | null;
   stopLoss: number | null;
   target: number | null;
+  selectedOptionSymbol: string | null;
+  selectedOptionType: string | null;
+  selectedOptionExpiry: string | null;
+  selectedOptionStrike: number | null;
+  selectedOptionLotSize: number | null;
 }

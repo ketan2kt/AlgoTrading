@@ -15,11 +15,10 @@ internal sealed class GrowwInstrumentSynchronizer(
         CancellationToken cancellationToken)
     {
         var downloaded = await gateway.GetInstrumentMasterAsync(cancellationToken);
-        var supported = SelectSupportedUniqueRecords(downloaded)
-            .Where(IsRequiredNiftyInstrument)
+        var supported = SelectRequiredNiftyRecords(downloaded)
             .Select(record => (Record: record, Mapping: TryMap(record)))
             .ToArray();
-        if (supported.Length != 1)
+        if (supported.Count(value => value.Mapping!.Value.Type == InstrumentType.Index) != 1)
         {
             throw new GrowwApiException(
                 "Groww instrument master did not contain exactly one valid NSE NIFTY cash index.",
@@ -108,11 +107,23 @@ internal sealed class GrowwInstrumentSynchronizer(
             .ToArray();
     }
 
-    private static bool IsRequiredNiftyInstrument(GrowwInstrumentRecord record) =>
-        string.Equals(record.Exchange, "NSE", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(record.Segment, "CASH", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(record.InstrumentType, "IDX", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(record.TradingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase);
+    internal static IReadOnlyList<GrowwInstrumentRecord> SelectRequiredNiftyRecords(
+        IReadOnlyList<GrowwInstrumentRecord> downloaded) =>
+        SelectSupportedUniqueRecords(downloaded).Where(IsRequiredNiftyInstrument).ToArray();
+
+    private static bool IsRequiredNiftyInstrument(GrowwInstrumentRecord record)
+    {
+        if (!string.Equals(record.Exchange, "NSE", StringComparison.OrdinalIgnoreCase)) return false;
+        var isIndex = string.Equals(record.Segment, "CASH", StringComparison.OrdinalIgnoreCase) &&
+                      string.Equals(record.InstrumentType, "IDX", StringComparison.OrdinalIgnoreCase) &&
+                      string.Equals(record.TradingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase);
+        var isOption = string.Equals(record.Segment, "FNO", StringComparison.OrdinalIgnoreCase) &&
+                       (string.Equals(record.InstrumentType, "CE", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(record.InstrumentType, "PE", StringComparison.OrdinalIgnoreCase)) &&
+                       string.Equals(record.UnderlyingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase) &&
+                       !string.IsNullOrWhiteSpace(record.ExpiryDate);
+        return isIndex || isOption;
+    }
 
     private static GrowwApiException Missing(GrowwInstrumentRecord record, string field) =>
         new($"Groww instrument {record.GrowwSymbol} omitted required {field}.", "MALFORMED_RESPONSE");

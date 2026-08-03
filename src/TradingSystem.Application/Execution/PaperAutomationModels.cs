@@ -13,10 +13,14 @@ public sealed record PaperAutomationSnapshot(
     int? ActiveQuantity,
     decimal? EntryPrice,
     decimal? StopLoss,
-    decimal? Target);
+    decimal? Target,
+    string? SelectedOptionSymbol = null,
+    string? SelectedOptionType = null,
+    DateOnly? SelectedOptionExpiry = null,
+    decimal? SelectedOptionStrike = null,
+    int? SelectedOptionLotSize = null);
 
 public interface IPaperAutomationReader
 {
     PaperAutomationSnapshot GetCurrent();
 }
-

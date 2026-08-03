@@ -195,6 +195,18 @@
         <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
           {{ view.paperAutomation.message }}
         </div>
+        <section class="option-routing-panel">
+          <div>
+            <span>OPTION ROUTING</span>
+            <strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for a directional signal' }}</strong>
+          </div>
+          @if (view.paperAutomation.selectedOptionSymbol) {
+            <div><span>Type</span><strong>{{ view.paperAutomation.selectedOptionType }}</strong></div>
+            <div><span>Strike</span><strong>{{ view.paperAutomation.selectedOptionStrike | number: '1.0-2' }}</strong></div>
+            <div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date: 'dd MMM yyyy' : 'Asia/Kolkata' }}</strong></div>
+            <div><span>Lot size</span><strong>{{ view.paperAutomation.selectedOptionLotSize }}</strong></div>
+          }
+        </section>
 
         @if (view.statusMessage) {
           <div class="feed-notice" [class.feed-notice--warning]="!view.isLive">

@@ -183,6 +183,26 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public void InstrumentSynchronizationIncludesNiftyIndexCallsAndPutsOnly()
+    {
+        var records = new[]
+        {
+            Instrument("NIFTY", "NIFTY", null, "IDX"),
+            new GrowwInstrumentRecord("NSE", "101", "NIFTY26AUG25000CE", "NSE-NIFTY-CE",
+                "CE", "FNO", null, "NIFTY", "2026-08-06", 25000m, 75, 0.05m, true, true),
+            new GrowwInstrumentRecord("NSE", "102", "NIFTY26AUG25000PE", "NSE-NIFTY-PE",
+                "PE", "FNO", null, "NIFTY", "2026-08-06", 25000m, 75, 0.05m, true, true),
+            new GrowwInstrumentRecord("NSE", "103", "BANKNIFTY26AUG50000CE", "NSE-BANKNIFTY-CE",
+                "CE", "FNO", null, "BANKNIFTY", "2026-08-06", 50000m, 30, 0.05m, true, true)
+        };
+
+        var selected = GrowwInstrumentSynchronizer.SelectRequiredNiftyRecords(records);
+
+        Assert.Equal(3, selected.Count);
+        Assert.DoesNotContain(selected, value => value.UnderlyingSymbol == "BANKNIFTY");
+    }
+
+    [Fact]
     public async Task CancellationIsPropagatedBeforeNetworkCall()
     {
         var calls = 0;

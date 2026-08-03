@@ -9,7 +9,6 @@ using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Application.Regime;
-using TradingSystem.Application.Risk;
 using TradingSystem.Application.Strategies;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
@@ -237,35 +236,30 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var audit = scope.ServiceProvider.GetRequiredService<IPaperLifecycleAuditStore>();
         await audit.PersistSignalAsync(signal, cancellationToken);
-        var risk = scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(signal,
-            new RiskContext(now, tradeState.TradesToday, 0, tradeState.RealisedPnl,
-                options.Value.MaximumDailyLoss, false, true, true));
-        await audit.PersistRiskDecisionAsync(signal.SignalId, risk, cancellationToken);
-        if (!risk.Approved)
+        var candidates = await db.Instruments.AsNoTracking().Where(value =>
+                value.Exchange == "NSE" && value.Segment == InstrumentSegment.FuturesAndOptions &&
+                (value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption) &&
+                value.IsActive && value.ExpiryDate != null && value.StrikePrice != null)
+            .Select(value => new NiftyOptionContractCandidate(value.Id, value.TradingSymbol, value.Type,
+                value.ExpiryDate!.Value, value.StrikePrice!.Value, value.LotSize, value.TickSize))
+            .ToListAsync(cancellationToken);
+        var selectedOption = NiftyOptionContractSelector.Select(
+            candidates, signal.Direction, currentPrice, DateOnly.FromDateTime(indiaNow.Date));
+        if (selectedOption is null)
         {
-            state.Record("RiskRejected", false, string.Join(" ", risk.RejectionReasons),
-                tradeState.TradesToday, tradeState.RealisedPnl);
+            state.Record("OptionUniverseUnavailable", false,
+                "A Nifty signal qualified, but no valid Nifty option contract was available. Index execution is blocked.",
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
             return;
         }
 
-        var slippagePercent = Math.Abs(currentPrice - signal.ProposedEntry) /
-                              signal.ProposedEntry * 100m;
-        if (slippagePercent > options.Value.MaximumEntrySlippagePercent)
-        {
-            state.Record("SlippageRejected", false,
-                $"Observed entry moved {slippagePercent:F3}%; maximum is {options.Value.MaximumEntrySlippagePercent:F3}%.",
-                tradeState.TradesToday, tradeState.RealisedPnl);
-            return;
-        }
-
-        var reference = $"{signal.SignalId:N}-ENTRY";
-        await broker.SubmitAsync(new(reference, instrument.Id, signal.Direction,
-            risk.ApprovedQuantity, currentPrice), cancellationToken);
-        var entry = await paperControl.ProcessNextFillAsync(reference, cancellationToken);
-        state.Record("PositionOpen", false, "Paper entry filled; stop and target monitoring is active.",
-            tradeState.TradesToday + 1, tradeState.RealisedPnl, 0m, signal.SignalId,
-            signal.Direction.ToString(), entry.FilledQuantity, entry.AverageFillPrice,
-            signal.ProposedStopLoss, signal.ProposedTarget);
+        state.Record("OptionSelected", false,
+            $"Signal mapped to {selectedOption.TradingSymbol}. Waiting for validated option premium and spread before paper entry.",
+            tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+            direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol,
+            optionType: selectedOption.Type.ToString(), optionExpiry: selectedOption.ExpiryDate,
+            optionStrike: selectedOption.StrikePrice, optionLotSize: selectedOption.LotSize);
     }
 
     private async Task ManageOpenPositionAsync(IServiceProvider services, RebuiltTradeState tradeState,
