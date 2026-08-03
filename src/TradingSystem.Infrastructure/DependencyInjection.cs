@@ -196,6 +196,11 @@ public static class DependencyInjection
                                  options.MaximumDailyLoss > 0 &&
                                  options.MaximumEntrySlippagePercent is > 0 and <= 1 &&
                                  options.EstimatedRoundTripCostBasisPoints is >= 0 and <= 100 &&
+                                 options.MaximumOptionSpreadPercent is > 0 and <= 10 &&
+                                 options.MaximumOptionPremium > 0 &&
+                                 options.MinimumOptionVolume >= 0 && options.MinimumOptionOpenInterest >= 0 &&
+                                 options.OptionStopLossPercent is > 0 and <= 50 &&
+                                 options.OptionRewardToRiskRatio is >= 1 and <= 5 &&
                                  TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.ForcedExit, "HH:mm", out _),

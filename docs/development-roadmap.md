@@ -121,6 +121,8 @@ Every phase ends with implementation, automated tests, manual verification, know
 
 **Status update (local, 2026-08-03):** append-only broker recovery, scheduled completed-candle evaluation, regime persistence, ORB evaluation, conservative risk sizing, duplicate suppression, entry-slippage rejection, configurable turnover-cost estimation, SL/target/time/kill-switch exits, pre-action reconciliation, closure audit, and dashboard monitoring are implemented. Automated tests pass. The promotion gate remains open until controlled replay, PostgreSQL restart testing, and a live-market paper soak are manually verified. Cross-store atomicity and instruction-boundary failure injection move to Phase 8 hardening; shadow/live promotion remains prohibited.
 
+**Option paper-execution increment (local, 2026-08-03):** Nifty remains the monitored and charted signal instrument. A qualifying directional signal selects a deterministic near-expiry ATM Nifty call or put, requires validated live bid/offer, volume, open interest, spread and premium, applies option-premium protective prices, sizes only in complete broker lots, and enters/exits through the durable paper broker. Restart reconstruction and reconciliation use the actual option instrument. No Groww order endpoint is called.
+
 **Live workspace increment (local, awaiting deployment approval):** the authenticated Nifty command view now also shows automation readiness, daily trade/P&L state, active paper position, and an audited administrator kill switch. It does not add live order capability. Production activation additionally requires secure daily Groww authentication and an in-session paper soak.
 
 ## Phase 8 — Risk and execution hardening

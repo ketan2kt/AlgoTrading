@@ -59,6 +59,27 @@ public sealed class OpeningRangeBreakoutStrategyTests
     }
 
     [Fact]
+    public void PreliminaryRiskSizesOptionsOnlyInWholeLots()
+    {
+        var signal = strategy.Evaluate(Context())! with
+        {
+            ProposedEntry = 100m,
+            ProposedStopLoss = 95m,
+            ProposedTarget = 110m
+        };
+        var engine = new PreliminaryRiskEngine(new()
+        {
+            MaximumRiskPerTrade = 1000m,
+            MaximumQuantity = 200
+        });
+
+        var decision = engine.Evaluate(signal, RiskContext(), quantityStep: 75);
+
+        Assert.True(decision.Approved);
+        Assert.Equal(150, decision.ApprovedQuantity);
+    }
+
+    [Fact]
     public async Task CompletePaperLifecycleEntersPartiallyFillsExitsAndReports()
     {
         await using var provider = CreateProvider();

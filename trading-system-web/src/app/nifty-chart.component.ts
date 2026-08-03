@@ -161,7 +161,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.priceLines = [];
     const overlay = this.latestOverlay();
     if (overlay) {
-      const entry = overlay.fillPrice ?? overlay.entry;
+      const entry = overlay.entry;
       this.priceLines = [
         this.series.createPriceLine({
           price: entry,
@@ -213,7 +213,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.riskZone.nativeElement.style.display = 'none';
       return;
     }
-    const entry = overlay.fillPrice ?? overlay.entry;
+    const entry = overlay.entry;
     this.setZone(this.rewardZone.nativeElement, entry, overlay.target);
     this.setZone(this.riskZone.nativeElement, entry, overlay.stopLoss);
   }

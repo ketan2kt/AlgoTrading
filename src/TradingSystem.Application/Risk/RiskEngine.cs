@@ -22,8 +22,9 @@ public sealed record RiskDecisionResult(bool Approved, int ApprovedQuantity,
 
 public sealed class PreliminaryRiskEngine(PreliminaryRiskOptions options)
 {
-    public RiskDecisionResult Evaluate(StrategySignal signal, RiskContext context)
+    public RiskDecisionResult Evaluate(StrategySignal signal, RiskContext context, int quantityStep = 1)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(quantityStep);
         var reasons = new List<string>();
         if (signal.ExpiresAtUtc <= context.NowUtc) reasons.Add("Signal expired.");
         if (context.KillSwitchActive) reasons.Add("Kill switch active.");
@@ -37,7 +38,8 @@ public sealed class PreliminaryRiskEngine(PreliminaryRiskOptions options)
         if (perUnitRisk <= 0) reasons.Add("Stop loss does not define positive risk.");
         var byRisk = perUnitRisk > 0 ? (int)Math.Floor(options.MaximumRiskPerTrade / perUnitRisk) : 0;
         var byCapital = signal.ProposedEntry > 0 ? (int)Math.Floor(options.MaximumCapitalExposure / signal.ProposedEntry) : 0;
-        var quantity = Math.Min(options.MaximumQuantity, Math.Min(byRisk, byCapital));
+        var rawQuantity = Math.Min(options.MaximumQuantity, Math.Min(byRisk, byCapital));
+        var quantity = rawQuantity / quantityStep * quantityStep;
         if (quantity <= 0) reasons.Add("Conservative position sizing produced zero quantity.");
         return new(reasons.Count == 0, reasons.Count == 0 ? quantity : 0,
             signal.ProposedStopLoss, signal.ProposedTarget, reasons,

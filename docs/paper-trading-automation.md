@@ -18,15 +18,17 @@ New entries require all of the following:
 - positive validated volume for VWAP and relative-volume confirmation;
 - a permitted deterministic market regime;
 - a qualifying Opening Range Breakout signal;
+- a deterministically selected near-expiry ATM Nifty call for bullish bias or put for bearish bias;
+- a live option quote with positive, non-inverted bid/offer, permitted spread and premium, and minimum volume/open interest;
 - risk approval, including quantity, daily trade/loss, exposure, and reward-to-risk limits;
-- live entry slippage no greater than the configured 0.10%;
+- a risk-approved quantity rounded down to complete option lots;
 - entry before 14:30 Asia/Kolkata.
 
-The paper fill price is the latest validated live observation and entry movement beyond 0.10% is rejected. One position is allowed. An open position is monitored against its immutable stop and target and is closed at a fresh observed price when either is crossed, when the administrator activates the kill switch, or at/after 15:15. Stale data never fabricates an exit. Reported realised P&L deducts a configurable conservative round-trip turnover cost (5 basis points by default); it is an estimate, not an exact Indian tax/brokerage calculator.
+Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. The paper option entry fills at the validated offer. One long option position is allowed. Its immutable premium stop and target are monitored against the live bid and it closes at that liquidation reference when either is crossed, when the administrator activates the kill switch, or at/after 15:15. A missing bid never fabricates an exit. Reported realised P&L deducts a configurable conservative round-trip turnover cost (5 basis points by default); it is an estimate, not an exact Indian tax/brokerage calculator.
 
 ## Recovery and audit
 
-Signals and risk decisions are persisted before submission. Entry reference `{signalId}-ENTRY` and exit reference `{signalId}-EXIT` make submission idempotent. On restart, filled entries without a filled exit are treated as open and reconciled with the recovered paper broker. Closures create an append-only audit record containing prices, quantity, reason, and realised P&L.
+Underlying signals and option-premium risk decisions are persisted before submission. Entry reference `{signalId}-ENTRY` and exit reference `{signalId}-EXIT` make submission idempotent. On restart, filled entries without a filled exit recover the actual option instrument and protective prices and are reconciled with the recovered paper broker. Closures create an append-only audit record containing prices, quantity, reason, and realised P&L.
 
 ## Dashboard
 
@@ -38,16 +40,18 @@ The protected Angular dashboard shows automation state, its current blocking/rea
 2. Enable it only in a non-live paper environment and supply a current Groww token.
 3. During an NSE session verify fresh one-minute candles accumulate and readiness reasons change deterministically.
 4. Verify no entry can occur before 09:30 or after 14:30, with stale data, missing volume/previous close, or an active kill switch.
-5. With a controlled replay/fake feed, produce one qualifying breakout and verify signal, risk decision, one entry fill, chart overlay, and open-position P&L.
-6. Restart the process and verify the same open position is recovered without a duplicate entry.
-7. Cross the stop and target separately in controlled runs; verify one idempotent exit and audited P&L.
-8. Activate the kill switch with a fresh price and verify emergency exit; verify stale data blocks a fabricated exit.
+5. With a controlled replay/fake feed, produce bullish and bearish breakouts and verify they map to CE and PE respectively; verify the Nifty chart overlay remains at the underlying signal level.
+6. Verify a wide spread, excessive premium, insufficient volume/open interest, and any quantity smaller than one lot all reject the entry.
+7. Verify one option entry fills at the offer and its open-position P&L is marked against the bid.
+8. Restart the process and verify the same option position and premium SL/target are recovered without a duplicate entry.
+9. Cross the option-premium stop and target separately in controlled runs; verify one idempotent exit and audited P&L.
+10. Activate the kill switch with a valid bid and verify emergency exit; verify a missing bid blocks a fabricated exit.
 
 ## Known limitations
 
 - Nifty cash index quote volume may be absent from the provider. The strategy intentionally remains blocked rather than substituting synthetic volume; a validated Nifty futures volume source is the likely next data improvement.
 - The first persisted day cannot evaluate because a previous-session close is unavailable. Historical gap backfill is not yet part of startup.
 - Exchange holidays and exceptional closures are not integrated yet.
-- Simulated fills include an entry-slippage guard and configurable turnover-cost estimate, but do not model an exact broker tariff, tax schedule, queue position, bid/ask spread, or latency. Results must not be treated as profitability evidence.
+- Simulated fills cross the visible option spread (offer entry/bid exit) and include a configurable turnover-cost estimate, but do not model an exact broker tariff, tax schedule, queue position, changing quote during submission, or latency. Results must not be treated as profitability evidence.
 - PostgreSQL integration/restart tests are checked in but remain opt-in on this workstation because Docker is unavailable.
 - This increment is local only until the user explicitly approves deployment.
