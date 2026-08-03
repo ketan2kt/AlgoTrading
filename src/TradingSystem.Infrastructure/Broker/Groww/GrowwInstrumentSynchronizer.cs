@@ -36,7 +36,6 @@ internal sealed class GrowwInstrumentSynchronizer(
         var inserted = 0;
         var updated = 0;
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         foreach (var item in supported)
         {
             var mapping = item.Mapping!.Value;
@@ -77,7 +76,6 @@ internal sealed class GrowwInstrumentSynchronizer(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return new GrowwInstrumentSyncResult(
             downloaded.Count,
             inserted,
