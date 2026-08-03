@@ -16,6 +16,7 @@ internal sealed class GrowwInstrumentSynchronizer(
     {
         var downloaded = await gateway.GetInstrumentMasterAsync(cancellationToken);
         var supported = SelectSupportedUniqueRecords(downloaded)
+            .Where(IsRequiredNiftyInstrument)
             .Select(record => (Record: record, Mapping: TryMap(record)))
             .ToArray();
 
@@ -95,6 +96,12 @@ internal sealed class GrowwInstrumentSynchronizer(
                 .First().Record)
             .ToArray();
     }
+
+    private static bool IsRequiredNiftyInstrument(GrowwInstrumentRecord record) =>
+        string.Equals(record.Exchange, "NSE", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(record.Segment, "CASH", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(record.InstrumentType, "IDX", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(record.TradingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase);
 
     private static (InstrumentSegment Segment, InstrumentType Type, DateOnly? ExpiryDate)? TryMap(
         GrowwInstrumentRecord record)
