@@ -123,6 +123,20 @@
         <div class="feed-notice" role="status">{{ tokenSuccess }}</div>
       }
 
+      @if (tokenStatus.isConfigured && !tokenStatus.isExpired) {
+        <section class="instrument-sync-card" aria-label="Groww instrument synchronisation">
+          <div>
+            <span>INSTRUMENT MASTER</span>
+            <strong>Groww Nifty instrument</strong>
+            <p>Refresh broker instrument identifiers whenever the feed reports InstrumentUnavailable.</p>
+          </div>
+          <button type="button" class="secondary-button" [disabled]="instrumentSyncBusy"
+            (click)="synchronizeInstruments()">
+            {{ instrumentSyncBusy ? 'Synchronising…' : 'Synchronise instruments' }}
+          </button>
+        </section>
+      }
+
       @if (workspace; as view) {
         <section class="market-strip" aria-label="Live Nifty feed status">
           <article>

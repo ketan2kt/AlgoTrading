@@ -46,6 +46,7 @@ export class App implements OnInit, OnDestroy {
   protected tokenBusy = false;
   protected tokenError = '';
   protected tokenSuccess = '';
+  protected instrumentSyncBusy = false;
   protected showTokenForm = false;
   protected killSwitchActive = false;
   protected killSwitchBusy = false;
@@ -161,13 +162,12 @@ export class App implements OnInit, OnDestroy {
     this.tokenSuccess = '';
     this.subscriptions.add(
       this.growwTokenService.store(token).subscribe({
-        next: (status) => {
+        next: (response) => {
           this.growwAccessToken = '';
-          this.tokenStatus = status;
+          this.tokenStatus = response.token;
           this.tokenBusy = false;
           this.showTokenForm = false;
-          this.tokenSuccess =
-            'Today’s Groww token is protected. The live feed will retry automatically.';
+          this.tokenSuccess = `Today’s Groww token is protected and instruments are synchronised (${response.instrumentSynchronization.inserted} added, ${response.instrumentSynchronization.updated} refreshed).`;
           this.loadWorkspace();
           this.refreshView();
         },
@@ -179,6 +179,25 @@ export class App implements OnInit, OnDestroy {
         },
       }),
     );
+  }
+
+  protected synchronizeInstruments(): void {
+    this.instrumentSyncBusy = true;
+    this.tokenError = '';
+    this.tokenSuccess = '';
+    this.subscriptions.add(this.growwTokenService.synchronizeInstruments().subscribe({
+      next: (result) => {
+        this.instrumentSyncBusy = false;
+        this.tokenSuccess = `Groww instruments synchronised (${result.inserted} added, ${result.updated} refreshed). The live feed will reconnect automatically.`;
+        this.loadWorkspace();
+        this.refreshView();
+      },
+      error: () => {
+        this.instrumentSyncBusy = false;
+        this.tokenError = 'Instrument synchronisation failed. Confirm the Groww token is current and try again.';
+        this.refreshView();
+      },
+    }));
   }
 
   private startWorkspace(): void {

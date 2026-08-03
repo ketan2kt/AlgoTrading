@@ -186,6 +186,35 @@ button:disabled {
 .token-form label {
   flex: 1;
 }
+.instrument-sync-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem 1.3rem;
+  background: #0d1d17;
+  border: 1px solid #203d31;
+  border-radius: 12px;
+}
+.instrument-sync-card span,
+.instrument-sync-card strong,
+.instrument-sync-card p {
+  display: block;
+}
+.instrument-sync-card span {
+  color: #80ad9c;
+  font-size: 0.68rem;
+  letter-spacing: 0.11em;
+}
+.instrument-sync-card strong {
+  margin-top: 0.3rem;
+}
+.instrument-sync-card p {
+  margin: 0.3rem 0 0;
+  color: #9cada4;
+  font-size: 0.82rem;
+}
 .market-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(145px, 1fr));

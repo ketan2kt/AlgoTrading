@@ -8,7 +8,9 @@ namespace TradingSystem.Api.Controllers;
 [Authorize(Roles = "Administrator")]
 [ApiController]
 [Route("api/broker/groww/access-token")]
-public sealed class GrowwTokenController(IGrowwTokenVault tokenVault) : ControllerBase
+public sealed class GrowwTokenController(
+    IGrowwTokenVault tokenVault,
+    IGrowwInstrumentSynchronizer instrumentSynchronizer) : ControllerBase
 {
     [HttpGet("status")]
     public async Task<ActionResult<GrowwTokenStatus>> GetStatus(
@@ -17,7 +19,7 @@ public sealed class GrowwTokenController(IGrowwTokenVault tokenVault) : Controll
 
     [ValidateAntiForgeryToken]
     [HttpPost]
-    public async Task<ActionResult<GrowwTokenStatus>> Store(
+    public async Task<ActionResult<StoreGrowwTokenResponse>> Store(
         StoreGrowwTokenRequest request,
         CancellationToken cancellationToken)
     {
@@ -28,12 +30,25 @@ public sealed class GrowwTokenController(IGrowwTokenVault tokenVault) : Controll
             return ValidationProblem(ModelState);
         }
 
-        return Ok(await tokenVault.StoreAsync(
+        var status = await tokenVault.StoreAsync(
             request.AccessToken,
             User.Identity?.Name ?? "administrator",
-            cancellationToken));
+            cancellationToken);
+        var synchronization = await instrumentSynchronizer.SynchronizeAsync(cancellationToken);
+
+        return Ok(new StoreGrowwTokenResponse(status, synchronization));
     }
+
+    [ValidateAntiForgeryToken]
+    [HttpPost("synchronize-instruments")]
+    public async Task<ActionResult<GrowwInstrumentSyncResult>> SynchronizeInstruments(
+        CancellationToken cancellationToken) =>
+        Ok(await instrumentSynchronizer.SynchronizeAsync(cancellationToken));
 }
+
+public sealed record StoreGrowwTokenResponse(
+    GrowwTokenStatus Token,
+    GrowwInstrumentSyncResult InstrumentSynchronization);
 
 public sealed class StoreGrowwTokenRequest
 {

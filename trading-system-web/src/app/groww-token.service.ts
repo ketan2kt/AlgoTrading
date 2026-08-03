@@ -10,6 +10,19 @@ export interface GrowwTokenStatus {
   source: string;
 }
 
+export interface GrowwInstrumentSyncResult {
+  downloaded: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  completedAtUtc: string;
+}
+
+export interface StoreGrowwTokenResponse {
+  token: GrowwTokenStatus;
+  instrumentSynchronization: GrowwInstrumentSyncResult;
+}
+
 @Injectable({ providedIn: 'root' })
 export class GrowwTokenService {
   private readonly http = inject(HttpClient);
@@ -18,14 +31,28 @@ export class GrowwTokenService {
     return this.http.get<GrowwTokenStatus>('/api/broker/groww/access-token/status');
   }
 
-  store(accessToken: string): Observable<GrowwTokenStatus> {
+  store(accessToken: string): Observable<StoreGrowwTokenResponse> {
     return this.http
       .get<{ token: string }>('/api/security/antiforgery-token')
       .pipe(
         switchMap(({ token }) =>
-          this.http.post<GrowwTokenStatus>(
+          this.http.post<StoreGrowwTokenResponse>(
             '/api/broker/groww/access-token',
             { accessToken },
+            { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) },
+          ),
+        ),
+      );
+  }
+
+  synchronizeInstruments(): Observable<GrowwInstrumentSyncResult> {
+    return this.http
+      .get<{ token: string }>('/api/security/antiforgery-token')
+      .pipe(
+        switchMap(({ token }) =>
+          this.http.post<GrowwInstrumentSyncResult>(
+            '/api/broker/groww/access-token/synchronize-instruments',
+            {},
             { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) },
           ),
         ),
