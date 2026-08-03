@@ -70,8 +70,8 @@ public sealed record GrowwInstrumentRecord(
     string? UnderlyingSymbol,
     string? ExpiryDate,
     decimal? StrikePrice,
-    int LotSize,
-    decimal TickSize,
+    int? LotSize,
+    decimal? TickSize,
     bool BuyAllowed,
     bool SellAllowed);
 

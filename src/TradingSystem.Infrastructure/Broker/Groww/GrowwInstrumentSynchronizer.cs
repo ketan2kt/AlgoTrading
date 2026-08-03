@@ -61,12 +61,19 @@ internal sealed class GrowwInstrumentSynchronizer(
                 updated++;
             }
 
-            instrument.UpdateBrokerMetadata(
-                item.Record.ExchangeToken,
-                mapping.ExpiryDate,
-                strikePrice,
-                item.Record.LotSize,
-                item.Record.TickSize);
+            if (mapping.Type == InstrumentType.Index)
+            {
+                instrument.UpdateIndexBrokerMetadata(item.Record.ExchangeToken);
+            }
+            else
+            {
+                instrument.UpdateBrokerMetadata(
+                    item.Record.ExchangeToken,
+                    mapping.ExpiryDate,
+                    strikePrice,
+                    item.Record.LotSize ?? throw Missing(item.Record, "lot_size"),
+                    item.Record.TickSize ?? throw Missing(item.Record, "tick_size"));
+            }
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -108,6 +115,9 @@ internal sealed class GrowwInstrumentSynchronizer(
         string.Equals(record.Segment, "CASH", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(record.InstrumentType, "IDX", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(record.TradingSymbol, "NIFTY", StringComparison.OrdinalIgnoreCase);
+
+    private static GrowwApiException Missing(GrowwInstrumentRecord record, string field) =>
+        new($"Groww instrument {record.GrowwSymbol} omitted required {field}.", "MALFORMED_RESPONSE");
 
     private static (InstrumentSegment Segment, InstrumentType Type, DateOnly? ExpiryDate)? TryMap(
         GrowwInstrumentRecord record)

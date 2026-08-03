@@ -59,8 +59,8 @@ internal static class GrowwInstrumentCsvParser
                     Optional(row, header, "underlying_symbol"),
                     Optional(row, header, "expiry_date"),
                     OptionalDecimal(row, header, "strike_price"),
-                    ParseInt(Required(row, header, "lot_size")),
-                    ParseDecimal(Required(row, header, "tick_size")),
+                    OptionalInt(row, header, "lot_size"),
+                    OptionalDecimal(row, header, "tick_size"),
                     ParseBoolean(Required(row, header, "buy_allowed")),
                     ParseBoolean(Required(row, header, "sell_allowed"))));
             }
@@ -156,6 +156,15 @@ internal static class GrowwInstrumentCsvParser
     {
         var value = Optional(row, header, name);
         return value is null ? null : ParseDecimal(value);
+    }
+
+    private static int? OptionalInt(
+        string[] row,
+        IReadOnlyDictionary<string, int> header,
+        string name)
+    {
+        var value = Optional(row, header, name);
+        return value is null ? null : ParseInt(value);
     }
 
     private static string Get(string[] row, IReadOnlyDictionary<string, int> header, string name) =>

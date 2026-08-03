@@ -130,8 +130,10 @@ public sealed class GrowwReadOnlyContractTests
     public async Task InstrumentCsvSkipsMalformedUnrelatedRowAndRetainsNifty()
     {
         const string header = "exchange,exchange_token,trading_symbol,groww_symbol,name,instrument_type,segment,series,isin,underlying_symbol,underlying_exchange_token,expiry_date,strike_price,lot_size,tick_size,freeze_quantity,is_reserved,buy_allowed,sell_allowed\r\n";
-        const string malformed = "NSE,99999,BROKEN,NSE-BROKEN,Broken,EQ,CASH,EQ,,,,,,,0.05,,0,1,1\r\n";
-        const string nifty = "NSE,NIFTY,NIFTY,NSE-NIFTY,Nifty 50,IDX,CASH,,,,,,,1,0.05,,0,1,1\r\n";
+        var malformed = string.Join(',',
+            ["NSE", "99999", "BROKEN", "NSE-BROKEN", "Broken", "EQ", "CASH", "EQ", "", "", "", "", "", "oops", "0.05", "", "0", "1", "1"]) + "\r\n";
+        var nifty = string.Join(',',
+            ["NSE", "NIFTY", "NIFTY", "NSE-NIFTY", "Nifty 50", "IDX", "CASH", "", "NIFTY", "", "", "", "", "", "", "", "", "0", "0"]) + "\r\n";
         var gateway = CreateGateway(request =>
             request.RequestUri!.Host.Contains("assets", StringComparison.Ordinal)
                 ? new HttpResponseMessage(HttpStatusCode.OK)
@@ -144,6 +146,8 @@ public sealed class GrowwReadOnlyContractTests
 
         var instrument = Assert.Single(instruments);
         Assert.Equal("NIFTY", instrument.TradingSymbol);
+        Assert.Null(instrument.LotSize);
+        Assert.Null(instrument.TickSize);
     }
 
     [Fact]

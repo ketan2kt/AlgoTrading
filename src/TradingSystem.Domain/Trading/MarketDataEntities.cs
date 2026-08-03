@@ -50,6 +50,22 @@ public sealed class Instrument : MutableEntity
         TickSize = tickSize;
         IsActive = true;
     }
+
+    public void UpdateIndexBrokerMetadata(string exchangeToken)
+    {
+        if (Type != InstrumentType.Index)
+        {
+            throw new InvalidOperationException("Index metadata can only be applied to an index instrument.");
+        }
+
+        if (string.IsNullOrWhiteSpace(exchangeToken))
+        {
+            throw new ArgumentException("Exchange token is required.", nameof(exchangeToken));
+        }
+
+        ExchangeToken = exchangeToken;
+        IsActive = true;
+    }
 }
 
 public sealed class Candle : Entity, IAppendOnlyEntity
