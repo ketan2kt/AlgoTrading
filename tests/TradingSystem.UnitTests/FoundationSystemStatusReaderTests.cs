@@ -19,6 +19,7 @@ public sealed class FoundationSystemStatusReaderTests
         Assert.False(result.LiveTradingAvailable);
         Assert.False(result.TradingEnabled);
         Assert.Equal("FoundationOnly", result.Status);
+        Assert.False(string.IsNullOrWhiteSpace(result.BuildVersion));
     }
 
     [Fact]

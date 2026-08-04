@@ -7,5 +7,5 @@ public sealed record SystemStatusSnapshot(
     bool LiveTradingAvailable,
     bool TradingEnabled,
     string Status,
-    DateTimeOffset ObservedAtUtc);
-
+    DateTimeOffset ObservedAtUtc,
+    string BuildVersion);

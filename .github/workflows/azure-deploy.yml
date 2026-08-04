@@ -68,7 +68,8 @@ jobs:
           dotnet publish src/TradingSystem.Api/TradingSystem.Api.csproj \
             --configuration Release \
             --output publish \
-            /p:UseAppHost=false
+            /p:UseAppHost=false \
+            /p:InformationalVersion="1.0.0+${GITHUB_SHA}"
           cd publish
           zip -r ../trading-system.zip .
 
@@ -136,3 +137,14 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --query "[?name=='PaperTrading__Automation__Enabled'].value | [0]" -o tsv)
           test "$automation" = "true"
+
+      - name: Verify deployed commit identity
+        run: |
+          app="${{ steps.infrastructure.outputs.app }}"
+          expected="1.0.0+${GITHUB_SHA}"
+          actual=$(curl --fail --silent --show-error \
+            "https://${app}.azurewebsites.net/api/system/status" | jq -r '.buildVersion')
+          if [ "$actual" != "$expected" ]; then
+            echo "App Service is running '$actual'; expected '$expected'." >&2
+            exit 1
+          fi

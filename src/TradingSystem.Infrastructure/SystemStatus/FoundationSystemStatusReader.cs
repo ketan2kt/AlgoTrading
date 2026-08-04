@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using TradingSystem.Application.SystemStatus;
 using TradingSystem.Domain;
 
@@ -8,6 +9,11 @@ public sealed class FoundationSystemStatusReader(
     IOptions<TradingModeOptions> options,
     TimeProvider timeProvider) : ISystemStatusReader
 {
+    private static readonly string BuildVersion =
+        typeof(FoundationSystemStatusReader).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? "unknown";
+
     public SystemStatusSnapshot GetCurrent()
     {
         var mode = options.Value.Mode;
@@ -23,7 +29,7 @@ public sealed class FoundationSystemStatusReader(
             LiveTradingAvailable: false,
             TradingEnabled: false,
             Status: "FoundationOnly",
-            ObservedAtUtc: timeProvider.GetUtcNow());
+            ObservedAtUtc: timeProvider.GetUtcNow(),
+            BuildVersion: BuildVersion);
     }
 }
-
