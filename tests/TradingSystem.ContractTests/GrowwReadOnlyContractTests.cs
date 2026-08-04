@@ -150,6 +150,44 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task HistoricalFuturesResponseSkipsIncompleteFormingRows()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"candles":[["2026-08-04T09:39:00",24500.0,24501.0,24499.0,24500.5,150,1200],["2026-08-04T09:40:00",null,null,null,null,null,null]],"closing_price":24500.5,"interval_in_minutes":1}}
+            """));
+
+        var result = await gateway.GetHistoricalCandlesAsync(
+            new GrowwHistoricalCandleRequest(
+                "NSE", "FNO", "NSE-NIFTY-26Aug26-FUT",
+                new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 8, 4, 4, 15, 0, TimeSpan.Zero),
+                "1minute"),
+            CancellationToken.None);
+
+        Assert.Single(result.Candles);
+        Assert.Equal("2026-08-04T09:39:00", result.Candles[0].SourceTimestamp);
+    }
+
+    [Fact]
+    public async Task HistoricalFuturesResponseWithOnlyIncompleteRowsFailsClosed()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"candles":[["2026-08-04T09:40:00",null,null,null,null,null,null]],"closing_price":24500.5,"interval_in_minutes":1}}
+            """));
+
+        var exception = await Assert.ThrowsAsync<GrowwApiException>(() =>
+            gateway.GetHistoricalCandlesAsync(
+                new GrowwHistoricalCandleRequest(
+                    "NSE", "FNO", "NSE-NIFTY-26Aug26-FUT",
+                    new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero),
+                    new DateTimeOffset(2026, 8, 4, 4, 15, 0, TimeSpan.Zero),
+                    "1minute"),
+                CancellationToken.None));
+
+        Assert.Equal("MALFORMED_RESPONSE", exception.ErrorCode);
+    }
+
+    [Fact]
     public async Task ApiFailurePreservesDocumentedCodeWithoutLeakingToken()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.Unauthorized, """

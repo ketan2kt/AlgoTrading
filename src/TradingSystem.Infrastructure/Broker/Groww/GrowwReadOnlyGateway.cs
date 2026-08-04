@@ -93,7 +93,15 @@ public sealed class GrowwReadOnlyGateway(
             throw Malformed("Groww historical response omitted candles or interval.");
         }
 
-        var candles = payload.Candles.Select(ParseCandle).ToArray();
+        var candles = payload.Candles
+            .Where(value => !IsIncompleteCandle(value))
+            .Select(ParseCandle)
+            .ToArray();
+        if (payload.Candles.Length > 0 && candles.Length == 0)
+        {
+            throw Malformed("Groww historical response contained no completed candle rows.");
+        }
+
         return new GrowwHistoricalCandles(candles, payload.ClosingPrice, payload.IntervalInMinutes);
     }
 
@@ -206,6 +214,16 @@ public sealed class GrowwReadOnlyGateway(
             fields.Length == 6 || fields[6].ValueKind == JsonValueKind.Null
                 ? null
                 : ParseRequiredDecimal(fields[6], "open interest"));
+    }
+
+    private static bool IsIncompleteCandle(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() is not (6 or 7))
+        {
+            return false;
+        }
+
+        return value.EnumerateArray().Take(5).Any(field => field.ValueKind == JsonValueKind.Null);
     }
 
     private static decimal ParseRequiredDecimal(JsonElement value, string fieldName)
