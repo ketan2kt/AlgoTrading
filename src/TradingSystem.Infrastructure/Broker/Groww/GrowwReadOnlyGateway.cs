@@ -181,9 +181,9 @@ public sealed class GrowwReadOnlyGateway(
 
     private static GrowwHistoricalCandle ParseCandle(JsonElement value)
     {
-        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() != 7)
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() is not (6 or 7))
         {
-            throw Malformed("Groww candle must contain exactly seven fields.");
+            throw Malformed("Groww candle must contain six or seven fields.");
         }
 
         var fields = value.EnumerateArray().ToArray();
@@ -198,7 +198,12 @@ public sealed class GrowwReadOnlyGateway(
                 // Groww can return null volume for a still-forming FNO candle. Preserve the
                 // candle shape and let downstream completeness/volume rules fail closed.
                 fields[5].ValueKind == JsonValueKind.Null ? 0 : fields[5].GetInt64(),
-                fields[6].ValueKind == JsonValueKind.Null ? null : fields[6].GetDecimal());
+                // The documented FNO shape includes OI as field seven. Groww can omit that
+                // trailing value from individual live-session rows; price confirmation remains
+                // usable, while downstream OI-dependent rules continue to fail closed.
+                fields.Length == 6 || fields[6].ValueKind == JsonValueKind.Null
+                    ? null
+                    : fields[6].GetDecimal());
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {

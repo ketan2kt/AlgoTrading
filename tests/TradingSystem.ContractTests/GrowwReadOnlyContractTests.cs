@@ -112,6 +112,26 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task HistoricalFuturesResponseAllowsRowsWithOmittedTrailingOpenInterest()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"candles":[["2026-08-04T09:40:00",24500.0,24501.0,24499.0,24500.5,150],["2026-08-04T09:41:00",24500.5,24502.0,24500.0,24501.5,175,1250]],"closing_price":24501.5,"interval_in_minutes":1}}
+            """));
+
+        var result = await gateway.GetHistoricalCandlesAsync(
+            new GrowwHistoricalCandleRequest(
+                "NSE", "FNO", "NSE-NIFTY-26Aug26-FUT",
+                DateTimeOffset.Parse("2026-08-04T04:00:00Z", CultureInfo.InvariantCulture),
+                DateTimeOffset.Parse("2026-08-04T04:15:00Z", CultureInfo.InvariantCulture),
+                "1minute"),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Candles.Count);
+        Assert.Null(result.Candles[0].OpenInterest);
+        Assert.Equal(1250m, result.Candles[1].OpenInterest);
+    }
+
+    [Fact]
     public async Task ApiFailurePreservesDocumentedCodeWithoutLeakingToken()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.Unauthorized, """
