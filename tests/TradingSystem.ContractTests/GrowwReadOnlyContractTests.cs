@@ -132,6 +132,24 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task HistoricalFuturesCandleAllowsWholeDecimalVolumeRepresentation()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"candles":[["2026-08-04T09:40:00",24500.0,24501.0,24499.0,24500.5,150.0,1200.0]],"closing_price":24500.5,"interval_in_minutes":1}}
+            """));
+
+        var result = await gateway.GetHistoricalCandlesAsync(
+            new GrowwHistoricalCandleRequest(
+                "NSE", "FNO", "NSE-NIFTY-26Aug26-FUT",
+                new DateTimeOffset(2026, 8, 4, 4, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 8, 4, 4, 15, 0, TimeSpan.Zero),
+                "1minute"),
+            CancellationToken.None);
+
+        Assert.Equal(150, Assert.Single(result.Candles).Volume);
+    }
+
+    [Fact]
     public async Task ApiFailurePreservesDocumentedCodeWithoutLeakingToken()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.Unauthorized, """

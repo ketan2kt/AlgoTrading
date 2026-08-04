@@ -190,28 +190,46 @@ public sealed class GrowwReadOnlyGateway(
         }
 
         var fields = value.EnumerateArray().ToArray();
-        try
+        if (fields[0].ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(fields[0].GetString()))
         {
-            return new GrowwHistoricalCandle(
-                fields[0].GetString() ?? throw new JsonException(),
-                fields[1].GetDecimal(),
-                fields[2].GetDecimal(),
-                fields[3].GetDecimal(),
-                fields[4].GetDecimal(),
-                // Groww can return null volume for a still-forming FNO candle. Preserve the
-                // candle shape and let downstream completeness/volume rules fail closed.
-                fields[5].ValueKind == JsonValueKind.Null ? 0 : fields[5].GetInt64(),
-                // The documented FNO shape includes OI as field seven. Groww can omit that
-                // trailing value from individual live-session rows; price confirmation remains
-                // usable, while downstream OI-dependent rules continue to fail closed.
-                fields.Length == 6 || fields[6].ValueKind == JsonValueKind.Null
-                    ? null
-                    : fields[6].GetDecimal());
+            throw Malformed($"Groww candle timestamp has invalid type {fields[0].ValueKind}.");
         }
-        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+
+        return new GrowwHistoricalCandle(
+            fields[0].GetString()!,
+            ParseRequiredDecimal(fields[1], "open"),
+            ParseRequiredDecimal(fields[2], "high"),
+            ParseRequiredDecimal(fields[3], "low"),
+            ParseRequiredDecimal(fields[4], "close"),
+            ParseVolume(fields[5]),
+            fields.Length == 6 || fields[6].ValueKind == JsonValueKind.Null
+                ? null
+                : ParseRequiredDecimal(fields[6], "open interest"));
+    }
+
+    private static decimal ParseRequiredDecimal(JsonElement value, string fieldName)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var parsed))
         {
-            throw Malformed("Groww candle contains invalid field types.", exception);
+            return parsed;
         }
+
+        throw Malformed($"Groww candle {fieldName} has invalid type {value.ValueKind}.");
+    }
+
+    private static long ParseVolume(JsonElement value)
+    {
+        // Groww can return null volume for a still-forming FNO candle. Preserve the
+        // candle shape and let downstream completeness/volume rules fail closed.
+        if (value.ValueKind == JsonValueKind.Null) return 0;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDecimal(out var parsed) ||
+            parsed != decimal.Truncate(parsed) || parsed < long.MinValue || parsed > long.MaxValue)
+        {
+            throw Malformed($"Groww candle volume is not a whole 64-bit number ({value.ValueKind}).");
+        }
+
+        return decimal.ToInt64(parsed);
     }
 
     private static string BuildQuery(params (string Name, string Value)[] values) =>
