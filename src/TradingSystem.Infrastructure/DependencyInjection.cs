@@ -124,6 +124,9 @@ public static class DependencyInjection
         services.AddHostedService<GrowwInstrumentSynchronizationService>();
         services.AddSingleton<MarketDataHealthMonitor>();
         services.AddSingleton<IMarketDataHealthReader>(provider => provider.GetRequiredService<MarketDataHealthMonitor>());
+        services.AddSingleton<FuturesFeedHealthMonitor>();
+        services.AddSingleton<IFuturesFeedHealthReader>(provider =>
+            provider.GetRequiredService<FuturesFeedHealthMonitor>());
         services.AddScoped<IMarketDataPersistence, EfMarketDataPersistence>();
         services.AddOptions<MarketDataOptions>()
             .Bind(configuration.GetSection(MarketDataOptions.SectionName))

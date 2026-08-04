@@ -15,6 +15,7 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
     IGrowwReadOnlyGateway gateway,
     GrowwQuoteNormalizer normalizer,
     IOptions<LiveNiftyOptions> options,
+    FuturesFeedHealthMonitor feedHealth,
     TimeProvider timeProvider,
     ILogger<GrowwNiftyFuturesMarketDataService> logger) : BackgroundService
 {
@@ -37,6 +38,13 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
             { break; }
             catch (Exception exception)
             {
+                var errorCode = exception is GrowwApiException growwException
+                    ? growwException.ErrorCode ?? "GROWW_API_ERROR"
+                    : "INTERNAL_FEED_ERROR";
+                var errorDetail = exception is GrowwApiException
+                    ? exception.Message
+                    : "The futures feed encountered an internal processing error.";
+                feedHealth.RecordFailure(timeProvider.GetUtcNow(), errorCode, errorDetail);
                 LogPollingFailed(logger, exception);
                 delay = TimeSpan.FromSeconds(10);
             }
@@ -78,6 +86,7 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
         var observation = normalizer.Normalize(future.Id, quote, now);
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
         await processor.ProcessAsync(observation, cancellationToken);
+        feedHealth.RecordSuccess(now);
     }
 
     private static bool IsMarketWindow(DateTimeOffset now)

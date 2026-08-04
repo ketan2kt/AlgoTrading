@@ -183,7 +183,10 @@ public sealed class GrowwReadOnlyGateway(
     {
         if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() is not (6 or 7))
         {
-            throw Malformed("Groww candle must contain six or seven fields.");
+            var observed = value.ValueKind == JsonValueKind.Array
+                ? value.GetArrayLength().ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : value.ValueKind.ToString();
+            throw Malformed($"Groww candle must contain six or seven fields; observed {observed}.");
         }
 
         var fields = value.EnumerateArray().ToArray();

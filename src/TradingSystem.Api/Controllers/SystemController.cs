@@ -20,6 +20,11 @@ public sealed class SystemController(ISystemStatusReader statusReader) : Control
         [FromServices] IMarketDataHealthReader healthReader) => Ok(healthReader.GetCurrent());
 
     [AllowAnonymous]
+    [HttpGet("futures-feed-health")]
+    public ActionResult<FuturesFeedHealthSnapshot> GetFuturesFeedHealth(
+        [FromServices] IFuturesFeedHealthReader healthReader) => Ok(healthReader.GetCurrent());
+
+    [AllowAnonymous]
     [HttpGet("market-regime")]
     public ActionResult<MarketRegimeResult?> GetMarketRegime(
         [FromServices] IMarketRegimeReader regimeReader) => Ok(regimeReader.GetLatest());
