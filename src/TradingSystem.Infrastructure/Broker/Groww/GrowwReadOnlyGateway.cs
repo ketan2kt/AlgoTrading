@@ -195,7 +195,9 @@ public sealed class GrowwReadOnlyGateway(
                 fields[2].GetDecimal(),
                 fields[3].GetDecimal(),
                 fields[4].GetDecimal(),
-                fields[5].GetInt64(),
+                // Groww can return null volume for a still-forming FNO candle. Preserve the
+                // candle shape and let downstream completeness/volume rules fail closed.
+                fields[5].ValueKind == JsonValueKind.Null ? 0 : fields[5].GetInt64(),
                 fields[6].ValueKind == JsonValueKind.Null ? null : fields[6].GetDecimal());
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)

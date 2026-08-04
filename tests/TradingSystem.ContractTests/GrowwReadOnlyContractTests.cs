@@ -92,6 +92,26 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task HistoricalFuturesCandleAllowsNullVolumeAndFailsClosedDownstream()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"candles":[["2026-08-04T09:39:00",24500.0,24501.0,24499.0,24500.5,null,1200]],"closing_price":24500.5,"interval_in_minutes":1}}
+            """));
+
+        var result = await gateway.GetHistoricalCandlesAsync(
+            new GrowwHistoricalCandleRequest(
+                "NSE", "FNO", "NSE-NIFTY-26Aug26-FUT",
+                DateTimeOffset.Parse("2026-08-04T04:00:00Z", CultureInfo.InvariantCulture),
+                DateTimeOffset.Parse("2026-08-04T04:10:00Z", CultureInfo.InvariantCulture),
+                "1minute"),
+            CancellationToken.None);
+
+        var candle = Assert.Single(result.Candles);
+        Assert.Equal(0, candle.Volume);
+        Assert.Equal(1200m, candle.OpenInterest);
+    }
+
+    [Fact]
     public async Task ApiFailurePreservesDocumentedCodeWithoutLeakingToken()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.Unauthorized, """
