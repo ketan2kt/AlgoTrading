@@ -22,7 +22,13 @@ public sealed record WorkspaceTradeOverlay(
     decimal Target,
     string Status,
     int? Quantity,
-    decimal? FillPrice);
+    decimal? FillPrice,
+    string? ExecutionInstrument,
+    string? ExecutionInstrumentType,
+    DateOnly? ExecutionExpiry,
+    decimal? ExecutionStrike,
+    decimal? ExecutionStopLoss,
+    decimal? ExecutionTarget);
 
 public sealed record TradingWorkspaceSnapshot(
     string Instrument,

@@ -106,22 +106,30 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => signalIds.Contains(value.SignalId))
             .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var entryReferences = signalIds.Select(value => $"{value:N}-ENTRY").ToArray();
-        var fillEvents = await dbContext.PaperBrokerEvents.AsNoTracking()
+        var brokerEvents = await dbContext.PaperBrokerEvents.AsNoTracking()
             .Where(value => entryReferences.Contains(value.ClientReference) &&
-                            value.EventType == "OrderFilled")
+                            (value.EventType == "OrderSubmitted" || value.EventType == "OrderFilled"))
             .OrderByDescending(value => value.Sequence)
             .Select(value => new { value.ClientReference, value.PayloadJson })
             .ToListAsync(cancellationToken);
-        var fills = fillEvents
+        var orders = brokerEvents
             .GroupBy(value => value.ClientReference, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => ParseFill(group.First().PayloadJson),
+                group => ParsePaperOrder(group.Select(value => value.PayloadJson)),
                 StringComparer.Ordinal);
+        var executionInstrumentIds = orders.Values.Where(value => value is not null)
+            .Select(value => value!.InstrumentId).Distinct().ToArray();
+        var executionInstruments = await dbContext.Instruments.AsNoTracking()
+            .Where(value => executionInstrumentIds.Contains(value.Id))
+            .ToDictionaryAsync(value => value.Id, cancellationToken);
         var overlays = signalRows.Select(value =>
         {
             risk.TryGetValue(value.Id, out var decision);
-            fills.TryGetValue($"{value.Id:N}-ENTRY", out var fill);
+            orders.TryGetValue($"{value.Id:N}-ENTRY", out var order);
+            var executionInstrument = order is null ? null :
+                executionInstruments.GetValueOrDefault(order.InstrumentId);
+            var protective = ParseProtectivePrices(decision?.SnapshotJson);
             return new WorkspaceTradeOverlay(
                 value.Id,
                 "Opening Range Breakout 1.0.0",
@@ -130,11 +138,17 @@ internal sealed class EfTradingWorkspaceReader(
                 value.ProposedEntry,
                 value.ProposedStopLoss,
                 value.ProposedTarget,
-                fill is not null ? "Filled" : decision is null
+                order?.FillPrice is not null ? "Filled" : decision is null
                     ? value.Status.ToString()
                     : decision.Approved ? "RiskApproved" : "RiskRejected",
-                fill?.Quantity ?? decision?.ApprovedQuantity,
-                fill?.Price);
+                order?.Quantity ?? decision?.ApprovedQuantity,
+                order?.FillPrice,
+                executionInstrument?.TradingSymbol,
+                executionInstrument?.Type.ToString(),
+                executionInstrument?.ExpiryDate,
+                executionInstrument?.StrikePrice,
+                protective.StopLoss,
+                protective.Target);
         }).ToArray();
 
         var message = !options.Enabled
@@ -171,22 +185,41 @@ internal sealed class EfTradingWorkspaceReader(
             paperAutomation.GetCurrent());
     }
 
-    private static FillProjection? ParseFill(string payloadJson)
+    private static PaperOrderProjection? ParsePaperOrder(IEnumerable<string> payloads)
     {
-        using var document = JsonDocument.Parse(payloadJson);
-        var root = document.RootElement;
-        if (!root.TryGetProperty("cumulativeFilledQuantity", out var quantity) ||
-            !root.TryGetProperty("averageFillPrice", out var price) ||
-            !quantity.TryGetInt32(out var parsedQuantity) ||
-            !price.TryGetDecimal(out var parsedPrice))
+        Guid? instrumentId = null;
+        int? quantity = null;
+        decimal? fillPrice = null;
+        foreach (var payloadJson in payloads)
         {
-            return null;
+            using var document = JsonDocument.Parse(payloadJson);
+            var root = document.RootElement;
+            if (root.TryGetProperty("instrumentId", out var instrument) &&
+                instrument.TryGetGuid(out var parsedInstrument))
+                instrumentId = parsedInstrument;
+            if (root.TryGetProperty("cumulativeFilledQuantity", out var filledQuantity) &&
+                filledQuantity.TryGetInt32(out var parsedQuantity))
+                quantity = parsedQuantity;
+            if (root.TryGetProperty("averageFillPrice", out var averageFillPrice) &&
+                averageFillPrice.TryGetDecimal(out var parsedPrice))
+                fillPrice = parsedPrice;
         }
-
-        return new(parsedQuantity, parsedPrice);
+        return instrumentId is null ? null : new(instrumentId.Value, quantity, fillPrice);
     }
 
-    private sealed record FillProjection(int Quantity, decimal Price);
+    private static (decimal? StopLoss, decimal? Target) ParseProtectivePrices(string? snapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotJson)) return (null, null);
+        using var document = JsonDocument.Parse(snapshotJson);
+        var root = document.RootElement;
+        var stop = root.TryGetProperty("finalStopLoss", out var stopElement) &&
+                   stopElement.TryGetDecimal(out var parsedStop) ? parsedStop : (decimal?)null;
+        var target = root.TryGetProperty("finalTarget", out var targetElement) &&
+                     targetElement.TryGetDecimal(out var parsedTarget) ? parsedTarget : (decimal?)null;
+        return (stop, target);
+    }
+
+    private sealed record PaperOrderProjection(Guid InstrumentId, int? Quantity, decimal? FillPrice);
 
     private static TimeZoneInfo FindIndiaTimeZone()
     {

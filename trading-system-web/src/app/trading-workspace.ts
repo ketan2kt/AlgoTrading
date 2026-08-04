@@ -20,6 +20,12 @@ export interface WorkspaceTradeOverlay {
   status: string;
   quantity: number | null;
   fillPrice: number | null;
+  executionInstrument: string | null;
+  executionInstrumentType: string | null;
+  executionExpiry: string | null;
+  executionStrike: number | null;
+  executionStopLoss: number | null;
+  executionTarget: number | null;
 }
 
 export interface TradingWorkspaceSnapshot {

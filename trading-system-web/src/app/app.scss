@@ -373,7 +373,7 @@ article > span,
 }
 .signal-row {
   display: grid;
-  grid-template-columns: 2fr repeat(3, 1fr);
+  grid-template-columns: minmax(220px, 2fr) repeat(auto-fit, minmax(125px, 1fr));
   gap: 1rem;
   align-items: center;
   padding: 1rem 1.3rem;

@@ -126,6 +126,16 @@ internal sealed partial class AutomatedPaperTradingService(
                     tradeState.Open.StopLoss, tradeState.Open.Target);
                 return;
             }
+            if (optionInstrument.Type is not (InstrumentType.CallOption or InstrumentType.PutOption))
+            {
+                state.Record("ReconciliationRequired", false,
+                    "A legacy non-option paper position was detected. It will not be monitored or reused as a Nifty option trade.",
+                    tradeState.TradesToday, tradeState.RealisedPnl, 0m,
+                    tradeState.Open.Signal.SignalId, tradeState.Open.Entry.Direction.ToString(),
+                    tradeState.Open.Entry.FilledQuantity, tradeState.Open.Entry.AverageFillPrice,
+                    tradeState.Open.StopLoss, tradeState.Open.Target);
+                return;
+            }
 
             var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
             var optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
@@ -302,6 +312,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var candidates = await db.Instruments.AsNoTracking().Where(value =>
                 value.Exchange == "NSE" && value.Segment == InstrumentSegment.FuturesAndOptions &&
                 (value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption) &&
+                value.TradingSymbol.StartsWith("NIFTY") &&
                 value.IsActive && value.ExpiryDate != null && value.StrikePrice != null)
             .Select(value => new NiftyOptionContractCandidate(value.Id, value.TradingSymbol, value.Type,
                 value.ExpiryDate!.Value, value.StrikePrice!.Value, value.LotSize, value.TickSize))

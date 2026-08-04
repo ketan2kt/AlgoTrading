@@ -249,8 +249,8 @@
               </select>
             </label>
             <div class="legend">
-              <span class="dot dot--entry"></span>Entry <span class="dot dot--risk"></span>SL
-              <span class="dot dot--reward"></span>Target
+              <span class="dot dot--entry"></span>Nifty trigger <span class="dot dot--risk"></span>Invalidation
+              <span class="dot dot--reward"></span>Objective
             </div>
           </div>
           <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
@@ -262,7 +262,7 @@
         <section class="detail-grid">
           <article class="positions-panel">
             <div class="panel-heading">
-              <div><span>STRATEGY EVENTS</span><strong>Signals and risk decisions</strong></div>
+              <div><span>STRATEGY EVENTS</span><strong>Nifty signals and option executions</strong></div>
             </div>
             @if (view.overlays.length) {
               @for (overlay of view.overlays; track overlay.signalId) {
@@ -271,18 +271,17 @@
                     <strong>{{ overlay.direction }} · {{ overlay.strategy }}</strong
                     ><span>{{ overlay.status }}</span>
                   </div>
-                  <div>
-                    <span>{{ overlay.fillPrice ? 'Fill' : 'Entry' }}</span
-                    ><strong>{{ overlay.entry | number: '1.2-2' }}</strong>
-                  </div>
-                  <div>
-                    <span>SL</span
-                    ><strong class="bad">{{ overlay.stopLoss | number: '1.2-2' }}</strong>
-                  </div>
-                  <div>
-                    <span>Target</span
-                    ><strong class="good">{{ overlay.target | number: '1.2-2' }}</strong>
-                  </div>
+                  @if (overlay.executionInstrument) {
+                    <div><span>Option bought</span><strong>{{ overlay.executionInstrument }}</strong></div>
+                    <div><span>Premium entry</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
+                    <div><span>Premium SL</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
+                    <div><span>Premium target</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
+                    <div><span>Contract</span><strong>{{ overlay.executionInstrumentType }} / {{ overlay.executionStrike | number: '1.0-0' }} / {{ overlay.executionExpiry | date: 'dd MMM yyyy' : 'Asia/Kolkata' }}</strong></div>
+                  } @else {
+                    <div><span>Nifty trigger</span><strong>{{ overlay.entry | number: '1.2-2' }}</strong></div>
+                    <div><span>Nifty invalidation</span><strong class="bad">{{ overlay.stopLoss | number: '1.2-2' }}</strong></div>
+                    <div><span>Nifty objective</span><strong class="good">{{ overlay.target | number: '1.2-2' }}</strong></div>
+                  }
                 </div>
               }
             } @else {

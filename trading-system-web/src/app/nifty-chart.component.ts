@@ -167,19 +167,19 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
           price: entry,
           color: '#f2c94c',
           lineWidth: 2,
-          title: 'ENTRY',
+          title: 'NIFTY TRIGGER',
         }),
         this.series.createPriceLine({
           price: overlay.stopLoss,
           color: '#ff5d68',
           lineWidth: 2,
-          title: 'SL',
+          title: 'NIFTY INVALIDATION',
         }),
         this.series.createPriceLine({
           price: overlay.target,
           color: '#28d17c',
           lineWidth: 2,
-          title: 'TARGET',
+          title: 'NIFTY OBJECTIVE',
         }),
       ];
       const position = overlay.direction === 'Buy' ? 'belowBar' : 'aboveBar';
