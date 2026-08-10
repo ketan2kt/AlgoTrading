@@ -109,7 +109,16 @@ describe('App', () => {
           instrument: 'NIFTY', exchange: 'NSE', timeframe: '1m', mode: 'Paper',
           feedStatus: 'Live', isLive: true, isFresh: true,
           lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: '2026-08-03T08:30:00Z',
-          statusMessage: null, candles: [], overlays: [],
+          statusMessage: null, candles: [], overlays: [], evaluations: [{
+            evaluationId: 'evaluation-1', candleTimeUtc: '2026-08-03T08:30:00Z',
+            strategy: 'opening-range-breakout 1.0.0', outcome: 'NoSignal', currentPrice: 24600,
+            openingRangeHigh: 24620, openingRangeLow: 24550, vwap: 24590,
+            fastEma: 24601, slowEma: 24595, atrPercent: 0.3, relativeFuturesVolume: 0.82,
+            regime: 'WeakBullishTrend', regimeBias: 'Buy', regimeConfidence: 0.61,
+            failedConditions: ['Relative futures volume 0.82 is below 1.25.'], signalId: null,
+            optionSymbol: null, optionType: null, optionExpiry: null, optionStrike: null,
+            optionPremium: null, realisedPnl: null,
+          }],
           paperAutomation: {
             status: 'WarmingUp', tradingPermitted: false, message: 'Waiting for confirmation.',
             observedAtUtc: '2026-08-03T08:30:00Z', tradesToday: 0, realisedPnl: 0,
@@ -144,5 +153,7 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Previous-session context');
     expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
     expect(fixture.nativeElement.textContent).toContain('18/21 candles');
+    expect(fixture.nativeElement.textContent).toContain('RESEARCH AUDIT');
+    expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.82 is below 1.25.');
   });
 });

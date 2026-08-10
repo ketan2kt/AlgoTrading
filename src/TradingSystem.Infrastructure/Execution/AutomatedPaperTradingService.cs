@@ -286,24 +286,31 @@ internal sealed partial class AutomatedPaperTradingService(
         var fast = Ema(closes, 9);
         var slow = Ema(closes, 21);
         var atr = AtrPercent(candles.TakeLast(15).ToArray());
+        var openingRangeHigh = openingCandles.Max(value => value.High);
+        var openingRangeLow = openingCandles.Min(value => value.Low);
         var sessionId = DeterministicSessionId(DateOnly.FromDateTime(indiaNow.Date));
         var regimeService = scope.ServiceProvider.GetRequiredService<MarketRegimeService>();
         var regime = await regimeService.EvaluateAsync(new MarketRegimeInput(
             sessionId, latestCandle.OpenTimeUtc, latestCandle.Close, previousClose.Value,
-            candles[0].Open, openingCandles.Max(value => value.High), openingCandles.Min(value => value.Low),
+            candles[0].Open, openingRangeHigh, openingRangeLow,
             vwap, fast, slow, atr, relativeVolume, 1m, true), cancellationToken);
         var strategy = scope.ServiceProvider.GetRequiredService<ITradingStrategy>();
-        var signal = strategy.Evaluate(new StrategyEvaluationContext(instrument.Id,
+        var strategyEvaluation = strategy.EvaluateDetailed(new StrategyEvaluationContext(instrument.Id,
             candleDecisionTime, latestCandle.Close,
-            openingCandles.Max(value => value.High), openingCandles.Min(value => value.Low), relativeVolume,
+            openingRangeHigh, openingRangeLow, relativeVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, regime.TradingPermitted, true,
             signals.OrderByDescending(value => value.MarketDataTimestampUtc)
                 .Select(value => (DateTimeOffset?)value.MarketDataTimestampUtc).FirstOrDefault(),
             tradeState.TradesToday));
+        var signal = strategyEvaluation.Signal;
         if (signal is null)
         {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
+                null, null, null, cancellationToken);
             state.Record("Scanning", true,
-                $"No qualifying setup. Regime: {regime.Regime} ({regime.Confidence:P0}).",
+                $"No qualifying setup. {string.Join(" ", strategyEvaluation.FailedConditions)}",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
@@ -322,6 +329,11 @@ internal sealed partial class AutomatedPaperTradingService(
             candidates, signal.Direction, currentPrice, DateOnly.FromDateTime(indiaNow.Date));
         if (selectedOption is null)
         {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "OptionUnavailable",
+                ["No valid Nifty option contract was available."], signal, null, null,
+                cancellationToken);
             state.Record("OptionUniverseUnavailable", false,
                 "A Nifty signal qualified, but no valid Nifty option contract was available. Index execution is blocked.",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -349,6 +361,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 0m, 0m);
             await audit.PersistRiskDecisionAsync(signal.SignalId, rejected, cancellationToken,
                 rejectedProposal);
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "OptionQuoteRejected", pricing.RejectionReasons,
+                signal, selectedOption, quote.OfferPrice ?? quote.LastPrice, cancellationToken);
             state.Record("LiquidityRejected", false,
                 $"{selectedOption.TradingSymbol} was rejected: {string.Join(" ", pricing.RejectionReasons)}",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -391,6 +407,10 @@ internal sealed partial class AutomatedPaperTradingService(
             optionProposal);
         if (!decision.Approved)
         {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "RiskRejected", decision.RejectionReasons,
+                signal, selectedOption, pricing.EntryPrice, cancellationToken);
             state.Record("RiskRejected", false, string.Join(" ", decision.RejectionReasons),
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol,
@@ -406,6 +426,11 @@ internal sealed partial class AutomatedPaperTradingService(
         var entry = await paperControl.ProcessNextFillAsync(entryReference, cancellationToken);
         if (entry.State != OrderState.Filled)
             throw new InvalidOperationException($"Paper option entry ended in state {entry.State}.");
+
+        await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+            latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+            relativeVolume, regime, "PaperPositionOpened", [], signal, selectedOption,
+            entry.AverageFillPrice, cancellationToken);
 
         state.Record("PositionOpen", false,
             $"Paper position opened in {selectedOption.TradingSymbol}; monitoring option premium SL and target.",
@@ -466,6 +491,16 @@ internal sealed partial class AutomatedPaperTradingService(
             open.Entry.FilledQuantity, options.Value.EstimatedRoundTripCostBasisPoints);
         var pnl = grossPnl - estimatedCosts;
         var reason = exitReason.ToString();
+        var db = services.GetRequiredService<TradingDbContext>();
+        if (!await db.PaperTradeResults.AnyAsync(value => value.SignalId == open.Signal.SignalId,
+                cancellationToken))
+        {
+            db.PaperTradeResults.Add(new PaperTradeResult(Guid.NewGuid(), open.Signal.SignalId,
+                optionInstrument.Id, optionInstrument.TradingSymbol, open.Entry.FilledQuantity,
+                open.Entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, grossPnl,
+                estimatedCosts, pnl, reason, timeProvider.GetUtcNow()));
+            await db.SaveChangesAsync(cancellationToken);
+        }
         var writer = services.GetRequiredService<IAuditWriter>();
         await writer.WriteAsync(new AuditEntry("paper-automation", "PaperTradeClosed", "Signal",
             open.Signal.SignalId.ToString("N"), reason, "{}", JsonSerializer.Serialize(new
@@ -595,6 +630,31 @@ internal sealed partial class AutomatedPaperTradingService(
         var target = root.TryGetProperty("finalTarget", out var targetElement)
             ? targetElement.GetDecimal() : fallbackTarget;
         return (stop, target);
+    }
+
+    private async Task PersistStrategyEvaluationAsync(TradingDbContext db,
+        ITradingStrategy strategy, Guid instrumentId, DateTimeOffset candleTimeUtc,
+        decimal currentPrice, decimal openingRangeHigh, decimal openingRangeLow,
+        decimal vwap, decimal fastEma, decimal slowEma, decimal atrPercent,
+        decimal relativeFuturesVolume, MarketRegimeResult regime, string outcome,
+        IReadOnlyList<string> failedConditions, StrategySignal? signal,
+        NiftyOptionContractCandidate? option, decimal? optionPremium,
+        CancellationToken cancellationToken)
+    {
+        if (await db.StrategyEvaluations.AnyAsync(value =>
+                value.StrategyCode == strategy.StrategyId &&
+                value.InstrumentId == instrumentId &&
+                value.CandleTimeUtc == candleTimeUtc, cancellationToken))
+            return;
+
+        db.StrategyEvaluations.Add(new StrategyEvaluation(Guid.NewGuid(), strategy.StrategyId,
+            strategy.Version, instrumentId, candleTimeUtc, currentPrice, openingRangeHigh,
+            openingRangeLow, vwap, fastEma, slowEma, atrPercent, relativeFuturesVolume,
+            regime.Regime, regime.DirectionalBias, regime.Confidence, outcome,
+            JsonSerializer.Serialize(failedConditions), signal?.SignalId,
+            option?.TradingSymbol, option?.Type.ToString(), option?.ExpiryDate,
+            option?.StrikePrice, optionPremium, timeProvider.GetUtcNow()));
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static decimal Ema(decimal[] values, int period)

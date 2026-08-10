@@ -48,7 +48,34 @@ export interface TradingWorkspaceSnapshot {
   statusMessage: string | null;
   candles: WorkspaceCandle[];
   overlays: WorkspaceTradeOverlay[];
+  evaluations: WorkspaceStrategyEvaluation[];
   paperAutomation: PaperAutomationSnapshot;
+}
+
+export interface WorkspaceStrategyEvaluation {
+  evaluationId: string;
+  candleTimeUtc: string;
+  strategy: string;
+  outcome: string;
+  currentPrice: number;
+  openingRangeHigh: number;
+  openingRangeLow: number;
+  vwap: number;
+  fastEma: number;
+  slowEma: number;
+  atrPercent: number;
+  relativeFuturesVolume: number;
+  regime: string;
+  regimeBias: string | null;
+  regimeConfidence: number;
+  failedConditions: string[];
+  signalId: string | null;
+  optionSymbol: string | null;
+  optionType: string | null;
+  optionExpiry: string | null;
+  optionStrike: number | null;
+  optionPremium: number | null;
+  realisedPnl: number | null;
 }
 
 export interface PaperAutomationSnapshot {

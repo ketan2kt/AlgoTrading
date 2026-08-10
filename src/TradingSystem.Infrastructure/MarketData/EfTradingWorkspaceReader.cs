@@ -162,6 +162,44 @@ internal sealed class EfTradingWorkspaceReader(
                 rejectionReasons);
         }).ToArray();
 
+        var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
+            .Where(value => value.InstrumentId == instrument.Id &&
+                            value.CandleTimeUtc >= sessionStartUtc &&
+                            value.CandleTimeUtc < sessionEndUtc)
+            .OrderByDescending(value => value.CandleTimeUtc)
+            .Take(40)
+            .ToListAsync(cancellationToken);
+        var evaluationSignalIds = evaluationRows.Where(value => value.SignalId != null)
+            .Select(value => value.SignalId!.Value).ToArray();
+        var tradeResults = await dbContext.PaperTradeResults.AsNoTracking()
+            .Where(value => evaluationSignalIds.Contains(value.SignalId))
+            .ToDictionaryAsync(value => value.SignalId, cancellationToken);
+        var evaluations = evaluationRows.Select(value => new WorkspaceStrategyEvaluation(
+            value.Id,
+            value.CandleTimeUtc,
+            $"{value.StrategyCode} {value.StrategyVersion}",
+            value.Outcome,
+            value.CurrentPrice,
+            value.OpeningRangeHigh,
+            value.OpeningRangeLow,
+            value.Vwap,
+            value.FastEma,
+            value.SlowEma,
+            value.AtrPercent,
+            value.RelativeFuturesVolume,
+            value.Regime.ToString(),
+            value.RegimeBias?.ToString(),
+            value.RegimeConfidence,
+            ParseRejectionReasons(value.FailedConditionsJson),
+            value.SignalId,
+            value.OptionSymbol,
+            value.OptionType,
+            value.OptionExpiry,
+            value.OptionStrike,
+            value.OptionPremium,
+            value.SignalId is { } signalId && tradeResults.TryGetValue(signalId, out var result)
+                ? result.RealisedPnl : null)).ToArray();
+
         var message = !options.Enabled
             ? "Live Nifty ingestion is disabled by server configuration."
             : state.Message;
@@ -178,6 +216,7 @@ internal sealed class EfTradingWorkspaceReader(
             message,
             closed,
             overlays,
+            evaluations,
             paperAutomation.GetCurrent());
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
@@ -191,6 +230,7 @@ internal sealed class EfTradingWorkspaceReader(
             state.LastMarketTimestampUtc,
             now,
             detail,
+            [],
             [],
             [],
             paperAutomation.GetCurrent());

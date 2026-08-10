@@ -316,6 +316,44 @@
             @if (killSwitchMessage) { <p>{{ killSwitchMessage }}</p> }
           </article>
         </section>
+
+        <section class="evaluation-panel">
+          <div class="panel-heading">
+            <div><span>RESEARCH AUDIT</span><strong>Every completed strategy evaluation</strong></div>
+          </div>
+          @if (view.evaluations.length) {
+            <div class="evaluation-table" role="table" aria-label="Strategy evaluation history">
+              @for (evaluation of view.evaluations; track evaluation.evaluationId) {
+                <article class="evaluation-row" role="row">
+                  <div><span>Time (IST)</span><strong>{{ evaluation.candleTimeUtc | date: 'HH:mm' : 'Asia/Kolkata' }}</strong></div>
+                  <div><span>Outcome</span><strong>{{ evaluation.outcome }}</strong></div>
+                  <div><span>Regime confidence</span><strong>{{ evaluation.regimeConfidence | percent: '1.0-0' }}</strong></div>
+                  <div><span>Futures relative volume</span><strong>{{ evaluation.relativeFuturesVolume | number: '1.2-2' }}</strong></div>
+                  <div><span>Regime / bias</span><strong>{{ evaluation.regime }} / {{ evaluation.regimeBias || 'None' }}</strong></div>
+                  <div><span>Nifty / VWAP</span><strong>{{ evaluation.currentPrice | number: '1.2-2' }} / {{ evaluation.vwap | number: '1.2-2' }}</strong></div>
+                  <div><span>EMA 9 / EMA 21</span><strong>{{ evaluation.fastEma | number: '1.2-2' }} / {{ evaluation.slowEma | number: '1.2-2' }}</strong></div>
+                  <div><span>Opening range</span><strong>{{ evaluation.openingRangeLow | number: '1.2-2' }}–{{ evaluation.openingRangeHigh | number: '1.2-2' }}</strong></div>
+                  @if (evaluation.optionSymbol) {
+                    <div><span>Proposed option</span><strong>{{ evaluation.optionSymbol }} @ {{ evaluation.optionPremium | number: '1.2-2' }}</strong></div>
+                  }
+                  @if (evaluation.realisedPnl !== null) {
+                    <div><span>Realised P&amp;L</span><strong [class.good]="evaluation.realisedPnl >= 0" [class.bad]="evaluation.realisedPnl < 0">{{ evaluation.realisedPnl | number: '1.2-2' }}</strong></div>
+                  }
+                  @if (evaluation.failedConditions.length) {
+                    <div class="evaluation-reasons">
+                      <span>Why no trade was taken</span>
+                      @for (reason of evaluation.failedConditions; track reason) {
+                        <strong class="bad">{{ reason }}</strong>
+                      }
+                    </div>
+                  }
+                </article>
+              }
+            </div>
+          } @else {
+            <p class="empty-copy">No completed strategy evaluations have been recorded for this session yet.</p>
+          }
+        </section>
       }
       <router-outlet />
     }

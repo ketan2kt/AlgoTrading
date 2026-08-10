@@ -25,6 +25,8 @@ public sealed class TradingDbContext(
     public DbSet<StrategyVersion> StrategyVersions => Set<StrategyVersion>();
     public DbSet<StrategyConfiguration> StrategyConfigurations => Set<StrategyConfiguration>();
     public DbSet<Signal> Signals => Set<Signal>();
+    public DbSet<StrategyEvaluation> StrategyEvaluations => Set<StrategyEvaluation>();
+    public DbSet<PaperTradeResult> PaperTradeResults => Set<PaperTradeResult>();
     public DbSet<RiskDecision> RiskDecisions => Set<RiskDecision>();
     public DbSet<TradingOrder> Orders => Set<TradingOrder>();
     public DbSet<OrderEvent> OrderEvents => Set<OrderEvent>();
@@ -238,6 +240,42 @@ public sealed class TradingDbContext(
             entity.Property(value => value.Fingerprint).HasMaxLength(128);
             entity.Property(value => value.ReasonsJson).HasColumnType("jsonb");
             entity.HasIndex(value => value.Fingerprint).IsUnique();
+        });
+        builder.Entity<StrategyEvaluation>(entity =>
+        {
+            ConfigureAppendOnly(entity, "strategy_evaluations");
+            entity.Property(value => value.StrategyCode).HasMaxLength(80);
+            entity.Property(value => value.StrategyVersion).HasMaxLength(40);
+            entity.Property(value => value.Outcome).HasMaxLength(80);
+            entity.Property(value => value.FailedConditionsJson).HasColumnType("jsonb");
+            entity.Property(value => value.OptionSymbol).HasMaxLength(120);
+            entity.Property(value => value.OptionType).HasMaxLength(40);
+            entity.Property(value => value.CurrentPrice).HasPrecision(18, 4);
+            entity.Property(value => value.OpeningRangeHigh).HasPrecision(18, 4);
+            entity.Property(value => value.OpeningRangeLow).HasPrecision(18, 4);
+            entity.Property(value => value.Vwap).HasPrecision(18, 4);
+            entity.Property(value => value.FastEma).HasPrecision(18, 4);
+            entity.Property(value => value.SlowEma).HasPrecision(18, 4);
+            entity.Property(value => value.AtrPercent).HasPrecision(12, 6);
+            entity.Property(value => value.RelativeFuturesVolume).HasPrecision(12, 6);
+            entity.Property(value => value.RegimeConfidence).HasPrecision(7, 6);
+            entity.Property(value => value.OptionStrike).HasPrecision(18, 4);
+            entity.Property(value => value.OptionPremium).HasPrecision(18, 4);
+            entity.HasIndex(value => new { value.StrategyCode, value.InstrumentId, value.CandleTimeUtc }).IsUnique();
+            entity.HasIndex(value => value.RecordedAtUtc);
+        });
+        builder.Entity<PaperTradeResult>(entity =>
+        {
+            ConfigureAppendOnly(entity, "paper_trade_results");
+            entity.Property(value => value.TradingSymbol).HasMaxLength(120);
+            entity.Property(value => value.ExitReason).HasMaxLength(80);
+            entity.Property(value => value.EntryPrice).HasPrecision(18, 4);
+            entity.Property(value => value.ExitPrice).HasPrecision(18, 4);
+            entity.Property(value => value.GrossPnl).HasPrecision(18, 2);
+            entity.Property(value => value.EstimatedCosts).HasPrecision(18, 2);
+            entity.Property(value => value.RealisedPnl).HasPrecision(18, 2);
+            entity.HasIndex(value => value.SignalId).IsUnique();
+            entity.HasIndex(value => value.ClosedAtUtc);
         });
         builder.Entity<RiskDecision>(entity =>
         {

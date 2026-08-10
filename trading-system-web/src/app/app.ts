@@ -1,4 +1,4 @@
-import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
+import { AsyncPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
@@ -13,7 +13,7 @@ import { PaperRiskService } from './paper-risk.service';
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, FormsModule, NiftyChartComponent, RouterOutlet],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

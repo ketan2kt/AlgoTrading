@@ -19,9 +19,14 @@ public sealed record StrategyEvaluationContext(
     bool RegimeTradingPermitted, bool DataTradingPermitted,
     DateTimeOffset? LastSignalAtUtc, int TradesToday);
 
+public sealed record StrategyEvaluationResult(
+    StrategySignal? Signal,
+    IReadOnlyList<string> FailedConditions);
+
 public interface ITradingStrategy
 {
     string StrategyId { get; }
     string Version { get; }
     StrategySignal? Evaluate(StrategyEvaluationContext context);
+    StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context);
 }

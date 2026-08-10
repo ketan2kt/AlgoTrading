@@ -406,6 +406,35 @@ article > span,
   color: #91a39a;
   line-height: 1.55;
 }
+.evaluation-panel {
+  margin-top: 1rem;
+  overflow: hidden;
+}
+.evaluation-table {
+  display: grid;
+}
+.evaluation-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  padding: 1rem 1.3rem;
+  border-top: 1px solid #1f2d27;
+}
+.evaluation-row > div {
+  display: grid;
+  gap: 0.35rem;
+}
+.evaluation-row span {
+  color: #7f9d8e;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.evaluation-reasons {
+  grid-column: 1 / -1;
+  padding-top: 0.75rem;
+  border-top: 1px solid #3c2929;
+}
 @media (max-width: 900px) {
   .login-layout,
   .detail-grid {

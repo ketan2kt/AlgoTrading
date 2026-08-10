@@ -45,6 +45,32 @@ public sealed class OpeningRangeBreakoutStrategyTests
     }
 
     [Fact]
+    public void DetailedEvaluationExplainsEveryFailedStrategyGate()
+    {
+        var result = strategy.EvaluateDetailed(Context() with
+        {
+            RegimeTradingPermitted = false,
+            RegimeConfidence = 0.40m,
+            RelativeVolume = 0.75m
+        });
+
+        Assert.Null(result.Signal);
+        Assert.Contains(result.FailedConditions, value => value.Contains("regime does not permit"));
+        Assert.Contains(result.FailedConditions, value => value.Contains("confidence 40%"));
+        Assert.Contains(result.FailedConditions, value => value.Contains("volume 0.75"));
+    }
+
+    [Fact]
+    public void DetailedEvaluationExplainsMissingChartPattern()
+    {
+        var result = strategy.EvaluateDetailed(Context() with { CurrentPrice = 100m });
+
+        Assert.Null(result.Signal);
+        Assert.Single(result.FailedConditions);
+        Assert.Contains("opening-range breakout", result.FailedConditions[0]);
+    }
+
+    [Fact]
     public void PreliminaryRiskSizesByRiskAndRejectsExpiredOrKillSwitch()
     {
         var signal = strategy.Evaluate(Context())!;

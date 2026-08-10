@@ -18,16 +18,24 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
     public string StrategyId => "opening-range-breakout";
     public string Version => "1.0.0";
 
-    public StrategySignal? Evaluate(StrategyEvaluationContext context)
+    public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
+
+    public StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (!context.RegimeTradingPermitted || !context.DataTradingPermitted ||
-            context.RegimeConfidence < options.MinimumRegimeConfidence ||
-            context.RelativeVolume < options.MinimumRelativeVolume ||
-            context.TradesToday >= options.MaximumTradesPerDay ||
-            context.LastSignalAtUtc is not null &&
+        var failed = new List<string>();
+        if (!context.RegimeTradingPermitted) failed.Add("Market regime does not permit trading.");
+        if (!context.DataTradingPermitted) failed.Add("Market data does not permit trading.");
+        if (context.RegimeConfidence < options.MinimumRegimeConfidence)
+            failed.Add($"Regime confidence {context.RegimeConfidence:P0} is below {options.MinimumRegimeConfidence:P0}.");
+        if (context.RelativeVolume < options.MinimumRelativeVolume)
+            failed.Add($"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}.");
+        if (context.TradesToday >= options.MaximumTradesPerDay)
+            failed.Add("Strategy daily trade limit reached.");
+        if (context.LastSignalAtUtc is not null &&
             context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes(options.CooldownMinutes))
-            return null;
+            failed.Add($"Strategy cooldown of {options.CooldownMinutes} minutes is active.");
+        if (failed.Count > 0) return new(null, failed);
         if (context.OpeningRangeHigh <= context.OpeningRangeLow || context.CurrentPrice <= 0)
             throw new ArgumentException("Opening-range context is invalid.", nameof(context));
 
@@ -42,15 +50,17 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
                 MarketRegime.StrongBearishTrend or MarketRegime.WeakBearishTrend or
                 MarketRegime.GapDownContinuation or MarketRegime.GapUpRejection or
                 MarketRegime.HighVolatilityExpansion;
-        if (!bullish && !bearish) return null;
+        if (!bullish && !bearish)
+            return new(null,
+                ["Price and regime direction do not form a confirmed opening-range breakout."]);
 
         var direction = bullish ? Direction.Buy : Direction.Sell;
         var entry = context.CurrentPrice;
         var stop = bullish ? context.OpeningRangeLow : context.OpeningRangeHigh;
         var risk = Math.Abs(entry - stop);
-        if (risk <= 0) return null;
+        if (risk <= 0) return new(null, ["The proposed stop does not define positive risk."]);
         var target = bullish ? entry + risk * options.RewardToRiskRatio : entry - risk * options.RewardToRiskRatio;
-        return new StrategySignal(Guid.NewGuid(), StrategyId, Version, context.InstrumentId,
+        var signal = new StrategySignal(Guid.NewGuid(), StrategyId, Version, context.InstrumentId,
             direction, SignalEntryType.Market, entry, stop, target, options.RewardToRiskRatio,
             Math.Clamp((context.RegimeConfidence + Math.Min(context.RelativeVolume / 3m, 1m)) / 2m, 0m, 1m),
             context.Regime,
@@ -58,5 +68,6 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
             ["Price returns inside opening range.", "Market-data or regime permission is withdrawn."],
             context.ObservedAtUtc.ToUniversalTime(),
             context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime());
+        return new(signal, []);
     }
 }

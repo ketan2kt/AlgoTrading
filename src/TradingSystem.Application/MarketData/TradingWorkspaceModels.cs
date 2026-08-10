@@ -37,6 +37,31 @@ public sealed record WorkspaceTradeOverlay(
     decimal? ExecutionCapitalExposure,
     IReadOnlyList<string> RejectionReasons);
 
+public sealed record WorkspaceStrategyEvaluation(
+    Guid EvaluationId,
+    DateTimeOffset CandleTimeUtc,
+    string Strategy,
+    string Outcome,
+    decimal CurrentPrice,
+    decimal OpeningRangeHigh,
+    decimal OpeningRangeLow,
+    decimal Vwap,
+    decimal FastEma,
+    decimal SlowEma,
+    decimal AtrPercent,
+    decimal RelativeFuturesVolume,
+    string Regime,
+    string? RegimeBias,
+    decimal RegimeConfidence,
+    IReadOnlyList<string> FailedConditions,
+    Guid? SignalId,
+    string? OptionSymbol,
+    string? OptionType,
+    DateOnly? OptionExpiry,
+    decimal? OptionStrike,
+    decimal? OptionPremium,
+    decimal? RealisedPnl);
+
 public sealed record TradingWorkspaceSnapshot(
     string Instrument,
     string Exchange,
@@ -50,6 +75,7 @@ public sealed record TradingWorkspaceSnapshot(
     string? StatusMessage,
     IReadOnlyList<WorkspaceCandle> Candles,
     IReadOnlyList<WorkspaceTradeOverlay> Overlays,
+    IReadOnlyList<WorkspaceStrategyEvaluation> Evaluations,
     PaperAutomationSnapshot PaperAutomation);
 
 public interface ITradingWorkspaceReader
