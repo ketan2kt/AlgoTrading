@@ -21,6 +21,7 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private DateOnly? bootstrappedSession;
+    private DateTimeOffset? lastFuturesHistoryRefreshUtc;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -68,30 +69,40 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
             .FirstOrDefaultAsync(cancellationToken);
         if (index?.GrowwSymbol is null || future?.GrowwSymbol is null) return;
 
-        if (bootstrappedSession != session)
+        var sessionStartIndia = indiaNow.Date.AddHours(9).AddMinutes(15);
+        var sessionStart = new DateTimeOffset(sessionStartIndia,
+            IndiaTimeZone.GetUtcOffset(sessionStartIndia)).ToUniversalTime();
+        var historyRefreshed = false;
+        if (now > sessionStart &&
+            (lastFuturesHistoryRefreshUtc is null ||
+             now - lastFuturesHistoryRefreshUtc >= TimeSpan.FromSeconds(30)))
         {
             var importer = scope.ServiceProvider.GetRequiredService<GrowwHistoricalCandleImporter>();
-            var sessionStartIndia = indiaNow.Date.AddHours(9).AddMinutes(15);
-            var sessionStart = new DateTimeOffset(sessionStartIndia,
-                IndiaTimeZone.GetUtcOffset(sessionStartIndia)).ToUniversalTime();
             var futureHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "FNO",
                 future.GrowwSymbol, sessionStart, now, "1minute"), cancellationToken);
             await importer.ImportAsync(future, futureHistory, now, cancellationToken);
+            lastFuturesHistoryRefreshUtc = now;
+            historyRefreshed = true;
 
-            var startIndia = indiaNow.Date.AddDays(-7).AddHours(9).AddMinutes(15);
-            var start = new DateTimeOffset(startIndia, IndiaTimeZone.GetUtcOffset(startIndia)).ToUniversalTime();
-            var indexHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "CASH",
-                index.GrowwSymbol, start, now, "1minute"), cancellationToken);
-            await importer.ImportAsync(index, indexHistory, now, cancellationToken);
-            bootstrappedSession = session;
+            if (bootstrappedSession != session)
+            {
+                var startIndia = indiaNow.Date.AddDays(-7).AddHours(9).AddMinutes(15);
+                var start = new DateTimeOffset(startIndia,
+                    IndiaTimeZone.GetUtcOffset(startIndia)).ToUniversalTime();
+                var indexHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "CASH",
+                    index.GrowwSymbol, start, now, "1minute"), cancellationToken);
+                await importer.ImportAsync(index, indexHistory, now, cancellationToken);
+                bootstrappedSession = session;
+            }
         }
 
         var quote = await gateway.GetQuoteAsync(new("NSE", "FNO", future.TradingSymbol),
             cancellationToken);
         var observation = normalizer.Normalize(future.Id, quote, now);
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
-        await processor.ProcessAsync(observation, cancellationToken);
-        feedHealth.RecordSuccess(now);
+        var result = await processor.ProcessAsync(observation, cancellationToken);
+        if (historyRefreshed || result.Validation.Accepted)
+            feedHealth.RecordSuccess(now);
     }
 
     private static bool IsMarketWindow(DateTimeOffset now)
