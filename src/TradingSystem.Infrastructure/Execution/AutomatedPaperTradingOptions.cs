@@ -18,4 +18,5 @@ public sealed class AutomatedPaperTradingOptions
     public decimal OptionStopLossPercent { get; init; } = 10m;
     public decimal OptionRewardToRiskRatio { get; init; } = 2m;
     public int MaximumOptionLots { get; init; } = 5;
+    public bool PermissivePaperExecution { get; init; } = true;
 }

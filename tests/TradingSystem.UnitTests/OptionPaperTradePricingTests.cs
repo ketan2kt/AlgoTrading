@@ -38,6 +38,32 @@ public sealed class OptionPaperTradePricingTests
         Assert.Equal(121.25m, result.Target);
     }
 
+    [Theory]
+    [InlineData(100, 101, 99, 101)]
+    [InlineData(100, 0, 99, 100)]
+    [InlineData(0, 0, 99, 99)]
+    public void PermissiveSimulationUsesBestPositiveAvailablePrice(
+        decimal last, decimal offer, decimal bid, decimal expected)
+    {
+        var quote = new GrowwQuote(last, null, bid, 0, offer, 0, 0, 0, 0);
+
+        var result = OptionPaperTradePricing.ForPermissiveSimulation(quote);
+
+        Assert.True(result.Approved);
+        Assert.Equal(expected, result.EntryPrice);
+    }
+
+    [Fact]
+    public void PermissiveSimulationRejectsOnlyWhenNoPositivePriceExists()
+    {
+        var quote = new GrowwQuote(0, null, 0, 0, 0, 0, null, null, null);
+
+        var result = OptionPaperTradePricing.ForPermissiveSimulation(quote);
+
+        Assert.False(result.Approved);
+        Assert.Single(result.RejectionReasons);
+    }
+
     private static GrowwQuote Quote(decimal bid, decimal offer, decimal volume, decimal oi) =>
         new((bid + offer) / 2m, null, bid, 10, offer, 10, volume, oi, 0m);
 }

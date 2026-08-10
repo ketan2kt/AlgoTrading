@@ -11,6 +11,21 @@ public sealed record OptionQuoteValidationResult(
 
 public static class OptionPaperTradePricing
 {
+    public static OptionQuoteValidationResult ForPermissiveSimulation(GrowwQuote quote)
+    {
+        ArgumentNullException.ThrowIfNull(quote);
+        var entryPrice = quote.OfferPrice is > 0 ? quote.OfferPrice.Value
+            : quote.LastPrice > 0 ? quote.LastPrice
+            : quote.BidPrice is > 0 ? quote.BidPrice.Value
+            : 0m;
+        var exitPrice = quote.BidPrice is > 0 ? quote.BidPrice.Value : entryPrice;
+        var reasons = entryPrice > 0
+            ? Array.Empty<string>()
+            : ["A positive option premium is required for paper execution."];
+
+        return new(reasons.Length == 0, entryPrice, exitPrice, 0m, reasons);
+    }
+
     public static OptionQuoteValidationResult Validate(
         GrowwQuote quote,
         decimal maximumSpreadPercent,

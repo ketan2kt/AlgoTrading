@@ -332,9 +332,11 @@ internal sealed partial class AutomatedPaperTradingService(
         var growwGateway = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
         var quote = await growwGateway.GetQuoteAsync(new GrowwQuoteRequest(
             "NSE", "FNO", selectedOption.TradingSymbol), cancellationToken);
-        var pricing = OptionPaperTradePricing.Validate(quote,
-            options.Value.MaximumOptionSpreadPercent, options.Value.MaximumOptionPremium,
-            options.Value.MinimumOptionVolume, options.Value.MinimumOptionOpenInterest);
+        var pricing = options.Value.PermissivePaperExecution
+            ? OptionPaperTradePricing.ForPermissiveSimulation(quote)
+            : OptionPaperTradePricing.Validate(quote,
+                options.Value.MaximumOptionSpreadPercent, options.Value.MaximumOptionPremium,
+                options.Value.MinimumOptionVolume, options.Value.MinimumOptionOpenInterest);
         if (!pricing.Approved)
         {
             var rejected = new RiskDecisionResult(false, 0, 0m, 0m,
@@ -374,11 +376,17 @@ internal sealed partial class AutomatedPaperTradingService(
             selectedOption.StrikePrice, selectedOption.LotSize,
             options.Value.MaximumOptionLots, pricing.EntryPrice,
             protective.StopLoss, protective.Target);
-        var riskEngine = scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>();
         var maximumOptionQuantity = checked(selectedOption.LotSize * options.Value.MaximumOptionLots);
-        var decision = riskEngine.Evaluate(executionSignal, new RiskContext(now,
-            tradeState.TradesToday, 0, tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
-            killSwitchActive, true, fresh), selectedOption.LotSize, maximumOptionQuantity);
+        var perUnitRisk = Math.Abs(executionSignal.ProposedEntry - executionSignal.ProposedStopLoss);
+        var decision = options.Value.PermissivePaperExecution
+            ? new RiskDecisionResult(true, maximumOptionQuantity,
+                executionSignal.ProposedStopLoss, executionSignal.ProposedTarget, [],
+                maximumOptionQuantity * perUnitRisk,
+                maximumOptionQuantity * executionSignal.ProposedEntry)
+            : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
+                executionSignal, new RiskContext(now, tradeState.TradesToday, 0,
+                    tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
+                    killSwitchActive, true, fresh), selectedOption.LotSize, maximumOptionQuantity);
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
             optionProposal);
         if (!decision.Approved)
