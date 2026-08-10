@@ -24,8 +24,15 @@ export interface WorkspaceTradeOverlay {
   executionInstrumentType: string | null;
   executionExpiry: string | null;
   executionStrike: number | null;
+  executionLotSize: number | null;
+  executionMaximumLots: number | null;
+  executionProposedEntry: number | null;
+  executionOneLotRisk: number | null;
   executionStopLoss: number | null;
   executionTarget: number | null;
+  executionRiskAmount: number | null;
+  executionCapitalExposure: number | null;
+  rejectionReasons: string[];
 }
 
 export interface TradingWorkspaceSnapshot {

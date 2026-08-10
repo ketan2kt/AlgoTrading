@@ -80,6 +80,52 @@ public sealed class OpeningRangeBreakoutStrategyTests
     }
 
     [Fact]
+    public void PreliminaryRiskCapsPaperOptionPositionAtFiveLotsAndFiveThousandRisk()
+    {
+        var signal = strategy.Evaluate(Context())! with
+        {
+            ProposedEntry = 100m,
+            ProposedStopLoss = 90m,
+            ProposedTarget = 120m
+        };
+        var engine = new PreliminaryRiskEngine(new()
+        {
+            MaximumRiskPerTrade = 5000m,
+            MaximumQuantity = 1000
+        });
+
+        var decision = engine.Evaluate(signal, RiskContext(), quantityStep: 65,
+            maximumQuantity: 65 * 5);
+
+        Assert.True(decision.Approved);
+        Assert.Equal(325, decision.ApprovedQuantity);
+        Assert.Equal(3250m, decision.RiskAmount);
+    }
+
+    [Fact]
+    public void PreliminaryRiskReducesLotsRatherThanExceedFiveThousandRisk()
+    {
+        var signal = strategy.Evaluate(Context())! with
+        {
+            ProposedEntry = 200m,
+            ProposedStopLoss = 180m,
+            ProposedTarget = 240m
+        };
+        var engine = new PreliminaryRiskEngine(new()
+        {
+            MaximumRiskPerTrade = 5000m,
+            MaximumQuantity = 1000
+        });
+
+        var decision = engine.Evaluate(signal, RiskContext(), quantityStep: 65,
+            maximumQuantity: 65 * 5);
+
+        Assert.True(decision.Approved);
+        Assert.Equal(195, decision.ApprovedQuantity);
+        Assert.Equal(3900m, decision.RiskAmount);
+    }
+
+    [Fact]
     public async Task CompletePaperLifecycleEntersPartiallyFillsExitsAndReports()
     {
         await using var provider = CreateProvider();
@@ -165,7 +211,8 @@ public sealed class OpeningRangeBreakoutStrategyTests
         public Task PersistRiskDecisionAsync(
             Guid signalId,
             RiskDecisionResult decision,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PaperOptionExecutionProposal? optionProposal = null)
         {
             DecisionWrites++;
             return Task.CompletedTask;

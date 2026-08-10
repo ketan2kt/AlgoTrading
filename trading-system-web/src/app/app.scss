@@ -383,6 +383,11 @@ article > span,
   display: grid;
   gap: 0.35rem;
 }
+.signal-row .rejection-reasons {
+  grid-column: 1 / -1;
+  padding: 0.8rem 0;
+  border-top: 1px solid #3c2929;
+}
 .empty-copy {
   padding: 1.2rem 1.3rem;
   color: #82948b;

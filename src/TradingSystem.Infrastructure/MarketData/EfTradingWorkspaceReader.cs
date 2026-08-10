@@ -129,7 +129,8 @@ internal sealed class EfTradingWorkspaceReader(
             orders.TryGetValue($"{value.Id:N}-ENTRY", out var order);
             var executionInstrument = order is null ? null :
                 executionInstruments.GetValueOrDefault(order.InstrumentId);
-            var protective = ParseProtectivePrices(decision?.SnapshotJson);
+            var execution = ParseExecutionDecision(decision?.SnapshotJson);
+            var rejectionReasons = ParseRejectionReasons(decision?.ReasonsJson);
             return new WorkspaceTradeOverlay(
                 value.Id,
                 "Opening Range Breakout 1.0.0",
@@ -143,12 +144,22 @@ internal sealed class EfTradingWorkspaceReader(
                     : decision.Approved ? "RiskApproved" : "RiskRejected",
                 order?.Quantity ?? decision?.ApprovedQuantity,
                 order?.FillPrice,
-                executionInstrument?.TradingSymbol,
-                executionInstrument?.Type.ToString(),
-                executionInstrument?.ExpiryDate,
-                executionInstrument?.StrikePrice,
-                protective.StopLoss,
-                protective.Target);
+                executionInstrument?.TradingSymbol ?? execution.TradingSymbol,
+                executionInstrument?.Type.ToString() ?? execution.InstrumentType,
+                executionInstrument?.ExpiryDate ?? execution.ExpiryDate,
+                executionInstrument?.StrikePrice ?? execution.StrikePrice,
+                executionInstrument?.LotSize ?? execution.LotSize,
+                execution.MaximumLots,
+                execution.ProposedEntry,
+                execution.ProposedEntry is { } proposedEntry && execution.StopLoss is { } proposedStop &&
+                (executionInstrument?.LotSize ?? execution.LotSize) is { } executionLotSize
+                    ? Math.Abs(proposedEntry - proposedStop) * executionLotSize
+                    : null,
+                execution.StopLoss,
+                execution.Target,
+                execution.RiskAmount,
+                execution.CapitalExposure,
+                rejectionReasons);
         }).ToArray();
 
         var message = !options.Enabled
@@ -207,19 +218,61 @@ internal sealed class EfTradingWorkspaceReader(
         return instrumentId is null ? null : new(instrumentId.Value, quantity, fillPrice);
     }
 
-    private static (decimal? StopLoss, decimal? Target) ParseProtectivePrices(string? snapshotJson)
+    private static ExecutionDecisionProjection ParseExecutionDecision(string? snapshotJson)
     {
-        if (string.IsNullOrWhiteSpace(snapshotJson)) return (null, null);
+        if (string.IsNullOrWhiteSpace(snapshotJson)) return new();
         using var document = JsonDocument.Parse(snapshotJson);
         var root = document.RootElement;
         var stop = root.TryGetProperty("finalStopLoss", out var stopElement) &&
                    stopElement.TryGetDecimal(out var parsedStop) ? parsedStop : (decimal?)null;
         var target = root.TryGetProperty("finalTarget", out var targetElement) &&
                      targetElement.TryGetDecimal(out var parsedTarget) ? parsedTarget : (decimal?)null;
-        return (stop, target);
+        var riskAmount = root.TryGetProperty("riskAmount", out var riskElement) &&
+                         riskElement.TryGetDecimal(out var parsedRisk) ? parsedRisk : (decimal?)null;
+        var exposure = root.TryGetProperty("capitalExposure", out var exposureElement) &&
+                       exposureElement.TryGetDecimal(out var parsedExposure) ? parsedExposure : (decimal?)null;
+        if (!root.TryGetProperty("optionProposal", out var proposal) ||
+            proposal.ValueKind != JsonValueKind.Object)
+            return new(StopLoss: stop, Target: target, RiskAmount: riskAmount,
+                CapitalExposure: exposure);
+        return new(
+            proposal.TryGetProperty("tradingSymbol", out var symbol) ? symbol.GetString() : null,
+            proposal.TryGetProperty("instrumentType", out var type) ? type.GetString() : null,
+            proposal.TryGetProperty("expiryDate", out var expiry) &&
+            DateOnly.TryParse(expiry.GetString(), out var parsedExpiry) ? parsedExpiry : null,
+            proposal.TryGetProperty("strikePrice", out var strike) && strike.TryGetDecimal(out var parsedStrike)
+                ? parsedStrike : null,
+            proposal.TryGetProperty("lotSize", out var lot) && lot.TryGetInt32(out var parsedLot)
+                ? parsedLot : null,
+            proposal.TryGetProperty("maximumLots", out var maximumLots) &&
+            maximumLots.TryGetInt32(out var parsedMaximumLots) ? parsedMaximumLots : null,
+            proposal.TryGetProperty("proposedEntry", out var entry) && entry.TryGetDecimal(out var parsedEntry)
+                ? parsedEntry : null,
+            stop,
+            target,
+            riskAmount,
+            exposure);
+    }
+
+    private static string[] ParseRejectionReasons(string? reasonsJson)
+    {
+        if (string.IsNullOrWhiteSpace(reasonsJson)) return [];
+        return JsonSerializer.Deserialize<string[]>(reasonsJson) ?? [];
     }
 
     private sealed record PaperOrderProjection(Guid InstrumentId, int? Quantity, decimal? FillPrice);
+    private sealed record ExecutionDecisionProjection(
+        string? TradingSymbol = null,
+        string? InstrumentType = null,
+        DateOnly? ExpiryDate = null,
+        decimal? StrikePrice = null,
+        int? LotSize = null,
+        int? MaximumLots = null,
+        decimal? ProposedEntry = null,
+        decimal? StopLoss = null,
+        decimal? Target = null,
+        decimal? RiskAmount = null,
+        decimal? CapitalExposure = null);
 
     private static TimeZoneInfo FindIndiaTimeZone()
     {

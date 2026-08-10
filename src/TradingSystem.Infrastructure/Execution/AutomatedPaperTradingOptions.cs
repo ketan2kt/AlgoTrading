@@ -17,4 +17,5 @@ public sealed class AutomatedPaperTradingOptions
     public decimal MinimumOptionOpenInterest { get; init; } = 100m;
     public decimal OptionStopLossPercent { get; init; } = 10m;
     public decimal OptionRewardToRiskRatio { get; init; } = 2m;
+    public int MaximumOptionLots { get; init; } = 5;
 }

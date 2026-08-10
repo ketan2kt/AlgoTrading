@@ -79,7 +79,8 @@ internal sealed class EfPaperLifecycleAuditStore(
     public async Task PersistRiskDecisionAsync(
         Guid signalId,
         RiskDecisionResult decision,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PaperOptionExecutionProposal? optionProposal = null)
     {
         if (await dbContext.RiskDecisions.AnyAsync(
                 value => value.SignalId == signalId,
@@ -99,7 +100,8 @@ internal sealed class EfPaperLifecycleAuditStore(
                 decision.FinalStopLoss,
                 decision.FinalTarget,
                 decision.RiskAmount,
-                decision.CapitalExposure
+                decision.CapitalExposure,
+                optionProposal
             }, JsonOptions),
             timeProvider.GetUtcNow()));
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -1,5 +1,10 @@
 # Automated paper trading
 
+Paper option positions are limited to five whole broker-defined lots and ₹5,000 risk at the
+protective stop per trade. The synchronized Groww instrument master is authoritative for lot size;
+the application does not hardcode a Nifty quantity. Position sizing reduces the number of lots when
+five lots would exceed the risk cap, and rejects the trade when even one lot cannot fit safely.
+
 ## Scope
 
 This Phase 7 increment joins the existing live Groww Nifty ingestion, deterministic market-regime engine, Opening Range Breakout strategy, conservative risk engine, durable paper broker, and dashboard. It never calls a Groww order endpoint. `PaperTrading:Automation:Enabled` defaults to `false`; promotion requires an explicit configuration change after review.

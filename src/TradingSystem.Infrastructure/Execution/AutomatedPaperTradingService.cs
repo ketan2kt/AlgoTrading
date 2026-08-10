@@ -187,7 +187,8 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
         var confirmationFuture = await db.Instruments.AsNoTracking().Where(value =>
-                value.Exchange == "NSE" && value.Type == InstrumentType.Future && value.IsActive &&
+                value.Exchange == "NSE" && value.Type == InstrumentType.Future &&
+                value.TradingSymbol.StartsWith("NIFTY") && value.IsActive &&
                 value.ExpiryDate >= sessionDate)
             .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
             .FirstOrDefaultAsync(cancellationToken);
@@ -338,7 +339,14 @@ internal sealed partial class AutomatedPaperTradingService(
         {
             var rejected = new RiskDecisionResult(false, 0, 0m, 0m,
                 pricing.RejectionReasons, 0m, 0m);
-            await audit.PersistRiskDecisionAsync(signal.SignalId, rejected, cancellationToken);
+            var rejectedProposal = new PaperOptionExecutionProposal(
+                selectedOption.InstrumentId, selectedOption.TradingSymbol,
+                selectedOption.Type.ToString(), selectedOption.ExpiryDate,
+                selectedOption.StrikePrice, selectedOption.LotSize,
+                options.Value.MaximumOptionLots, quote.OfferPrice ?? quote.LastPrice,
+                0m, 0m);
+            await audit.PersistRiskDecisionAsync(signal.SignalId, rejected, cancellationToken,
+                rejectedProposal);
             state.Record("LiquidityRejected", false,
                 $"{selectedOption.TradingSymbol} was rejected: {string.Join(" ", pricing.RejectionReasons)}",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -360,11 +368,19 @@ internal sealed partial class AutomatedPaperTradingService(
             ProposedTarget = protective.Target,
             RewardToRiskRatio = options.Value.OptionRewardToRiskRatio
         };
+        var optionProposal = new PaperOptionExecutionProposal(
+            selectedOption.InstrumentId, selectedOption.TradingSymbol,
+            selectedOption.Type.ToString(), selectedOption.ExpiryDate,
+            selectedOption.StrikePrice, selectedOption.LotSize,
+            options.Value.MaximumOptionLots, pricing.EntryPrice,
+            protective.StopLoss, protective.Target);
         var riskEngine = scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>();
+        var maximumOptionQuantity = checked(selectedOption.LotSize * options.Value.MaximumOptionLots);
         var decision = riskEngine.Evaluate(executionSignal, new RiskContext(now,
             tradeState.TradesToday, 0, tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
-            killSwitchActive, true, fresh), selectedOption.LotSize);
-        await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken);
+            killSwitchActive, true, fresh), selectedOption.LotSize, maximumOptionQuantity);
+        await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
+            optionProposal);
         if (!decision.Approved)
         {
             state.Record("RiskRejected", false, string.Join(" ", decision.RejectionReasons),
@@ -514,7 +530,8 @@ internal sealed partial class AutomatedPaperTradingService(
             cancellationToken);
         var date = DateOnly.FromDateTime(indiaNow.Date);
         var future = await db.Instruments.AsNoTracking().Where(value =>
-                value.Exchange == "NSE" && value.Type == InstrumentType.Future && value.IsActive &&
+                value.Exchange == "NSE" && value.Type == InstrumentType.Future &&
+                value.TradingSymbol.StartsWith("NIFTY") && value.IsActive &&
                 value.ExpiryDate >= date)
             .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
         var futureCount = future is null ? 0 : await db.Candles.AsNoTracking().CountAsync(value =>
@@ -531,14 +548,18 @@ internal sealed partial class AutomatedPaperTradingService(
         var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
         var start = ParseTime(options.Value.OpeningRangeEnd);
         var cutoff = ParseTime(options.Value.EntryCutoff);
+        var futuresDetail = future is null
+            ? "Nifty futures instrument not synchronised"
+            : localTime < new TimeOnly(9, 15)
+                ? $"Market opens at 09:15 IST; {future.TradingSymbol} confirmation will then build to 21 candles"
+                : $"{future.TradingSymbol}: {futureCount}/21 candles";
         state.RecordReadiness([
             new("index", "Nifty spot feed", indexCount > 0,
                 indexCount > 0 ? $"{indexCount} completed candles" : "Waiting for spot candles"),
             new("history", "Previous-session context", priorClose,
                 priorClose ? "Previous close available" : "Historical backfill pending"),
             new("future", "Nifty futures confirmation", futureCount >= 21,
-                future is null ? "Futures instrument not synchronised" :
-                $"{future.TradingSymbol}: {futureCount}/21 candles"),
+                futuresDetail),
             new("freshness", "Live data freshness", fresh,
                 fresh ? "Latest Nifty quote is current" : "Live Nifty quote is stale"),
             new("window", "Entry window", localTime >= start && localTime < cutoff,

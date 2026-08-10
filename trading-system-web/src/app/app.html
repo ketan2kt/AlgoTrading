@@ -272,15 +272,27 @@
                     ><span>{{ overlay.status }}</span>
                   </div>
                   @if (overlay.executionInstrument) {
-                    <div><span>Option bought</span><strong>{{ overlay.executionInstrument }}</strong></div>
-                    <div><span>Premium entry</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
+                    <div><span>{{ overlay.fillPrice ? 'Option bought' : 'Proposed option' }}</span><strong>{{ overlay.executionInstrument }}</strong></div>
+                    <div><span>{{ overlay.fillPrice ? 'Premium fill' : 'Proposed premium' }}</span><strong>{{ (overlay.fillPrice || overlay.executionProposedEntry) | number: '1.2-2' }}</strong></div>
                     <div><span>Premium SL</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
                     <div><span>Premium target</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
                     <div><span>Contract</span><strong>{{ overlay.executionInstrumentType }} / {{ overlay.executionStrike | number: '1.0-0' }} / {{ overlay.executionExpiry | date: 'dd MMM yyyy' : 'Asia/Kolkata' }}</strong></div>
+                    <div><span>Position size</span><strong>{{ overlay.quantity || 0 }} units / {{ overlay.executionLotSize }} per lot / max {{ overlay.executionMaximumLots }} lots</strong></div>
+                    @if (overlay.executionOneLotRisk) {
+                      <div><span>Risk for one lot</span><strong>{{ overlay.executionOneLotRisk | number: '1.2-2' }}</strong></div>
+                    }
                   } @else {
                     <div><span>Nifty trigger</span><strong>{{ overlay.entry | number: '1.2-2' }}</strong></div>
                     <div><span>Nifty invalidation</span><strong class="bad">{{ overlay.stopLoss | number: '1.2-2' }}</strong></div>
                     <div><span>Nifty objective</span><strong class="good">{{ overlay.target | number: '1.2-2' }}</strong></div>
+                  }
+                  @if (overlay.rejectionReasons.length) {
+                    <div class="rejection-reasons">
+                      <span>Why this trade was rejected</span>
+                      @for (reason of overlay.rejectionReasons; track reason) {
+                        <strong class="bad">{{ reason }}</strong>
+                      }
+                    </div>
                   }
                 </div>
               }

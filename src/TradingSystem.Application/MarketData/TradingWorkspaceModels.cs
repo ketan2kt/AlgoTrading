@@ -27,8 +27,15 @@ public sealed record WorkspaceTradeOverlay(
     string? ExecutionInstrumentType,
     DateOnly? ExecutionExpiry,
     decimal? ExecutionStrike,
+    int? ExecutionLotSize,
+    int? ExecutionMaximumLots,
+    decimal? ExecutionProposedEntry,
+    decimal? ExecutionOneLotRisk,
     decimal? ExecutionStopLoss,
-    decimal? ExecutionTarget);
+    decimal? ExecutionTarget,
+    decimal? ExecutionRiskAmount,
+    decimal? ExecutionCapitalExposure,
+    IReadOnlyList<string> RejectionReasons);
 
 public sealed record TradingWorkspaceSnapshot(
     string Instrument,

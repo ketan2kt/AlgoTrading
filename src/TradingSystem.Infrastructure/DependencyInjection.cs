@@ -206,6 +206,7 @@ public static class DependencyInjection
                                  options.MinimumOptionVolume >= 0 && options.MinimumOptionOpenInterest >= 0 &&
                                  options.OptionStopLossPercent is > 0 and <= 50 &&
                                  options.OptionRewardToRiskRatio is >= 1 and <= 5 &&
+                                 options.MaximumOptionLots is >= 1 and <= 10 &&
                                  TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.ForcedExit, "HH:mm", out _),

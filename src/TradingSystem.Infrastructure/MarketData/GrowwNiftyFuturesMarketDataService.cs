@@ -62,7 +62,8 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
             value.Exchange == "NSE" && value.Type == InstrumentType.Index &&
             value.TradingSymbol == "NIFTY" && value.IsActive, cancellationToken);
         var future = await db.Instruments.Where(value => value.Exchange == "NSE" &&
-                value.Type == InstrumentType.Future && value.ExpiryDate >= session && value.IsActive)
+                value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith("NIFTY") &&
+                value.ExpiryDate >= session && value.IsActive)
             .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
             .FirstOrDefaultAsync(cancellationToken);
         if (index?.GrowwSymbol is null || future?.GrowwSymbol is null) return;
@@ -70,14 +71,18 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
         if (bootstrappedSession != session)
         {
             var importer = scope.ServiceProvider.GetRequiredService<GrowwHistoricalCandleImporter>();
+            var sessionStartIndia = indiaNow.Date.AddHours(9).AddMinutes(15);
+            var sessionStart = new DateTimeOffset(sessionStartIndia,
+                IndiaTimeZone.GetUtcOffset(sessionStartIndia)).ToUniversalTime();
+            var futureHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "FNO",
+                future.GrowwSymbol, sessionStart, now, "1minute"), cancellationToken);
+            await importer.ImportAsync(future, futureHistory, now, cancellationToken);
+
             var startIndia = indiaNow.Date.AddDays(-7).AddHours(9).AddMinutes(15);
             var start = new DateTimeOffset(startIndia, IndiaTimeZone.GetUtcOffset(startIndia)).ToUniversalTime();
             var indexHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "CASH",
                 index.GrowwSymbol, start, now, "1minute"), cancellationToken);
             await importer.ImportAsync(index, indexHistory, now, cancellationToken);
-            var futureHistory = await gateway.GetHistoricalCandlesAsync(new("NSE", "FNO",
-                future.GrowwSymbol, start, now, "1minute"), cancellationToken);
-            await importer.ImportAsync(future, futureHistory, now, cancellationToken);
             bootstrappedSession = session;
         }
 
