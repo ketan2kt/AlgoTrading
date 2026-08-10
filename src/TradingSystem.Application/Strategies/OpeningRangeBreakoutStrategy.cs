@@ -27,9 +27,11 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         if (!context.RegimeTradingPermitted) failed.Add("Market regime does not permit trading.");
         if (!context.DataTradingPermitted) failed.Add("Market data does not permit trading.");
         if (context.RegimeConfidence < options.MinimumRegimeConfidence)
-            failed.Add($"Regime confidence {context.RegimeConfidence:P0} is below {options.MinimumRegimeConfidence:P0}.");
+            failed.Add(FormattableString.Invariant(
+                $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
         if (context.RelativeVolume < options.MinimumRelativeVolume)
-            failed.Add($"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}.");
+            failed.Add(FormattableString.Invariant(
+                $"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}."));
         if (context.TradesToday >= options.MaximumTradesPerDay)
             failed.Add("Strategy daily trade limit reached.");
         if (context.LastSignalAtUtc is not null &&
