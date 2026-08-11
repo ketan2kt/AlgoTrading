@@ -198,6 +198,7 @@ public static class DependencyInjection
         services.AddOptions<AutomatedPaperTradingOptions>()
             .Bind(configuration.GetSection(AutomatedPaperTradingOptions.SectionName))
             .Validate(options => options.EvaluationIntervalSeconds is >= 2 and <= 60 &&
+                                 options.NoTradeAuditIntervalMinutes is >= 5 and <= 60 &&
                                  options.MaximumDailyLoss > 0 &&
                                  options.MaximumEntrySlippagePercent is > 0 and <= 1 &&
                                  options.EstimatedRoundTripCostBasisPoints is >= 0 and <= 100 &&

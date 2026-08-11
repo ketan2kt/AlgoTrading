@@ -71,6 +71,21 @@ public sealed class OpeningRangeBreakoutStrategyTests
     }
 
     [Fact]
+    public void NoTradeResearchIsDueOnlyAfterConfiguredInterval()
+    {
+        var sessionStart = new DateTimeOffset(2026, 8, 11, 3, 45, 0, TimeSpan.Zero);
+
+        Assert.False(StrategyEvaluationAuditCadence.IsNoTradeAuditDue(
+            sessionStart, sessionStart.AddMinutes(14), null, 15));
+        Assert.True(StrategyEvaluationAuditCadence.IsNoTradeAuditDue(
+            sessionStart, sessionStart.AddMinutes(15), null, 15));
+        Assert.False(StrategyEvaluationAuditCadence.IsNoTradeAuditDue(
+            sessionStart, sessionStart.AddMinutes(29), sessionStart.AddMinutes(15), 15));
+        Assert.True(StrategyEvaluationAuditCadence.IsNoTradeAuditDue(
+            sessionStart, sessionStart.AddMinutes(30), sessionStart.AddMinutes(15), 15));
+    }
+
+    [Fact]
     public void PreliminaryRiskSizesByRiskAndRejectsExpiredOrKillSwitch()
     {
         var signal = strategy.Evaluate(Context())!;

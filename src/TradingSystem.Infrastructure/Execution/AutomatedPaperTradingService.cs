@@ -305,12 +305,28 @@ internal sealed partial class AutomatedPaperTradingService(
         var signal = strategyEvaluation.Signal;
         if (signal is null)
         {
-            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
-                null, null, null, cancellationToken);
+            var lastNoTradeAudit = await db.StrategyEvaluations.AsNoTracking()
+                .Where(value => value.StrategyCode == strategy.StrategyId &&
+                                value.InstrumentId == instrument.Id &&
+                                value.Outcome == "NoSignal" &&
+                                value.CandleTimeUtc >= sessionStart &&
+                                value.CandleTimeUtc < sessionEnd)
+                .OrderByDescending(value => value.CandleTimeUtc)
+                .Select(value => (DateTimeOffset?)value.CandleTimeUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (StrategyEvaluationAuditCadence.IsNoTradeAuditDue(sessionStart,
+                    candleDecisionTime, lastNoTradeAudit,
+                    options.Value.NoTradeAuditIntervalMinutes))
+            {
+                await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                    latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                    relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
+                    null, null, null, cancellationToken);
+            }
             state.Record("Scanning", true,
-                $"No qualifying setup. {string.Join(" ", strategyEvaluation.FailedConditions)}",
+                $"Scanning each completed candle for the opening-range pattern. " +
+                $"{string.Join(" ", strategyEvaluation.FailedConditions)} " +
+                $"No-trade research is stored every {options.Value.NoTradeAuditIntervalMinutes} minutes.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }

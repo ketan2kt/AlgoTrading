@@ -5,6 +5,7 @@ public sealed class AutomatedPaperTradingOptions
     public const string SectionName = "PaperTrading:Automation";
     public bool Enabled { get; init; }
     public int EvaluationIntervalSeconds { get; init; } = 5;
+    public int NoTradeAuditIntervalMinutes { get; init; } = 15;
     public string OpeningRangeEnd { get; init; } = "09:30";
     public string EntryCutoff { get; init; } = "14:30";
     public string ForcedExit { get; init; } = "15:15";
