@@ -5,8 +5,8 @@ namespace TradingSystem.Application.Strategies;
 public sealed class OpeningRangeBreakoutOptions
 {
     public decimal BreakoutBufferPercent { get; init; } = 0.05m;
-    public decimal MinimumRelativeVolume { get; init; } = 1.25m;
-    public decimal MinimumRegimeConfidence { get; init; } = 0.65m;
+    public decimal MinimumRelativeVolume { get; init; } = 0.75m;
+    public decimal MinimumRegimeConfidence { get; init; } = 0.50m;
     public decimal RewardToRiskRatio { get; init; } = 2m;
     public int SignalExpirySeconds { get; init; } = 30;
     public int CooldownMinutes { get; init; } = 30;

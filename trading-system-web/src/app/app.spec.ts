@@ -113,9 +113,9 @@ describe('App', () => {
             evaluationId: 'evaluation-1', candleTimeUtc: '2026-08-03T08:30:00Z',
             strategy: 'opening-range-breakout 1.0.0', outcome: 'NoSignal', currentPrice: 24600,
             openingRangeHigh: 24620, openingRangeLow: 24550, vwap: 24590,
-            fastEma: 24601, slowEma: 24595, atrPercent: 0.3, relativeFuturesVolume: 0.82,
-            regime: 'WeakBullishTrend', regimeBias: 'Buy', regimeConfidence: 0.61,
-            failedConditions: ['Relative futures volume 0.82 is below 1.25.'], signalId: null,
+            fastEma: 24601, slowEma: 24595, atrPercent: 0.3, relativeFuturesVolume: 0.62,
+            regime: 'WeakBullishTrend', regimeBias: 'Buy', regimeConfidence: 0.49,
+            failedConditions: ['Relative futures volume 0.62 is below 0.75.'], signalId: null,
             optionSymbol: null, optionType: null, optionExpiry: null, optionStrike: null,
             optionPremium: null, realisedPnl: null,
           }],
@@ -154,6 +154,6 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
     expect(fixture.nativeElement.textContent).toContain('18/21 candles');
     expect(fixture.nativeElement.textContent).toContain('RESEARCH AUDIT');
-    expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.82 is below 1.25.');
+    expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
   });
 });
