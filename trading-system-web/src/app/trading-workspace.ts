@@ -37,6 +37,9 @@ export interface WorkspaceTradeOverlay {
   currentOptionPrice: number | null;
   exitPrice: number | null;
   realisedPnl: number | null;
+  unrealisedPnl: number | null;
+  entryTimeUtc: string | null;
+  exitTimeUtc: string | null;
 }
 
 export interface TradingWorkspaceSnapshot {

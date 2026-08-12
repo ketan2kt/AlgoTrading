@@ -39,7 +39,10 @@ public sealed record WorkspaceTradeOverlay(
     string LifecycleStatus,
     decimal? CurrentOptionPrice,
     decimal? ExitPrice,
-    decimal? RealisedPnl);
+    decimal? RealisedPnl,
+    decimal? UnrealisedPnl,
+    DateTimeOffset? EntryTimeUtc,
+    DateTimeOffset? ExitTimeUtc);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,

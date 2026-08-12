@@ -112,13 +112,14 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => entryReferences.Contains(value.ClientReference) &&
                             (value.EventType == "OrderSubmitted" || value.EventType == "OrderFilled"))
             .OrderByDescending(value => value.Sequence)
-            .Select(value => new { value.ClientReference, value.PayloadJson })
+            .Select(value => new PaperBrokerEventProjection(
+                value.ClientReference, value.EventType, value.PayloadJson, value.OccurredAtUtc))
             .ToListAsync(cancellationToken);
         var orders = brokerEvents
             .GroupBy(value => value.ClientReference, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => ParsePaperOrder(group.Select(value => value.PayloadJson)),
+                group => ParsePaperOrder(group),
                 StringComparer.Ordinal);
         var executionInstrumentIds = orders.Values.Where(value => value is not null)
             .Select(value => value!.InstrumentId).Distinct().ToArray();
@@ -177,7 +178,10 @@ internal sealed class EfTradingWorkspaceReader(
                 lifecycleStatus,
                 isActive ? automation.CurrentOptionPrice : result?.ExitPrice,
                 result?.ExitPrice,
-                result?.RealisedPnl);
+                result?.RealisedPnl,
+                isActive ? automation.UnrealisedPnl : null,
+                order?.FillTimeUtc,
+                result?.ClosedAtUtc);
         }).ToArray();
 
         var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
@@ -258,14 +262,15 @@ internal sealed class EfTradingWorkspaceReader(
         _ => "Closed"
     };
 
-    private static PaperOrderProjection? ParsePaperOrder(IEnumerable<string> payloads)
+    private static PaperOrderProjection? ParsePaperOrder(IEnumerable<PaperBrokerEventProjection> events)
     {
         Guid? instrumentId = null;
         int? quantity = null;
         decimal? fillPrice = null;
-        foreach (var payloadJson in payloads)
+        DateTimeOffset? fillTimeUtc = null;
+        foreach (var entry in events)
         {
-            using var document = JsonDocument.Parse(payloadJson);
+            using var document = JsonDocument.Parse(entry.PayloadJson);
             var root = document.RootElement;
             if (root.TryGetProperty("instrumentId", out var instrument) &&
                 instrument.TryGetGuid(out var parsedInstrument))
@@ -276,8 +281,9 @@ internal sealed class EfTradingWorkspaceReader(
             if (root.TryGetProperty("averageFillPrice", out var averageFillPrice) &&
                 averageFillPrice.TryGetDecimal(out var parsedPrice))
                 fillPrice = parsedPrice;
+            if (entry.EventType == "OrderFilled") fillTimeUtc = entry.OccurredAtUtc;
         }
-        return instrumentId is null ? null : new(instrumentId.Value, quantity, fillPrice);
+        return instrumentId is null ? null : new(instrumentId.Value, quantity, fillPrice, fillTimeUtc);
     }
 
     private static ExecutionDecisionProjection ParseExecutionDecision(string? snapshotJson)
@@ -322,7 +328,10 @@ internal sealed class EfTradingWorkspaceReader(
         return JsonSerializer.Deserialize<string[]>(reasonsJson) ?? [];
     }
 
-    private sealed record PaperOrderProjection(Guid InstrumentId, int? Quantity, decimal? FillPrice);
+    private sealed record PaperBrokerEventProjection(string ClientReference, string EventType,
+        string PayloadJson, DateTimeOffset OccurredAtUtc);
+    private sealed record PaperOrderProjection(Guid InstrumentId, int? Quantity, decimal? FillPrice,
+        DateTimeOffset? FillTimeUtc);
     private sealed record ExecutionDecisionProjection(
         string? TradingSymbol = null,
         string? InstrumentType = null,

@@ -140,9 +140,14 @@ internal sealed partial class AutomatedPaperTradingService(
             var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
             var optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
                 optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
-            var optionFresh = optionQuote.BidPrice is > 0;
+            // Some Groww option quotes omit market depth while still supplying a valid LTP.
+            // Prefer the executable bid, but use LTP for paper marking and monitoring when absent.
+            var currentOptionPrice = optionQuote.BidPrice is > 0
+                ? optionQuote.BidPrice.Value
+                : optionQuote.LastPrice;
+            var optionFresh = currentOptionPrice > 0;
             await ManageOpenPositionAsync(scope.ServiceProvider, tradeState,
-                optionQuote.BidPrice ?? 0m, indiaNow.TimeOfDay, optionFresh, killSwitchActive,
+                currentOptionPrice, indiaNow.TimeOfDay, optionFresh, killSwitchActive,
                 optionInstrument, cancellationToken);
             return;
         }
