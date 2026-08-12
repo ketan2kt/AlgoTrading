@@ -279,7 +279,8 @@
                   <div><span>{{ overlay.exitPrice !== null ? 'Exit premium' : 'Current premium' }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
                     <div><span>Premium SL</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
                     <div><span>Premium target</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
-                  <div><span>Quantity / expiry</span><strong>{{ overlay.quantity }} units · {{ overlay.executionExpiry | date: 'dd MMM yyyy' : 'Asia/Kolkata' }}</strong></div>
+                  <div><span>Quantity</span><strong>{{ overlay.quantity }} units</strong></div>
+                  <div><span>Expiry</span><strong>{{ overlay.executionExpiry | date: 'dd MMM' : 'Asia/Kolkata' }}</strong></div>
                   <div><span>{{ overlay.realisedPnl !== null ? 'Realised P&L' : 'Live P&L' }}</span><strong [class.good]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) >= 0" [class.bad]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) < 0">₹{{ (overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) | number: '1.2-2' }}</strong></div>
                   <div><span>Trade taken (IST)</span><strong>{{ overlay.entryTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata' }}</strong></div>
                   <div><span>Exited (IST)</span><strong>{{ overlay.exitTimeUtc ? (overlay.exitTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata') : 'Active' }}</strong></div>
