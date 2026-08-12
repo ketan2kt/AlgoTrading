@@ -47,6 +47,7 @@
         </form>
       </section>
     } @else {
+      <div class="workspace-shell">
       <section class="workspace-heading">
         <div>
           <p class="eyebrow">LIVE TRADING WORKSPACE</p>
@@ -233,7 +234,7 @@
           <div class="feed-notice feed-notice--warning">{{ workspaceError }}</div>
         }
 
-        <section class="chart-panel">
+        <section class="chart-panel workspace-priority-chart">
           <div class="panel-heading">
             <div><span>NIFTY 50</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
             <label class="timeframe-control">
@@ -259,7 +260,7 @@
           </p>
         </section>
 
-        <section class="detail-grid">
+        <section class="detail-grid workspace-priority-events">
           <article class="positions-panel">
             <div class="panel-heading">
               <div><span>STRATEGY EVENTS</span><strong>Nifty signals and option executions</strong></div>
@@ -303,21 +304,9 @@
               </p>
             }
           </article>
-          <article class="safety-panel">
-            <span>SAFETY STATE</span><strong>{{ view.mode }} mode</strong>
-            <p>
-              Live market monitoring may run, but real-order capability remains absent. Stale or
-              disconnected data blocks decisions.
-            </p>
-            <button type="button" [disabled]="killSwitchBusy"
-              (click)="setKillSwitch(!killSwitchActive)">
-              {{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}
-            </button>
-            @if (killSwitchMessage) { <p>{{ killSwitchMessage }}</p> }
-          </article>
         </section>
 
-        <section class="evaluation-panel">
+        <section class="evaluation-panel workspace-priority-audit">
           <div class="panel-heading">
             <div><span>RESEARCH AUDIT</span><strong>15-minute no-trade summaries and immediate trade outcomes</strong></div>
           </div>
@@ -354,7 +343,21 @@
             <p class="empty-copy">No completed strategy evaluations have been recorded for this session yet.</p>
           }
         </section>
+
+        <section class="safety-panel">
+          <span>SAFETY STATE</span><strong>{{ view.mode }} mode</strong>
+          <p>
+            Live market monitoring may run, but real-order capability remains absent. Stale or
+            disconnected data blocks decisions.
+          </p>
+          <button type="button" [disabled]="killSwitchBusy"
+            (click)="setKillSwitch(!killSwitchActive)">
+            {{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}
+          </button>
+          @if (killSwitchMessage) { <p>{{ killSwitchMessage }}</p> }
+        </section>
       }
+      </div>
       <router-outlet />
     }
   </main>

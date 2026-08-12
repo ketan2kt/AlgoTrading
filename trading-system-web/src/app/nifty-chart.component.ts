@@ -48,11 +48,11 @@ import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
       .chart-shell {
         display: block;
         position: relative;
-        min-height: 460px;
+        min-height: clamp(420px, calc(100vh - 110px), 680px);
       }
       .chart {
         width: 100%;
-        height: 460px;
+        height: clamp(420px, calc(100vh - 110px), 680px);
       }
       .chart-empty {
         position: absolute;
