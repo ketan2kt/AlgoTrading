@@ -260,12 +260,12 @@
           </p>
         </section>
 
+        @if (view.overlays.length) {
         <section class="detail-grid workspace-priority-events">
           <article class="positions-panel">
             <div class="panel-heading">
               <div><span>STRATEGY EVENTS</span><strong>Nifty signals and option executions</strong></div>
             </div>
-            @if (view.overlays.length) {
               @for (overlay of view.overlays; track overlay.signalId) {
                 <div class="signal-row">
                   <div>
@@ -297,14 +297,9 @@
                   }
                 </div>
               }
-            } @else {
-              <p class="empty-copy">
-                No persisted strategy signals for this instrument. The system will never invent or
-                force one.
-              </p>
-            }
           </article>
         </section>
+        }
 
         <section class="evaluation-panel workspace-priority-audit">
           <div class="panel-heading">

@@ -87,7 +87,9 @@ internal sealed class EfTradingWorkspaceReader(
         }
 
         var signalRows = await dbContext.Signals.AsNoTracking()
-            .Where(value => value.InstrumentId == instrument.Id)
+            .Where(value => value.InstrumentId == instrument.Id &&
+                            value.MarketDataTimestampUtc >= sessionStartUtc &&
+                            value.MarketDataTimestampUtc < sessionEndUtc)
             .OrderByDescending(value => value.MarketDataTimestampUtc)
             .Take(30)
             .Select(value => new

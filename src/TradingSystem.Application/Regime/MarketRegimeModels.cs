@@ -32,7 +32,7 @@ public sealed class MarketRegimeOptions
 {
     public const string SectionName = "MarketRegime";
     public decimal MinimumDataQuality { get; init; } = 0.90m;
-    public decimal MinimumTradingConfidence { get; init; } = 0.65m;
+    public decimal MinimumTradingConfidence { get; init; } = 0.50m;
     public decimal GapThresholdPercent { get; init; } = 0.40m;
     public decimal StrongTrendEmaSpreadPercent { get; init; } = 0.25m;
     public decimal WeakTrendEmaSpreadPercent { get; init; } = 0.08m;

@@ -5,6 +5,17 @@ namespace TradingSystem.UnitTests;
 
 public sealed class MarketRegimeEngineTests
 {
+    [Fact]
+    public void FiftyPercentConfidenceIsPermittedByPaperDefault()
+    {
+        var result = new MarketRegimeEngine(new()).Evaluate(Input(
+            open: 100m, current: 100m, vwap: 100m, fast: 100m, slow: 100m,
+            atr: 0.5m, relativeVolume: 1m));
+
+        Assert.True(result.Confidence >= 0.50m);
+        Assert.True(result.TradingPermitted);
+    }
+
     private readonly MarketRegimeEngine engine = new(new MarketRegimeOptions());
 
     [Theory]
