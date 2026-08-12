@@ -1,5 +1,37 @@
 import { WorkspaceCandle } from './trading-workspace';
 
+export interface ChartLogicalRange {
+  from: number;
+  to: number;
+}
+
+const IST_OFFSET_MILLISECONDS = 330 * 60_000;
+const NIFTY_SESSION_MINUTES = 375;
+
+export function currentSessionLogicalRange(
+  candles: WorkspaceCandle[],
+  timeframeMinutes: number,
+): ChartLogicalRange | null {
+  if (!candles.length || timeframeMinutes < 1) return null;
+
+  const latestSession = istSessionDate(candles[candles.length - 1].openTimeUtc);
+  const firstCurrentSessionIndex = candles.findIndex(
+    (candle) => istSessionDate(candle.openTimeUtc) === latestSession,
+  );
+  if (firstCurrentSessionIndex < 0) return null;
+
+  const expectedSessionBars = Math.ceil(NIFTY_SESSION_MINUTES / timeframeMinutes);
+  return {
+    from: firstCurrentSessionIndex - 0.5,
+    to: Math.max(candles.length + 1, firstCurrentSessionIndex + expectedSessionBars - 0.5),
+  };
+}
+
+function istSessionDate(openTimeUtc: string): string {
+  const timestamp = new Date(openTimeUtc).getTime() + IST_OFFSET_MILLISECONDS;
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
 export function aggregateCandles(
   candles: WorkspaceCandle[],
   timeframeMinutes: number,

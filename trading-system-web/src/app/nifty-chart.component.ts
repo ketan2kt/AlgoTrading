@@ -21,7 +21,7 @@ import {
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
-import { aggregateCandles } from './chart-candles';
+import { aggregateCandles, currentSessionLogicalRange } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 
 @Component({
@@ -196,7 +196,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.markerApi?.setMarkers([]);
     }
     if (candles.length && (!this.hasFittedContent || this.renderedTimeframeMinutes !== this.timeframeMinutes)) {
-      this.chart.timeScale().fitContent();
+      const initialRange = currentSessionLogicalRange(displayCandles, this.timeframeMinutes);
+      if (initialRange) this.chart.timeScale().setVisibleLogicalRange(initialRange);
       this.hasFittedContent = true;
       this.renderedTimeframeMinutes = this.timeframeMinutes;
     }

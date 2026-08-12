@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateCandles } from './chart-candles';
+import { aggregateCandles, currentSessionLogicalRange } from './chart-candles';
 import { WorkspaceCandle } from './trading-workspace';
 
 describe('aggregateCandles', () => {
@@ -21,6 +21,19 @@ describe('aggregateCandles', () => {
       close: 99,
       volume: 60,
     });
+  });
+});
+
+describe('currentSessionLogicalRange', () => {
+  it('places the latest session first candle at the left and keeps prior sessions off-screen', () => {
+    const candles: WorkspaceCandle[] = [
+      candle('2026-08-11T03:45:00Z', 100, 101, 99, 100, 10),
+      candle('2026-08-11T03:50:00Z', 100, 102, 100, 101, 10),
+      candle('2026-08-12T03:45:00Z', 102, 103, 101, 102, 10),
+      candle('2026-08-12T03:50:00Z', 102, 104, 102, 103, 10),
+    ];
+
+    expect(currentSessionLogicalRange(candles, 5)).toEqual({ from: 1.5, to: 76.5 });
   });
 });
 

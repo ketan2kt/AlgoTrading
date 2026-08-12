@@ -350,12 +350,15 @@
         <div class="logs-backdrop" (click)="closeGrowwPositions()">
           <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Groww live positions" (click)="$event.stopPropagation()">
             <div class="panel-heading">
-              <div><span>GROWW ACCOUNT · READ ONLY</span><strong>Live broker positions</strong></div>
-              <button type="button" (click)="closeGrowwPositions()">Close</button>
+              <div><span>GROWW ACCOUNT · READ ONLY</span><strong>Currently open broker positions</strong></div>
+              <div class="modal-actions">
+                <button type="button" (click)="openGrowwPositions()" [disabled]="growwPositionsLoading">Refresh</button>
+                <button type="button" (click)="closeGrowwPositions()">Close</button>
+              </div>
             </div>
             @if (growwPositionsLoading) { <p class="empty-copy">Reading Groww positions…</p> }
             @else if (growwPositionsError) { <p class="form-error">{{ growwPositionsError }}</p> }
-            @else if (!growwPositions.length) { <p class="empty-copy">No open Groww positions.</p> }
+            @else if (!growwPositions.length) { <p class="empty-copy">No currently open Groww positions. Closed trades are not included here.</p> }
             @else {
               <div class="evaluation-table">
                 @for (position of growwPositions; track position.segment + position.tradingSymbol) {
@@ -369,7 +372,7 @@
                   </article>
                 }
               </div>
-              <p class="empty-copy">Updated {{ growwPositionsObservedAt | date:'HH:mm:ss':'Asia/Kolkata' }} IST · This screen cannot place or modify orders.</p>
+              <p class="empty-copy">Updated {{ growwPositionsObservedAt | date:'HH:mm:ss':'Asia/Kolkata' }} IST · Open, non-zero positions only. This screen cannot place or modify orders.</p>
             }
           </section>
         </div>

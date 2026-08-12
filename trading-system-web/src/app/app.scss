@@ -465,6 +465,7 @@ article > span,
   z-index: 1;
   background: #0c1813;
 }
+.modal-actions { display: flex; align-items: center; gap: 0.4rem; }
 .report-tools { display:flex; gap:.5rem; padding:.55rem .75rem; position:sticky; top:3.2rem; z-index:1; background:#0c1813; }
 .report-tools input { flex:1; min-width:180px; }
 .evaluation-table {
