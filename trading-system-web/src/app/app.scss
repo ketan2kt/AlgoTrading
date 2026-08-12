@@ -440,6 +440,7 @@ article > span,
   gap: 0.2rem;
 }
 .logs-launch strong { font-size: 0.82rem; font-weight: 600; }
+.alert-strip { border-color:#6b4b27; background:#21180e; }
 .logs-backdrop {
   position: fixed;
   inset: 0;
@@ -464,6 +465,8 @@ article > span,
   z-index: 1;
   background: #0c1813;
 }
+.report-tools { display:flex; gap:.5rem; padding:.55rem .75rem; position:sticky; top:3.2rem; z-index:1; background:#0c1813; }
+.report-tools input { flex:1; min-width:180px; }
 .evaluation-table {
   display: grid;
 }

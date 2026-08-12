@@ -337,6 +337,26 @@ public sealed class GrowwReadOnlyContractTests
             method.Name.Contains("Trade", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task PositionsUseOfficialReadOnlyEndpointAndMapFnoFields()
+    {
+        HttpRequestMessage? captured = null;
+        var gateway = CreateGateway(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"positions":[{"trading_symbol":"NIFTY26AUG24300PE","credit_quantity":325,"credit_price":113.8,"debit_quantity":0,"debit_price":0,"exchange":"NSE","quantity":325,"product":"NRML","net_price":113.8,"net_carry_forward_quantity":0,"net_carry_forward_price":0,"realised_pnl":0}]}}
+                """);
+        });
+
+        var position = Assert.Single(await gateway.GetPositionsAsync("FNO", CancellationToken.None));
+
+        Assert.Equal("NIFTY26AUG24300PE", position.TradingSymbol);
+        Assert.Equal(325, position.Quantity);
+        Assert.Equal("/v1/positions/user", captured!.RequestUri!.AbsolutePath);
+        Assert.Contains("segment=FNO", captured.RequestUri.Query, StringComparison.Ordinal);
+    }
+
     private static GrowwReadOnlyGateway CreateGateway(
         Func<HttpRequestMessage, HttpResponseMessage> responder)
     {

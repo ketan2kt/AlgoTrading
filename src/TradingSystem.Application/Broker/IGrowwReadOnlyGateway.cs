@@ -14,6 +14,10 @@ public interface IGrowwReadOnlyGateway
 
     Task<IReadOnlyList<GrowwInstrumentRecord>> GetInstrumentMasterAsync(
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<GrowwPosition>> GetPositionsAsync(
+        string segment,
+        CancellationToken cancellationToken);
 }
 
 public sealed record GrowwUserProfile(
@@ -74,6 +78,21 @@ public sealed record GrowwInstrumentRecord(
     decimal? TickSize,
     bool BuyAllowed,
     bool SellAllowed);
+
+public sealed record GrowwPosition(
+    string TradingSymbol,
+    string Segment,
+    string Exchange,
+    string Product,
+    int Quantity,
+    decimal NetPrice,
+    int CreditQuantity,
+    decimal CreditPrice,
+    int DebitQuantity,
+    decimal DebitPrice,
+    int NetCarryForwardQuantity,
+    decimal NetCarryForwardPrice,
+    decimal RealisedPnl);
 
 public sealed class GrowwApiException(
     string message,

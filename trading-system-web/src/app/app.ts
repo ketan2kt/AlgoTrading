@@ -10,6 +10,8 @@ import { SystemStatusService } from './system-status.service';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
+import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
+import { PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 
 @Component({
   selector: 'app-root',
@@ -24,6 +26,8 @@ export class App implements OnInit, OnDestroy {
   private readonly growwTokenService = inject(GrowwTokenService);
   private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly paperRisk = inject(PaperRiskService);
+  private readonly growwPositionsService = inject(GrowwPositionsService);
+  private readonly paperReportService = inject(PaperReportService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -52,6 +56,16 @@ export class App implements OnInit, OnDestroy {
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
   protected logsOpen = false;
+  protected growwPositionsOpen = false;
+  protected growwPositionsLoading = false;
+  protected growwPositionsError = '';
+  protected growwPositions: GrowwLivePosition[] = [];
+  protected growwPositionsObservedAt = '';
+  protected reportOpen = false;
+  protected reportLoading = false;
+  protected reportError = '';
+  protected report: PaperTradingReport | null = null;
+  protected tradeFilter = '';
   protected tradeAlertsEnabled = false;
   private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
@@ -160,6 +174,57 @@ export class App implements OnInit, OnDestroy {
 
   protected closeLogs(): void {
     this.logsOpen = false;
+  }
+
+  protected openGrowwPositions(): void {
+    this.growwPositionsOpen = true;
+    this.growwPositionsLoading = true;
+    this.growwPositionsError = '';
+    this.subscriptions.add(this.growwPositionsService.get().subscribe({
+      next: (response) => {
+        this.growwPositions = response.positions;
+        this.growwPositionsObservedAt = response.observedAtUtc;
+        this.growwPositionsLoading = false;
+        this.refreshView();
+      },
+      error: () => {
+        this.growwPositionsLoading = false;
+        this.growwPositionsError = 'Unable to read Groww positions. Confirm today’s token is valid.';
+        this.refreshView();
+      },
+    }));
+  }
+
+  protected closeGrowwPositions(): void { this.growwPositionsOpen = false; }
+
+  protected openReport(): void {
+    this.reportOpen=true; this.reportLoading=true; this.reportError='';
+    this.subscriptions.add(this.paperReportService.get().subscribe({
+      next:value=>{this.report=value;this.reportLoading=false;this.refreshView();},
+      error:()=>{this.reportLoading=false;this.reportError='Unable to load paper-trading report.';this.refreshView();},
+    }));
+  }
+  protected closeReport():void { this.reportOpen=false; }
+  protected filteredTrades():PaperTradeHistoryItem[] {
+    const value=this.tradeFilter.trim().toLowerCase();
+    return !value ? this.report?.trades || [] : (this.report?.trades || []).filter(trade=>
+      [trade.contract,trade.direction,trade.exitReason,trade.strategy].some(field=>field.toLowerCase().includes(value)));
+  }
+  protected exportTrades():void {
+    const header='Contract,Direction,Quantity,Entry,Exit,PnL,Reason,EntryTimeUTC,ExitTimeUTC';
+    const lines=this.filteredTrades().map(t=>[t.contract,t.direction,t.quantity,t.entryPrice,t.exitPrice,t.realisedPnl,t.exitReason,t.signalTimeUtc,t.exitTimeUtc].join(','));
+    const url=URL.createObjectURL(new Blob([[header,...lines].join('\n')],{type:'text/csv'}));
+    const anchor=document.createElement('a'); anchor.href=url; anchor.download='paper-trades.csv'; anchor.click(); URL.revokeObjectURL(url);
+  }
+
+  protected operationalAlerts(view:TradingWorkspaceSnapshot):string[] {
+    const alerts:string[]=[];
+    if (!this.tokenStatus.isConfigured || this.tokenStatus.isExpired) alerts.push('Groww token requires attention.');
+    if (!view.isFresh) alerts.push('Nifty market data is stale or disconnected.');
+    if (view.paperAutomation.status==='PositionUnmonitored') alerts.push('Open paper position quote is unavailable.');
+    if (view.paperAutomation.status==='ReconciliationRequired') alerts.push('Paper broker reconciliation requires attention.');
+    if (this.killSwitchActive) alerts.push('Emergency kill switch is active.');
+    return alerts;
   }
 
   protected setKillSwitch(active: boolean): void {

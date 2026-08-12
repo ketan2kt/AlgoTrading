@@ -20,4 +20,11 @@ public sealed class AutomatedPaperTradingOptions
     public decimal OptionRewardToRiskRatio { get; init; } = 2m;
     public int MaximumOptionLots { get; init; } = 5;
     public bool PermissivePaperExecution { get; init; } = true;
+    public bool BreakEvenEnabled { get; init; } = true;
+    public decimal BreakEvenTriggerRiskMultiple { get; init; } = 1m;
+    public bool TrailingStopEnabled { get; init; } = true;
+    public decimal TrailingStopRiskMultiple { get; init; } = 1m;
+    public bool PartialProfitEnabled { get; init; } = true;
+    public decimal PartialProfitRiskMultiple { get; init; } = 1m;
+    public decimal PartialExitFraction { get; init; } = 0.40m;
 }

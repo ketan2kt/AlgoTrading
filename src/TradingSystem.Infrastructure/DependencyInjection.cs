@@ -160,6 +160,7 @@ public static class DependencyInjection
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
+        services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
@@ -206,8 +207,12 @@ public static class DependencyInjection
                                  options.MaximumOptionPremium > 0 &&
                                  options.MinimumOptionVolume >= 0 && options.MinimumOptionOpenInterest >= 0 &&
                                  options.OptionStopLossPercent is > 0 and <= 50 &&
-                                 options.OptionRewardToRiskRatio is >= 1 and <= 5 &&
-                                 options.MaximumOptionLots is >= 1 and <= 10 &&
+                                   options.OptionRewardToRiskRatio is >= 1 and <= 5 &&
+                                   options.MaximumOptionLots is >= 1 and <= 10 &&
+                                   options.BreakEvenTriggerRiskMultiple is > 0 and <= 5 &&
+                                   options.TrailingStopRiskMultiple is > 0 and <= 5 &&
+                                   options.PartialProfitRiskMultiple is > 0 and <= 5 &&
+                                   options.PartialExitFraction is > 0 and < 1 &&
                                  TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.ForcedExit, "HH:mm", out _),

@@ -58,6 +58,8 @@
           </p>
         </div>
         <div class="workspace-actions">
+          <button class="secondary-button" type="button" (click)="openGrowwPositions()">Groww live positions</button>
+          <button class="secondary-button" type="button" (click)="openReport()">Performance &amp; history</button>
           <button class="secondary-button" type="button" (click)="enableTradeAlerts()">
             {{ tradeAlertsEnabled ? 'Trade alerts on' : 'Enable loud trade alerts' }}
           </button>
@@ -265,6 +267,10 @@
           </p>
         </section>
 
+        @if (operationalAlerts(view).length) {
+          <section class="logs-launch workspace-priority-events alert-strip"><div><span>OPERATIONAL ALERTS</span><strong>{{operationalAlerts(view)[0]}}</strong></div><span>{{operationalAlerts(view).length}} active</span></section>
+        }
+
         @if (executedTrades(view).length) {
         <section class="detail-grid workspace-priority-events">
           <article class="positions-panel">
@@ -314,6 +320,8 @@
                   <div><span>Nifty / VWAP</span><strong>{{ evaluation.currentPrice | number: '1.2-2' }} / {{ evaluation.vwap | number: '1.2-2' }}</strong></div>
                   <div><span>EMA 9 / EMA 21</span><strong>{{ evaluation.fastEma | number: '1.2-2' }} / {{ evaluation.slowEma | number: '1.2-2' }}</strong></div>
                   <div><span>Opening range</span><strong>{{ evaluation.openingRangeLow | number: '1.2-2' }}–{{ evaluation.openingRangeHigh | number: '1.2-2' }}</strong></div>
+                  <div><span>Confidence rule</span><strong [class.good]="evaluation.regimeConfidence >= 0.50" [class.bad]="evaluation.regimeConfidence < 0.50">{{ evaluation.regimeConfidence >= 0.50 ? 'Passed' : 'Failed' }} (50% minimum)</strong></div>
+                  <div><span>Futures volume rule</span><strong [class.good]="evaluation.relativeFuturesVolume >= 0.75" [class.bad]="evaluation.relativeFuturesVolume < 0.75">{{ evaluation.relativeFuturesVolume >= 0.75 ? 'Passed' : 'Failed' }} (0.75 minimum)</strong></div>
                   @if (evaluation.optionSymbol) {
                     <div><span>Proposed option</span><strong>{{ evaluation.optionSymbol }} @ {{ evaluation.optionPremium | number: '1.2-2' }}</strong></div>
                   }
@@ -335,6 +343,58 @@
             <p class="empty-copy">No completed strategy evaluations have been recorded for this session yet.</p>
           }
         </section>
+        </div>
+        }
+
+        @if (growwPositionsOpen) {
+        <div class="logs-backdrop" (click)="closeGrowwPositions()">
+          <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Groww live positions" (click)="$event.stopPropagation()">
+            <div class="panel-heading">
+              <div><span>GROWW ACCOUNT · READ ONLY</span><strong>Live broker positions</strong></div>
+              <button type="button" (click)="closeGrowwPositions()">Close</button>
+            </div>
+            @if (growwPositionsLoading) { <p class="empty-copy">Reading Groww positions…</p> }
+            @else if (growwPositionsError) { <p class="form-error">{{ growwPositionsError }}</p> }
+            @else if (!growwPositions.length) { <p class="empty-copy">No open Groww positions.</p> }
+            @else {
+              <div class="evaluation-table">
+                @for (position of growwPositions; track position.segment + position.tradingSymbol) {
+                  <article class="evaluation-row">
+                    <div><span>Contract</span><strong>{{ position.tradingSymbol }}</strong></div>
+                    <div><span>Quantity</span><strong>{{ position.quantity }}</strong></div>
+                    <div><span>Average</span><strong>{{ position.averagePrice | number:'1.2-2' }}</strong></div>
+                    <div><span>Current</span><strong>{{ position.currentPrice !== null ? (position.currentPrice | number:'1.2-2') : 'Quote unavailable' }}</strong></div>
+                    <div><span>Live P&amp;L</span><strong [class.good]="(position.unrealisedPnl || 0) >= 0" [class.bad]="(position.unrealisedPnl || 0) < 0">₹{{ position.unrealisedPnl | number:'1.2-2' }}</strong></div>
+                    <div><span>Segment / product</span><strong>{{ position.segment }} · {{ position.product }}</strong></div>
+                  </article>
+                }
+              </div>
+              <p class="empty-copy">Updated {{ growwPositionsObservedAt | date:'HH:mm:ss':'Asia/Kolkata' }} IST · This screen cannot place or modify orders.</p>
+            }
+          </section>
+        </div>
+        }
+
+        @if (reportOpen) {
+        <div class="logs-backdrop" (click)="closeReport()">
+          <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Paper performance and trade history" (click)="$event.stopPropagation()">
+            <div class="panel-heading"><div><span>PAPER REPORT</span><strong>Daily performance and trade history</strong></div><button type="button" (click)="closeReport()">Close</button></div>
+            @if (reportLoading) { <p class="empty-copy">Loading report…</p> }
+            @else if (reportError) { <p class="form-error">{{reportError}}</p> }
+            @else if (report) {
+              <div class="evaluation-table">
+                @for(day of report.daily;track day.date){
+                  <article class="evaluation-row"><div><span>Date</span><strong>{{day.date|date:'dd MMM yyyy'}}</strong></div><div><span>Trades</span><strong>{{day.trades}}</strong></div><div><span>Wins / losses</span><strong>{{day.wins}} / {{day.losses}}</strong></div><div><span>Win rate</span><strong>{{day.winRate|percent:'1.0-0'}}</strong></div><div><span>Net P&amp;L</span><strong [class.good]="day.netPnl>=0" [class.bad]="day.netPnl<0">₹{{day.netPnl|number:'1.2-2'}}</strong></div><div><span>Max drawdown</span><strong class="bad">₹{{day.maximumDrawdown|number:'1.2-2'}}</strong></div></article>
+                }
+              </div>
+              <div class="report-tools"><input [(ngModel)]="tradeFilter" placeholder="Filter contract, direction, result or strategy"/><button type="button" (click)="exportTrades()">Export CSV</button></div>
+              <div class="evaluation-table">
+                @for(trade of filteredTrades();track trade.signalId){
+                  <article class="evaluation-row"><div><span>Contract</span><strong>{{trade.contract}}</strong></div><div><span>Entry / exit</span><strong>{{trade.entryPrice|number:'1.2-2'}} / {{trade.exitPrice|number:'1.2-2'}}</strong></div><div><span>Quantity</span><strong>{{trade.quantity}}</strong></div><div><span>Result</span><strong>{{trade.exitReason}}</strong></div><div><span>P&amp;L</span><strong [class.good]="trade.realisedPnl>=0" [class.bad]="trade.realisedPnl<0">₹{{trade.realisedPnl|number:'1.2-2'}}</strong></div><div><span>Exited IST</span><strong>{{trade.exitTimeUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</strong></div></article>
+                }
+              </div>
+            }
+          </section>
         </div>
         }
 

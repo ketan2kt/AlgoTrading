@@ -127,6 +127,21 @@ public sealed class GrowwReadOnlyGateway(
         return GrowwInstrumentCsvParser.Parse(text);
     }
 
+    public async Task<IReadOnlyList<GrowwPosition>> GetPositionsAsync(
+        string segment, CancellationToken cancellationToken)
+    {
+        ValidateIdentifier(segment, nameof(segment));
+        if (segment is not ("CASH" or "FNO"))
+            throw new ArgumentException("Only Groww CASH and FNO positions are supported.", nameof(segment));
+        var payload = await GetPayloadAsync<PositionsPayload>(
+            "/v1/positions/user" + BuildQuery(("segment", segment)), cancellationToken);
+        return (payload.Positions ?? []).Select(value => new GrowwPosition(
+            value.TradingSymbol ?? string.Empty, segment, value.Exchange ?? string.Empty,
+            value.Product ?? string.Empty, value.Quantity, value.NetPrice,
+            value.CreditQuantity, value.CreditPrice, value.DebitQuantity, value.DebitPrice,
+            value.NetCarryForwardQuantity, value.NetCarryForwardPrice, value.RealisedPnl)).ToArray();
+    }
+
     private async Task<TPayload> GetPayloadAsync<TPayload>(
         string path,
         CancellationToken cancellationToken)
@@ -296,4 +311,21 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("candles")] JsonElement[]? Candles,
         [property: JsonPropertyName("closing_price")] decimal ClosingPrice,
         [property: JsonPropertyName("interval_in_minutes")] int IntervalInMinutes);
+
+    private sealed record PositionsPayload(
+        [property: JsonPropertyName("positions")] PositionPayload[]? Positions);
+
+    private sealed record PositionPayload(
+        [property: JsonPropertyName("trading_symbol")] string? TradingSymbol,
+        [property: JsonPropertyName("credit_quantity")] int CreditQuantity,
+        [property: JsonPropertyName("credit_price")] decimal CreditPrice,
+        [property: JsonPropertyName("debit_quantity")] int DebitQuantity,
+        [property: JsonPropertyName("debit_price")] decimal DebitPrice,
+        [property: JsonPropertyName("exchange")] string? Exchange,
+        [property: JsonPropertyName("quantity")] int Quantity,
+        [property: JsonPropertyName("product")] string? Product,
+        [property: JsonPropertyName("net_price")] decimal NetPrice,
+        [property: JsonPropertyName("net_carry_forward_quantity")] int NetCarryForwardQuantity,
+        [property: JsonPropertyName("net_carry_forward_price")] decimal NetCarryForwardPrice,
+        [property: JsonPropertyName("realised_pnl")] decimal RealisedPnl);
 }

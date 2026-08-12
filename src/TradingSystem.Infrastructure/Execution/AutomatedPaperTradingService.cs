@@ -30,6 +30,7 @@ internal sealed partial class AutomatedPaperTradingService(
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private DateTimeOffset? lastEvaluatedCandleUtc;
+    private readonly Dictionary<Guid, decimal> favourablePriceBySignal = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -96,7 +97,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var tradeState = await RebuildTradeStateAsync(db, signals, cancellationToken);
         var reconciliation = await broker.ReconcileAsync(
             tradeState.Open is null ? [] : [new ExpectedBrokerPosition(tradeState.Open.Entry.InstrumentId,
-                tradeState.Open.Entry.Direction, tradeState.Open.Entry.FilledQuantity)], cancellationToken);
+                tradeState.Open.Entry.Direction, tradeState.Open.RemainingQuantity)], cancellationToken);
         if (!reconciliation.TradingPermitted)
         {
             state.Record("ReconciliationRequired", false,
@@ -484,9 +485,42 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
-        var unrealised = (price - open.Entry.AverageFillPrice!.Value) * open.Entry.FilledQuantity * multiplier;
+        var entryPrice = open.Entry.AverageFillPrice!.Value;
+        var favourable = favourablePriceBySignal.GetValueOrDefault(open.Signal.SignalId, entryPrice);
+        favourable = open.Entry.Direction == Direction.Buy ? Math.Max(favourable, price) : Math.Min(favourable, price);
+        favourablePriceBySignal[open.Signal.SignalId] = favourable;
+        var effectiveStop = open.StopLoss;
+        if (options.Value.BreakEvenEnabled || options.Value.TrailingStopEnabled)
+            effectiveStop = PaperProtectiveStopPolicy.Calculate(open.Entry.Direction, entryPrice,
+                open.StopLoss, favourable,
+                options.Value.BreakEvenEnabled ? options.Value.BreakEvenTriggerRiskMultiple : decimal.MaxValue,
+                options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue);
+        var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
+
+        var riskPerUnit = Math.Abs(entryPrice - open.StopLoss);
+        if (options.Value.PartialProfitEnabled && open.PartialExit is null &&
+            ((open.Entry.Direction == Direction.Buy && price >= entryPrice + riskPerUnit * options.Value.PartialProfitRiskMultiple) ||
+             (open.Entry.Direction == Direction.Sell && price <= entryPrice - riskPerUnit * options.Value.PartialProfitRiskMultiple)))
+        {
+            var partialQuantity = Math.Clamp((int)Math.Floor(open.Entry.FilledQuantity * options.Value.PartialExitFraction),
+                1, Math.Max(1, open.Entry.FilledQuantity - 1));
+            var partialReference = $"{open.Signal.SignalId:N}-PARTIAL";
+            var partialDirection = open.Entry.Direction == Direction.Buy ? Direction.Sell : Direction.Buy;
+            await broker.SubmitAsync(new(partialReference, open.Entry.InstrumentId, partialDirection,
+                partialQuantity, price), cancellationToken);
+            await paperControl.ProcessNextFillAsync(partialReference, cancellationToken);
+            state.Record("PositionOpen", false,
+                $"Partial profit booked on {partialQuantity} units; break-even/trailing protection is active.",
+                tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
+                open.Entry.Direction.ToString(), open.RemainingQuantity - partialQuantity, entryPrice,
+                effectiveStop, open.Target, optionSymbol: optionInstrument.TradingSymbol,
+                optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
+                optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
+                currentOptionPrice: price);
+            return;
+        }
         var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
-            open.StopLoss, open.Target,
+            effectiveStop, open.Target,
             TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh);
         if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None)
@@ -495,8 +529,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 fresh ? "Monitoring protective stop, target, and forced exit." :
                     "Market data is stale; new entries are blocked and the paper position cannot be repriced.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
-                open.Entry.Direction.ToString(), open.Entry.FilledQuantity, open.Entry.AverageFillPrice,
-                open.StopLoss, open.Target, optionSymbol: optionInstrument.TradingSymbol,
+                open.Entry.Direction.ToString(), open.RemainingQuantity, open.Entry.AverageFillPrice,
+                effectiveStop, open.Target, optionSymbol: optionInstrument.TradingSymbol,
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
                 optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
                 currentOptionPrice: price);
@@ -506,10 +540,13 @@ internal sealed partial class AutomatedPaperTradingService(
         var exitReference = $"{open.Signal.SignalId:N}-EXIT";
         var exitDirection = open.Entry.Direction == Direction.Buy ? Direction.Sell : Direction.Buy;
         await broker.SubmitAsync(new(exitReference, open.Entry.InstrumentId, exitDirection,
-            open.Entry.FilledQuantity, price), cancellationToken);
+            open.RemainingQuantity, price), cancellationToken);
         var exit = await paperControl.ProcessNextFillAsync(exitReference, cancellationToken);
         var grossPnl = (exit.AverageFillPrice!.Value - open.Entry.AverageFillPrice.Value) *
-                       open.Entry.FilledQuantity * multiplier;
+                       open.RemainingQuantity * multiplier;
+        if (open.PartialExit?.AverageFillPrice is { } partialPrice)
+            grossPnl += (partialPrice - open.Entry.AverageFillPrice.Value) *
+                        open.PartialExit.FilledQuantity * multiplier;
         var estimatedCosts = PaperTradingCostModel.EstimateRoundTripCost(
             open.Entry.AverageFillPrice.Value, exit.AverageFillPrice.Value,
             open.Entry.FilledQuantity, options.Value.EstimatedRoundTripCostBasisPoints);
@@ -569,7 +606,10 @@ internal sealed partial class AutomatedPaperTradingService(
                     .SingleOrDefaultAsync(value => value.SignalId == row.Id, cancellationToken);
                 var protective = ParseProtectivePrices(risk?.SnapshotJson,
                     signal.ProposedStopLoss, signal.ProposedTarget);
-                open = new OpenTrade(signal, entry, protective.StopLoss, protective.Target);
+                var partial = await broker.GetOrderAsync($"{row.Id:N}-PARTIAL", cancellationToken);
+                var remaining = entry.FilledQuantity - (partial?.State == OrderState.Filled ? partial.FilledQuantity : 0);
+                open = new OpenTrade(signal, entry, protective.StopLoss, protective.Target,
+                    remaining, partial?.State == OrderState.Filled ? partial : null);
             }
         }
         return new(count, realised, open);
@@ -719,7 +759,7 @@ internal sealed partial class AutomatedPaperTradingService(
     }
 
     private sealed record OpenTrade(StrategySignal Signal, BrokerOrderSnapshot Entry,
-        decimal StopLoss, decimal Target);
+        decimal StopLoss, decimal Target, int RemainingQuantity, BrokerOrderSnapshot? PartialExit);
     private sealed record RebuiltTradeState(int TradesToday, decimal RealisedPnl, OpenTrade? Open);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Automated paper-trading cycle failed.")]
