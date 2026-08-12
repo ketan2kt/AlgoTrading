@@ -33,6 +33,10 @@ export interface WorkspaceTradeOverlay {
   executionRiskAmount: number | null;
   executionCapitalExposure: number | null;
   rejectionReasons: string[];
+  lifecycleStatus: string;
+  currentOptionPrice: number | null;
+  exitPrice: number | null;
+  realisedPnl: number | null;
 }
 
 export interface TradingWorkspaceSnapshot {
@@ -98,6 +102,7 @@ export interface PaperAutomationSnapshot {
   selectedOptionStrike: number | null;
   selectedOptionLotSize: number | null;
   readinessChecks: PaperReadinessCheck[] | null;
+  currentOptionPrice: number | null;
 }
 
 export interface PaperReadinessCheck {

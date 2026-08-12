@@ -19,7 +19,8 @@ public sealed record PaperAutomationSnapshot(
     DateOnly? SelectedOptionExpiry = null,
     decimal? SelectedOptionStrike = null,
     int? SelectedOptionLotSize = null,
-    IReadOnlyList<PaperReadinessCheck>? ReadinessChecks = null);
+    IReadOnlyList<PaperReadinessCheck>? ReadinessChecks = null,
+    decimal? CurrentOptionPrice = null);
 
 public sealed record PaperReadinessCheck(string Code, string Label, bool Ready, string Detail);
 

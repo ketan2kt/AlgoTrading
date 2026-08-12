@@ -35,7 +35,11 @@ public sealed record WorkspaceTradeOverlay(
     decimal? ExecutionTarget,
     decimal? ExecutionRiskAmount,
     decimal? ExecutionCapitalExposure,
-    IReadOnlyList<string> RejectionReasons);
+    IReadOnlyList<string> RejectionReasons,
+    string LifecycleStatus,
+    decimal? CurrentOptionPrice,
+    decimal? ExitPrice,
+    decimal? RealisedPnl);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,

@@ -455,7 +455,8 @@ internal sealed partial class AutomatedPaperTradingService(
             entry: entry.AverageFillPrice, stop: decision.FinalStopLoss, target: decision.FinalTarget,
             optionSymbol: selectedOption.TradingSymbol,
             optionType: selectedOption.Type.ToString(), optionExpiry: selectedOption.ExpiryDate,
-            optionStrike: selectedOption.StrikePrice, optionLotSize: selectedOption.LotSize);
+            optionStrike: selectedOption.StrikePrice, optionLotSize: selectedOption.LotSize,
+            currentOptionPrice: entry.AverageFillPrice);
     }
 
     private async Task ManageOpenPositionAsync(IServiceProvider services, RebuiltTradeState tradeState,
@@ -472,7 +473,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 open.Entry.AverageFillPrice, open.StopLoss, open.Target,
                 optionSymbol: optionInstrument.TradingSymbol,
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
-                optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize);
+                optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
+                currentOptionPrice: price > 0 ? price : null);
             return;
         }
 
@@ -491,7 +493,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 open.Entry.Direction.ToString(), open.Entry.FilledQuantity, open.Entry.AverageFillPrice,
                 open.StopLoss, open.Target, optionSymbol: optionInstrument.TradingSymbol,
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
-                optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize);
+                optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
+                currentOptionPrice: price);
             return;
         }
 

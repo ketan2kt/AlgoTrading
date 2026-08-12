@@ -126,6 +126,7 @@ describe('App', () => {
             activeQuantity: null, entryPrice: null, stopLoss: null, target: null,
             selectedOptionSymbol: null, selectedOptionType: null, selectedOptionExpiry: null,
             selectedOptionStrike: null, selectedOptionLotSize: null,
+            currentOptionPrice: null,
             readinessChecks: [
               { code: 'history', label: 'Previous-session context', ready: true,
                 detail: 'Previous close available' },
@@ -153,7 +154,12 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Previous-session context');
     expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
     expect(fixture.nativeElement.textContent).toContain('18/21 candles');
-    expect(fixture.nativeElement.textContent).toContain('RESEARCH AUDIT');
+    expect(fixture.nativeElement.textContent).toContain('RESEARCH LOGS');
+    expect(fixture.nativeElement.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
+    const logsButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('View logs')) as HTMLButtonElement;
+    logsButton.click();
+    fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
   });
 });

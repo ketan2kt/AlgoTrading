@@ -427,6 +427,42 @@ article > span,
   margin: 0;
   overflow: hidden;
 }
+.logs-launch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+}
+.logs-launch > div {
+  display: grid;
+  gap: 0.2rem;
+}
+.logs-launch strong { font-size: 0.82rem; font-weight: 600; }
+.logs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(2, 8, 5, 0.78);
+}
+.logs-modal {
+  width: min(1180px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+  border: 1px solid #33483e;
+  border-radius: 0.55rem;
+  background: #09130f;
+  box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.55);
+}
+.logs-modal .panel-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #0c1813;
+}
 .evaluation-table {
   display: grid;
 }

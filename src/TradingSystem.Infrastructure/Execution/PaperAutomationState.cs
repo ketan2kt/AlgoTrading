@@ -25,14 +25,14 @@ internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAu
         string? direction = null, int? quantity = null, decimal? entry = null,
         decimal? stop = null, decimal? target = null, string? optionSymbol = null,
         string? optionType = null, DateOnly? optionExpiry = null, decimal? optionStrike = null,
-        int? optionLotSize = null)
+        int? optionLotSize = null, decimal? currentOptionPrice = null)
     {
         lock (gate)
         {
             snapshot = new(status, permitted, message, timeProvider.GetUtcNow(), tradesToday,
                 realisedPnl, unrealisedPnl, signalId, direction, quantity, entry, stop, target,
                 optionSymbol, optionType, optionExpiry, optionStrike, optionLotSize,
-                snapshot.ReadinessChecks);
+                snapshot.ReadinessChecks, currentOptionPrice);
         }
     }
 }

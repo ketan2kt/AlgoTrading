@@ -7,7 +7,7 @@ import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
-import { TradingWorkspaceSnapshot } from './trading-workspace';
+import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 
@@ -51,6 +51,7 @@ export class App implements OnInit, OnDestroy {
   protected killSwitchActive = false;
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
+  protected logsOpen = false;
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
 
@@ -129,6 +130,18 @@ export class App implements OnInit, OnDestroy {
     if (!this.chartTimeframes.includes(value)) return;
     this.chartTimeframeMinutes = value;
     localStorage.setItem('sarthi.chartTimeframeMinutes', String(value));
+  }
+
+  protected executedTrades(view: TradingWorkspaceSnapshot): WorkspaceTradeOverlay[] {
+    return view.overlays.filter((overlay) => overlay.fillPrice !== null);
+  }
+
+  protected openLogs(): void {
+    this.logsOpen = true;
+  }
+
+  protected closeLogs(): void {
+    this.logsOpen = false;
   }
 
   protected setKillSwitch(active: boolean): void {

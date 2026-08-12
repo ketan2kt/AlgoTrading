@@ -125,6 +125,10 @@ internal sealed class EfTradingWorkspaceReader(
         var executionInstruments = await dbContext.Instruments.AsNoTracking()
             .Where(value => executionInstrumentIds.Contains(value.Id))
             .ToDictionaryAsync(value => value.Id, cancellationToken);
+        var tradeResults = await dbContext.PaperTradeResults.AsNoTracking()
+            .Where(value => signalIds.Contains(value.SignalId))
+            .ToDictionaryAsync(value => value.SignalId, cancellationToken);
+        var automation = paperAutomation.GetCurrent();
         var overlays = signalRows.Select(value =>
         {
             risk.TryGetValue(value.Id, out var decision);
@@ -133,6 +137,14 @@ internal sealed class EfTradingWorkspaceReader(
                 executionInstruments.GetValueOrDefault(order.InstrumentId);
             var execution = ParseExecutionDecision(decision?.SnapshotJson);
             var rejectionReasons = ParseRejectionReasons(decision?.ReasonsJson);
+            tradeResults.TryGetValue(value.Id, out var result);
+            var isActive = result is null && automation.ActiveSignalId == value.Id &&
+                           automation.Status is "PositionOpen" or "PositionUnmonitored";
+            var lifecycleStatus = result is not null ? FormatExitStatus(result.ExitReason) :
+                isActive ? (automation.Status == "PositionUnmonitored" ? "Active · quote unavailable" : "Active") :
+                order?.FillPrice is not null ? "Entry filled" : decision is null
+                    ? value.Status.ToString()
+                    : decision.Approved ? "Risk approved" : "Risk rejected";
             return new WorkspaceTradeOverlay(
                 value.Id,
                 "Opening Range Breakout 1.0.0",
@@ -161,7 +173,11 @@ internal sealed class EfTradingWorkspaceReader(
                 execution.Target,
                 execution.RiskAmount,
                 execution.CapitalExposure,
-                rejectionReasons);
+                rejectionReasons,
+                lifecycleStatus,
+                isActive ? automation.CurrentOptionPrice : result?.ExitPrice,
+                result?.ExitPrice,
+                result?.RealisedPnl);
         }).ToArray();
 
         var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
@@ -171,11 +187,6 @@ internal sealed class EfTradingWorkspaceReader(
             .OrderByDescending(value => value.CandleTimeUtc)
             .Take(40)
             .ToListAsync(cancellationToken);
-        var evaluationSignalIds = evaluationRows.Where(value => value.SignalId != null)
-            .Select(value => value.SignalId!.Value).ToArray();
-        var tradeResults = await dbContext.PaperTradeResults.AsNoTracking()
-            .Where(value => evaluationSignalIds.Contains(value.SignalId))
-            .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var evaluations = evaluationRows.Select(value => new WorkspaceStrategyEvaluation(
             value.Id,
             value.CandleTimeUtc,
@@ -219,7 +230,7 @@ internal sealed class EfTradingWorkspaceReader(
             closed,
             overlays,
             evaluations,
-            paperAutomation.GetCurrent());
+            automation);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             options.TradingSymbol,
@@ -237,6 +248,15 @@ internal sealed class EfTradingWorkspaceReader(
             [],
             paperAutomation.GetCurrent());
     }
+
+    private static string FormatExitStatus(string exitReason) => exitReason switch
+    {
+        "StopLoss" => "SL hit",
+        "Target" => "Target hit",
+        "ForcedIntradayExit" => "Time exit",
+        "EmergencyKillSwitch" => "Emergency exit",
+        _ => "Closed"
+    };
 
     private static PaperOrderProjection? ParsePaperOrder(IEnumerable<string> payloads)
     {
