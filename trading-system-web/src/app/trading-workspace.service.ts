@@ -11,7 +11,7 @@ export class TradingWorkspaceService {
   private connection: HubConnection | null = null;
 
   getNifty(): Observable<TradingWorkspaceSnapshot> {
-    return this.http.get<TradingWorkspaceSnapshot>('/api/trading-workspace/nifty?candleCount=180');
+    return this.http.get<TradingWorkspaceSnapshot>('/api/trading-workspace/nifty?candleCount=1500');
   }
 
   updates$(): Observable<TradingWorkspaceSnapshot> {

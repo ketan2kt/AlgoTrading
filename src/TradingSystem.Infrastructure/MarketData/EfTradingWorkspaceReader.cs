@@ -54,7 +54,7 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => value.InstrumentId == instrument.Id &&
                             value.IntervalSeconds == marketDataOptions.Value.CandleIntervalSeconds &&
                             value.Source == "Groww" &&
-                            value.OpenTimeUtc >= sessionStartUtc &&
+                            value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
                             value.OpenTimeUtc < sessionEndUtc)
             .OrderByDescending(value => value.OpenTimeUtc)
             .Take(candleCount)
@@ -63,6 +63,15 @@ internal sealed class EfTradingWorkspaceReader(
                 value.OpenTimeUtc, value.IntervalSeconds, value.Open, value.High, value.Low,
                 value.Close, value.Volume, true))
             .ToListAsync(cancellationToken);
+        var displayedSessionDates = closed
+            .Select(value => DateOnly.FromDateTime(
+                TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))
+            .Distinct()
+            .OrderByDescending(value => value)
+            .Take(3)
+            .ToHashSet();
+        closed = closed.Where(value => displayedSessionDates.Contains(DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))).ToList();
 
         var interval = marketDataOptions.Value.CandleIntervalSeconds;
         var currentBucket = DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds() -

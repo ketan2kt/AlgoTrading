@@ -9,5 +9,5 @@ public sealed class LiveNiftyOptions
     public string Segment { get; init; } = "CASH";
     public string TradingSymbol { get; init; } = "NIFTY";
     public int PollIntervalSeconds { get; init; } = 2;
-    public int WorkspaceCandleCount { get; init; } = 180;
+    public int WorkspaceCandleCount { get; init; } = 1500;
 }

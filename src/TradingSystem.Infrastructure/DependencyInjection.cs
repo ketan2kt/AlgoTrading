@@ -151,7 +151,7 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(LiveNiftyOptions.SectionName))
             .Validate(options => options.PollIntervalSeconds is >= 1 and <= 30,
                 "Live Nifty poll interval must be between 1 and 30 seconds.")
-            .Validate(options => options.WorkspaceCandleCount is >= 30 and <= 1000,
+            .Validate(options => options.WorkspaceCandleCount is >= 30 and <= 1500,
                 "Live Nifty workspace candle count must be between 30 and 1000.")
             .Validate(options => options.Exchange == "NSE" && options.Segment == "CASH" &&
                                  options.TradingSymbol == "NIFTY",

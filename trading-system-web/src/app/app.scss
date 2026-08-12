@@ -148,6 +148,7 @@ button:disabled {
   border: 1px solid #26362f;
   border-radius: 8px;
 }
+.workspace-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; }
 .workspace-heading h1 {
   font-size: 1.15rem;
 }

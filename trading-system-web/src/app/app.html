@@ -57,7 +57,12 @@
             live source.
           </p>
         </div>
-        <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>
+        <div class="workspace-actions">
+          <button class="secondary-button" type="button" (click)="enableTradeAlerts()">
+            {{ tradeAlertsEnabled ? 'Trade alerts on' : 'Enable loud trade alerts' }}
+          </button>
+          <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>
+        </div>
       </section>
 
       @if (tokenStatus; as token) {
@@ -269,7 +274,7 @@
               @for (overlay of executedTrades(view); track overlay.signalId) {
                 <div class="signal-row">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
-                  <div><span>Contract / strike</span><strong>{{ overlay.executionInstrument }} · {{ overlay.executionStrike | number: '1.0-0' }}</strong></div>
+                  <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
                   <div><span>Entry premium</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
                   <div><span>{{ overlay.exitPrice !== null ? 'Exit premium' : 'Current premium' }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
                     <div><span>Premium SL</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>

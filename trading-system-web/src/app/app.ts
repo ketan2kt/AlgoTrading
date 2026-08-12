@@ -52,6 +52,10 @@ export class App implements OnInit, OnDestroy {
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
   protected logsOpen = false;
+  protected tradeAlertsEnabled = false;
+  private audioContext: AudioContext | null = null;
+  private tradeStates = new Map<string, string>();
+  private tradeStatesInitialized = false;
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
 
@@ -134,6 +138,20 @@ export class App implements OnInit, OnDestroy {
 
   protected executedTrades(view: TradingWorkspaceSnapshot): WorkspaceTradeOverlay[] {
     return view.overlays.filter((overlay) => overlay.fillPrice !== null);
+  }
+
+  protected compactOptionName(overlay: WorkspaceTradeOverlay): string {
+    const strike = overlay.executionStrike == null ? '' : Math.trunc(overlay.executionStrike).toString();
+    const type = overlay.executionInstrumentType === 'PutOption' ? 'PE' :
+      overlay.executionInstrumentType === 'CallOption' ? 'CE' : '';
+    return strike && type ? `${strike}${type}` : overlay.executionInstrument || 'Option';
+  }
+
+  protected enableTradeAlerts(): void {
+    this.audioContext ??= new AudioContext();
+    void this.audioContext.resume();
+    this.tradeAlertsEnabled = true;
+    this.playTradeAlert('enabled');
   }
 
   protected openLogs(): void {
@@ -231,6 +249,7 @@ export class App implements OnInit, OnDestroy {
     this.loadWorkspace();
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
+        this.detectTradeAlerts(snapshot);
         this.workspace = snapshot;
         this.workspaceError = '';
         this.refreshView();
@@ -279,6 +298,7 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.workspaceService.getNifty().subscribe({
         next: (snapshot) => {
+          this.detectTradeAlerts(snapshot);
           this.workspace = snapshot;
           this.workspaceError = '';
           this.refreshView();
@@ -293,6 +313,41 @@ export class App implements OnInit, OnDestroy {
 
   private refreshView(): void {
     this.changeDetector.markForCheck();
+  }
+
+  private detectTradeAlerts(snapshot: TradingWorkspaceSnapshot): void {
+    const trades = snapshot.overlays.filter((overlay) => overlay.fillPrice !== null);
+    if (!this.tradeStatesInitialized) {
+      trades.forEach((trade) => this.tradeStates.set(trade.signalId, trade.lifecycleStatus));
+      this.tradeStatesInitialized = true;
+      return;
+    }
+    for (const trade of trades) {
+      const previous = this.tradeStates.get(trade.signalId);
+      if (!previous) this.playTradeAlert('entry');
+      else if (previous !== trade.lifecycleStatus &&
+               ['SL hit', 'Target hit', 'Time exit', 'Emergency exit', 'Closed'].includes(trade.lifecycleStatus))
+        this.playTradeAlert('exit');
+      this.tradeStates.set(trade.signalId, trade.lifecycleStatus);
+    }
+  }
+
+  private playTradeAlert(kind: 'entry' | 'exit' | 'enabled'): void {
+    if (!this.tradeAlertsEnabled || !this.audioContext) return;
+    const frequencies = kind === 'entry' ? [880, 1175, 880] : kind === 'exit' ? [440, 294, 220] : [660];
+    const start = this.audioContext.currentTime;
+    frequencies.forEach((frequency, index) => {
+      const oscillator = this.audioContext!.createOscillator();
+      const gain = this.audioContext!.createGain();
+      oscillator.type = 'square';
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.001, start + index * 0.22);
+      gain.gain.exponentialRampToValueAtTime(0.35, start + index * 0.22 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + index * 0.22 + 0.18);
+      oscillator.connect(gain).connect(this.audioContext!.destination);
+      oscillator.start(start + index * 0.22);
+      oscillator.stop(start + index * 0.22 + 0.2);
+    });
   }
 
   private readChartTimeframe(): number {
