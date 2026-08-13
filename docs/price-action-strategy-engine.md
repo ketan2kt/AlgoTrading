@@ -34,6 +34,14 @@ The existing premium lifecycle performs partial profit at 1R, moves protection t
 after further favourable movement, and exits at stop, target, kill switch or the intraday cutoff.
 Restart recovery reconstructs the position from the durable paper journal.
 
+While an option position is open, the engine also evaluates completed Nifty candles for invalidation
+of the original directional thesis. It waits for at least two completed candles after entry and then
+requires three of four independent reversal facts: two closes beyond EMA 9, an EMA 9/21 cross,
+opposite higher-high/lower-low structure with at least 55% strength, and a close through the recent
+swing. A confirmed invalidation closes the option using the current executable paper price and stores
+the evidence in the audit log. One adverse candle, stale Nifty data or incomplete history cannot
+trigger this exit. Premium stop, target, emergency and time exits retain priority.
+
 ## Research
 
 All evaluated signals and periodic no-trade explanations are persisted. Closed paper trades include

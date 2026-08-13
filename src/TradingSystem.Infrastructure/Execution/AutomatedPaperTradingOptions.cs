@@ -31,4 +31,7 @@ public sealed class AutomatedPaperTradingOptions
     public bool PartialProfitEnabled { get; init; } = true;
     public decimal PartialProfitRiskMultiple { get; init; } = 1m;
     public decimal PartialExitFraction { get; init; } = 0.40m;
+    public bool UnderlyingTrendInvalidationEnabled { get; init; } = true;
+    public decimal MinimumReversalStructureStrength { get; init; } = 0.55m;
+    public int RequiredReversalEvidenceCount { get; init; } = 3;
 }

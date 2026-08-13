@@ -273,6 +273,7 @@ internal sealed class EfTradingWorkspaceReader(
         "Target" => "Target hit",
         "ForcedIntradayExit" => "Time exit",
         "EmergencyKillSwitch" => "Emergency exit",
+        "UnderlyingTrendInvalidated" => "Trend reversal exit",
         _ => "Closed"
     };
 

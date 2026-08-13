@@ -148,8 +148,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 : optionQuote.LastPrice;
             var optionFresh = currentOptionPrice > 0;
             await ManageOpenPositionAsync(scope.ServiceProvider, tradeState,
-                currentOptionPrice, indiaNow.TimeOfDay, optionFresh, killSwitchActive,
-                optionInstrument, cancellationToken);
+                currentOptionPrice, indiaNow.TimeOfDay, optionFresh, fresh, killSwitchActive,
+                optionInstrument, instrument.Id, sessionStart, sessionEnd, cancellationToken);
             return;
         }
 
@@ -493,8 +493,9 @@ internal sealed partial class AutomatedPaperTradingService(
     }
 
     private async Task ManageOpenPositionAsync(IServiceProvider services, RebuiltTradeState tradeState,
-        decimal price, TimeSpan indiaTime, bool fresh, bool killSwitchActive, Instrument optionInstrument,
-        CancellationToken cancellationToken)
+        decimal price, TimeSpan indiaTime, bool fresh, bool underlyingFresh, bool killSwitchActive,
+        Instrument optionInstrument, Guid underlyingInstrumentId, DateTimeOffset sessionStart,
+        DateTimeOffset sessionEnd, CancellationToken cancellationToken)
     {
         var open = tradeState.Open!;
         if (!fresh || price <= 0)
@@ -524,8 +525,22 @@ internal sealed partial class AutomatedPaperTradingService(
                 options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue);
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
 
+        var invalidation = options.Value.UnderlyingTrendInvalidationEnabled && underlyingFresh
+            ? await EvaluateUnderlyingInvalidationAsync(services, open, underlyingInstrumentId,
+                sessionStart, sessionEnd, cancellationToken)
+            : new UnderlyingTrendInvalidationResult(false, 0m,
+                underlyingFresh ? ["Underlying trend invalidation is disabled."] :
+                    ["Fresh Nifty data is unavailable; reversal exits fail closed."]);
+
+        var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
+            effectiveStop, open.Target,
+            TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh);
+        if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
+        if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
+            exitReason = PaperExitReason.UnderlyingTrendInvalidated;
+
         var riskPerUnit = Math.Abs(entryPrice - open.StopLoss);
-        if (options.Value.PartialProfitEnabled && open.PartialExit is null &&
+        if (exitReason == PaperExitReason.None && options.Value.PartialProfitEnabled && open.PartialExit is null &&
             ((open.Entry.Direction == Direction.Buy && price >= entryPrice + riskPerUnit * options.Value.PartialProfitRiskMultiple) ||
              (open.Entry.Direction == Direction.Sell && price <= entryPrice - riskPerUnit * options.Value.PartialProfitRiskMultiple)))
         {
@@ -546,14 +561,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 currentOptionPrice: price);
             return;
         }
-        var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
-            effectiveStop, open.Target,
-            TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh);
-        if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None)
         {
             state.Record(fresh ? "PositionOpen" : "PositionUnmonitored", false,
-                fresh ? "Monitoring protective stop, target, and forced exit." :
+                fresh ? "Monitoring premium protection and confirmed Nifty trend invalidation." :
                     "Market data is stale; new entries are blocked and the paper position cannot be repriced.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
                 open.Entry.Direction.ToString(), open.RemainingQuantity, open.Entry.AverageFillPrice,
@@ -598,10 +609,39 @@ internal sealed partial class AutomatedPaperTradingService(
                 quantity = open.Entry.FilledQuantity,
                 grossPnl,
                 estimatedCosts,
-                realisedPnl = pnl
+                realisedPnl = pnl,
+                reversalEvidenceScore = invalidation.EvidenceScore,
+                reversalEvidence = invalidation.SupportingEvidence
             }), open.Signal.SignalId.ToString("N"), timeProvider.GetUtcNow()), cancellationToken);
         state.Record("TradeClosed", false, $"Paper trade closed by {reason}; realised P&L {pnl:F2}.",
             tradeState.TradesToday, tradeState.RealisedPnl + pnl);
+    }
+
+    private async Task<UnderlyingTrendInvalidationResult> EvaluateUnderlyingInvalidationAsync(
+        IServiceProvider services, OpenTrade open, Guid underlyingInstrumentId,
+        DateTimeOffset sessionStart, DateTimeOffset sessionEnd, CancellationToken cancellationToken)
+    {
+        var db = services.GetRequiredService<TradingDbContext>();
+        var interval = marketOptions.Value.CandleIntervalSeconds;
+        var candles = await db.Candles.AsNoTracking().Where(value =>
+                value.InstrumentId == underlyingInstrumentId && value.Source == "Groww" &&
+                value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
+                value.OpenTimeUtc < sessionEnd)
+            .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        if (candles.Count < 21)
+            return new(false, 0m, ["At least 21 completed Nifty candles are required."]);
+
+        var postEntryCompleted = candles.Count(value =>
+            value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) > open.Signal.MarketDataTimestampUtc);
+        if (postEntryCompleted < 2)
+            return new(false, 0m, ["Waiting for two completed Nifty candles after entry."]);
+
+        var closes = candles.Select(value => value.Close).ToArray();
+        var bars = candles.TakeLast(30).Select(value => new StrategyPriceBar(
+            value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray();
+        return UnderlyingTrendInvalidationPolicy.Evaluate(open.Signal.Direction, bars,
+            Ema(closes, 9), Ema(closes, 21), options.Value.MinimumReversalStructureStrength,
+            options.Value.RequiredReversalEvidenceCount);
     }
 
     private async Task<RebuiltTradeState> RebuildTradeStateAsync(TradingDbContext db,

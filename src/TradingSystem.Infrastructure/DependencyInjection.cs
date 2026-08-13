@@ -237,6 +237,8 @@ public static class DependencyInjection
                                    options.TrailingStopRiskMultiple is > 0 and <= 5 &&
                                    options.PartialProfitRiskMultiple is > 0 and <= 5 &&
                                    options.PartialExitFraction is > 0 and < 1 &&
+                                   options.MinimumReversalStructureStrength is >= 0.5m and <= 1m &&
+                                   options.RequiredReversalEvidenceCount is >= 2 and <= 4 &&
                                  TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.ForcedExit, "HH:mm", out _),
