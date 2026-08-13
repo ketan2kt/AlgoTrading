@@ -7,7 +7,7 @@ five lots would exceed the risk cap, and rejects the trade when even one lot can
 
 ## Scope
 
-This Phase 7 increment joins the existing live Groww Nifty ingestion, deterministic market-regime engine, Opening Range Breakout strategy, conservative risk engine, durable paper broker, and dashboard. It never calls a Groww order endpoint. `PaperTrading:Automation:Enabled` defaults to `false`; promotion requires an explicit configuration change after review.
+This Phase 7 increment joins the existing live Groww Nifty ingestion, deterministic market-regime engine, three-strategy price-action portfolio, conservative risk engine, durable paper broker, and dashboard. It never calls a Groww order endpoint. `PaperTrading:Automation:Enabled` defaults to `false`; promotion requires an explicit configuration change after review.
 
 ## Decision cycle
 
@@ -23,7 +23,7 @@ New entries require all of the following:
 - a persisted previous-session close;
 - positive validated futures volume for relative-volume confirmation;
 - a permitted deterministic market regime;
-- a qualifying Opening Range Breakout signal;
+- a qualifying Opening Range Breakout, Opening Range Retest, or VWAP Trend Pullback signal;
 - a deterministically selected near-expiry ATM Nifty call for bullish bias or put for bearish bias;
 - a live option quote with positive, non-inverted bid/offer, permitted spread and premium, and minimum volume/open interest;
 - risk approval, including quantity, daily trade/loss, exposure, and reward-to-risk limits;

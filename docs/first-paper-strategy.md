@@ -2,7 +2,9 @@
 
 ## Strategy
 
-The only implemented strategy is Opening Range Breakout version `1.0.0`. It evaluates a precomputed, validated context and generates an immutable proposal only when price clears the opening range plus a configurable buffer, relative volume is sufficient, regime direction confirms the break, data/regime permission is true, confidence passes, cooldown has elapsed, and its daily strategy limit is not reached.
+The paper strategy portfolio contains Opening Range Breakout, Opening Range Retest, and VWAP Trend Pullback, each versioned `1.0.0`. All strategies evaluate the same validated, completed-candle context and generate immutable proposals without broker access. The portfolio deterministically selects the highest-confidence qualifying signal for a candle.
+
+Opening Range Breakout requires a buffered range break with matching regime direction. Opening Range Retest requires a prior break, a hold at the broken boundary, and a directional confirmation candle aligned with VWAP and EMA structure. VWAP Trend Pullback requires an established EMA trend, a pullback into the VWAP tolerance area, and a continuation candle. Futures relative volume contributes confirmation and confidence but is not a universal veto for the two price-action setups.
 
 The proposal contains entry, stop, target, reward-to-risk, confidence, supporting and invalidating reasons, source timestamp, and expiry. The strategy has no broker dependency and does not choose final quantity.
 
@@ -10,7 +12,7 @@ The proposal contains entry, stop, target, reward-to-risk, confidence, supportin
 
 The Phase 7 risk gate owns quantity and checks signal expiry, kill switch, broker/data health, daily trade/loss limits, open-position count, minimum reward-to-risk, per-trade risk, quantity cap, and capital exposure. Any rejection produces quantity zero and the paper broker is not called.
 
-Defaults are deliberately conservative: one ORB trade per day, maximum three system trades per day, one open position, ₹500 maximum modeled risk, quantity cap 75, ₹200,000 exposure, and minimum 1.8 reward-to-risk.
+Defaults retain a maximum of three system trades per day, one open position, a shared 20-minute price-action cooldown, minimum 55% price-action score, ₹5,000 maximum paper risk per trade, five option lots, ₹200,000 exposure, and minimum 1.8 reward-to-risk. The portfolio never forces a minimum trade count.
 
 ## Paper lifecycle
 

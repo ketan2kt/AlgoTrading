@@ -183,8 +183,23 @@ public static class DependencyInjection
                                  options.MaximumTradesPerDay is >= 1 and <= 3,
                 "Opening-range strategy settings are invalid.")
             .ValidateOnStart();
-        services.AddSingleton<ITradingStrategy>(provider => new OpeningRangeBreakoutStrategy(
-            provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value));
+        services.AddOptions<PriceActionStrategyOptions>()
+            .Bind(configuration.GetSection("Strategies:PriceAction"))
+            .Validate(options => options.MinimumScore is >= 0.50m and <= 1m &&
+                                 options.RewardToRiskRatio >= 1m &&
+                                 options.MaximumTradesPerDay is >= 1 and <= 3,
+                "Price-action strategy settings are invalid.")
+            .ValidateOnStart();
+        services.AddSingleton<ITradingStrategy>(provider =>
+        {
+            var priceAction = provider.GetRequiredService<IOptions<PriceActionStrategyOptions>>().Value;
+            return new CompositeTradingStrategy([
+                new OpeningRangeBreakoutStrategy(
+                    provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value),
+                new OpeningRangeRetestStrategy(priceAction),
+                new VwapTrendPullbackStrategy(priceAction)
+            ]);
+        });
         services.AddOptions<PreliminaryRiskOptions>()
             .Bind(configuration.GetSection("Risk:Preliminary"))
             .Validate(options => options.MaximumRiskPerTrade > 0 && options.MaximumQuantity > 0 &&

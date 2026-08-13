@@ -30,7 +30,6 @@ public sealed class OpeningRangeBreakoutStrategyTests
     [Theory]
     [InlineData(false, true, 1.5, 0)]
     [InlineData(true, false, 1.5, 0)]
-    [InlineData(true, true, 0.5, 0)]
     [InlineData(true, true, 1.5, 1)]
     public void SafetyGatesProduceNoSignal(bool regimePermitted, bool dataPermitted,
         decimal volume, int trades)
@@ -57,7 +56,7 @@ public sealed class OpeningRangeBreakoutStrategyTests
         Assert.Null(result.Signal);
         Assert.Contains(result.FailedConditions, value => value.Contains("regime does not permit"));
         Assert.Contains(result.FailedConditions, value => value.Contains("confidence 40%"));
-        Assert.Contains(result.FailedConditions, value => value.Contains("volume 0.50"));
+        Assert.DoesNotContain(result.FailedConditions, value => value.Contains("volume 0.50"));
     }
 
     [Fact]

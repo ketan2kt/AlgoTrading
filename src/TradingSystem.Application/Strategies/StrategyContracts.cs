@@ -17,7 +17,17 @@ public sealed record StrategyEvaluationContext(
     decimal OpeningRangeHigh, decimal OpeningRangeLow, decimal RelativeVolume,
     MarketRegime Regime, Direction? RegimeBias, decimal RegimeConfidence,
     bool RegimeTradingPermitted, bool DataTradingPermitted,
-    DateTimeOffset? LastSignalAtUtc, int TradesToday);
+    DateTimeOffset? LastSignalAtUtc, int TradesToday)
+{
+    public decimal Vwap { get; init; }
+    public decimal FastEma { get; init; }
+    public decimal SlowEma { get; init; }
+    public decimal AtrPercent { get; init; }
+    public IReadOnlyList<StrategyPriceBar> RecentCandles { get; init; } = [];
+}
+
+public sealed record StrategyPriceBar(
+    DateTimeOffset OpenTimeUtc, decimal Open, decimal High, decimal Low, decimal Close);
 
 public sealed record StrategyEvaluationResult(
     StrategySignal? Signal,

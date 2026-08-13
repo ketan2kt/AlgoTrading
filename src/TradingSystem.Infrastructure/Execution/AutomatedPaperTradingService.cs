@@ -301,13 +301,22 @@ internal sealed partial class AutomatedPaperTradingService(
             candles[0].Open, openingRangeHigh, openingRangeLow,
             vwap, fast, slow, atr, relativeVolume, 1m, true), cancellationToken);
         var strategy = scope.ServiceProvider.GetRequiredService<ITradingStrategy>();
-        var strategyEvaluation = strategy.EvaluateDetailed(new StrategyEvaluationContext(instrument.Id,
+        var strategyContext = new StrategyEvaluationContext(instrument.Id,
             candleDecisionTime, latestCandle.Close,
             openingRangeHigh, openingRangeLow, relativeVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, regime.TradingPermitted, true,
             signals.OrderByDescending(value => value.MarketDataTimestampUtc)
                 .Select(value => (DateTimeOffset?)value.MarketDataTimestampUtc).FirstOrDefault(),
-            tradeState.TradesToday));
+            tradeState.TradesToday)
+        {
+            Vwap = vwap,
+            FastEma = fast,
+            SlowEma = slow,
+            AtrPercent = atr,
+            RecentCandles = candles.TakeLast(8).Select(value => new StrategyPriceBar(
+                value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray()
+        };
+        var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
         if (signal is null)
         {
@@ -330,7 +339,7 @@ internal sealed partial class AutomatedPaperTradingService(
                     null, null, null, cancellationToken);
             }
             state.Record("Scanning", true,
-                $"Scanning each completed candle for the opening-range pattern. " +
+                $"Scanning each completed candle across the price-action portfolio. " +
                 $"{string.Join(" ", strategyEvaluation.FailedConditions)} " +
                 $"No-trade research is stored every {options.Value.NoTradeAuditIntervalMinutes} minutes.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
@@ -711,8 +720,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.CandleTimeUtc == candleTimeUtc, cancellationToken))
             return;
 
-        db.StrategyEvaluations.Add(new StrategyEvaluation(Guid.NewGuid(), strategy.StrategyId,
-            strategy.Version, instrumentId, candleTimeUtc, currentPrice, openingRangeHigh,
+        var recordedStrategyId = signal?.StrategyId ?? strategy.StrategyId;
+        var recordedStrategyVersion = signal?.StrategyVersion ?? strategy.Version;
+        db.StrategyEvaluations.Add(new StrategyEvaluation(Guid.NewGuid(), recordedStrategyId,
+            recordedStrategyVersion, instrumentId, candleTimeUtc, currentPrice, openingRangeHigh,
             openingRangeLow, vwap, fastEma, slowEma, atrPercent, relativeFuturesVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, outcome,
             JsonSerializer.Serialize(failedConditions), signal?.SignalId,

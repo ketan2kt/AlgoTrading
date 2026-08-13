@@ -29,9 +29,6 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         if (context.RegimeConfidence < options.MinimumRegimeConfidence)
             failed.Add(FormattableString.Invariant(
                 $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
-        if (context.RelativeVolume < options.MinimumRelativeVolume)
-            failed.Add(FormattableString.Invariant(
-                $"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}."));
         if (context.TradesToday >= options.MaximumTradesPerDay)
             failed.Add("Strategy daily trade limit reached.");
         if (context.LastSignalAtUtc is not null &&
@@ -62,11 +59,16 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         var risk = Math.Abs(entry - stop);
         if (risk <= 0) return new(null, ["The proposed stop does not define positive risk."]);
         var target = bullish ? entry + risk * options.RewardToRiskRatio : entry - risk * options.RewardToRiskRatio;
+        var confidence = Math.Clamp(0.50m + context.RegimeConfidence * 0.30m +
+            Math.Clamp(context.RelativeVolume, 0m, 1m) * 0.20m, 0m, 1m);
         var signal = new StrategySignal(Guid.NewGuid(), StrategyId, Version, context.InstrumentId,
             direction, SignalEntryType.Market, entry, stop, target, options.RewardToRiskRatio,
-            Math.Clamp((context.RegimeConfidence + Math.Min(context.RelativeVolume / 3m, 1m)) / 2m, 0m, 1m),
+            confidence,
             context.Regime,
-            ["Opening range broken with buffer.", "Relative volume and regime bias confirm direction."],
+            ["Opening range broken with buffer.",
+             context.RelativeVolume >= options.MinimumRelativeVolume
+                 ? "Futures volume confirms direction."
+                 : "Price pattern qualified without volume confirmation."],
             ["Price returns inside opening range.", "Market-data or regime permission is withdrawn."],
             context.ObservedAtUtc.ToUniversalTime(),
             context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime());
