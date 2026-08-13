@@ -33,7 +33,7 @@ internal sealed class EfPaperLifecycleAuditStore(
         if (strategy is null)
         {
             strategy = new Strategy(Guid.NewGuid(), signal.StrategyId,
-                "Opening Range Breakout", timeProvider.GetUtcNow());
+                HumaniseStrategyName(signal.StrategyId), timeProvider.GetUtcNow());
             dbContext.Strategies.Add(strategy);
         }
 
@@ -75,6 +75,10 @@ internal sealed class EfPaperLifecycleAuditStore(
             reasons));
         await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    private static string HumaniseStrategyName(string strategyId) => string.Join(' ',
+        strategyId.Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
 
     public async Task PersistRiskDecisionAsync(
         Guid signalId,

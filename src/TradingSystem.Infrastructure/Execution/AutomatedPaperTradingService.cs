@@ -295,6 +295,11 @@ internal sealed partial class AutomatedPaperTradingService(
         var openingRangeHigh = openingCandles.Max(value => value.High);
         var openingRangeLow = openingCandles.Min(value => value.Low);
         var sessionId = DeterministicSessionId(DateOnly.FromDateTime(indiaNow.Date));
+        var tradesByStrategy = await db.StrategyEvaluations.AsNoTracking()
+            .Where(value => value.CandleTimeUtc >= sessionStart && value.CandleTimeUtc < sessionEnd &&
+                            value.Outcome == "PaperPositionOpened")
+            .GroupBy(value => value.StrategyCode)
+            .ToDictionaryAsync(group => group.Key, group => group.Count(), cancellationToken);
         var regimeService = scope.ServiceProvider.GetRequiredService<MarketRegimeService>();
         var regime = await regimeService.EvaluateAsync(new MarketRegimeInput(
             sessionId, latestCandle.OpenTimeUtc, latestCandle.Close, previousClose.Value,
@@ -313,8 +318,13 @@ internal sealed partial class AutomatedPaperTradingService(
             FastEma = fast,
             SlowEma = slow,
             AtrPercent = atr,
-            RecentCandles = candles.TakeLast(8).Select(value => new StrategyPriceBar(
-                value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray()
+            RecentCandles = candles.TakeLast(30).Select(value => new StrategyPriceBar(
+                value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray(),
+            TradesByStrategyToday = tradesByStrategy
+        };
+        strategyContext = strategyContext with
+        {
+            MarketStructure = MarketStructureAnalyzer.Analyze(strategyContext.RecentCandles)
         };
         var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
@@ -357,7 +367,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.ExpiryDate!.Value, value.StrikePrice!.Value, value.LotSize, value.TickSize))
             .ToListAsync(cancellationToken);
         var selectedOption = NiftyOptionContractSelector.Select(
-            candidates, signal.Direction, currentPrice, DateOnly.FromDateTime(indiaNow.Date));
+            candidates, signal.Direction, currentPrice, DateOnly.FromDateTime(indiaNow.Date),
+            new NiftyOptionSelectionOptions(options.Value.MaximumOptionDaysToExpiry,
+                options.Value.ExpiryDayInTheMoneySteps, options.Value.NormalInTheMoneySteps,
+                options.Value.OptionStrikeStep));
         if (selectedOption is null)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
@@ -405,8 +418,13 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var tradingDate = DateOnly.FromDateTime(indiaNow.Date);
+        var stopLossPercent = ExpiryAwareOptionPolicy.StopLossPercent(tradingDate,
+            selectedOption.ExpiryDate, options.Value.OptionStopLossPercent);
+        var maximumLots = ExpiryAwareOptionPolicy.MaximumLots(tradingDate,
+            selectedOption.ExpiryDate, options.Value.MaximumOptionLots);
         var protective = OptionPaperTradePricing.ProtectivePrices(pricing.EntryPrice,
-            options.Value.OptionStopLossPercent, options.Value.OptionRewardToRiskRatio,
+            stopLossPercent, options.Value.OptionRewardToRiskRatio,
             selectedOption.TickSize);
         var executionSignal = signal with
         {
@@ -421,9 +439,9 @@ internal sealed partial class AutomatedPaperTradingService(
             selectedOption.InstrumentId, selectedOption.TradingSymbol,
             selectedOption.Type.ToString(), selectedOption.ExpiryDate,
             selectedOption.StrikePrice, selectedOption.LotSize,
-            options.Value.MaximumOptionLots, pricing.EntryPrice,
+            maximumLots, pricing.EntryPrice,
             protective.StopLoss, protective.Target);
-        var maximumOptionQuantity = checked(selectedOption.LotSize * options.Value.MaximumOptionLots);
+        var maximumOptionQuantity = checked(selectedOption.LotSize * maximumLots);
         var perUnitRisk = Math.Abs(executionSignal.ProposedEntry - executionSignal.ProposedStopLoss);
         var decision = options.Value.PermissivePaperExecution
             ? new RiskDecisionResult(true, maximumOptionQuantity,

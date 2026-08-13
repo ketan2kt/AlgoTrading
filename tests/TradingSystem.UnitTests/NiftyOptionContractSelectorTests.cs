@@ -40,6 +40,19 @@ public sealed class NiftyOptionContractSelectorTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public void ExpiryDaySelectsOneStepInTheMoney()
+    {
+        var result = NiftyOptionContractSelector.Select([
+            Option(InstrumentType.PutOption, Today, 25000),
+            Option(InstrumentType.PutOption, Today, 25050)
+        ], Direction.Sell, 25010m, Today,
+            new NiftyOptionSelectionOptions(10, 1, 0, 50m));
+
+        Assert.NotNull(result);
+        Assert.Equal(25050m, result.StrikePrice);
+    }
+
     private static NiftyOptionContractCandidate Option(
         InstrumentType type,
         DateOnly expiry,

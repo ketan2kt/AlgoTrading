@@ -19,6 +19,10 @@ public sealed class AutomatedPaperTradingOptions
     public decimal OptionStopLossPercent { get; init; } = 10m;
     public decimal OptionRewardToRiskRatio { get; init; } = 2m;
     public int MaximumOptionLots { get; init; } = 5;
+    public int MaximumOptionDaysToExpiry { get; init; } = 10;
+    public int ExpiryDayInTheMoneySteps { get; init; } = 1;
+    public int NormalInTheMoneySteps { get; init; }
+    public decimal OptionStrikeStep { get; init; } = 50m;
     public bool PermissivePaperExecution { get; init; } = true;
     public bool BreakEvenEnabled { get; init; } = true;
     public decimal BreakEvenTriggerRiskMultiple { get; init; } = 1m;

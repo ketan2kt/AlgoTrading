@@ -187,6 +187,7 @@ public static class DependencyInjection
             .Bind(configuration.GetSection("Strategies:PriceAction"))
             .Validate(options => options.MinimumScore is >= 0.50m and <= 1m &&
                                  options.RewardToRiskRatio >= 1m &&
+                                 options.MaximumTradesPerStrategyPerDay is >= 1 and <= 3 &&
                                  options.MaximumTradesPerDay is >= 1 and <= 3,
                 "Price-action strategy settings are invalid.")
             .ValidateOnStart();
@@ -197,7 +198,11 @@ public static class DependencyInjection
                 new OpeningRangeBreakoutStrategy(
                     provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value),
                 new OpeningRangeRetestStrategy(priceAction),
-                new VwapTrendPullbackStrategy(priceAction)
+                new VwapTrendPullbackStrategy(priceAction),
+                new EmaPullbackContinuationStrategy(priceAction),
+                new RangeBreakoutRetestStrategy(priceAction),
+                new VwapRejectionReversalStrategy(priceAction),
+                new MomentumExpansionStrategy(priceAction)
             ]);
         });
         services.AddOptions<PreliminaryRiskOptions>()
@@ -224,6 +229,10 @@ public static class DependencyInjection
                                  options.OptionStopLossPercent is > 0 and <= 50 &&
                                    options.OptionRewardToRiskRatio is >= 1 and <= 5 &&
                                    options.MaximumOptionLots is >= 1 and <= 10 &&
+                                   options.MaximumOptionDaysToExpiry is >= 1 and <= 31 &&
+                                   options.ExpiryDayInTheMoneySteps is >= 0 and <= 3 &&
+                                   options.NormalInTheMoneySteps is >= 0 and <= 3 &&
+                                   options.OptionStrikeStep > 0 &&
                                    options.BreakEvenTriggerRiskMultiple is > 0 and <= 5 &&
                                    options.TrailingStopRiskMultiple is > 0 and <= 5 &&
                                    options.PartialProfitRiskMultiple is > 0 and <= 5 &&

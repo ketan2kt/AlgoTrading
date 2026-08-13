@@ -391,6 +391,14 @@
                 }
               </div>
               <div class="report-tools"><input [(ngModel)]="tradeFilter" placeholder="Filter contract, direction, result or strategy"/><button type="button" (click)="exportTrades()">Export CSV</button></div>
+              @if (report.breakdown.length) {
+                <div class="panel-heading"><div><span>STRATEGY RESEARCH</span><strong>Results by setup, regime, time and expiry distance</strong></div></div>
+                <div class="evaluation-table">
+                  @for(item of report.breakdown;track item.strategy + item.regime + item.timeBucket + item.daysToExpiry){
+                    <article class="evaluation-row"><div><span>Strategy</span><strong>{{item.strategy}}</strong></div><div><span>Regime</span><strong>{{item.regime}}</strong></div><div><span>Time (IST)</span><strong>{{item.timeBucket}}</strong></div><div><span>Days to expiry</span><strong>{{item.daysToExpiry}}</strong></div><div><span>Trades / win rate</span><strong>{{item.trades}} / {{item.winRate|percent:'1.0-0'}}</strong></div><div><span>Net / average P&amp;L</span><strong [class.good]="item.netPnl>=0" [class.bad]="item.netPnl<0">â‚¹{{item.netPnl|number:'1.2-2'}} / â‚¹{{item.averagePnl|number:'1.2-2'}}</strong></div></article>
+                  }
+                </div>
+              }
               <div class="evaluation-table">
                 @for(trade of filteredTrades();track trade.signalId){
                   <article class="evaluation-row"><div><span>Contract</span><strong>{{trade.contract}}</strong></div><div><span>Entry / exit</span><strong>{{trade.entryPrice|number:'1.2-2'}} / {{trade.exitPrice|number:'1.2-2'}}</strong></div><div><span>Quantity</span><strong>{{trade.quantity}}</strong></div><div><span>Result</span><strong>{{trade.exitReason}}</strong></div><div><span>P&amp;L</span><strong [class.good]="trade.realisedPnl>=0" [class.bad]="trade.realisedPnl<0">₹{{trade.realisedPnl|number:'1.2-2'}}</strong></div><div><span>Exited IST</span><strong>{{trade.exitTimeUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</strong></div></article>

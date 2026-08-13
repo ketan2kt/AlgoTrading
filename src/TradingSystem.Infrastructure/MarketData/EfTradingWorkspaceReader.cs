@@ -95,13 +95,16 @@ internal sealed class EfTradingWorkspaceReader(
                 false));
         }
 
-        var signalRows = await dbContext.Signals.AsNoTracking()
-            .Where(value => value.InstrumentId == instrument.Id &&
-                            value.MarketDataTimestampUtc >= sessionStartUtc &&
-                            value.MarketDataTimestampUtc < sessionEndUtc)
-            .OrderByDescending(value => value.MarketDataTimestampUtc)
-            .Take(30)
-            .Select(value => new
+        var signalRows = await (from value in dbContext.Signals.AsNoTracking()
+            join version in dbContext.StrategyVersions.AsNoTracking()
+                on value.StrategyVersionId equals version.Id
+            join strategy in dbContext.Strategies.AsNoTracking()
+                on version.StrategyId equals strategy.Id
+            where value.InstrumentId == instrument.Id &&
+                  value.MarketDataTimestampUtc >= sessionStartUtc &&
+                  value.MarketDataTimestampUtc < sessionEndUtc
+            orderby value.MarketDataTimestampUtc descending
+            select new
             {
                 value.Id,
                 value.Direction,
@@ -109,8 +112,10 @@ internal sealed class EfTradingWorkspaceReader(
                 value.ProposedEntry,
                 value.ProposedStopLoss,
                 value.ProposedTarget,
-                value.Status
+                value.Status,
+                Strategy = strategy.Code + " " + version.Version
             })
+            .Take(30)
             .ToListAsync(cancellationToken);
         var signalIds = signalRows.Select(value => value.Id).ToArray();
         var risk = await dbContext.RiskDecisions.AsNoTracking()
@@ -157,7 +162,7 @@ internal sealed class EfTradingWorkspaceReader(
                     : decision.Approved ? "Risk approved" : "Risk rejected";
             return new WorkspaceTradeOverlay(
                 value.Id,
-                "Opening Range Breakout 1.0.0",
+                value.Strategy,
                 value.Direction.ToString(),
                 value.MarketDataTimestampUtc,
                 value.ProposedEntry,

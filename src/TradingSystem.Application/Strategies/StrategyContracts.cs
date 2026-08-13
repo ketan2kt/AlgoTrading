@@ -24,10 +24,26 @@ public sealed record StrategyEvaluationContext(
     public decimal SlowEma { get; init; }
     public decimal AtrPercent { get; init; }
     public IReadOnlyList<StrategyPriceBar> RecentCandles { get; init; } = [];
+    public MarketStructureSnapshot MarketStructure { get; init; } = MarketStructureSnapshot.Unavailable;
+    public IReadOnlyDictionary<string, int> TradesByStrategyToday { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
 }
 
 public sealed record StrategyPriceBar(
     DateTimeOffset OpenTimeUtc, decimal Open, decimal High, decimal Low, decimal Close);
+
+public enum MarketStructureDirection { Unavailable = 0, Bullish = 1, Bearish = 2, Range = 3 }
+
+public sealed record MarketStructureSnapshot(
+    MarketStructureDirection Direction,
+    decimal Strength,
+    decimal RecentSwingHigh,
+    decimal RecentSwingLow,
+    int ConsecutiveDirectionalSwings)
+{
+    public static MarketStructureSnapshot Unavailable { get; } =
+        new(MarketStructureDirection.Unavailable, 0m, 0m, 0m, 0);
+}
 
 public sealed record StrategyEvaluationResult(
     StrategySignal? Signal,

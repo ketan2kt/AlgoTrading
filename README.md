@@ -59,6 +59,8 @@ TradingSystem.slnx
 
 ## Documentation
 
+- [Price-action strategy engine](docs/price-action-strategy-engine.md)
+
 - [Product requirements](docs/product-requirements.md)
 - [Architecture](docs/architecture.md)
 - [Database model](docs/database-model.md)

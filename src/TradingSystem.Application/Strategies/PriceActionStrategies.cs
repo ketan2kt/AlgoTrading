@@ -9,6 +9,7 @@ public sealed class PriceActionStrategyOptions
     public int SignalExpirySeconds { get; init; } = 30;
     public int CooldownMinutes { get; init; } = 20;
     public int MaximumTradesPerDay { get; init; } = 3;
+    public int MaximumTradesPerStrategyPerDay { get; init; } = 2;
 }
 
 public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options) : ITradingStrategy
@@ -26,6 +27,9 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
         if (!context.DataTradingPermitted) failures.Add("Market data does not permit trading.");
         if (context.TradesToday >= Options.MaximumTradesPerDay)
             failures.Add("Paper daily trade limit reached.");
+        if (context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
+            Options.MaximumTradesPerStrategyPerDay)
+            failures.Add($"Daily allocation for {StrategyId} is exhausted.");
         if (context.LastSignalAtUtc is not null &&
             context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes(Options.CooldownMinutes))
             failures.Add($"Shared cooldown of {Options.CooldownMinutes} minutes is active.");
@@ -145,6 +149,137 @@ public sealed class VwapTrendPullbackStrategy(PriceActionStrategyOptions options
     }
 }
 
+public sealed class EmaPullbackContinuationStrategy(PriceActionStrategyOptions options)
+    : PriceActionStrategyBase(options)
+{
+    public override string StrategyId => "ema-pullback-continuation";
+
+    public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var failures = SafetyFailures(context);
+        if (failures.Count > 0) return new(null, failures);
+        var pullback = context.RecentCandles[^2];
+        var confirmation = context.RecentCandles[^1];
+        var tolerance = context.CurrentPrice * context.AtrPercent / 100m * 0.25m;
+        var bullish = context.FastEma > context.SlowEma &&
+            pullback.Low <= context.FastEma + tolerance && pullback.Close >= context.SlowEma &&
+            confirmation.Close > pullback.High && confirmation.Close > confirmation.Open;
+        var bearish = context.FastEma < context.SlowEma &&
+            pullback.High >= context.FastEma - tolerance && pullback.Close <= context.SlowEma &&
+            confirmation.Close < pullback.Low && confirmation.Close < confirmation.Open;
+        if (!bullish && !bearish)
+            return new(null, ["No EMA 9/21 pullback with a confirmed continuation candle."]);
+        var direction = bullish ? Direction.Buy : Direction.Sell;
+        var structureAligned = direction == Direction.Buy
+            ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
+            : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+        var stop = direction == Direction.Buy ? pullback.Low - tolerance : pullback.High + tolerance;
+        return Signal(context, direction, stop, Score(context, true, structureAligned),
+            "Price retraced into the EMA 9/21 trend zone.",
+            "The confirmation candle resumed the prevailing trend.");
+    }
+}
+
+public sealed class RangeBreakoutRetestStrategy(PriceActionStrategyOptions options)
+    : PriceActionStrategyBase(options)
+{
+    public override string StrategyId => "intraday-range-breakout-retest";
+
+    public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var failures = SafetyFailures(context);
+        if (failures.Count > 0) return new(null, failures);
+        var bars = context.RecentCandles;
+        if (bars.Count < 8) return new(null, ["At least eight candles are required to define an intraday range."]);
+        var rangeBars = bars.TakeLast(8).Take(6).ToArray();
+        var retest = bars[^2];
+        var confirmation = bars[^1];
+        var rangeHigh = rangeBars.Max(x => x.High);
+        var rangeLow = rangeBars.Min(x => x.Low);
+        var tolerance = context.CurrentPrice * context.AtrPercent / 100m * 0.25m;
+        var bullish = retest.Low <= rangeHigh + tolerance && retest.Close >= rangeHigh &&
+            confirmation.Close > retest.High;
+        var bearish = retest.High >= rangeLow - tolerance && retest.Close <= rangeLow &&
+            confirmation.Close < retest.Low;
+        if (!bullish && !bearish)
+            return new(null, ["No intraday consolidation breakout, retest and continuation sequence."]);
+        var direction = bullish ? Direction.Buy : Direction.Sell;
+        var trendAligned = direction == Direction.Buy
+            ? context.CurrentPrice > context.Vwap : context.CurrentPrice < context.Vwap;
+        if (!trendAligned) return new(null, ["Range breakout is not aligned with VWAP."]);
+        var stop = direction == Direction.Buy ? retest.Low - tolerance : retest.High + tolerance;
+        return Signal(context, direction, stop, Score(context, true, true),
+            "A six-candle intraday range broke and held on retest.", "VWAP confirms breakout direction.");
+    }
+}
+
+public sealed class VwapRejectionReversalStrategy(PriceActionStrategyOptions options)
+    : PriceActionStrategyBase(options)
+{
+    public override string StrategyId => "vwap-rejection-reversal";
+
+    public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var failures = SafetyFailures(context);
+        if (failures.Count > 0) return new(null, failures);
+        var bars = context.RecentCandles;
+        var test = bars[^2];
+        var confirmation = bars[^1];
+        var tolerance = context.CurrentPrice * context.AtrPercent / 100m * 0.30m;
+        var bullish = test.Low <= context.Vwap + tolerance && test.Close > context.Vwap &&
+            confirmation.Close > test.High && confirmation.Close > confirmation.Open;
+        var bearish = test.High >= context.Vwap - tolerance && test.Close < context.Vwap &&
+            confirmation.Close < test.Low && confirmation.Close < confirmation.Open;
+        if (!bullish && !bearish)
+            return new(null, ["VWAP was not rejected with a reversal confirmation candle."]);
+        var direction = bullish ? Direction.Buy : Direction.Sell;
+        var structureConfirmed = direction == Direction.Buy
+            ? context.MarketStructure.Direction is MarketStructureDirection.Bullish or MarketStructureDirection.Range
+            : context.MarketStructure.Direction is MarketStructureDirection.Bearish or MarketStructureDirection.Range;
+        var stop = direction == Direction.Buy ? test.Low - tolerance : test.High + tolerance;
+        return Signal(context, direction, stop, Score(context, false, structureConfirmed),
+            "Price rejected VWAP and closed back on the directional side.",
+            "The next candle confirmed the reversal.");
+    }
+}
+
+public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options)
+    : PriceActionStrategyBase(options)
+{
+    public override string StrategyId => "momentum-expansion";
+
+    public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var failures = SafetyFailures(context);
+        if (failures.Count > 0) return new(null, failures);
+        var bars = context.RecentCandles;
+        var confirmation = bars[^1];
+        var prior = bars.TakeLast(Math.Min(7, bars.Count)).SkipLast(1).ToArray();
+        var averageRange = prior.Average(x => x.High - x.Low);
+        var currentRange = confirmation.High - confirmation.Low;
+        if (averageRange <= 0 || currentRange < averageRange * 1.45m)
+            return new(null, ["Latest candle is not a 1.45x range expansion."]);
+        var bullish = confirmation.Close > confirmation.Open && confirmation.Close > prior.Max(x => x.High) &&
+            confirmation.Close > context.Vwap;
+        var bearish = confirmation.Close < confirmation.Open && confirmation.Close < prior.Min(x => x.Low) &&
+            confirmation.Close < context.Vwap;
+        if (!bullish && !bearish)
+            return new(null, ["Expansion candle did not close beyond recent structure and VWAP."]);
+        var direction = bullish ? Direction.Buy : Direction.Sell;
+        var structureAligned = direction == Direction.Buy
+            ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
+            : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+        var stop = direction == Direction.Buy ? confirmation.Low : confirmation.High;
+        return Signal(context, direction, stop, Score(context, true, structureAligned),
+            "Candle range expanded beyond its recent baseline.",
+            "Close broke recent structure on the directional side of VWAP.");
+    }
+}
+
 public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> strategies) : ITradingStrategy
 {
     public string StrategyId => "price-action-portfolio";
@@ -156,6 +291,9 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
         var results = strategies.Select(strategy => (strategy, result: strategy.EvaluateDetailed(context))).ToArray();
         var selected = results.Where(value => value.result.Signal is not null)
             .Select(value => value.result.Signal!)
+            .GroupBy(value => value.Direction)
+            .Select(group => group.OrderByDescending(value => value.Confidence)
+                .ThenBy(value => value.StrategyId, StringComparer.Ordinal).First())
             .OrderByDescending(value => value.Confidence)
             .ThenBy(value => value.StrategyId, StringComparer.Ordinal)
             .FirstOrDefault();

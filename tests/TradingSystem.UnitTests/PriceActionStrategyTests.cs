@@ -72,6 +72,84 @@ public sealed class PriceActionStrategyTests
         Assert.Equal("higher", signal.StrategyId);
     }
 
+    [Fact]
+    public void EmaPullbackSignalsAfterTrendResumes()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 102.5m,
+            FastEma = 101.5m,
+            SlowEma = 101m,
+            RecentCandles =
+            [
+                Bar(100m, 101m, 99.8m, 100.8m), Bar(100.8m, 101.4m, 100.6m, 101.2m),
+                Bar(101.2m, 101.8m, 101m, 101.6m), Bar(101.6m, 102m, 101.4m, 101.8m),
+                Bar(101.8m, 102.1m, 101.5m, 101.9m), Bar(101.9m, 102.2m, 101.6m, 102m),
+                Bar(102m, 102.1m, 101.3m, 101.6m), Bar(101.6m, 102.6m, 101.5m, 102.5m)
+            ],
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.8m, 102.6m, 101m, 6)
+        };
+
+        var signal = new EmaPullbackContinuationStrategy(new()).Evaluate(context);
+
+        Assert.NotNull(signal);
+        Assert.Equal(Direction.Buy, signal.Direction);
+    }
+
+    [Fact]
+    public void RangeRetestSignalsAfterConsolidationBreakout()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 102m,
+            RecentCandles =
+            [
+                Bar(100m, 101m, 99.8m, 100.4m), Bar(100.4m, 101m, 100m, 100.7m),
+                Bar(100.7m, 101m, 100.1m, 100.5m), Bar(100.5m, 100.9m, 100m, 100.6m),
+                Bar(100.6m, 101m, 100.2m, 100.8m), Bar(100.8m, 101m, 100.3m, 100.9m),
+                Bar(101.1m, 101.5m, 100.95m, 101.3m), Bar(101.3m, 102.1m, 101.2m, 102m)
+            ]
+        };
+
+        Assert.NotNull(new RangeBreakoutRetestStrategy(new()).Evaluate(context));
+    }
+
+    [Fact]
+    public void VwapRejectionSignalsAfterConfirmedReclaim()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 101.4m,
+            Vwap = 100m,
+            RecentCandles =
+            [
+                Bar(99.8m, 100.2m, 99.5m, 100.1m), Bar(100.1m, 100.5m, 99.8m, 100.3m),
+                Bar(100.3m, 100.4m, 99.7m, 100.1m), Bar(100.1m, 101.5m, 100m, 101.4m)
+            ],
+            MarketStructure = new(MarketStructureDirection.Range, 0.7m, 101m, 99.5m, 3)
+        };
+
+        Assert.NotNull(new VwapRejectionReversalStrategy(new()).Evaluate(context));
+    }
+
+    [Fact]
+    public void MomentumExpansionSignalsOnStructuralClose()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 103m,
+            RecentCandles =
+            [
+                Bar(100m, 100.5m, 99.8m, 100.3m), Bar(100.3m, 100.8m, 100.1m, 100.6m),
+                Bar(100.6m, 101m, 100.3m, 100.8m), Bar(100.8m, 101.2m, 100.5m, 101m),
+                Bar(101m, 101.4m, 100.8m, 101.2m), Bar(101.2m, 103.2m, 101m, 103m)
+            ],
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.8m, 103.2m, 100.5m, 5)
+        };
+
+        Assert.NotNull(new MomentumExpansionStrategy(new()).Evaluate(context));
+    }
+
     private static StrategyEvaluationContext Context() => new(Guid.NewGuid(), Now, 102m,
         101m, 99m, 0.8m, MarketRegime.WeakBullishTrend, Direction.Buy, 0.65m,
         true, true, null, 0)
