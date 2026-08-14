@@ -169,12 +169,13 @@ internal sealed partial class AutomatedPaperTradingService(
         var currentPrice = latest!.Price;
 
         var openingRangeEnd = ParseTime(options.Value.OpeningRangeEnd);
+        var entryWindowStart = ParseTime(options.Value.EntryWindowStart);
         var entryCutoff = ParseTime(options.Value.EntryCutoff);
         var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
-        if (localTime < openingRangeEnd || localTime >= entryCutoff)
+        if (localTime < entryWindowStart || localTime >= entryCutoff)
         {
-            state.Record(localTime < openingRangeEnd ? "WarmingUp" : "EntryCutoff", false,
-                localTime < openingRangeEnd ? "Building the 15-minute opening range." :
+            state.Record(localTime < entryWindowStart ? "WarmingUp" : "EntryCutoff", false,
+                localTime < entryWindowStart ? "Waiting for the paper entry window." :
                 "New-entry cutoff reached; monitoring only.", tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
@@ -184,9 +185,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (candles.Count < 21)
+        if (candles.Count < options.Value.MinimumSignalCandles)
         {
-            state.Record("WarmingUp", false, $"Waiting for indicators: {candles.Count}/21 completed candles.",
+            state.Record("WarmingUp", false,
+                $"Waiting for minimum pattern data: {candles.Count}/{options.Value.MinimumSignalCandles} completed candles.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
@@ -210,10 +212,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (confirmationCandles.Count < 21)
+        if (confirmationCandles.Count < options.Value.MinimumFuturesConfirmationCandles)
         {
             state.Record("WarmingUp", false,
-                $"Waiting for Nifty futures confirmation: {confirmationCandles.Count}/21 completed candles.",
+                $"Waiting for minimum Nifty futures data: {confirmationCandles.Count}/{options.Value.MinimumFuturesConfirmationCandles} completed candles.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
@@ -720,24 +722,25 @@ internal sealed partial class AutomatedPaperTradingService(
         var fresh = latestReceived is not null && now - latestReceived <=
             TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
         var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
-        var start = ParseTime(options.Value.OpeningRangeEnd);
+        var start = ParseTime(options.Value.EntryWindowStart);
         var cutoff = ParseTime(options.Value.EntryCutoff);
         var futuresDetail = future is null
             ? "Nifty futures instrument not synchronised"
             : localTime < new TimeOnly(9, 15)
-                ? $"Market opens at 09:15 IST; {future.TradingSymbol} confirmation will then build to 21 candles"
-                : $"{future.TradingSymbol}: {futureCount}/21 candles";
+                ? $"Market opens at 09:15 IST; {future.TradingSymbol} confirmation will then build"
+                : $"{future.TradingSymbol}: {futureCount}/{options.Value.MinimumFuturesConfirmationCandles} candles";
         state.RecordReadiness([
             new("index", "Nifty spot feed", indexCount > 0,
                 indexCount > 0 ? $"{indexCount} completed candles" : "Waiting for spot candles"),
             new("history", "Previous-session context", priorClose,
                 priorClose ? "Previous close available" : "Historical backfill pending"),
-            new("future", "Nifty futures confirmation", futureCount >= 21,
+            new("future", "Nifty futures confirmation",
+                futureCount >= options.Value.MinimumFuturesConfirmationCandles,
                 futuresDetail),
             new("freshness", "Live data freshness", fresh,
                 fresh ? "Latest Nifty quote is current" : "Live Nifty quote is stale"),
             new("window", "Entry window", localTime >= start && localTime < cutoff,
-                $"{options.Value.OpeningRangeEnd}–{options.Value.EntryCutoff} IST"),
+                $"{options.Value.EntryWindowStart}–{options.Value.EntryCutoff} IST"),
             new("risk", "Risk controls", !killSwitchActive,
                 killSwitchActive ? "Kill switch active" : "Kill switch clear")
         ]);

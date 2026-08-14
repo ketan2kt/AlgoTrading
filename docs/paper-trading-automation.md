@@ -17,18 +17,23 @@ New entries require all of the following:
 
 - Paper mode, automation enabled, weekday session, and inactive kill switch;
 - fresh validated Groww data within the configured staleness limit;
-- at least 21 completed Nifty spot one-minute candles;
-- at least 21 aligned nearest-expiry Nifty futures candles for relative-volume confirmation;
-- a completed 09:15-09:30 opening range;
+- at least four completed Nifty spot candles, which is the minimum price-pattern input;
+- at least two aligned nearest-expiry Nifty futures candles to calculate contextual relative volume;
+- opening-range data when an opening-range strategy is evaluated;
 - a persisted previous-session close;
 - positive validated futures volume for relative-volume confirmation;
 - a permitted deterministic market regime;
 - a qualifying Opening Range Breakout, Opening Range Retest, or VWAP Trend Pullback signal;
 - a deterministically selected near-expiry ATM Nifty call for bullish bias or put for bearish bias;
 - a live option quote with positive, non-inverted bid/offer, permitted spread and premium, and minimum volume/open interest;
-- risk approval, including quantity, daily trade/loss, exposure, and reward-to-risk limits;
+- risk approval, including quantity, daily loss, exposure, and reward-to-risk limits;
 - a risk-approved quantity rounded down to complete option lots;
-- entry before 14:30 Asia/Kolkata.
+- entry within 09:15-15:15 Asia/Kolkata.
+
+The paper exploration profile does not enforce a daily trade-count ceiling or a per-strategy daily
+allocation ceiling. One open position, per-trade sizing, daily-loss protection, reconciliation,
+data freshness and the emergency kill switch remain active. This relaxed profile must not be copied
+to live trading without a separate reviewed promotion.
 
 Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. At session startup the system imports up to seven days of official Groww one-minute spot and nearest-future history, then continues polling both live quotes. Spot OHLC drives strategy price levels while futures volume supplies relative-volume confirmation. The paper option entry fills at the validated offer. One long option position is allowed. Its immutable premium stop and target are monitored against the live bid and it closes at that liquidation reference when either is crossed, when the administrator activates the kill switch, or at/after 15:15. A missing bid never fabricates an exit.
 
@@ -45,7 +50,7 @@ The protected Angular dashboard shows automation state, trades today, realised/u
 1. Keep `PaperTrading__Automation__Enabled=false`; verify the dashboard reports `Disabled`.
 2. Enable it only in a non-live paper environment and supply a current Groww token.
 3. During an NSE session verify fresh one-minute candles accumulate and readiness reasons change deterministically.
-4. Verify no entry can occur before 09:30 or after 14:30, with stale data, missing volume/previous close, or an active kill switch.
+4. Verify entries are evaluated from 09:15 until the 15:15 cutoff and remain blocked with stale data, missing required context, or an active kill switch.
 5. With a controlled replay/fake feed, produce bullish and bearish breakouts and verify they map to CE and PE respectively; verify the Nifty chart overlay remains at the underlying signal level.
 6. Verify a wide spread, excessive premium, insufficient volume/open interest, and any quantity smaller than one lot all reject the entry.
 7. Verify one option entry fills at the offer and its open-position P&L is marked against the bid.

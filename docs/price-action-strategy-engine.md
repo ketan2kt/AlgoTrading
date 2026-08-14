@@ -3,9 +3,10 @@
 ## Scope
 
 The paper engine evaluates completed five-minute Nifty candles and routes an approved directional
-signal to a Nifty call or put. It never submits a live broker order. A maximum of three entries per
-session, one open position, shared cooldowns, data freshness, reconciliation and the paper kill
-switch remain authoritative.
+signal to a Nifty call or put. It never submits a live broker order. In the exploration profile the
+daily trade-count ceiling is disabled and entries may be evaluated from 09:15 until 15:15 IST. One
+open position, shared cooldowns, data freshness, daily-loss protection, reconciliation and the paper
+kill switch remain authoritative.
 
 ## Deterministic setup portfolio
 

@@ -70,6 +70,22 @@ public sealed class OpeningRangeBreakoutStrategyTests
     }
 
     [Fact]
+    public void ExplorationProfileDoesNotRejectByDailyTradeCount()
+    {
+        var exploration = new OpeningRangeBreakoutStrategy(new()
+        {
+            EnforceDailyTradeLimit = false,
+            MaximumTradesPerDay = 1
+        });
+
+        var result = exploration.EvaluateDetailed(Context() with { TradesToday = 25 });
+
+        Assert.NotNull(result.Signal);
+        Assert.DoesNotContain(result.FailedConditions,
+            value => value.Contains("daily trade limit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void NoTradeResearchIsDueOnlyAfterConfiguredInterval()
     {
         var sessionStart = new DateTimeOffset(2026, 8, 11, 3, 45, 0, TimeSpan.Zero);
@@ -117,6 +133,25 @@ public sealed class OpeningRangeBreakoutStrategyTests
 
         Assert.True(decision.Approved);
         Assert.Equal(150, decision.ApprovedQuantity);
+    }
+
+    [Fact]
+    public void ExplorationRiskProfileDoesNotRejectByDailyTradeCount()
+    {
+        var signal = strategy.Evaluate(Context())!;
+        var engine = new PreliminaryRiskEngine(new()
+        {
+            EnforceDailyTradeLimit = false,
+            MaximumTradesPerDay = 1,
+            MaximumRiskPerTrade = 500m,
+            MaximumQuantity = 75
+        });
+
+        var decision = engine.Evaluate(signal, RiskContext() with { TradesToday = 25 });
+
+        Assert.True(decision.Approved);
+        Assert.DoesNotContain(decision.RejectionReasons,
+            value => value.Contains("Daily trade limit", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

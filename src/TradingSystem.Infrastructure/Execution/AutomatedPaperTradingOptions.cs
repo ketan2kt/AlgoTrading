@@ -6,6 +6,7 @@ public sealed class AutomatedPaperTradingOptions
     public bool Enabled { get; init; }
     public int EvaluationIntervalSeconds { get; init; } = 5;
     public int NoTradeAuditIntervalMinutes { get; init; } = 15;
+    public string EntryWindowStart { get; init; } = "09:15";
     public string OpeningRangeEnd { get; init; } = "09:30";
     public string EntryCutoff { get; init; } = "14:30";
     public string ForcedExit { get; init; } = "15:15";
@@ -34,4 +35,6 @@ public sealed class AutomatedPaperTradingOptions
     public bool UnderlyingTrendInvalidationEnabled { get; init; } = true;
     public decimal MinimumReversalStructureStrength { get; init; } = 0.55m;
     public int RequiredReversalEvidenceCount { get; init; } = 3;
+    public int MinimumSignalCandles { get; init; } = 4;
+    public int MinimumFuturesConfirmationCandles { get; init; } = 2;
 }

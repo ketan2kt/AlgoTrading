@@ -11,6 +11,7 @@ public sealed class OpeningRangeBreakoutOptions
     public int SignalExpirySeconds { get; init; } = 30;
     public int CooldownMinutes { get; init; } = 30;
     public int MaximumTradesPerDay { get; init; } = 1;
+    public bool EnforceDailyTradeLimit { get; init; } = true;
 }
 
 public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions options) : ITradingStrategy
@@ -29,7 +30,7 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         if (context.RegimeConfidence < options.MinimumRegimeConfidence)
             failed.Add(FormattableString.Invariant(
                 $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
-        if (context.TradesToday >= options.MaximumTradesPerDay)
+        if (options.EnforceDailyTradeLimit && context.TradesToday >= options.MaximumTradesPerDay)
             failed.Add("Strategy daily trade limit reached.");
         if (context.LastSignalAtUtc is not null &&
             context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes(options.CooldownMinutes))

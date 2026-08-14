@@ -10,6 +10,7 @@ public sealed class PreliminaryRiskOptions
     public decimal MinimumRewardToRiskRatio { get; init; } = 1.8m;
     public int MaximumTradesPerDay { get; init; } = 3;
     public int MaximumOpenPositions { get; init; } = 1;
+    public bool EnforceDailyTradeLimit { get; init; } = true;
 }
 
 public sealed record RiskContext(DateTimeOffset NowUtc, int TradesToday, int OpenPositions,
@@ -32,7 +33,8 @@ public sealed class PreliminaryRiskEngine(PreliminaryRiskOptions options)
         if (context.KillSwitchActive) reasons.Add("Kill switch active.");
         if (!context.BrokerConnected) reasons.Add("Broker unavailable.");
         if (!context.DataTradingPermitted) reasons.Add("Market data blocks trading.");
-        if (context.TradesToday >= options.MaximumTradesPerDay) reasons.Add("Daily trade limit reached.");
+        if (options.EnforceDailyTradeLimit && context.TradesToday >= options.MaximumTradesPerDay)
+            reasons.Add("Daily trade limit reached.");
         if (context.OpenPositions >= options.MaximumOpenPositions) reasons.Add("Open-position limit reached.");
         if (context.DailyRealisedPnl <= -context.MaximumDailyLoss) reasons.Add("Daily loss limit reached.");
         if (signal.RewardToRiskRatio < options.MinimumRewardToRiskRatio) reasons.Add("Reward-to-risk is too low.");

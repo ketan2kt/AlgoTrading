@@ -10,6 +10,7 @@ public sealed class PriceActionStrategyOptions
     public int CooldownMinutes { get; init; } = 20;
     public int MaximumTradesPerDay { get; init; } = 3;
     public int MaximumTradesPerStrategyPerDay { get; init; } = 2;
+    public bool EnforceDailyTradeLimits { get; init; } = true;
 }
 
 public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options) : ITradingStrategy
@@ -25,9 +26,9 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     {
         var failures = new List<string>();
         if (!context.DataTradingPermitted) failures.Add("Market data does not permit trading.");
-        if (context.TradesToday >= Options.MaximumTradesPerDay)
+        if (Options.EnforceDailyTradeLimits && context.TradesToday >= Options.MaximumTradesPerDay)
             failures.Add("Paper daily trade limit reached.");
-        if (context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
+        if (Options.EnforceDailyTradeLimits && context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
             Options.MaximumTradesPerStrategyPerDay)
             failures.Add($"Daily allocation for {StrategyId} is exhausted.");
         if (context.LastSignalAtUtc is not null &&

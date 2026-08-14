@@ -73,6 +73,35 @@ public sealed class PriceActionStrategyTests
     }
 
     [Fact]
+    public void ExplorationProfileDoesNotApplyPortfolioOrStrategyDailyCeilings()
+    {
+        var strategy = new OpeningRangeRetestStrategy(new()
+        {
+            EnforceDailyTradeLimits = false,
+            MaximumTradesPerDay = 1,
+            MaximumTradesPerStrategyPerDay = 1
+        });
+        var context = Context() with
+        {
+            CurrentPrice = 102.4m,
+            TradesToday = 30,
+            TradesByStrategyToday = new Dictionary<string, int>
+            {
+                ["opening-range-retest"] = 30
+            },
+            RecentCandles =
+            [
+                Bar(100m, 101.8m, 99.8m, 101.5m),
+                Bar(101.5m, 102.2m, 101.2m, 102m),
+                Bar(102m, 102.1m, 100.9m, 101.2m),
+                Bar(101.2m, 102.5m, 101.1m, 102.4m)
+            ]
+        };
+
+        Assert.NotNull(strategy.Evaluate(context));
+    }
+
+    [Fact]
     public void EmaPullbackSignalsAfterTrendResumes()
     {
         var context = Context() with
