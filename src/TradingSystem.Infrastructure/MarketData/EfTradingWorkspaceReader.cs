@@ -153,10 +153,11 @@ internal sealed class EfTradingWorkspaceReader(
             var execution = ParseExecutionDecision(decision?.SnapshotJson);
             var rejectionReasons = ParseRejectionReasons(decision?.ReasonsJson);
             tradeResults.TryGetValue(value.Id, out var result);
-            var isActive = result is null && automation.ActiveSignalId == value.Id &&
-                           automation.Status is "PositionOpen" or "PositionUnmonitored";
+            var positionMark = automation.ActivePositionMarks?
+                .FirstOrDefault(mark => mark.SignalId == value.Id);
+            var isActive = result is null && positionMark is not null;
             var lifecycleStatus = result is not null ? FormatExitStatus(result.ExitReason) :
-                isActive ? (automation.Status == "PositionUnmonitored" ? "Active · quote unavailable" : "Active") :
+                isActive ? (positionMark!.QuoteAvailable ? "Active" : "Active · quote unavailable") :
                 order?.FillPrice is not null ? "Entry filled" : decision is null
                     ? value.Status.ToString()
                     : decision.Approved ? "Risk approved" : "Risk rejected";
@@ -190,10 +191,10 @@ internal sealed class EfTradingWorkspaceReader(
                 execution.CapitalExposure,
                 rejectionReasons,
                 lifecycleStatus,
-                isActive ? automation.CurrentOptionPrice : result?.ExitPrice,
+                isActive ? positionMark!.CurrentPrice : result?.ExitPrice,
                 result?.ExitPrice,
                 result?.RealisedPnl,
-                isActive ? automation.UnrealisedPnl : null,
+                isActive ? positionMark!.UnrealisedPnl : null,
                 order?.FillTimeUtc,
                 result?.ClosedAtUtc);
         }).ToArray();

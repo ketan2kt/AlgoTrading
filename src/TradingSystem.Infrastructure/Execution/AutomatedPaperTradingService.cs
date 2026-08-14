@@ -127,6 +127,9 @@ internal sealed partial class AutomatedPaperTradingService(
         var fresh = latest is not null && now - latest.ReceivedAtUtc <=
             TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
 
+        state.SynchronizeActivePositions(tradeState.OpenPositions.Select(value => value.Signal.SignalId));
+
+        var openPositionMonitoringFailed = false;
         if (tradeState.OpenPositions.Count > 0)
         {
             foreach (var open in tradeState.OpenPositions)
@@ -155,18 +158,49 @@ internal sealed partial class AutomatedPaperTradingService(
                     return;
                 }
 
-                var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
-                var optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
-                    optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
-                var currentOptionPrice = optionQuote.BidPrice is > 0
+                GrowwQuote optionQuote;
+                try
+                {
+                    var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
+                    optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
+                        optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    state.RecordPositionMark(open.Signal.SignalId, null, null, null, false);
+                    LogPositionQuoteFailed(logger, optionInstrument.TradingSymbol, exception);
+                    openPositionMonitoringFailed = true;
+                    continue;
+                }
+
+                // LTP is the position's market mark shown on the dashboard. The bid remains the
+                // conservative executable value used for exits and protective-price evaluation.
+                var displayPrice = optionQuote.LastPrice > 0
+                    ? optionQuote.LastPrice
+                    : optionQuote.BidPrice;
+                var executablePrice = optionQuote.BidPrice is > 0
                     ? optionQuote.BidPrice.Value
                     : optionQuote.LastPrice;
-                var optionFresh = currentOptionPrice > 0;
+                var optionFresh = displayPrice is > 0 && executablePrice > 0;
+                var positionMultiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
+                var unrealised = displayPrice is > 0 && open.Entry.AverageFillPrice is { } entryPrice
+                    ? (displayPrice.Value - entryPrice) * open.RemainingQuantity * positionMultiplier
+                    : (decimal?)null;
+                state.RecordPositionMark(open.Signal.SignalId, displayPrice, executablePrice,
+                    unrealised, optionFresh);
                 var monitoringBlocked = await ManageOpenPositionAsync(scope.ServiceProvider, tradeState,
-                    open, currentOptionPrice, indiaNow.TimeOfDay, optionFresh, fresh, killSwitchActive,
+                    open, executablePrice, indiaNow.TimeOfDay, optionFresh, fresh, killSwitchActive,
                     optionInstrument, instrument.Id, sessionStart, sessionEnd, cancellationToken);
-                if (monitoringBlocked) return;
+                openPositionMonitoringFailed |= monitoringBlocked;
             }
+        }
+
+        if (openPositionMonitoringFailed)
+        {
+            state.Record("PositionUnmonitored", false,
+                "At least one active option quote is unavailable; all other positions remain monitored and new entries are blocked.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
         }
 
         if (killSwitchActive)
@@ -981,4 +1015,9 @@ internal sealed partial class AutomatedPaperTradingService(
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Optional paper reversal-exit research capture failed; trading continues.")]
     private static partial void LogExitResearchCaptureFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Live option quote failed for active paper position {TradingSymbol}.")]
+    private static partial void LogPositionQuoteFailed(ILogger logger, string tradingSymbol,
+        Exception exception);
 }

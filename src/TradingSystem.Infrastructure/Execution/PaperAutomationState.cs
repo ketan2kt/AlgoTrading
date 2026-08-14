@@ -5,6 +5,7 @@ namespace TradingSystem.Infrastructure.Execution;
 internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAutomationReader
 {
     private readonly object gate = new();
+    private readonly Dictionary<Guid, PaperPositionMark> activePositionMarks = [];
     private PaperAutomationSnapshot snapshot = new(
         "Starting", false, "Paper automation is starting.", DateTimeOffset.MinValue,
         0, 0m, 0m, null, null, null, null, null, null);
@@ -20,6 +21,29 @@ internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAu
         lock (gate) snapshot = snapshot with { ReadinessChecks = checks };
     }
 
+    public void SynchronizeActivePositions(IEnumerable<Guid> signalIds)
+    {
+        ArgumentNullException.ThrowIfNull(signalIds);
+        var active = signalIds.ToHashSet();
+        lock (gate)
+        {
+            foreach (var signalId in activePositionMarks.Keys.Where(id => !active.Contains(id)).ToArray())
+                activePositionMarks.Remove(signalId);
+            snapshot = snapshot with { ActivePositionMarks = activePositionMarks.Values.ToArray() };
+        }
+    }
+
+    public void RecordPositionMark(Guid signalId, decimal? currentPrice, decimal? executablePrice,
+        decimal? unrealisedPnl, bool quoteAvailable)
+    {
+        lock (gate)
+        {
+            activePositionMarks[signalId] = new(signalId, currentPrice, executablePrice,
+                unrealisedPnl, timeProvider.GetUtcNow(), quoteAvailable);
+            snapshot = snapshot with { ActivePositionMarks = activePositionMarks.Values.ToArray() };
+        }
+    }
+
     public void Record(string status, bool permitted, string message, int tradesToday = 0,
         decimal realisedPnl = 0m, decimal unrealisedPnl = 0m, Guid? signalId = null,
         string? direction = null, int? quantity = null, decimal? entry = null,
@@ -32,7 +56,7 @@ internal sealed class PaperAutomationState(TimeProvider timeProvider) : IPaperAu
             snapshot = new(status, permitted, message, timeProvider.GetUtcNow(), tradesToday,
                 realisedPnl, unrealisedPnl, signalId, direction, quantity, entry, stop, target,
                 optionSymbol, optionType, optionExpiry, optionStrike, optionLotSize,
-                snapshot.ReadinessChecks, currentOptionPrice);
+                snapshot.ReadinessChecks, currentOptionPrice, activePositionMarks.Values.ToArray());
         }
     }
 }
