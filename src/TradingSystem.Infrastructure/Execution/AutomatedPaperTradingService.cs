@@ -575,7 +575,9 @@ internal sealed partial class AutomatedPaperTradingService(
             effectiveStop = PaperProtectiveStopPolicy.Calculate(open.Entry.Direction, entryPrice,
                 open.StopLoss, favourable,
                 options.Value.BreakEvenEnabled ? options.Value.BreakEvenTriggerRiskMultiple : decimal.MaxValue,
-                options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue);
+                options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue,
+                options.Value.ProfitLockTriggerRiskMultiple,
+                options.Value.ProfitLockRiskMultiple);
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
 
         var invalidation = options.Value.UnderlyingTrendInvalidationEnabled && underlyingFresh

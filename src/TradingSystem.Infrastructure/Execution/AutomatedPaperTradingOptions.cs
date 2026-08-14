@@ -18,7 +18,7 @@ public sealed class AutomatedPaperTradingOptions
     public decimal MinimumOptionVolume { get; init; } = 100m;
     public decimal MinimumOptionOpenInterest { get; init; } = 100m;
     public decimal OptionStopLossPercent { get; init; } = 10m;
-    public decimal OptionRewardToRiskRatio { get; init; } = 2m;
+    public decimal OptionRewardToRiskRatio { get; init; } = 1m;
     public int MaximumOptionLots { get; init; } = 5;
     public int MaximumOptionDaysToExpiry { get; init; } = 10;
     public int ExpiryDayInTheMoneySteps { get; init; } = 1;
@@ -29,6 +29,8 @@ public sealed class AutomatedPaperTradingOptions
     public decimal BreakEvenTriggerRiskMultiple { get; init; } = 1m;
     public bool TrailingStopEnabled { get; init; } = true;
     public decimal TrailingStopRiskMultiple { get; init; } = 1m;
+    public decimal ProfitLockTriggerRiskMultiple { get; init; } = 0.90m;
+    public decimal ProfitLockRiskMultiple { get; init; } = 0.80m;
     public bool PartialProfitEnabled { get; init; } = true;
     public decimal PartialProfitRiskMultiple { get; init; } = 1m;
     public decimal PartialExitFraction { get; init; } = 0.40m;
