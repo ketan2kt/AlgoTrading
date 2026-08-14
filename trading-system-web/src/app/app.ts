@@ -66,10 +66,10 @@ export class App implements OnInit, OnDestroy {
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
   protected tradeFilter = '';
-  protected tradeAlertsEnabled = false;
   private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
   private tradeStatesInitialized = false;
+  private readonly armTradeAlerts = (): void => this.ensureTradeAlertsReady();
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
 
@@ -93,6 +93,9 @@ export class App implements OnInit, OnDestroy {
   );
 
   ngOnInit(): void {
+    this.ensureTradeAlertsReady();
+    document.addEventListener('pointerdown', this.armTradeAlerts, { once: true, capture: true });
+    document.addEventListener('keydown', this.armTradeAlerts, { once: true, capture: true });
     this.subscriptions.add(
       this.auth.currentUser().subscribe({
         next: (user) => {
@@ -112,11 +115,15 @@ export class App implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.unsubscribe();
+    document.removeEventListener('pointerdown', this.armTradeAlerts, { capture: true });
+    document.removeEventListener('keydown', this.armTradeAlerts, { capture: true });
+    void this.audioContext?.close();
     void this.workspaceService.disconnect();
   }
 
   protected login(): void {
     if (!this.username.trim() || !this.password) return;
+    this.ensureTradeAlertsReady();
     this.loginBusy = true;
     this.loginError = '';
     this.subscriptions.add(
@@ -159,13 +166,6 @@ export class App implements OnInit, OnDestroy {
     const type = overlay.executionInstrumentType === 'PutOption' ? 'PE' :
       overlay.executionInstrumentType === 'CallOption' ? 'CE' : '';
     return strike && type ? `${strike}${type}` : overlay.executionInstrument || 'Option';
-  }
-
-  protected enableTradeAlerts(): void {
-    this.audioContext ??= new AudioContext();
-    void this.audioContext.resume();
-    this.tradeAlertsEnabled = true;
-    this.playTradeAlert('enabled');
   }
 
   protected openLogs(): void {
@@ -391,15 +391,32 @@ export class App implements OnInit, OnDestroy {
       const previous = this.tradeStates.get(trade.signalId);
       if (!previous) this.playTradeAlert('entry');
       else if (previous !== trade.lifecycleStatus &&
-               ['SL hit', 'Target hit', 'Time exit', 'Emergency exit', 'Closed'].includes(trade.lifecycleStatus))
+               ['SL hit', 'Target hit', 'Time exit', 'Emergency exit', 'Trend reversal exit', 'Closed']
+                 .includes(trade.lifecycleStatus))
         this.playTradeAlert('exit');
       this.tradeStates.set(trade.signalId, trade.lifecycleStatus);
     }
   }
 
-  private playTradeAlert(kind: 'entry' | 'exit' | 'enabled'): void {
-    if (!this.tradeAlertsEnabled || !this.audioContext) return;
-    const frequencies = kind === 'entry' ? [880, 1175, 880] : kind === 'exit' ? [440, 294, 220] : [660];
+  private ensureTradeAlertsReady(): void {
+    if (typeof AudioContext === 'undefined') return;
+    this.audioContext ??= new AudioContext();
+    if (this.audioContext.state === 'suspended') void this.audioContext.resume();
+  }
+
+  private playTradeAlert(kind: 'entry' | 'exit'): void {
+    this.ensureTradeAlertsReady();
+    if (!this.audioContext) return;
+    if (this.audioContext.state === 'suspended') {
+      void this.audioContext.resume().then(() => this.emitTradeAlert(kind)).catch(() => undefined);
+      return;
+    }
+    this.emitTradeAlert(kind);
+  }
+
+  private emitTradeAlert(kind: 'entry' | 'exit'): void {
+    if (!this.audioContext) return;
+    const frequencies = kind === 'entry' ? [880, 1175, 880] : [440, 294, 220];
     const start = this.audioContext.currentTime;
     frequencies.forEach((frequency, index) => {
       const oscillator = this.audioContext!.createOscillator();
@@ -407,7 +424,7 @@ export class App implements OnInit, OnDestroy {
       oscillator.type = 'square';
       oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0.001, start + index * 0.22);
-      gain.gain.exponentialRampToValueAtTime(0.35, start + index * 0.22 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.55, start + index * 0.22 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, start + index * 0.22 + 0.18);
       oscillator.connect(gain).connect(this.audioContext!.destination);
       oscillator.start(start + index * 0.22);
