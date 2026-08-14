@@ -37,6 +37,9 @@ public sealed class AutomatedPaperTradingOptions
     public bool UnderlyingTrendInvalidationEnabled { get; init; } = true;
     public decimal MinimumReversalStructureStrength { get; init; } = 0.55m;
     public int RequiredReversalEvidenceCount { get; init; } = 3;
+    public bool ProtectProfitableConfirmedReversals { get; init; } = true;
+    public decimal ReversalProfitLockFraction { get; init; } = 0.80m;
+    public int ExitResearchMaximumDelayMinutes { get; init; } = 3;
     public int MinimumSignalCandles { get; init; } = 4;
     public int MinimumFuturesConfirmationCandles { get; init; } = 2;
     public int PositionRecoveryLookbackDays { get; init; } = 14;

@@ -77,6 +77,15 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        try
+        {
+            await CaptureReversalExitResearchAsync(scope.ServiceProvider, db, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogExitResearchCaptureFailed(logger, exception);
+        }
+
         var now = timeProvider.GetUtcNow();
         var indiaNow = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         if (indiaNow.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
@@ -587,6 +596,21 @@ internal sealed partial class AutomatedPaperTradingService(
                 underlyingFresh ? ["Underlying trend invalidation is disabled."] :
                     ["Fresh Nifty data is unavailable; reversal exits fail closed."]);
 
+        var reversalProtected = invalidation.ShouldExit && unrealised > 0 &&
+                                options.Value.ProtectProfitableConfirmedReversals;
+        if (reversalProtected)
+        {
+            effectiveStop = PaperProtectiveStopPolicy.ProtectReversalProfit(open.Entry.Direction,
+                entryPrice, price, effectiveStop, options.Value.ReversalProfitLockFraction);
+            invalidation = invalidation with
+            {
+                ShouldExit = false,
+                SupportingEvidence = invalidation.SupportingEvidence
+                    .Append($"Profitable reversal protected at {options.Value.ReversalProfitLockFraction:P0} of current premium gain.")
+                    .ToArray()
+            };
+        }
+
         var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
             effectiveStop, open.Target,
             TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh);
@@ -630,7 +654,9 @@ internal sealed partial class AutomatedPaperTradingService(
         if (exitReason == PaperExitReason.None)
         {
             state.Record(fresh ? "PositionOpen" : "PositionUnmonitored", false,
-                fresh ? "Monitoring premium protection and confirmed Nifty trend invalidation." :
+                fresh ? reversalProtected
+                    ? "Confirmed reversal detected; premium profit is protected by a tightened stop."
+                    : "Monitoring premium protection and confirmed Nifty trend invalidation." :
                     "Market data is stale; new entries are blocked and the paper position cannot be repriced.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
                 open.Entry.Direction.ToString(), open.RemainingQuantity, open.Entry.AverageFillPrice,
@@ -704,11 +730,51 @@ internal sealed partial class AutomatedPaperTradingService(
             return new(false, 0m, ["Waiting for two completed Nifty candles after entry."]);
 
         var closes = candles.Select(value => value.Close).ToArray();
-        var bars = candles.TakeLast(30).Select(value => new StrategyPriceBar(
+        var bars = candles.Select(value => new StrategyPriceBar(
             value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray();
         return UnderlyingTrendInvalidationPolicy.Evaluate(open.Signal.Direction, bars,
             Ema(closes, 9), Ema(closes, 21), options.Value.MinimumReversalStructureStrength,
             options.Value.RequiredReversalEvidenceCount);
+    }
+
+    private async Task CaptureReversalExitResearchAsync(IServiceProvider services,
+        TradingDbContext db, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var oldest = now.AddMinutes(-60 - options.Value.ExitResearchMaximumDelayMinutes);
+        var trades = await db.PaperTradeResults.AsNoTracking().Where(value =>
+                value.ExitReason == PaperExitReason.UnderlyingTrendInvalidated.ToString() &&
+                value.ClosedAtUtc >= oldest && value.ClosedAtUtc <= now.AddMinutes(-15))
+            .ToListAsync(cancellationToken);
+        if (trades.Count == 0) return;
+
+        var gateway = services.GetRequiredService<IGrowwReadOnlyGateway>();
+        foreach (var trade in trades)
+        {
+            foreach (var horizon in new[] { 15, 30, 60 })
+            {
+                var scheduled = trade.ClosedAtUtc.AddMinutes(horizon);
+                if (now < scheduled || now > scheduled.AddMinutes(options.Value.ExitResearchMaximumDelayMinutes))
+                    continue;
+                if (await db.PaperExitFollowUps.AnyAsync(value =>
+                        value.TradeResultId == trade.Id && value.HorizonMinutes == horizon,
+                        cancellationToken)) continue;
+
+                var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
+                    value.Id == trade.InstrumentId, cancellationToken);
+                if (instrument is null) continue;
+                var quote = await gateway.GetQuoteAsync(new GrowwQuoteRequest(
+                    instrument.Exchange, "FNO", instrument.TradingSymbol), cancellationToken);
+                var observedPrice = quote.BidPrice is > 0 ? quote.BidPrice.Value : quote.LastPrice;
+                if (observedPrice <= 0) continue;
+                db.PaperExitFollowUps.Add(new PaperExitFollowUp(Guid.NewGuid(), trade.Id,
+                    trade.SignalId, horizon, observedPrice,
+                    (observedPrice - trade.EntryPrice) * trade.Quantity,
+                    (observedPrice - trade.ExitPrice) * trade.Quantity,
+                    scheduled, now));
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     private async Task<RebuiltTradeState> RebuildTradeStateAsync(TradingDbContext db,
@@ -911,4 +977,8 @@ internal sealed partial class AutomatedPaperTradingService(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Automated paper-trading cycle failed.")]
     private static partial void LogCycleFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Optional paper reversal-exit research capture failed; trading continues.")]
+    private static partial void LogExitResearchCaptureFailed(ILogger logger, Exception exception);
 }

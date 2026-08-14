@@ -97,3 +97,31 @@ public sealed class PaperTradeResult : Entity, IAppendOnlyEntity
     public string ExitReason { get; private init; }
     public DateTimeOffset ClosedAtUtc { get; private init; }
 }
+
+public sealed class PaperExitFollowUp : Entity, IAppendOnlyEntity
+{
+    public PaperExitFollowUp(Guid id, Guid tradeResultId, Guid signalId, int horizonMinutes,
+        decimal observedOptionPrice, decimal hypotheticalPnlFromEntry,
+        decimal incrementalPnlAfterExit, DateTimeOffset scheduledAtUtc,
+        DateTimeOffset observedAtUtc) : base(id)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(horizonMinutes);
+        TradeResultId = tradeResultId;
+        SignalId = signalId;
+        HorizonMinutes = horizonMinutes;
+        ObservedOptionPrice = observedOptionPrice;
+        HypotheticalPnlFromEntry = hypotheticalPnlFromEntry;
+        IncrementalPnlAfterExit = incrementalPnlAfterExit;
+        ScheduledAtUtc = scheduledAtUtc.ToUniversalTime();
+        ObservedAtUtc = observedAtUtc.ToUniversalTime();
+    }
+
+    public Guid TradeResultId { get; private init; }
+    public Guid SignalId { get; private init; }
+    public int HorizonMinutes { get; private init; }
+    public decimal ObservedOptionPrice { get; private init; }
+    public decimal HypotheticalPnlFromEntry { get; private init; }
+    public decimal IncrementalPnlAfterExit { get; private init; }
+    public DateTimeOffset ScheduledAtUtc { get; private init; }
+    public DateTimeOffset ObservedAtUtc { get; private init; }
+}

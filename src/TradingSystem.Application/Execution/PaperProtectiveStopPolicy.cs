@@ -4,6 +4,20 @@ namespace TradingSystem.Application.Execution;
 
 public static class PaperProtectiveStopPolicy
 {
+    public static decimal ProtectReversalProfit(Direction direction, decimal entry,
+        decimal currentPrice, decimal existingStop, decimal lockFraction)
+    {
+        if (lockFraction is <= 0 or >= 1) throw new ArgumentOutOfRangeException(nameof(lockFraction));
+        var favourableMove = direction == Direction.Buy ? currentPrice - entry : entry - currentPrice;
+        if (favourableMove <= 0) return existingStop;
+        var protectedStop = direction == Direction.Buy
+            ? entry + favourableMove * lockFraction
+            : entry - favourableMove * lockFraction;
+        return direction == Direction.Buy
+            ? Math.Max(existingStop, protectedStop)
+            : Math.Min(existingStop, protectedStop);
+    }
+
     public static decimal Calculate(Direction direction, decimal entry, decimal initialStop,
         decimal highWater, decimal breakEvenTriggerR, decimal trailingDistanceR,
         decimal profitLockTriggerR = decimal.MaxValue, decimal profitLockR = 0m)

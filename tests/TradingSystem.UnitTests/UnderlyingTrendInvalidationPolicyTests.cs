@@ -12,7 +12,7 @@ public sealed class UnderlyingTrendInvalidationPolicyTests
     public void ExitsBullishTradeAfterConfirmedBearishReversal()
     {
         var result = UnderlyingTrendInvalidationPolicy.Evaluate(Direction.Buy,
-            BearishBars(), 97m, 99m);
+            BearishBars(), 101m, 103m);
 
         Assert.True(result.ShouldExit);
         Assert.True(result.SupportingEvidence.Count >= 3);
@@ -26,7 +26,7 @@ public sealed class UnderlyingTrendInvalidationPolicyTests
             new StrategyPriceBar(Now.AddMinutes(index * 5), 95m + index, 96m + index,
                 94.5m + index, 95.5m + index)).ToArray();
 
-        var result = UnderlyingTrendInvalidationPolicy.Evaluate(Direction.Sell, bars, 104m, 102m);
+        var result = UnderlyingTrendInvalidationPolicy.Evaluate(Direction.Sell, bars, 100m, 98m);
 
         Assert.True(result.ShouldExit);
         Assert.True(result.SupportingEvidence.Count >= 3);
@@ -53,6 +53,23 @@ public sealed class UnderlyingTrendInvalidationPolicyTests
 
         Assert.False(result.ShouldExit);
         Assert.Contains("Insufficient", result.SupportingEvidence[0]);
+    }
+
+    [Fact]
+    public void ZigZagSessionDoesNotExitOnCorrelatedEmaNoise()
+    {
+        var bars = Enumerable.Range(0, 12).Select(index =>
+        {
+            var close = index % 2 == 0 ? 101m : 99m;
+            return new StrategyPriceBar(Now.AddMinutes(index * 5), 100m,
+                close + 1m, close - 1m, close);
+        }).ToArray();
+
+        var result = UnderlyingTrendInvalidationPolicy.Evaluate(Direction.Buy,
+            bars, 100.5m, 101m);
+
+        Assert.False(result.ShouldExit);
+        Assert.Equal(SessionBehaviour.ZigZag, result.Behaviour);
     }
 
     private static StrategyPriceBar[] BearishBars() =>

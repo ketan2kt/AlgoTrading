@@ -108,6 +108,20 @@ Boundary and property tests for sizing/rounding; daily loss and trade-count conc
 
 No automated test may resolve or call a live execution gateway.
 
-## 9. Open risk decisions
+## 9. Paper trend-reversal protection
+
+Trend-reversal exits are session-behaviour aware. The engine classifies the completed session as
+trending, range-bound, or zigzag before acting on recent reversal evidence. Every market exit requires
+three persistent closes on the adverse side of EMA 9 and a confirmed swing break. Range-bound and
+zigzag sessions additionally require all four evidence categories, including opposite market
+structure; correlated EMA noise alone is insufficient.
+
+When a confirmed reversal occurs while the option position is profitable, the paper engine protects
+80% of the current premium gain with a tightened stop rather than immediately submitting a market
+exit. A losing position may still exit on the fully confirmed reversal. Each reversal exit is followed
+up at 15, 30, and 60 minutes when valid quotes are available; observed premium and counterfactual P&L
+are persisted for research. Follow-up collection is optional and cannot block trading.
+
+## 10. Open risk decisions
 
 The owner must approve before paper trading: capital base definition, per-trade and daily loss budgets, whether unrealised loss counts toward the daily stop, eligible instruments, long/short option scope, max premium/margin exposure, minimum reward:risk, liquidity/spread/slippage limits, cutoff/exit times, fee model, cooldowns, and emergency liquidation style.

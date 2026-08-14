@@ -242,6 +242,8 @@ public static class DependencyInjection
                                    options.PartialExitFraction is > 0 and < 1 &&
                                    options.MinimumReversalStructureStrength is >= 0.5m and <= 1m &&
                                    options.RequiredReversalEvidenceCount is >= 2 and <= 4 &&
+                                   options.ReversalProfitLockFraction is > 0 and < 1 &&
+                                   options.ExitResearchMaximumDelayMinutes is >= 1 and <= 10 &&
                                    options.MinimumSignalCandles is >= 4 and <= 21 &&
                                    options.MinimumFuturesConfirmationCandles is >= 2 and <= 21 &&
                                  TimeOnly.TryParseExact(options.EntryWindowStart, "HH:mm", out _) &&

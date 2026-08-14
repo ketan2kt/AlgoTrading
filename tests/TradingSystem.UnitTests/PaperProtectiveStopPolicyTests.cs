@@ -30,4 +30,12 @@ public sealed class PaperProtectiveStopPolicyTests
     public void ShortPositionLocksSymmetricProfit() =>
         Assert.Equal(92, PaperProtectiveStopPolicy.Calculate(Direction.Sell,
             100, 110, 91, 1, 1, 0.9m, 0.8m));
+
+    [Theory]
+    [InlineData(Direction.Buy, 100, 110, 90, 108)]
+    [InlineData(Direction.Sell, 100, 90, 110, 92)]
+    public void ConfirmedReversalLocksEightyPercentOfOpenProfit(Direction direction,
+        decimal entry, decimal current, decimal existingStop, decimal expected) =>
+        Assert.Equal(expected, PaperProtectiveStopPolicy.ProtectReversalProfit(
+            direction, entry, current, existingStop, 0.8m));
 }
