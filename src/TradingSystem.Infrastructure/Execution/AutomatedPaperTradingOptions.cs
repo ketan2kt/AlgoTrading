@@ -37,4 +37,13 @@ public sealed class AutomatedPaperTradingOptions
     public int RequiredReversalEvidenceCount { get; init; } = 3;
     public int MinimumSignalCandles { get; init; } = 4;
     public int MinimumFuturesConfirmationCandles { get; init; } = 2;
+    public int PositionRecoveryLookbackDays { get; init; } = 14;
+    public int MaximumConcurrentPositions { get; init; } = 8;
+    public bool SelectiveHedgingEnabled { get; init; } = true;
+    public decimal HedgeMinimumAtrPercent { get; init; } = 0.35m;
+    public decimal HedgeMinimumRelativeFuturesVolume { get; init; } = 1m;
+    public decimal HedgeMinimumSignalConfidence { get; init; } = 0.60m;
+    public bool WeeklyCarryForwardEnabled { get; init; }
+    public int WeeklyCarryMaximumDaysToExpiry { get; init; } = 7;
+    public decimal WeeklyCarryMinimumConfidence { get; init; } = 0.65m;
 }

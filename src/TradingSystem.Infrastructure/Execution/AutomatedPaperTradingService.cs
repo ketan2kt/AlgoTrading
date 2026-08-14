@@ -87,17 +87,23 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var sessionStart = ToUtc(indiaNow.Date, new TimeOnly(9, 15));
         var sessionEnd = ToUtc(indiaNow.Date, new TimeOnly(15, 30));
-        var signals = await LoadSessionSignalsAsync(db, instrument.Id, sessionStart, sessionEnd, cancellationToken);
+        var sessionSignals = await LoadSessionSignalsAsync(db, instrument.Id, sessionStart, sessionEnd, cancellationToken);
+        // Recovery must include unresolved positions opened on an earlier session. Limiting this
+        // query to today would orphan any explicitly approved carry-forward paper position.
+        var recoveryStart = sessionStart.AddDays(-options.Value.PositionRecoveryLookbackDays);
+        var recoverySignals = await LoadSessionSignalsAsync(db, instrument.Id, recoveryStart, sessionEnd,
+            cancellationToken);
         var killSwitch = await db.ApplicationSettings.AsNoTracking().Where(value =>
                 value.Mode == TradingMode.Paper && value.Key == "EmergencyKillSwitch")
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
         var killSwitchActive = bool.TryParse(killSwitch, out var active) && active;
         await UpdateReadinessAsync(db, instrument.Id, sessionStart, sessionEnd, now, indiaNow,
             killSwitchActive, cancellationToken);
-        var tradeState = await RebuildTradeStateAsync(db, signals, cancellationToken);
+        var tradeState = await RebuildTradeStateAsync(db, recoverySignals, sessionStart, sessionEnd,
+            cancellationToken);
         var reconciliation = await broker.ReconcileAsync(
-            tradeState.Open is null ? [] : [new ExpectedBrokerPosition(tradeState.Open.Entry.InstrumentId,
-                tradeState.Open.Entry.Direction, tradeState.Open.RemainingQuantity)], cancellationToken);
+            tradeState.OpenPositions.Select(open => new ExpectedBrokerPosition(open.Entry.InstrumentId,
+                open.Entry.Direction, open.RemainingQuantity)).ToArray(), cancellationToken);
         if (!reconciliation.TradingPermitted)
         {
             state.Record("ReconciliationRequired", false,
@@ -112,45 +118,46 @@ internal sealed partial class AutomatedPaperTradingService(
         var fresh = latest is not null && now - latest.ReceivedAtUtc <=
             TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
 
-        if (tradeState.Open is not null)
+        if (tradeState.OpenPositions.Count > 0)
         {
-            var optionInstrument = await db.Instruments.AsNoTracking()
-                .SingleOrDefaultAsync(value => value.Id == tradeState.Open.Entry.InstrumentId,
-                    cancellationToken);
-            if (optionInstrument is null)
+            foreach (var open in tradeState.OpenPositions)
             {
-                state.Record("PositionUnmonitored", false,
-                    "An open paper option position exists but its instrument metadata is unavailable.",
-                    tradeState.TradesToday, tradeState.RealisedPnl, 0m,
-                    tradeState.Open.Signal.SignalId, tradeState.Open.Entry.Direction.ToString(),
-                    tradeState.Open.Entry.FilledQuantity, tradeState.Open.Entry.AverageFillPrice,
-                    tradeState.Open.StopLoss, tradeState.Open.Target);
-                return;
-            }
-            if (optionInstrument.Type is not (InstrumentType.CallOption or InstrumentType.PutOption))
-            {
-                state.Record("ReconciliationRequired", false,
-                    "A legacy non-option paper position was detected. It will not be monitored or reused as a Nifty option trade.",
-                    tradeState.TradesToday, tradeState.RealisedPnl, 0m,
-                    tradeState.Open.Signal.SignalId, tradeState.Open.Entry.Direction.ToString(),
-                    tradeState.Open.Entry.FilledQuantity, tradeState.Open.Entry.AverageFillPrice,
-                    tradeState.Open.StopLoss, tradeState.Open.Target);
-                return;
-            }
+                var optionInstrument = await db.Instruments.AsNoTracking()
+                    .SingleOrDefaultAsync(value => value.Id == open.Entry.InstrumentId,
+                        cancellationToken);
+                if (optionInstrument is null)
+                {
+                    state.Record("PositionUnmonitored", false,
+                        "An open paper option position exists but its instrument metadata is unavailable.",
+                        tradeState.TradesToday, tradeState.RealisedPnl, 0m,
+                        open.Signal.SignalId, open.Entry.Direction.ToString(),
+                        open.Entry.FilledQuantity, open.Entry.AverageFillPrice,
+                        open.StopLoss, open.Target);
+                    return;
+                }
+                if (optionInstrument.Type is not (InstrumentType.CallOption or InstrumentType.PutOption))
+                {
+                    state.Record("ReconciliationRequired", false,
+                        "A legacy non-option paper position was detected. It will not be monitored or reused as a Nifty option trade.",
+                        tradeState.TradesToday, tradeState.RealisedPnl, 0m,
+                        open.Signal.SignalId, open.Entry.Direction.ToString(),
+                        open.Entry.FilledQuantity, open.Entry.AverageFillPrice,
+                        open.StopLoss, open.Target);
+                    return;
+                }
 
-            var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
-            var optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
-                optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
-            // Some Groww option quotes omit market depth while still supplying a valid LTP.
-            // Prefer the executable bid, but use LTP for paper marking and monitoring when absent.
-            var currentOptionPrice = optionQuote.BidPrice is > 0
-                ? optionQuote.BidPrice.Value
-                : optionQuote.LastPrice;
-            var optionFresh = currentOptionPrice > 0;
-            await ManageOpenPositionAsync(scope.ServiceProvider, tradeState,
-                currentOptionPrice, indiaNow.TimeOfDay, optionFresh, fresh, killSwitchActive,
-                optionInstrument, instrument.Id, sessionStart, sessionEnd, cancellationToken);
-            return;
+                var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
+                var optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
+                    optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
+                var currentOptionPrice = optionQuote.BidPrice is > 0
+                    ? optionQuote.BidPrice.Value
+                    : optionQuote.LastPrice;
+                var optionFresh = currentOptionPrice > 0;
+                var monitoringBlocked = await ManageOpenPositionAsync(scope.ServiceProvider, tradeState,
+                    open, currentOptionPrice, indiaNow.TimeOfDay, optionFresh, fresh, killSwitchActive,
+                    optionInstrument, instrument.Id, sessionStart, sessionEnd, cancellationToken);
+                if (monitoringBlocked) return;
+            }
         }
 
         if (killSwitchActive)
@@ -229,7 +236,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
         lastEvaluatedCandleUtc = latestCandle.OpenTimeUtc;
         var candleDecisionTime = latestCandle.OpenTimeUtc.AddSeconds(latestCandle.IntervalSeconds);
-        if (signals.Any(value => value.MarketDataTimestampUtc == candleDecisionTime))
+        if (sessionSignals.Any(value => value.MarketDataTimestampUtc == candleDecisionTime))
         {
             state.Record("Scanning", true,
                 "This completed candle already has a durable signal decision; duplicate evaluation was suppressed.",
@@ -312,7 +319,7 @@ internal sealed partial class AutomatedPaperTradingService(
             candleDecisionTime, latestCandle.Close,
             openingRangeHigh, openingRangeLow, relativeVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, regime.TradingPermitted, true,
-            signals.OrderByDescending(value => value.MarketDataTimestampUtc)
+            sessionSignals.OrderByDescending(value => value.MarketDataTimestampUtc)
                 .Select(value => (DateTimeOffset?)value.MarketDataTimestampUtc).FirstOrDefault(),
             tradeState.TradesToday)
         {
@@ -356,6 +363,51 @@ internal sealed partial class AutomatedPaperTradingService(
                 $"No-trade research is stored every {options.Value.NoTradeAuditIntervalMinutes} minutes.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
+        }
+
+        if (tradeState.OpenPositions.Count >= options.Value.MaximumConcurrentPositions)
+        {
+            state.Record("PortfolioCapacity", false,
+                $"Concurrent paper-position capacity ({options.Value.MaximumConcurrentPositions}) is reached.",
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+
+        var hasOpposingExposure = tradeState.OpenPositions.Any(open =>
+            open.Signal.Direction != signal.Direction);
+        if (hasOpposingExposure)
+        {
+            if (!options.Value.SelectiveHedgingEnabled)
+            {
+                state.Record("HedgeRejected", true,
+                    "An opposite setup was detected, but selective paper hedging is disabled.",
+                    tradeState.TradesToday, tradeState.RealisedPnl);
+                return;
+            }
+            var hedgeDecision = SelectiveHedgePolicy.Evaluate(new SelectiveHedgeInput(
+                    true,
+                    tradeState.OpenPositions.Any(open =>
+                        open.Signal.StrategyId.StartsWith("selective-hedge-", StringComparison.Ordinal)),
+                    atr, relativeVolume, signal.Confidence, regime.Regime),
+                options.Value.HedgeMinimumAtrPercent,
+                options.Value.HedgeMinimumRelativeFuturesVolume,
+                options.Value.HedgeMinimumSignalConfidence);
+            if (!hedgeDecision.Approved)
+            {
+                await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                    latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                    relativeVolume, regime, "HedgeRejected", hedgeDecision.Reasons,
+                    signal, null, null, cancellationToken);
+                state.Record("HedgeRejected", true, string.Join(" ", hedgeDecision.Reasons),
+                    tradeState.TradesToday, tradeState.RealisedPnl);
+                return;
+            }
+            signal = signal with
+            {
+                StrategyId = $"selective-hedge-{signal.StrategyId}",
+                SupportingReasons = signal.SupportingReasons
+                    .Append("Opposite long-option hedge qualified by volatility policy.").ToArray()
+            };
         }
 
         var audit = scope.ServiceProvider.GetRequiredService<IPaperLifecycleAuditStore>();
@@ -451,7 +503,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 maximumOptionQuantity * perUnitRisk,
                 maximumOptionQuantity * executionSignal.ProposedEntry)
             : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
-                executionSignal, new RiskContext(now, tradeState.TradesToday, 0,
+                executionSignal, new RiskContext(now, tradeState.TradesToday, tradeState.OpenPositions.Count,
                     tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
                     killSwitchActive, true, fresh), selectedOption.LotSize, maximumOptionQuantity);
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
@@ -494,12 +546,11 @@ internal sealed partial class AutomatedPaperTradingService(
             currentOptionPrice: entry.AverageFillPrice);
     }
 
-    private async Task ManageOpenPositionAsync(IServiceProvider services, RebuiltTradeState tradeState,
-        decimal price, TimeSpan indiaTime, bool fresh, bool underlyingFresh, bool killSwitchActive,
+    private async Task<bool> ManageOpenPositionAsync(IServiceProvider services, RebuiltTradeState tradeState,
+        OpenTrade open, decimal price, TimeSpan indiaTime, bool fresh, bool underlyingFresh, bool killSwitchActive,
         Instrument optionInstrument, Guid underlyingInstrumentId, DateTimeOffset sessionStart,
         DateTimeOffset sessionEnd, CancellationToken cancellationToken)
     {
-        var open = tradeState.Open!;
         if (!fresh || price <= 0)
         {
             state.Record("PositionUnmonitored", false,
@@ -511,7 +562,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
                 optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
                 currentOptionPrice: price > 0 ? price : null);
-            return;
+            return true;
         }
 
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
@@ -540,6 +591,17 @@ internal sealed partial class AutomatedPaperTradingService(
         if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
+        if (exitReason == PaperExitReason.ForcedIntradayExit && options.Value.WeeklyCarryForwardEnabled)
+        {
+            var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
+                timeProvider.GetUtcNow(), IndiaTimeZone).Date);
+            var carry = WeeklyCarryPolicy.Evaluate(new WeeklyCarryInput(localDate,
+                    optionInstrument.ExpiryDate, open.Entry.Direction, entryPrice, price,
+                    open.Signal.Confidence, invalidation.ShouldExit, killSwitchActive),
+                options.Value.WeeklyCarryMaximumDaysToExpiry,
+                options.Value.WeeklyCarryMinimumConfidence);
+            if (carry.Approved) exitReason = PaperExitReason.None;
+        }
 
         var riskPerUnit = Math.Abs(entryPrice - open.StopLoss);
         if (exitReason == PaperExitReason.None && options.Value.PartialProfitEnabled && open.PartialExit is null &&
@@ -561,7 +623,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
                 optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
                 currentOptionPrice: price);
-            return;
+            return false;
         }
         if (exitReason == PaperExitReason.None)
         {
@@ -574,7 +636,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
                 optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
                 currentOptionPrice: price);
-            return;
+            return false;
         }
 
         var exitReference = $"{open.Signal.SignalId:N}-EXIT";
@@ -617,6 +679,7 @@ internal sealed partial class AutomatedPaperTradingService(
             }), open.Signal.SignalId.ToString("N"), timeProvider.GetUtcNow()), cancellationToken);
         state.Record("TradeClosed", false, $"Paper trade closed by {reason}; realised P&L {pnl:F2}.",
             tradeState.TradesToday, tradeState.RealisedPnl + pnl);
+        return false;
     }
 
     private async Task<UnderlyingTrendInvalidationResult> EvaluateUnderlyingInvalidationAsync(
@@ -647,17 +710,18 @@ internal sealed partial class AutomatedPaperTradingService(
     }
 
     private async Task<RebuiltTradeState> RebuildTradeStateAsync(TradingDbContext db,
-        IReadOnlyList<Signal> signals,
+        IReadOnlyList<Signal> signals, DateTimeOffset sessionStart, DateTimeOffset sessionEnd,
         CancellationToken cancellationToken)
     {
-        OpenTrade? open = null;
+        var open = new List<OpenTrade>();
         var count = 0;
         var realised = 0m;
         foreach (var row in signals.OrderBy(value => value.MarketDataTimestampUtc))
         {
             var entry = await broker.GetOrderAsync($"{row.Id:N}-ENTRY", cancellationToken);
             if (entry?.State != OrderState.Filled) continue;
-            count++;
+            if (row.MarketDataTimestampUtc >= sessionStart && row.MarketDataTimestampUtc < sessionEnd)
+                count++;
             var signal = ToStrategySignal(row);
             var exit = await broker.GetOrderAsync($"{row.Id:N}-EXIT", cancellationToken);
             if (exit?.State == OrderState.Filled)
@@ -665,9 +729,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 var multiplier = entry.Direction == Direction.Buy ? 1m : -1m;
                 var grossPnl = (exit.AverageFillPrice!.Value - entry.AverageFillPrice!.Value) *
                                entry.FilledQuantity * multiplier;
-                realised += grossPnl - PaperTradingCostModel.EstimateRoundTripCost(
-                    entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, entry.FilledQuantity,
-                    options.Value.EstimatedRoundTripCostBasisPoints);
+                if (row.MarketDataTimestampUtc >= sessionStart && row.MarketDataTimestampUtc < sessionEnd)
+                    realised += grossPnl - PaperTradingCostModel.EstimateRoundTripCost(
+                        entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, entry.FilledQuantity,
+                        options.Value.EstimatedRoundTripCostBasisPoints);
             }
             else
             {
@@ -677,8 +742,9 @@ internal sealed partial class AutomatedPaperTradingService(
                     signal.ProposedStopLoss, signal.ProposedTarget);
                 var partial = await broker.GetOrderAsync($"{row.Id:N}-PARTIAL", cancellationToken);
                 var remaining = entry.FilledQuantity - (partial?.State == OrderState.Filled ? partial.FilledQuantity : 0);
-                open = new OpenTrade(signal, entry, protective.StopLoss, protective.Target,
-                    remaining, partial?.State == OrderState.Filled ? partial : null);
+                if (remaining > 0)
+                    open.Add(new OpenTrade(signal, entry, protective.StopLoss, protective.Target,
+                        remaining, partial?.State == OrderState.Filled ? partial : null));
             }
         }
         return new(count, realised, open);
@@ -746,12 +812,18 @@ internal sealed partial class AutomatedPaperTradingService(
         ]);
     }
 
-    private static StrategySignal ToStrategySignal(Signal value) => new(value.Id,
-        "opening-range-breakout", "1.0.0", value.InstrumentId, value.Direction,
+    private static StrategySignal ToStrategySignal(Signal value)
+    {
+        var fingerprint = value.Fingerprint.Split(':', StringSplitOptions.RemoveEmptyEntries);
+        var strategyId = fingerprint.Length >= 3 ? string.Join(':', fingerprint[..^2]) : "unknown-strategy";
+        var version = fingerprint.Length >= 2 ? fingerprint[^2] : "unknown";
+        return new(value.Id,
+        strategyId, version, value.InstrumentId, value.Direction,
         SignalEntryType.Market, value.ProposedEntry, value.ProposedStopLoss, value.ProposedTarget,
         Math.Abs(value.ProposedTarget - value.ProposedEntry) /
         Math.Abs(value.ProposedEntry - value.ProposedStopLoss), value.Confidence,
         MarketRegime.Uncertain, [], [], value.MarketDataTimestampUtc, value.ExpiresAtUtc);
+    }
 
     private static (decimal StopLoss, decimal Target) ParseProtectivePrices(
         string? snapshotJson, decimal fallbackStop, decimal fallbackTarget)
@@ -832,7 +904,8 @@ internal sealed partial class AutomatedPaperTradingService(
 
     private sealed record OpenTrade(StrategySignal Signal, BrokerOrderSnapshot Entry,
         decimal StopLoss, decimal Target, int RemainingQuantity, BrokerOrderSnapshot? PartialExit);
-    private sealed record RebuiltTradeState(int TradesToday, decimal RealisedPnl, OpenTrade? Open);
+    private sealed record RebuiltTradeState(int TradesToday, decimal RealisedPnl,
+        IReadOnlyList<OpenTrade> OpenPositions);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Automated paper-trading cycle failed.")]
     private static partial void LogCycleFailed(ILogger logger, Exception exception);
