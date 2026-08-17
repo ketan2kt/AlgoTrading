@@ -28,6 +28,7 @@ public sealed class TradingDbContext(
     public DbSet<StrategyEvaluation> StrategyEvaluations => Set<StrategyEvaluation>();
     public DbSet<PaperTradeResult> PaperTradeResults => Set<PaperTradeResult>();
     public DbSet<PaperExitFollowUp> PaperExitFollowUps => Set<PaperExitFollowUp>();
+    public DbSet<PaperTradePriceSample> PaperTradePriceSamples => Set<PaperTradePriceSample>();
     public DbSet<RiskDecision> RiskDecisions => Set<RiskDecision>();
     public DbSet<TradingOrder> Orders => Set<TradingOrder>();
     public DbSet<OrderEvent> OrderEvents => Set<OrderEvent>();
@@ -286,6 +287,13 @@ public sealed class TradingDbContext(
             entity.Property(value => value.IncrementalPnlAfterExit).HasPrecision(18, 2);
             entity.HasIndex(value => new { value.TradeResultId, value.HorizonMinutes }).IsUnique();
             entity.HasIndex(value => value.ObservedAtUtc);
+        });
+        builder.Entity<PaperTradePriceSample>(entity =>
+        {
+            ConfigureAppendOnly(entity, "paper_trade_price_samples");
+            entity.Property(value => value.OptionPrice).HasPrecision(18, 4);
+            entity.HasIndex(value => new { value.SignalId, value.ObservedMinuteUtc }).IsUnique();
+            entity.HasIndex(value => new { value.InstrumentId, value.ObservedAtUtc });
         });
         builder.Entity<RiskDecision>(entity =>
         {

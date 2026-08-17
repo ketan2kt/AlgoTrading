@@ -13,6 +13,7 @@ public sealed class TradingDbContextModelTests
         var settings = context.Model.FindEntityType(typeof(ApplicationSetting));
         var orders = context.Model.FindEntityType(typeof(TradingOrder));
         var signals = context.Model.FindEntityType(typeof(Signal));
+        var priceSamples = context.Model.FindEntityType(typeof(PaperTradePriceSample));
 
         Assert.NotNull(settings);
         Assert.Contains(
@@ -31,6 +32,10 @@ public sealed class TradingDbContextModelTests
             signals.GetIndexes(),
             index => index.IsUnique &&
                      index.Properties.Single().Name == "Fingerprint");
+        Assert.NotNull(priceSamples);
+        Assert.Contains(priceSamples.GetIndexes(), index => index.IsUnique &&
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(["SignalId", "ObservedMinuteUtc"]));
     }
 
     [Fact]
@@ -63,4 +68,3 @@ public sealed class TradingDbContextModelTests
         return new TradingDbContext(options, TimeProvider.System);
     }
 }
-

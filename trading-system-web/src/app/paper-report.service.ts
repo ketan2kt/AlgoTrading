@@ -1,10 +1,15 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 
-export interface PaperTradeHistoryItem { signalId:string; contract:string; direction:string; quantity:number; entryPrice:number; exitPrice:number; realisedPnl:number; exitReason:string; signalTimeUtc:string; exitTimeUtc:string; strategy:string; regime:string; daysToExpiry:number; }
+export interface TradeExitQualityMetrics { maximumFavourableExcursion:number; maximumAdverseExcursion:number; profitGiveback:number; capturedProfitRatio:number; bestPostExitIncrementalPnl:number; priceSamples:number; assessment:string; }
+export interface PaperTradeHistoryItem { signalId:string; contract:string; direction:string; quantity:number; entryPrice:number; exitPrice:number; realisedPnl:number; exitReason:string; signalTimeUtc:string; exitTimeUtc:string; strategy:string; regime:string; daysToExpiry:number; exitQuality:TradeExitQualityMetrics; }
 export interface DailyPaperPerformance { date:string; trades:number; wins:number; losses:number; netPnl:number; grossProfit:number; grossLoss:number; winRate:number; maximumDrawdown:number; }
-export interface StrategyPerformanceBreakdown { strategy:string; regime:string; timeBucket:string; daysToExpiry:number; trades:number; wins:number; netPnl:number; winRate:number; averagePnl:number; }
-export interface PaperTradingReport { daily:DailyPaperPerformance[]; trades:PaperTradeHistoryItem[]; breakdown:StrategyPerformanceBreakdown[]; observedAtUtc:string; }
+export interface StrategyPerformanceBreakdown { strategy:string; regime:string; timeBucket:string; daysToExpiry:number; trades:number; wins:number; netPnl:number; winRate:number; averagePnl:number; expectancy:number; profitFactor:number; }
+export interface DecisionReasonCount { reason:string; count:number; }
+export interface StrategyDecisionFunnel { outcome:string; evaluations:number; averageConfidence:number; averageRelativeFuturesVolume:number; leadingReasons:DecisionReasonCount[]; }
+export interface ResearchRecommendation { code:string; severity:string; message:string; supportingTrades:number; eligibleForExperiment:boolean; }
+export interface PaperResearchSummary { closedTrades:number; expectancy:number; profitFactor:number; averageMaximumFavourableExcursion:number; averageMaximumAdverseExcursion:number; averageProfitGiveback:number; earlyExitCandidates:number; profitGivebackCandidates:number; }
+export interface PaperTradingReport { daily:DailyPaperPerformance[]; trades:PaperTradeHistoryItem[]; breakdown:StrategyPerformanceBreakdown[]; decisionFunnel:StrategyDecisionFunnel[]; recommendations:ResearchRecommendation[]; research:PaperResearchSummary; observedAtUtc:string; }
 @Injectable({providedIn:'root'})
 export class PaperReportService {
   private readonly http=inject(HttpClient);

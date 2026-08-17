@@ -613,6 +613,8 @@ internal sealed partial class AutomatedPaperTradingService(
             latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
             relativeVolume, regime, "PaperPositionOpened", [], signal, selectedOption,
             entry.AverageFillPrice, cancellationToken);
+        await PersistTradePriceSampleAsync(db, signal.SignalId, selectedOption.InstrumentId,
+            entry.AverageFillPrice!.Value, cancellationToken);
 
         state.Record("PositionOpen", false,
             $"Paper position opened in {selectedOption.TradingSymbol}; monitoring option premium SL and target.",
@@ -643,6 +645,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 currentOptionPrice: price > 0 ? price : null);
             return true;
         }
+
+        var researchDb = services.GetRequiredService<TradingDbContext>();
+        await PersistTradePriceSampleAsync(researchDb, open.Signal.SignalId,
+            optionInstrument.Id, price, cancellationToken);
 
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
         var entryPrice = open.Entry.AverageFillPrice!.Value;
@@ -845,6 +851,22 @@ internal sealed partial class AutomatedPaperTradingService(
                 await db.SaveChangesAsync(cancellationToken);
             }
         }
+    }
+
+    private async Task PersistTradePriceSampleAsync(TradingDbContext db, Guid signalId,
+        Guid instrumentId, decimal price, CancellationToken cancellationToken)
+    {
+        if (price <= 0) return;
+        var now = timeProvider.GetUtcNow();
+        var minute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0,
+            TimeSpan.Zero);
+        if (await db.PaperTradePriceSamples.AsNoTracking().AnyAsync(value =>
+                value.SignalId == signalId && value.ObservedMinuteUtc == minute,
+                cancellationToken)) return;
+
+        db.PaperTradePriceSamples.Add(new PaperTradePriceSample(Guid.NewGuid(), signalId,
+            instrumentId, price, now));
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<RebuiltTradeState> RebuildTradeStateAsync(TradingDbContext db,

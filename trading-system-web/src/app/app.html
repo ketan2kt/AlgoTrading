@@ -391,6 +391,21 @@
             @if (reportLoading) { <p class="empty-copy">Loading report…</p> }
             @else if (reportError) { <p class="form-error">{{reportError}}</p> }
             @else if (report) {
+              <div class="panel-heading"><div><span>EXIT QUALITY</span><strong>Observed paper-trade evidence</strong></div></div>
+              <div class="evaluation-table"><article class="evaluation-row">
+                <div><span>Closed trades</span><strong>{{report.research.closedTrades}}</strong></div>
+                <div><span>Expectancy</span><strong [class.good]="report.research.expectancy>=0" [class.bad]="report.research.expectancy<0">{{report.research.expectancy|number:'1.2-2'}}</strong></div>
+                <div><span>Profit factor</span><strong>{{report.research.profitFactor>=999 ? 'No observed losses' : (report.research.profitFactor|number:'1.2-2')}}</strong></div>
+                <div><span>Average MFE</span><strong class="good">{{report.research.averageMaximumFavourableExcursion|number:'1.2-2'}}</strong></div>
+                <div><span>Average MAE</span><strong class="bad">{{report.research.averageMaximumAdverseExcursion|number:'1.2-2'}}</strong></div>
+                <div><span>Average giveback</span><strong>{{report.research.averageProfitGiveback|number:'1.2-2'}}</strong></div>
+                <div><span>Early-exit candidates</span><strong>{{report.research.earlyExitCandidates}}</strong></div>
+                <div><span>Giveback candidates</span><strong>{{report.research.profitGivebackCandidates}}</strong></div>
+              </article></div>
+              <div class="panel-heading"><div><span>RESEARCH RECOMMENDATIONS</span><strong>Advisory only · never changes strategy automatically</strong></div></div>
+              <div class="evaluation-table">@for(item of report.recommendations;track item.code + item.message){
+                <article class="evaluation-row"><div><span>Finding</span><strong>{{item.code}}</strong></div><div><span>Evidence</span><strong>{{item.supportingTrades}} trades</strong></div><div><span>Status</span><strong>{{item.eligibleForExperiment ? 'Eligible for controlled replay' : 'Collecting evidence'}}</strong></div><div class="evaluation-reasons"><span>Recommendation</span><strong>{{item.message}}</strong></div></article>
+              }</div>
               <div class="evaluation-table">
                 @for(day of report.daily;track day.date){
                   <article class="evaluation-row"><div><span>Date</span><strong>{{day.date|date:'dd MMM yyyy'}}</strong></div><div><span>Trades</span><strong>{{day.trades}}</strong></div><div><span>Wins / losses</span><strong>{{day.wins}} / {{day.losses}}</strong></div><div><span>Win rate</span><strong>{{day.winRate|percent:'1.0-0'}}</strong></div><div><span>Net P&amp;L</span><strong [class.good]="day.netPnl>=0" [class.bad]="day.netPnl<0">₹{{day.netPnl|number:'1.2-2'}}</strong></div><div><span>Max drawdown</span><strong class="bad">₹{{day.maximumDrawdown|number:'1.2-2'}}</strong></div></article>
@@ -405,8 +420,15 @@
                   }
                 </div>
               }
+              @if (report.decisionFunnel.length) {
+                <div class="panel-heading"><div><span>DECISION FUNNEL</span><strong>Signals, rejections and leading reasons</strong></div></div>
+                <div class="evaluation-table">@for(item of report.decisionFunnel;track item.outcome){
+                  <article class="evaluation-row"><div><span>Outcome</span><strong>{{item.outcome}}</strong></div><div><span>Evaluations</span><strong>{{item.evaluations}}</strong></div><div><span>Average confidence</span><strong>{{item.averageConfidence|percent:'1.0-0'}}</strong></div><div><span>Average futures volume</span><strong>{{item.averageRelativeFuturesVolume|number:'1.2-2'}}</strong></div><div class="evaluation-reasons"><span>Leading reason</span><strong>{{item.leadingReasons.length ? item.leadingReasons[0].reason + ' (' + item.leadingReasons[0].count + ')' : 'No failed condition'}}</strong></div></article>
+                }</div>
+              }
               <div class="evaluation-table">
                 @for(trade of filteredTrades();track trade.signalId){
+                  <article class="evaluation-row"><div><span>Exit assessment</span><strong>{{trade.exitQuality.assessment}}</strong></div><div><span>MFE / MAE</span><strong>{{trade.exitQuality.maximumFavourableExcursion|number:'1.0-0'}} / {{trade.exitQuality.maximumAdverseExcursion|number:'1.0-0'}}</strong></div><div><span>Profit giveback</span><strong>{{trade.exitQuality.profitGiveback|number:'1.0-0'}}</strong></div><div><span>Post-exit opportunity</span><strong>{{trade.exitQuality.bestPostExitIncrementalPnl|number:'1.0-0'}}</strong></div><div><span>Price samples</span><strong>{{trade.exitQuality.priceSamples}}</strong></div></article>
                   <article class="evaluation-row"><div><span>Contract</span><strong>{{trade.contract}}</strong></div><div><span>Entry / exit</span><strong>{{trade.entryPrice|number:'1.2-2'}} / {{trade.exitPrice|number:'1.2-2'}}</strong></div><div><span>Quantity</span><strong>{{trade.quantity}}</strong></div><div><span>Result</span><strong>{{trade.exitReason}}</strong></div><div><span>P&amp;L</span><strong [class.good]="trade.realisedPnl>=0" [class.bad]="trade.realisedPnl<0">₹{{trade.realisedPnl|number:'1.2-2'}}</strong></div><div><span>Exited IST</span><strong>{{trade.exitTimeUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</strong></div></article>
                 }
               </div>

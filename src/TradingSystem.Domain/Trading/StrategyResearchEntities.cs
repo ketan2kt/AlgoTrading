@@ -125,3 +125,26 @@ public sealed class PaperExitFollowUp : Entity, IAppendOnlyEntity
     public DateTimeOffset ScheduledAtUtc { get; private init; }
     public DateTimeOffset ObservedAtUtc { get; private init; }
 }
+
+public sealed class PaperTradePriceSample : Entity, IAppendOnlyEntity
+{
+    public PaperTradePriceSample(Guid id, Guid signalId, Guid instrumentId,
+        decimal optionPrice, DateTimeOffset observedAtUtc) : base(id)
+    {
+        if (signalId == Guid.Empty || instrumentId == Guid.Empty || optionPrice <= 0)
+            throw new ArgumentException("Paper-trade price sample values are invalid.");
+
+        SignalId = signalId;
+        InstrumentId = instrumentId;
+        OptionPrice = optionPrice;
+        ObservedAtUtc = observedAtUtc.ToUniversalTime();
+        ObservedMinuteUtc = new DateTimeOffset(ObservedAtUtc.Year, ObservedAtUtc.Month,
+            ObservedAtUtc.Day, ObservedAtUtc.Hour, ObservedAtUtc.Minute, 0, TimeSpan.Zero);
+    }
+
+    public Guid SignalId { get; private init; }
+    public Guid InstrumentId { get; private init; }
+    public decimal OptionPrice { get; private init; }
+    public DateTimeOffset ObservedAtUtc { get; private init; }
+    public DateTimeOffset ObservedMinuteUtc { get; private init; }
+}

@@ -148,6 +148,10 @@ multi-session soak and opt-in PostgreSQL restart verification are reviewed.
 **Verification:** see `docs/phase-8-risk-execution-hardening.md` for the acceptance matrix, manual
 verification, security/risk review, and known limitations.
 
+## Phase 8.5 — Strategy intelligence and validation
+
+**Status update (local, 2026-08-17):** engineering implementation is complete; paper evidence and controlled replay are pending. The system persists minute-bucketed option price paths, measures MFE, MAE, profit giveback, exit quality, expectancy and profit factor, aggregates the decision funnel, and produces sample-size-gated advisory recommendations. It cannot modify strategy parameters automatically. See `docs/phase-8-5-strategy-intelligence.md`.
+
 ## Phase 9 — Groww order integration
 
 **Backlog:** re-review create/modify/cancel/query contracts, implement behind build/config/activation gates, controlled minimum-quantity test plan, disable after test.
