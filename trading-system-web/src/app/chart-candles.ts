@@ -1,4 +1,4 @@
-import { WorkspaceCandle } from './trading-workspace';
+import { WorkspaceCandle, WorkspaceVolumeBar } from './trading-workspace';
 
 export interface ChartLogicalRange {
   from: number;
@@ -63,6 +63,29 @@ export function aggregateCandles(
     });
   }
 
+  return [...buckets.values()].sort(
+    (left, right) => new Date(left.openTimeUtc).getTime() - new Date(right.openTimeUtc).getTime(),
+  );
+}
+
+export function aggregateVolumeBars(
+  bars: WorkspaceVolumeBar[],
+  timeframeMinutes: number,
+): WorkspaceVolumeBar[] {
+  if (timeframeMinutes <= 1) return bars;
+
+  const bucketMilliseconds = timeframeMinutes * 60_000;
+  const buckets = new Map<number, WorkspaceVolumeBar>();
+  for (const bar of bars) {
+    const timestamp = new Date(bar.openTimeUtc).getTime();
+    const bucket = Math.floor(timestamp / bucketMilliseconds) * bucketMilliseconds;
+    const current = buckets.get(bucket);
+    buckets.set(bucket, {
+      openTimeUtc: new Date(bucket).toISOString(),
+      volume: (current?.volume ?? 0) + bar.volume,
+      isClosed: bar.isClosed,
+    });
+  }
   return [...buckets.values()].sort(
     (left, right) => new Date(left.openTimeUtc).getTime() - new Date(right.openTimeUtc).getTime(),
   );

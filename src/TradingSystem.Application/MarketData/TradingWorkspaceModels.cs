@@ -12,6 +12,11 @@ public sealed record WorkspaceCandle(
     long Volume,
     bool IsClosed);
 
+public sealed record WorkspaceVolumeBar(
+    DateTimeOffset OpenTimeUtc,
+    long Volume,
+    bool IsClosed);
+
 public sealed record WorkspaceTradeOverlay(
     Guid SignalId,
     string Strategy,
@@ -83,7 +88,8 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<WorkspaceCandle> Candles,
     IReadOnlyList<WorkspaceTradeOverlay> Overlays,
     IReadOnlyList<WorkspaceStrategyEvaluation> Evaluations,
-    PaperAutomationSnapshot PaperAutomation);
+    PaperAutomationSnapshot PaperAutomation,
+    IReadOnlyList<WorkspaceVolumeBar>? FuturesVolume = null);
 
 public interface ITradingWorkspaceReader
 {

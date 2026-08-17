@@ -14,6 +14,8 @@ import {
   ColorType,
   createChart,
   createSeriesMarkers,
+  HistogramData,
+  HistogramSeries,
   IChartApi,
   IPriceLine,
   ISeriesApi,
@@ -21,7 +23,7 @@ import {
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
-import { aggregateCandles, currentSessionLogicalRange } from './chart-candles';
+import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 
 @Component({
@@ -30,6 +32,7 @@ import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
   template: `
     <div class="chart-shell">
       <div #chart class="chart" aria-label="Live Nifty candlestick chart"></div>
+      <div class="volume-label">NIFTY FUTURES VOLUME</div>
       @if (!snapshot?.candles?.length) {
         <div class="chart-empty">
           <strong>Waiting for live Nifty candles</strong>
@@ -68,6 +71,15 @@ import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
         color: #e9f2ed;
         font-size: 1.05rem;
       }
+      .volume-label {
+        position: absolute;
+        left: 10px;
+        bottom: 25px;
+        color: #789087;
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        pointer-events: none;
+      }
       .trade-zone {
         position: absolute;
         right: 64px;
@@ -96,6 +108,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private chart: IChartApi | null = null;
   private series: ISeriesApi<'Candlestick'> | null = null;
+  private volumeSeries: ISeriesApi<'Histogram'> | null = null;
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private priceLines: IPriceLine[] = [];
@@ -130,6 +143,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       wickUpColor: '#28d17c',
       wickDownColor: '#ff5d68',
     });
+    this.series.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.24 } });
+    this.volumeSeries = this.chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    this.chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
+      borderVisible: false,
+    });
     this.resizeObserver = new ResizeObserver(() => this.positionZones(this.latestOverlay()));
     this.resizeObserver.observe(this.chartElement.nativeElement);
     this.render();
@@ -157,6 +181,24 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       close: value.close,
     }));
     this.series.setData(candles);
+    const candleDirectionByTime = new Map(
+      displayCandles.map((value) => [
+        Math.floor(new Date(value.openTimeUtc).getTime() / 1000),
+        value.close >= value.open,
+      ]),
+    );
+    const volume: HistogramData<Time>[] = aggregateVolumeBars(
+      this.snapshot.futuresVolume ?? [],
+      this.timeframeMinutes,
+    ).map((value) => {
+      const time = Math.floor(new Date(value.openTimeUtc).getTime() / 1000);
+      return {
+        time: time as Time,
+        value: value.volume,
+        color: candleDirectionByTime.get(time) === false ? '#ff5d6870' : '#28d17c70',
+      };
+    });
+    this.volumeSeries?.setData(volume);
     this.priceLines.forEach((line) => this.series?.removePriceLine(line));
     this.priceLines = [];
     const overlay = this.latestOverlay();

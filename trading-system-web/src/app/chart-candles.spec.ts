@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateCandles, currentSessionLogicalRange } from './chart-candles';
+import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
 import { WorkspaceCandle } from './trading-workspace';
 
 describe('aggregateCandles', () => {
@@ -21,6 +21,24 @@ describe('aggregateCandles', () => {
       close: 99,
       volume: 60,
     });
+  });
+});
+
+describe('aggregateVolumeBars', () => {
+  it('sums aligned one-minute futures volume into the selected timeframe', () => {
+    const result = aggregateVolumeBars(
+      [
+        { openTimeUtc: '2026-08-17T03:45:00Z', volume: 100, isClosed: true },
+        { openTimeUtc: '2026-08-17T03:46:00Z', volume: 125, isClosed: true },
+        { openTimeUtc: '2026-08-17T03:50:00Z', volume: 80, isClosed: true },
+      ],
+      5,
+    );
+
+    expect(result).toEqual([
+      { openTimeUtc: '2026-08-17T03:45:00.000Z', volume: 225, isClosed: true },
+      { openTimeUtc: '2026-08-17T03:50:00.000Z', volume: 80, isClosed: true },
+    ]);
   });
 });
 

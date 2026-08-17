@@ -95,6 +95,29 @@ internal sealed class EfTradingWorkspaceReader(
                 false));
         }
 
+        var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
+        var volumeInstrument = await dbContext.Instruments.AsNoTracking()
+            .Where(value => value.Exchange == "NSE" && value.Type == InstrumentType.Future &&
+                            value.TradingSymbol.StartsWith("NIFTY") && value.IsActive &&
+                            value.ExpiryDate >= sessionDate)
+            .OrderBy(value => value.ExpiryDate)
+            .ThenBy(value => value.TradingSymbol)
+            .FirstOrDefaultAsync(cancellationToken);
+        var futuresVolume = volumeInstrument is null
+            ? []
+            : await dbContext.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == volumeInstrument.Id &&
+                                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                                value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
+                                value.OpenTimeUtc < sessionEndUtc)
+                .OrderBy(value => value.OpenTimeUtc)
+                .Select(value => new WorkspaceVolumeBar(value.OpenTimeUtc, value.Volume, true))
+                .ToListAsync(cancellationToken);
+        if (displayedSessionDates.Count > 0)
+            futuresVolume = futuresVolume.Where(value => displayedSessionDates.Contains(
+                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date)))
+                .ToList();
+
         var signalRows = await (from value in dbContext.Signals.AsNoTracking()
             join version in dbContext.StrategyVersions.AsNoTracking()
                 on value.StrategyVersionId equals version.Id
@@ -249,7 +272,8 @@ internal sealed class EfTradingWorkspaceReader(
             closed,
             overlays,
             evaluations,
-            automation);
+            automation,
+            futuresVolume);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             options.TradingSymbol,

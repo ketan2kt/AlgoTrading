@@ -9,6 +9,12 @@ export interface WorkspaceCandle {
   isClosed: boolean;
 }
 
+export interface WorkspaceVolumeBar {
+  openTimeUtc: string;
+  volume: number;
+  isClosed: boolean;
+}
+
 export interface WorkspaceTradeOverlay {
   signalId: string;
   strategy: string;
@@ -57,6 +63,7 @@ export interface TradingWorkspaceSnapshot {
   overlays: WorkspaceTradeOverlay[];
   evaluations: WorkspaceStrategyEvaluation[];
   paperAutomation: PaperAutomationSnapshot;
+  futuresVolume?: WorkspaceVolumeBar[] | null;
 }
 
 export interface WorkspaceStrategyEvaluation {
