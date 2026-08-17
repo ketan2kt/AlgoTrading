@@ -3,7 +3,8 @@ namespace TradingSystem.Application.Execution;
 public sealed record PaperTradeHistoryItem(Guid SignalId, string Contract, string Direction,
     int Quantity, decimal EntryPrice, decimal ExitPrice, decimal RealisedPnl, string ExitReason,
     DateTimeOffset SignalTimeUtc, DateTimeOffset ExitTimeUtc, string Strategy,
-    string Regime, int DaysToExpiry, TradeExitQualityMetrics ExitQuality);
+    string Regime, int DaysToExpiry, PaperTradingCostBreakdown Costs,
+    TradeExitQualityMetrics ExitQuality);
 
 public sealed record DailyPaperPerformance(DateOnly Date, int Trades, int Wins, int Losses,
     decimal NetPnl, decimal GrossProfit, decimal GrossLoss, decimal WinRate,

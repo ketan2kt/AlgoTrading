@@ -753,9 +753,19 @@ internal sealed partial class AutomatedPaperTradingService(
         if (open.PartialExit?.AverageFillPrice is { } partialPrice)
             grossPnl += (partialPrice - open.Entry.AverageFillPrice.Value) *
                         open.PartialExit.FilledQuantity * multiplier;
-        var estimatedCosts = PaperTradingCostModel.EstimateRoundTripCost(
-            open.Entry.AverageFillPrice.Value, exit.AverageFillPrice.Value,
-            open.Entry.FilledQuantity, options.Value.EstimatedRoundTripCostBasisPoints);
+        var transactions = new List<PaperOptionTransaction>
+        {
+            new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                PaperOptionTransactionSide.Sell, open.Entry.AverageFillPrice.Value,
+                open.Entry.FilledQuantity)
+        };
+        if (open.PartialExit?.AverageFillPrice is { } bookedPartialPrice)
+            transactions.Add(new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Sell :
+                PaperOptionTransactionSide.Buy, bookedPartialPrice, open.PartialExit.FilledQuantity));
+        transactions.Add(new(exitDirection == Direction.Buy ? PaperOptionTransactionSide.Buy :
+            PaperOptionTransactionSide.Sell, exit.AverageFillPrice.Value, open.RemainingQuantity));
+        var costs = PaperTradingCostModel.CalculateOptionCharges(transactions);
+        var estimatedCosts = costs.Total;
         var pnl = grossPnl - estimatedCosts;
         var reason = exitReason.ToString();
         var db = services.GetRequiredService<TradingDbContext>();
@@ -765,7 +775,7 @@ internal sealed partial class AutomatedPaperTradingService(
             db.PaperTradeResults.Add(new PaperTradeResult(Guid.NewGuid(), open.Signal.SignalId,
                 optionInstrument.Id, optionInstrument.TradingSymbol, open.Entry.FilledQuantity,
                 open.Entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, grossPnl,
-                estimatedCosts, pnl, reason, timeProvider.GetUtcNow()));
+                estimatedCosts, JsonSerializer.Serialize(costs), pnl, reason, timeProvider.GetUtcNow()));
             await db.SaveChangesAsync(cancellationToken);
         }
         var writer = services.GetRequiredService<IAuditWriter>();
@@ -777,6 +787,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 quantity = open.Entry.FilledQuantity,
                 grossPnl,
                 estimatedCosts,
+                costBreakdown = costs,
                 realisedPnl = pnl,
                 reversalEvidenceScore = invalidation.EvidenceScore,
                 reversalEvidence = invalidation.SupportingEvidence
@@ -887,12 +898,29 @@ internal sealed partial class AutomatedPaperTradingService(
             if (exit?.State == OrderState.Filled)
             {
                 var multiplier = entry.Direction == Direction.Buy ? 1m : -1m;
+                var partial = await broker.GetOrderAsync($"{row.Id:N}-PARTIAL", cancellationToken);
                 var grossPnl = (exit.AverageFillPrice!.Value - entry.AverageFillPrice!.Value) *
-                               entry.FilledQuantity * multiplier;
+                               exit.FilledQuantity * multiplier;
+                if (partial?.State == OrderState.Filled && partial.AverageFillPrice is { } bookedPrice)
+                    grossPnl += (bookedPrice - entry.AverageFillPrice.Value) *
+                                partial.FilledQuantity * multiplier;
                 if (row.MarketDataTimestampUtc >= sessionStart && row.MarketDataTimestampUtc < sessionEnd)
-                    realised += grossPnl - PaperTradingCostModel.EstimateRoundTripCost(
-                        entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, entry.FilledQuantity,
-                        options.Value.EstimatedRoundTripCostBasisPoints);
+                {
+                    var transactions = new List<PaperOptionTransaction>
+                    {
+                        new(entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                            PaperOptionTransactionSide.Sell, entry.AverageFillPrice.Value,
+                            entry.FilledQuantity)
+                    };
+                    if (partial?.State == OrderState.Filled && partial.AverageFillPrice is { } partialPrice)
+                        transactions.Add(new(partial.Direction == Direction.Buy ?
+                            PaperOptionTransactionSide.Buy : PaperOptionTransactionSide.Sell,
+                            partialPrice, partial.FilledQuantity));
+                    transactions.Add(new(exit.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                        PaperOptionTransactionSide.Sell, exit.AverageFillPrice.Value,
+                        exit.FilledQuantity));
+                    realised += grossPnl - PaperTradingCostModel.CalculateOptionCharges(transactions).Total;
+                }
             }
             else
             {

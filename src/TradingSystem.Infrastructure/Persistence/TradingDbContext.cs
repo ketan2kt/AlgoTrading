@@ -275,6 +275,7 @@ public sealed class TradingDbContext(
             entity.Property(value => value.ExitPrice).HasPrecision(18, 4);
             entity.Property(value => value.GrossPnl).HasPrecision(18, 2);
             entity.Property(value => value.EstimatedCosts).HasPrecision(18, 2);
+            entity.Property(value => value.CostBreakdownJson).HasColumnType("jsonb");
             entity.Property(value => value.RealisedPnl).HasPrecision(18, 2);
             entity.HasIndex(value => value.SignalId).IsUnique();
             entity.HasIndex(value => value.ClosedAtUtc);

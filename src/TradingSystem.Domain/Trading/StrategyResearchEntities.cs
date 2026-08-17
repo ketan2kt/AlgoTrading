@@ -69,7 +69,7 @@ public sealed class PaperTradeResult : Entity, IAppendOnlyEntity
 {
     public PaperTradeResult(Guid id, Guid signalId, Guid instrumentId, string tradingSymbol,
         int quantity, decimal entryPrice, decimal exitPrice, decimal grossPnl,
-        decimal estimatedCosts, decimal realisedPnl, string exitReason,
+        decimal estimatedCosts, string costBreakdownJson, decimal realisedPnl, string exitReason,
         DateTimeOffset closedAtUtc) : base(id)
     {
         SignalId = signalId;
@@ -80,6 +80,7 @@ public sealed class PaperTradeResult : Entity, IAppendOnlyEntity
         ExitPrice = exitPrice;
         GrossPnl = grossPnl;
         EstimatedCosts = estimatedCosts;
+        CostBreakdownJson = costBreakdownJson;
         RealisedPnl = realisedPnl;
         ExitReason = exitReason;
         ClosedAtUtc = closedAtUtc.ToUniversalTime();
@@ -93,6 +94,7 @@ public sealed class PaperTradeResult : Entity, IAppendOnlyEntity
     public decimal ExitPrice { get; private init; }
     public decimal GrossPnl { get; private init; }
     public decimal EstimatedCosts { get; private init; }
+    public string CostBreakdownJson { get; private init; }
     public decimal RealisedPnl { get; private init; }
     public string ExitReason { get; private init; }
     public DateTimeOffset ClosedAtUtc { get; private init; }

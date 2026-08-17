@@ -12,7 +12,6 @@ public sealed class AutomatedPaperTradingOptions
     public string ForcedExit { get; init; } = "15:15";
     public decimal MaximumDailyLoss { get; init; } = 1500m;
     public decimal MaximumEntrySlippagePercent { get; init; } = 0.10m;
-    public decimal EstimatedRoundTripCostBasisPoints { get; init; } = 5m;
     public decimal MaximumOptionSpreadPercent { get; init; } = 1.5m;
     public decimal MaximumOptionPremium { get; init; } = 500m;
     public decimal MinimumOptionVolume { get; init; } = 100m;

@@ -53,6 +53,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 x.Result.ClosedAtUtc, x.Strategy, regimes.GetValueOrDefault(x.Signal.Id, "Unknown"),
                 x.ExpiryDate is { } expiry ? Math.Max(0, expiry.DayNumber - DateOnly.FromDateTime(
                     TimeZoneInfo.ConvertTime(x.Signal.MarketDataTimestampUtc, India).Date).DayNumber) : -1,
+                ParseCosts(x.Result.CostBreakdownJson, x.Result.EstimatedCosts),
                 PaperTradeResearchAnalyzer.Analyze(new(x.Result.Quantity, x.Result.EntryPrice,
                     x.Result.ExitPrice, x.Result.GrossPnl, x.Result.EstimatedCosts,
                     x.Result.RealisedPnl, x.Result.ExitReason,
@@ -173,6 +174,18 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
         if (string.IsNullOrWhiteSpace(json)) return [];
         try { return JsonSerializer.Deserialize<string[]>(json) ?? []; }
         catch (JsonException) { return ["Unreadable legacy reason"]; }
+    }
+
+    private static PaperTradingCostBreakdown ParseCosts(string json, decimal total)
+    {
+        if (!string.IsNullOrWhiteSpace(json))
+            try
+            {
+                var result = JsonSerializer.Deserialize<PaperTradingCostBreakdown>(json);
+                if (result is not null && result.ScheduleVersion is not null) return result;
+            }
+            catch (JsonException) { }
+        return new("legacy-estimate", 0m, 0m, 0m, 0m, 0m, 0m, 0m, total);
     }
 
     private static TimeZoneInfo FindIndiaTimeZone()

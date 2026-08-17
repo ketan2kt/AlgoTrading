@@ -211,8 +211,8 @@ export class App implements OnInit, OnDestroy {
       [trade.contract,trade.direction,trade.exitReason,trade.strategy].some(field=>field.toLowerCase().includes(value)));
   }
   protected exportTrades():void {
-    const header='Contract,Direction,Quantity,Entry,Exit,PnL,Reason,EntryTimeUTC,ExitTimeUTC';
-    const lines=this.filteredTrades().map(t=>[t.contract,t.direction,t.quantity,t.entryPrice,t.exitPrice,t.realisedPnl,t.exitReason,t.signalTimeUtc,t.exitTimeUtc].join(','));
+    const header='Contract,Direction,Quantity,Entry,Exit,NetPnL,TotalCharges,Brokerage,STT,GST,Reason,EntryTimeUTC,ExitTimeUTC';
+    const lines=this.filteredTrades().map(t=>[t.contract,t.direction,t.quantity,t.entryPrice,t.exitPrice,t.realisedPnl,t.costs.total,t.costs.brokerage,t.costs.securitiesTransactionTax,t.costs.goodsAndServicesTax,t.exitReason,t.signalTimeUtc,t.exitTimeUtc].join(','));
     const url=URL.createObjectURL(new Blob([[header,...lines].join('\n')],{type:'text/csv'}));
     const anchor=document.createElement('a'); anchor.href=url; anchor.download='paper-trades.csv'; anchor.click(); URL.revokeObjectURL(url);
   }

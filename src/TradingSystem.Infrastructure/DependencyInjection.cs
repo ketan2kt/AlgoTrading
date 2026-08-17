@@ -222,7 +222,6 @@ public static class DependencyInjection
                                  options.NoTradeAuditIntervalMinutes is >= 5 and <= 60 &&
                                  options.MaximumDailyLoss > 0 &&
                                  options.MaximumEntrySlippagePercent is > 0 and <= 1 &&
-                                 options.EstimatedRoundTripCostBasisPoints is >= 0 and <= 100 &&
                                  options.MaximumOptionSpreadPercent is > 0 and <= 10 &&
                                  options.MaximumOptionPremium > 0 &&
                                  options.MinimumOptionVolume >= 0 && options.MinimumOptionOpenInterest >= 0 &&

@@ -16,6 +16,23 @@ This phase adds an advisory research layer. It does not change strategy paramete
 - The decision funnel aggregates signals, rejections, confidence, futures volume and leading failed conditions.
 - Recommendations are deterministic and advisory. A minimum of 20 closed trades is required before a recommendation can become eligible for a controlled replay experiment.
 - The authenticated paper report exposes the new evidence without changing the chart-first dashboard layout.
+- Every executed paper option order, including a partial exit, is charged using the versioned `GROWW-NSE-OPTIONS-2026-04-01` schedule. Net P&L deducts brokerage, STT, NSE transaction charges, NSE IPFT, SEBI turnover fees, GST and buy-side stamp duty.
+
+## Paper cost schedule
+
+The schedule is based on Groww's published equity-option pricing and the NSE STT schedule effective 1 April 2026:
+
+- Groww brokerage: ₹20 per executed F&O order.
+- STT: 0.15% of sell-side option premium turnover.
+- NSE option transaction charge: 0.03503% of premium turnover on both sides.
+- NSE IPFT: 0.0005% of premium turnover on both sides.
+- SEBI turnover fee: 0.0001% on both sides.
+- GST: 18% of brokerage, exchange, IPFT and SEBI charges.
+- Stamp duty: 0.003% of buy-side premium turnover.
+
+Sources: [Groww F&O pricing](https://groww.in/pricing/futures-and-options), [NSE STT](https://www.nseindia.com/static/products-services/equity-derivatives-securities-transaction-tax), and [NSE transaction-charge circular](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf).
+
+The model rounds displayed components and the total to paise. Actual broker contract notes remain authoritative and can differ because of broker/exchange rounding, regulatory changes, exercise STT, penalties or physical-settlement charges. The schedule must be reviewed whenever published rates change.
 
 ## Interpretation boundaries
 
