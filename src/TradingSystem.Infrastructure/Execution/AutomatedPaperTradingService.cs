@@ -115,6 +115,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 open.Entry.Direction, open.RemainingQuantity)).ToArray(), cancellationToken);
         if (!reconciliation.TradingPermitted)
         {
+            RecordPortfolioRisk(state, tradeState, options.Value.MaximumDailyLoss, false);
             state.Record("ReconciliationRequired", false,
                 $"Paper position mismatch: {string.Join(" ", reconciliation.Mismatches)}",
                 tradeState.TradesToday, tradeState.RealisedPnl);
@@ -197,11 +198,14 @@ internal sealed partial class AutomatedPaperTradingService(
 
         if (openPositionMonitoringFailed)
         {
+            RecordPortfolioRisk(state, tradeState, options.Value.MaximumDailyLoss, true);
             state.Record("PositionUnmonitored", false,
                 "At least one active option quote is unavailable; all other positions remain monitored and new entries are blocked.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
+
+        RecordPortfolioRisk(state, tradeState, options.Value.MaximumDailyLoss, true);
 
         if (killSwitchActive)
         {
@@ -560,16 +564,27 @@ internal sealed partial class AutomatedPaperTradingService(
             maximumLots, pricing.EntryPrice,
             protective.StopLoss, protective.Target);
         var maximumOptionQuantity = checked(selectedOption.LotSize * maximumLots);
-        var perUnitRisk = Math.Abs(executionSignal.ProposedEntry - executionSignal.ProposedStopLoss);
-        var decision = options.Value.PermissivePaperExecution
-            ? new RiskDecisionResult(true, maximumOptionQuantity,
-                executionSignal.ProposedStopLoss, executionSignal.ProposedTarget, [],
-                maximumOptionQuantity * perUnitRisk,
-                maximumOptionQuantity * executionSignal.ProposedEntry)
-            : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
+        var riskOptions = scope.ServiceProvider.GetRequiredService<IOptions<PreliminaryRiskOptions>>().Value;
+        var existingCapitalExposure = tradeState.OpenPositions.Sum(open =>
+            open.Entry.AverageFillPrice.GetValueOrDefault() * open.RemainingQuantity);
+        var openUnrealisedPnl = state.GetCurrent().ActivePositionMarks?.Sum(mark =>
+            mark.UnrealisedPnl.GetValueOrDefault()) ?? 0m;
+        var hardenedDecision = PaperPortfolioRiskPolicy.Evaluate(new(
+            executionSignal.ProposedEntry, executionSignal.ProposedStopLoss,
+            selectedOption.LotSize, maximumLots, riskOptions.MaximumRiskPerTrade,
+            riskOptions.MaximumCapitalExposure, existingCapitalExposure,
+            tradeState.RealisedPnl, openUnrealisedPnl, options.Value.MaximumDailyLoss,
+            tradeState.OpenPositions.Count, options.Value.MaximumConcurrentPositions,
+            killSwitchActive, true, fresh));
+        var decision = !hardenedDecision.Approved
+            ? hardenedDecision with { FinalTarget = executionSignal.ProposedTarget }
+            : options.Value.PermissivePaperExecution
+                ? hardenedDecision with { FinalTarget = executionSignal.ProposedTarget }
+                : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
                 executionSignal, new RiskContext(now, tradeState.TradesToday, tradeState.OpenPositions.Count,
                     tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
-                    killSwitchActive, true, fresh), selectedOption.LotSize, maximumOptionQuantity);
+                    killSwitchActive, true, fresh), selectedOption.LotSize,
+                    Math.Min(maximumOptionQuantity, hardenedDecision.ApprovedQuantity));
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
             optionProposal);
         if (!decision.Approved)
@@ -986,6 +1001,24 @@ internal sealed partial class AutomatedPaperTradingService(
             option?.TradingSymbol, option?.Type.ToString(), option?.ExpiryDate,
             option?.StrikePrice, optionPremium, timeProvider.GetUtcNow()));
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void RecordPortfolioRisk(PaperAutomationState automationState,
+        RebuiltTradeState tradeState, decimal maximumDailyLoss, bool reconciliationHealthy)
+    {
+        var marks = automationState.GetCurrent().ActivePositionMarks ?? [];
+        var unrealised = marks.Sum(mark => mark.UnrealisedPnl.GetValueOrDefault());
+        automationState.RecordPortfolioRisk(
+            tradeState.OpenPositions.Count,
+            tradeState.OpenPositions.Sum(open =>
+                open.Entry.AverageFillPrice.GetValueOrDefault() * open.RemainingQuantity),
+            tradeState.OpenPositions.Sum(open =>
+                Math.Abs(open.Entry.AverageFillPrice.GetValueOrDefault() - open.StopLoss) *
+                open.RemainingQuantity),
+            Math.Max(0m, -(tradeState.RealisedPnl + Math.Min(0m, unrealised))),
+            maximumDailyLoss,
+            marks.Count(mark => !mark.QuoteAvailable),
+            reconciliationHealthy);
     }
 
     private static decimal Ema(decimal[] values, int period)

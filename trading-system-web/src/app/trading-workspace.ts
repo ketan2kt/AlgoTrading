@@ -113,6 +113,18 @@ export interface PaperAutomationSnapshot {
   selectedOptionLotSize: number | null;
   readinessChecks: PaperReadinessCheck[] | null;
   currentOptionPrice: number | null;
+  portfolioRisk?: PaperPortfolioRiskSnapshot | null;
+}
+
+export interface PaperPortfolioRiskSnapshot {
+  openPositions: number;
+  capitalExposure: number;
+  openRiskAtStops: number;
+  dailyLossConsumed: number;
+  maximumDailyLoss: number;
+  quoteUnavailablePositions: number;
+  reconciliationHealthy: boolean;
+  observedAtUtc: string;
 }
 
 export interface PaperReadinessCheck {

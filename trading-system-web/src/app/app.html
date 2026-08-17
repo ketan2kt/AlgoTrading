@@ -191,9 +191,18 @@
             ><strong>{{ view.paperAutomation.unrealisedPnl | number: '1.2-2' }}</strong>
           </article>
           <article>
-            <span>Active position</span
-            ><strong>{{ view.paperAutomation.activeDirection || 'None' }}
-              @if (view.paperAutomation.activeQuantity) { &times; {{ view.paperAutomation.activeQuantity }} }
+            <span>Open positions</span><strong>{{ view.paperAutomation.portfolioRisk?.openPositions ?? 0 }}</strong>
+          </article>
+          <article>
+            <span>Capital exposure</span><strong>₹{{ view.paperAutomation.portfolioRisk?.capitalExposure ?? 0 | number: '1.0-0' }}</strong>
+          </article>
+          <article>
+            <span>Risk at stops</span><strong>₹{{ view.paperAutomation.portfolioRisk?.openRiskAtStops ?? 0 | number: '1.0-0' }}</strong>
+          </article>
+          <article>
+            <span>Daily loss consumed</span><strong [class.bad]="(view.paperAutomation.portfolioRisk?.dailyLossConsumed ?? 0) > 0">
+              ₹{{ view.paperAutomation.portfolioRisk?.dailyLossConsumed ?? 0 | number: '1.0-0' }} /
+              ₹{{ view.paperAutomation.portfolioRisk?.maximumDailyLoss ?? 0 | number: '1.0-0' }}
             </strong>
           </article>
         </section>

@@ -182,6 +182,10 @@ Groww documents that manually generated access tokens expire daily at 06:00. The
 - SignalR publishes the authenticated live Nifty and paper-automation workspace projection.
 - The worker emits only a safe foundation heartbeat.
 - Paper orders, fills, cancellations, idempotency keys, order numbering, and positions are reconstructed from an append-only PostgreSQL journal after restart.
+- Phase 8 mandatory paper risk remains active even when permissive strategy evaluation is enabled:
+  complete-lot quantity is bounded by per-trade risk, aggregate premium exposure, daily loss
+  including open losses, open-position capacity, data freshness, reconciliation, and the kill
+  switch. The dashboard exposes portfolio exposure and risk-at-stop telemetry.
 - Fill prices are explicit deterministic test/replay inputs. They are not a claim of realistic spread, latency, fees, or slippage modeling.
 - Backtest and Groww execution gateways are not implemented, and resolving an execution gateway outside Paper mode fails closed.
 - Groww streaming feed support is not implemented: official documentation describes the Python SDK but does not publish a .NET or wire-level feed contract.
@@ -189,7 +193,7 @@ Groww documents that manually generated access tokens expire daily at 06:00. The
 - The Azure paper environment polls the documented Groww Nifty quote endpoint during the NSE session and persists validated observations/candles. Streaming, holiday-calendar integration, and gap backfill remain incomplete.
 - Native PostgreSQL candle partitioning and retention jobs remain deferred until Phase 5 volume is measured in a paper soak test.
 - Regime thresholds are conservative initial hypotheses, not evidence of profitability, and must be calibrated only through replay/out-of-sample analysis.
-- Strategy signals and risk decisions are persisted before paper submission. Nifty is the signal instrument; qualifying bullish/bearish signals deterministically select a near-expiry ATM call/put, validate its live bid/offer, volume, open interest, spread and premium, size in whole lots, and submit only to the paper broker. The coordinator reconstructs the actual option entry after restart, reconciles before acting, monitors option-premium SL/target/15:15 exits, and audits closures. Cross-store atomicity, realistic latency/slippage, and crash injection at every instruction boundary remain incomplete.
+- Strategy signals and risk decisions are persisted before paper submission. Nifty is the signal instrument; qualifying bullish/bearish signals deterministically select a near-expiry call/put, validate its quote, size in whole lots, reject an identical active contract/direction, and submit only to the paper broker. The coordinator reconstructs actual option entries after restart, reconciles before acting, isolates per-position quote failures, monitors premium protection and 15:15 exits, and audits closures. See `docs/phase-8-risk-execution-hardening.md`.
 - Session startup imports up to seven days of official Groww one-minute candles for Nifty spot and the nearest Nifty future. Spot OHLC drives the chart and the ORB, opening-range-retest, and VWAP-pullback setups; futures volume contributes confirmation without universally vetoing valid price action. The dashboard exposes each readiness prerequisite independently.
 - The Azure paper environment is deployed at `https://sarthico.com` and `https://www.sarthico.com`. It remains monitoring/demo-only until the remaining promotion gates are complete.
 - The currently deployed workspace does not yet contain this local Phase 7 increment. Deployment is intentionally deferred until explicit approval. See `docs/live-nifty-workspace.md` and `docs/paper-trading-automation.md`.

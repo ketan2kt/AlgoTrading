@@ -129,7 +129,13 @@ Every phase ends with implementation, automated tests, manual verification, know
 
 ## Phase 8 — Risk and execution hardening
 
-**Backlog:** complete risk matrix, atomic daily counters, submission ledger, all order states, partial/unknown handling, reconciliation, kill switch, failure injection.
+**Status (engineering implemented 2026-08-17; promotion evidence pending):** mandatory portfolio-safe
+paper sizing, complete-lot risk/exposure limits, unrealised-loss daily stop, distinct-contract
+concurrency, duplicate active-contract suppression, append-before-mutate broker journal,
+unknown-commit replay, partial-fill/restart recovery, reconciliation blocking, per-position quote
+isolation, kill-switch/forced exits, portfolio dashboard telemetry, failure simulations, and a Phase 8
+runbook are implemented. Live orders remain absent. Promotion is blocked until the documented
+multi-session soak and opt-in PostgreSQL restart verification are reviewed.
 
 **Acceptance criteria**
 
@@ -138,6 +144,9 @@ Every phase ends with implementation, automated tests, manual verification, know
 - Restart/disconnect/partial-fill/mismatch/forced-exit tests pass.
 - Kill switch blocks entries and reconciles exit attempts.
 - Paper soak test has no unresolved state divergence.
+
+**Verification:** see `docs/phase-8-risk-execution-hardening.md` for the acceptance matrix, manual
+verification, security/risk review, and known limitations.
 
 ## Phase 9 — Groww order integration
 

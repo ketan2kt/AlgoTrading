@@ -21,7 +21,8 @@ public sealed record PaperAutomationSnapshot(
     int? SelectedOptionLotSize = null,
     IReadOnlyList<PaperReadinessCheck>? ReadinessChecks = null,
     decimal? CurrentOptionPrice = null,
-    IReadOnlyList<PaperPositionMark>? ActivePositionMarks = null);
+    IReadOnlyList<PaperPositionMark>? ActivePositionMarks = null,
+    PaperPortfolioRiskSnapshot? PortfolioRisk = null);
 
 public sealed record PaperPositionMark(
     Guid SignalId,
@@ -30,6 +31,16 @@ public sealed record PaperPositionMark(
     decimal? UnrealisedPnl,
     DateTimeOffset ObservedAtUtc,
     bool QuoteAvailable);
+
+public sealed record PaperPortfolioRiskSnapshot(
+    int OpenPositions,
+    decimal CapitalExposure,
+    decimal OpenRiskAtStops,
+    decimal DailyLossConsumed,
+    decimal MaximumDailyLoss,
+    int QuoteUnavailablePositions,
+    bool ReconciliationHealthy,
+    DateTimeOffset ObservedAtUtc);
 
 public sealed record PaperReadinessCheck(string Code, string Label, bool Ready, string Detail);
 

@@ -35,7 +35,7 @@ allocation ceiling. One open position, per-trade sizing, daily-loss protection, 
 data freshness and the emergency kill switch remain active. This relaxed profile must not be copied
 to live trading without a separate reviewed promotion.
 
-Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. At session startup the system imports up to seven days of official Groww one-minute spot and nearest-future history, then continues polling both live quotes. Spot OHLC drives strategy price levels while futures volume supplies relative-volume confirmation. The paper option entry fills at the validated offer. One long option position is allowed. Its immutable premium stop and target are monitored against the live bid and it closes at that liquidation reference when either is crossed, when the administrator activates the kill switch, or at/after 15:15. A missing bid never fabricates an exit.
+Nifty remains the signal and chart instrument; it is never submitted as the paper order instrument. At session startup the system imports up to seven days of official Groww one-minute spot and nearest-future history, then continues polling both live quotes. Spot OHLC drives strategy price levels while futures volume supplies relative-volume confirmation. Distinct long-option positions and qualified hedges may coexist up to portfolio capacity, but an identical active contract/direction is suppressed. Each position is independently marked and monitored against executable bid protection; a missing bid never fabricates an exit and blocks new entries while other positions continue to be monitored.
 
 ## Recovery and audit
 
