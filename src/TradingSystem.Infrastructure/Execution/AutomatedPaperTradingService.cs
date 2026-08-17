@@ -482,6 +482,27 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var duplicateActiveContract = ActiveContractEntryPolicy.IsDuplicate(
+            tradeState.OpenPositions.Select(open => new ActiveContractExposure(
+                open.Entry.InstrumentId, open.Entry.Direction)),
+            selectedOption.InstrumentId,
+            Direction.Buy);
+        if (duplicateActiveContract)
+        {
+            var reason = $"{selectedOption.TradingSymbol} already has an active long paper position; " +
+                         "the existing position will continue to be managed instead of adding duplicate exposure.";
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "DuplicateActiveContract", [reason],
+                signal, selectedOption, null, cancellationToken);
+            state.Record("DuplicateActiveContract", true, reason,
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol,
+                optionType: selectedOption.Type.ToString(), optionExpiry: selectedOption.ExpiryDate,
+                optionStrike: selectedOption.StrikePrice, optionLotSize: selectedOption.LotSize);
+            return;
+        }
+
         var growwGateway = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
         var quote = await growwGateway.GetQuoteAsync(new GrowwQuoteRequest(
             "NSE", "FNO", selectedOption.TradingSymbol), cancellationToken);
