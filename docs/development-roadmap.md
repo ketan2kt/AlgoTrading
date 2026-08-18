@@ -152,6 +152,8 @@ verification, security/risk review, and known limitations.
 
 **Status update (local, 2026-08-17):** engineering implementation is complete; paper evidence and controlled replay are pending. The system persists minute-bucketed option price paths, measures MFE, MAE, profit giveback, exit quality, expectancy and profit factor, aggregates the decision funnel, and produces sample-size-gated advisory recommendations. It cannot modify strategy parameters automatically. See `docs/phase-8-5-strategy-intelligence.md`.
 
+**Shadow structure update (local, 2026-08-18):** trend efficiency, chop, swing consistency, move maturity and remaining-room scoring are implemented as a non-blocking counterfactual layer. Its verdict and evidence are persisted and compared with realised results; paper execution remains unchanged pending review.
+
 ## Phase 9 — Groww order integration
 
 **Backlog:** re-review create/modify/cancel/query contracts, implement behind build/config/activation gates, controlled minimum-quantity test plan, disable after test.

@@ -90,6 +90,10 @@ export interface WorkspaceStrategyEvaluation {
   optionStrike: number | null;
   optionPremium: number | null;
   realisedPnl: number | null;
+  shadowStructureState: string | null;
+  shadowTrendQuality: number | null;
+  shadowWouldPermit: boolean | null;
+  shadowEvidence: string[];
 }
 
 export interface PaperAutomationSnapshot {

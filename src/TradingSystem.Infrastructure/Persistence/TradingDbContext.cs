@@ -263,6 +263,9 @@ public sealed class TradingDbContext(
             entity.Property(value => value.RegimeConfidence).HasPrecision(7, 6);
             entity.Property(value => value.OptionStrike).HasPrecision(18, 4);
             entity.Property(value => value.OptionPremium).HasPrecision(18, 4);
+            entity.Property(value => value.ShadowStructureState).HasMaxLength(60);
+            entity.Property(value => value.ShadowTrendQuality).HasPrecision(7, 6);
+            entity.Property(value => value.ShadowEvidenceJson).HasColumnType("jsonb");
             entity.HasIndex(value => new { value.StrategyCode, value.InstrumentId, value.CandleTimeUtc }).IsUnique();
             entity.HasIndex(value => value.RecordedAtUtc);
         });

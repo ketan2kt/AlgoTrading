@@ -11,7 +11,9 @@ public sealed class StrategyEvaluation : Entity, IAppendOnlyEntity
         MarketRegime regime, Direction? regimeBias, decimal regimeConfidence,
         string outcome, string failedConditionsJson, Guid? signalId,
         string? optionSymbol, string? optionType, DateOnly? optionExpiry,
-        decimal? optionStrike, decimal? optionPremium, DateTimeOffset recordedAtUtc) : base(id)
+        decimal? optionStrike, decimal? optionPremium, DateTimeOffset recordedAtUtc,
+        string? shadowStructureState = null, decimal? shadowTrendQuality = null,
+        bool? shadowWouldPermit = null, string? shadowEvidenceJson = null) : base(id)
     {
         StrategyCode = strategyCode;
         StrategyVersion = strategyVersion;
@@ -37,6 +39,10 @@ public sealed class StrategyEvaluation : Entity, IAppendOnlyEntity
         OptionStrike = optionStrike;
         OptionPremium = optionPremium;
         RecordedAtUtc = recordedAtUtc.ToUniversalTime();
+        ShadowStructureState = shadowStructureState;
+        ShadowTrendQuality = shadowTrendQuality;
+        ShadowWouldPermit = shadowWouldPermit;
+        ShadowEvidenceJson = shadowEvidenceJson;
     }
 
     public string StrategyCode { get; private init; }
@@ -63,6 +69,10 @@ public sealed class StrategyEvaluation : Entity, IAppendOnlyEntity
     public decimal? OptionStrike { get; private init; }
     public decimal? OptionPremium { get; private init; }
     public DateTimeOffset RecordedAtUtc { get; private init; }
+    public string? ShadowStructureState { get; private init; }
+    public decimal? ShadowTrendQuality { get; private init; }
+    public bool? ShadowWouldPermit { get; private init; }
+    public string? ShadowEvidenceJson { get; private init; }
 }
 
 public sealed class PaperTradeResult : Entity, IAppendOnlyEntity

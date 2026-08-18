@@ -72,7 +72,11 @@ public sealed record WorkspaceStrategyEvaluation(
     DateOnly? OptionExpiry,
     decimal? OptionStrike,
     decimal? OptionPremium,
-    decimal? RealisedPnl);
+    decimal? RealisedPnl,
+    string? ShadowStructureState,
+    decimal? ShadowTrendQuality,
+    bool? ShadowWouldPermit,
+    IReadOnlyList<string> ShadowEvidence);
 
 public sealed record TradingWorkspaceSnapshot(
     string Instrument,

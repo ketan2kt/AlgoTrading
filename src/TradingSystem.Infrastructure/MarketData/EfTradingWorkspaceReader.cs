@@ -253,7 +253,11 @@ internal sealed class EfTradingWorkspaceReader(
             value.OptionStrike,
             value.OptionPremium,
             value.SignalId is { } signalId && tradeResults.TryGetValue(signalId, out var result)
-                ? result.RealisedPnl : null)).ToArray();
+                ? result.RealisedPnl : null,
+            value.ShadowStructureState,
+            value.ShadowTrendQuality,
+            value.ShadowWouldPermit,
+            ParseRejectionReasons(value.ShadowEvidenceJson))).ToArray();
 
         var message = !options.Enabled
             ? "Live Nifty ingestion is disabled by server configuration."

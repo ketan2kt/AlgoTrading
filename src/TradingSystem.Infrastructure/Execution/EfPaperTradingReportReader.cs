@@ -42,15 +42,17 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 group => (IReadOnlyList<decimal>)group.Select(value => value.IncrementalPnlAfterExit).ToArray());
         var regimeRows = await db.StrategyEvaluations.AsNoTracking()
             .Where(x => x.SignalId != null && signalIds.Contains(x.SignalId.Value))
-            .Select(x => new { SignalId = x.SignalId!.Value, x.Regime, x.RecordedAtUtc })
+            .Select(x => new { SignalId = x.SignalId!.Value, x.Regime, x.RecordedAtUtc,
+                x.ShadowStructureState, x.ShadowTrendQuality, x.ShadowWouldPermit })
             .ToListAsync(cancellationToken);
         var regimes = regimeRows.GroupBy(x => x.SignalId)
             .ToDictionary(group => group.Key,
-                group => group.OrderByDescending(x => x.RecordedAtUtc).First().Regime.ToString());
+                group => group.OrderByDescending(x => x.RecordedAtUtc).First());
         var rows = baseRows.Select(x => new PaperTradeHistoryItem(x.Result.SignalId, x.Result.TradingSymbol,
                 x.Signal.Direction.ToString(), x.Result.Quantity, x.Result.EntryPrice, x.Result.ExitPrice,
                 x.Result.RealisedPnl, x.Result.ExitReason, x.Signal.MarketDataTimestampUtc,
-                x.Result.ClosedAtUtc, x.Strategy, regimes.GetValueOrDefault(x.Signal.Id, "Unknown"),
+                x.Result.ClosedAtUtc, x.Strategy,
+                regimes.TryGetValue(x.Signal.Id, out var context) ? context.Regime.ToString() : "Unknown",
                 x.ExpiryDate is { } expiry ? Math.Max(0, expiry.DayNumber - DateOnly.FromDateTime(
                     TimeZoneInfo.ConvertTime(x.Signal.MarketDataTimestampUtc, India).Date).DayNumber) : -1,
                 ParseCosts(x.Result.CostBreakdownJson, x.Result.EstimatedCosts),
@@ -58,7 +60,9 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                     x.Result.ExitPrice, x.Result.GrossPnl, x.Result.EstimatedCosts,
                     x.Result.RealisedPnl, x.Result.ExitReason,
                     sampleLookup.GetValueOrDefault(x.Signal.Id, []),
-                    followUpLookup.GetValueOrDefault(x.Signal.Id, [])))))
+                    followUpLookup.GetValueOrDefault(x.Signal.Id, []))),
+                context?.ShadowStructureState, context?.ShadowTrendQuality,
+                context?.ShadowWouldPermit))
             .ToList();
         var daily = rows.GroupBy(value => DateOnly.FromDateTime(
                 TimeZoneInfo.ConvertTime(value.ExitTimeUtc, India).Date))
@@ -97,7 +101,16 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             .ToArray();
         var research = SummariseResearch(rows);
         var recommendations = BuildRecommendations(rows, breakdown, research);
-        return new(daily, rows, breakdown, funnel, recommendations, research,
+        var shadow = rows.Where(value => value.ShadowWouldPermit is not null &&
+                                         value.ShadowStructureState is not null)
+            .GroupBy(value => new { State = value.ShadowStructureState!,
+                WouldPermit = value.ShadowWouldPermit!.Value })
+            .OrderByDescending(group => group.Count())
+            .Select(group => new ShadowStructurePerformance(group.Key.State,
+                group.Key.WouldPermit, group.Count(), group.Count(value => value.RealisedPnl > 0),
+                group.Sum(value => value.RealisedPnl), group.Average(value => value.RealisedPnl)))
+            .ToArray();
+        return new(daily, rows, breakdown, funnel, recommendations, research, shadow,
             timeProvider.GetUtcNow());
     }
 

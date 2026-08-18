@@ -382,6 +382,10 @@ internal sealed partial class AutomatedPaperTradingService(
         {
             MarketStructure = MarketStructureAnalyzer.Analyze(strategyContext.RecentCandles)
         };
+        var shadowStructure = MarketStructureQualityAnalyzer.Analyze(
+            strategyContext.RecentCandles, null, strategyContext.CurrentPrice,
+            strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
+            strategyContext.OpeningRangeLow);
         var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
         if (signal is null)
@@ -402,7 +406,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                     latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                     relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
-                    null, null, null, cancellationToken);
+                    null, null, null, cancellationToken, shadowStructure);
             }
             state.Record("Scanning", true,
                 $"Scanning each completed candle across the price-action portfolio. " +
@@ -411,6 +415,11 @@ internal sealed partial class AutomatedPaperTradingService(
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
+
+        shadowStructure = MarketStructureQualityAnalyzer.Analyze(
+            strategyContext.RecentCandles, signal.Direction, strategyContext.CurrentPrice,
+            strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
+            strategyContext.OpeningRangeLow, Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
 
         if (tradeState.OpenPositions.Count >= options.Value.MaximumConcurrentPositions)
         {
@@ -444,7 +453,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                     latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                     relativeVolume, regime, "HedgeRejected", hedgeDecision.Reasons,
-                    signal, null, null, cancellationToken);
+                    signal, null, null, cancellationToken, shadowStructure);
                 state.Record("HedgeRejected", true, string.Join(" ", hedgeDecision.Reasons),
                     tradeState.TradesToday, tradeState.RealisedPnl);
                 return;
@@ -478,7 +487,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                 relativeVolume, regime, "OptionUnavailable",
                 ["No valid Nifty option contract was available."], signal, null, null,
-                cancellationToken);
+                cancellationToken, shadowStructure);
             state.Record("OptionUniverseUnavailable", false,
                 "A Nifty signal qualified, but no valid Nifty option contract was available. Index execution is blocked.",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -498,7 +507,7 @@ internal sealed partial class AutomatedPaperTradingService(
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                 relativeVolume, regime, "DuplicateActiveContract", [reason],
-                signal, selectedOption, null, cancellationToken);
+                signal, selectedOption, null, cancellationToken, shadowStructure);
             state.Record("DuplicateActiveContract", true, reason,
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol,
@@ -530,7 +539,8 @@ internal sealed partial class AutomatedPaperTradingService(
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                 relativeVolume, regime, "OptionQuoteRejected", pricing.RejectionReasons,
-                signal, selectedOption, quote.OfferPrice ?? quote.LastPrice, cancellationToken);
+                signal, selectedOption, quote.OfferPrice ?? quote.LastPrice, cancellationToken,
+                shadowStructure);
             state.Record("LiquidityRejected", false,
                 $"{selectedOption.TradingSymbol} was rejected: {string.Join(" ", pricing.RejectionReasons)}",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -592,7 +602,7 @@ internal sealed partial class AutomatedPaperTradingService(
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
                 relativeVolume, regime, "RiskRejected", decision.RejectionReasons,
-                signal, selectedOption, pricing.EntryPrice, cancellationToken);
+                signal, selectedOption, pricing.EntryPrice, cancellationToken, shadowStructure);
             state.Record("RiskRejected", false, string.Join(" ", decision.RejectionReasons),
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol,
@@ -612,7 +622,7 @@ internal sealed partial class AutomatedPaperTradingService(
         await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
             latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
             relativeVolume, regime, "PaperPositionOpened", [], signal, selectedOption,
-            entry.AverageFillPrice, cancellationToken);
+            entry.AverageFillPrice, cancellationToken, shadowStructure);
         await PersistTradePriceSampleAsync(db, signal.SignalId, selectedOption.InstrumentId,
             entry.AverageFillPrice!.Value, cancellationToken);
 
@@ -1033,7 +1043,8 @@ internal sealed partial class AutomatedPaperTradingService(
         decimal relativeFuturesVolume, MarketRegimeResult regime, string outcome,
         IReadOnlyList<string> failedConditions, StrategySignal? signal,
         NiftyOptionContractCandidate? option, decimal? optionPremium,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MarketStructureQualitySnapshot? shadowStructure = null)
     {
         if (await db.StrategyEvaluations.AnyAsync(value =>
                 value.StrategyCode == strategy.StrategyId &&
@@ -1049,7 +1060,10 @@ internal sealed partial class AutomatedPaperTradingService(
             regime.Regime, regime.DirectionalBias, regime.Confidence, outcome,
             JsonSerializer.Serialize(failedConditions), signal?.SignalId,
             option?.TradingSymbol, option?.Type.ToString(), option?.ExpiryDate,
-            option?.StrikePrice, optionPremium, timeProvider.GetUtcNow()));
+            option?.StrikePrice, optionPremium, timeProvider.GetUtcNow(),
+            shadowStructure?.State.ToString(), shadowStructure?.TrendQuality,
+            shadowStructure?.WouldPermit,
+            shadowStructure is null ? null : JsonSerializer.Serialize(shadowStructure.Reasons)));
         await db.SaveChangesAsync(cancellationToken);
     }
 

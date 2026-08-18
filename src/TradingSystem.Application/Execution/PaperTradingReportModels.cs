@@ -4,7 +4,8 @@ public sealed record PaperTradeHistoryItem(Guid SignalId, string Contract, strin
     int Quantity, decimal EntryPrice, decimal ExitPrice, decimal RealisedPnl, string ExitReason,
     DateTimeOffset SignalTimeUtc, DateTimeOffset ExitTimeUtc, string Strategy,
     string Regime, int DaysToExpiry, PaperTradingCostBreakdown Costs,
-    TradeExitQualityMetrics ExitQuality);
+    TradeExitQualityMetrics ExitQuality, string? ShadowStructureState,
+    decimal? ShadowTrendQuality, bool? ShadowWouldPermit);
 
 public sealed record DailyPaperPerformance(DateOnly Date, int Trades, int Wins, int Losses,
     decimal NetPnl, decimal GrossProfit, decimal GrossLoss, decimal WinRate,
@@ -32,12 +33,16 @@ public sealed record PaperResearchSummary(int ClosedTrades, decimal Expectancy,
     decimal AverageMaximumAdverseExcursion, decimal AverageProfitGiveback,
     int EarlyExitCandidates, int ProfitGivebackCandidates);
 
+public sealed record ShadowStructurePerformance(string State, bool WouldPermit, int Trades,
+    int Wins, decimal NetPnl, decimal Expectancy);
+
 public sealed record PaperTradingReport(IReadOnlyList<DailyPaperPerformance> Daily,
     IReadOnlyList<PaperTradeHistoryItem> Trades,
     IReadOnlyList<StrategyPerformanceBreakdown> Breakdown,
     IReadOnlyList<StrategyDecisionFunnel> DecisionFunnel,
     IReadOnlyList<ResearchRecommendation> Recommendations,
     PaperResearchSummary Research,
+    IReadOnlyList<ShadowStructurePerformance> ShadowStructure,
     DateTimeOffset ObservedAtUtc);
 
 public interface IPaperTradingReportReader

@@ -16,6 +16,15 @@ This phase adds an advisory research layer. It does not change strategy paramete
 - The decision funnel aggregates signals, rejections, confidence, futures volume and leading failed conditions.
 - Recommendations are deterministic and advisory. A minimum of 20 closed trades is required before a recommendation can become eligible for a controlled replay experiment.
 - The authenticated paper report exposes the new evidence without changing the chart-first dashboard layout.
+- A fast-reacting market-structure quality analyzer runs in shadow mode. It measures trend efficiency, close-direction flips, VWAP recrossing, swing consistency, move maturity in ATR and known room-to-risk before nearby structure.
+- The shadow layer classifies `CleanTrend`, `DevelopingTrend`, `MatureTrend`, `StructuredRange`, `NoisyChop` and `VolatilityTransition`. Its permit/reject verdict is persisted beside the actual decision but cannot block a paper entry.
+- Paper reports compare realised results for trades the shadow layer would have permitted versus rejected. This creates counterfactual evidence before any filter is promoted.
+
+## Shadow market-structure policy
+
+The shadow layer vetoes a candidate when observed evidence indicates noisy low-efficiency chop, a continuation move that has already travelled at least three ATR, conflict with a high-quality directional path, or less than 1.10R of known room before nearby structure. Unknown room is reported as unknown rather than invented.
+
+These thresholds are hypotheses, not profitable rules. They must remain shadow-only until enough completed trades show an improvement in net expectancy and drawdown after charges across varied regimes. Promotion requires an explicit code/configuration change and approval.
 - Every executed paper option order, including a partial exit, is charged using the versioned `GROWW-NSE-OPTIONS-2026-04-01` schedule. Net P&L deducts brokerage, STT, NSE transaction charges, NSE IPFT, SEBI turnover fees, GST and buy-side stamp duty.
 
 ## Paper cost schedule
@@ -37,6 +46,8 @@ The model rounds displayed components and the total to paise. Actual broker cont
 ## Interpretation boundaries
 
 MFE and MAE use observed executable option-premium samples, not an assumed continuous price path. A rapid movement between samples may therefore be missed. Historical trades created before this release will show insufficient price-path evidence.
+
+The shadow analyzer uses completed five-minute candles and the current session VWAP. It is faster and richer than the legacy two-half structure label, but it cannot see order-book behaviour between candles and must not be treated as a forecast.
 
 Post-exit analysis currently exists for trend-invalidation exits because those follow-up quotes were already captured. Extending it to every exit reason requires a separate bounded quote-retention decision.
 
