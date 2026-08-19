@@ -106,6 +106,11 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Mode == TradingMode.Paper && value.Key == "EmergencyKillSwitch")
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
         var killSwitchActive = bool.TryParse(killSwitch, out var active) && active;
+        var dailyLossOverrideJson = await db.ApplicationSettings.AsNoTracking().Where(value =>
+                value.Mode == TradingMode.Paper && value.Key == EfPaperDailyLossOverrideService.Key)
+            .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
+        var dailyLossLimitOverridden = EfPaperDailyLossOverrideService.IsActiveForDate(
+            dailyLossOverrideJson, DateOnly.FromDateTime(indiaNow.Date));
         await UpdateReadinessAsync(db, instrument.Id, sessionStart, sessionEnd, now, indiaNow,
             killSwitchActive, cancellationToken);
         var tradeState = await RebuildTradeStateAsync(db, recoverySignals, sessionStart, sessionEnd,
@@ -585,7 +590,7 @@ internal sealed partial class AutomatedPaperTradingService(
             riskOptions.MaximumCapitalExposure, existingCapitalExposure,
             tradeState.RealisedPnl, openUnrealisedPnl, options.Value.MaximumDailyLoss,
             tradeState.OpenPositions.Count, options.Value.MaximumConcurrentPositions,
-            killSwitchActive, true, fresh));
+            killSwitchActive, true, fresh, dailyLossLimitOverridden));
         var decision = !hardenedDecision.Approved
             ? hardenedDecision with { FinalTarget = executionSignal.ProposedTarget }
             : options.Value.PermissivePaperExecution
@@ -593,7 +598,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
                 executionSignal, new RiskContext(now, tradeState.TradesToday, tradeState.OpenPositions.Count,
                     tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
-                    killSwitchActive, true, fresh), selectedOption.LotSize,
+                    killSwitchActive, true, fresh, dailyLossLimitOverridden), selectedOption.LotSize,
                     Math.Min(maximumOptionQuantity, hardenedDecision.ApprovedQuantity));
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
             optionProposal);

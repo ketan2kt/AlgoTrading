@@ -72,7 +72,10 @@ describe('App', () => {
       },
     });
     TestBed.overrideProvider(PaperRiskService, {
-      useValue: { getKillSwitch: () => NEVER, setKillSwitch: () => NEVER },
+      useValue: {
+        getKillSwitch: () => NEVER, setKillSwitch: () => NEVER,
+        getDailyLossOverride: () => NEVER, setDailyLossOverride: () => NEVER,
+      },
     });
 
     const fixture = TestBed.createComponent(App);
@@ -103,7 +106,10 @@ describe('App', () => {
     });
     TestBed.overrideProvider(GrowwTokenService, { useValue: { getStatus: () => NEVER } });
     TestBed.overrideProvider(PaperRiskService, {
-      useValue: { getKillSwitch: () => NEVER, setKillSwitch: () => NEVER },
+      useValue: {
+        getKillSwitch: () => NEVER, setKillSwitch: () => NEVER,
+        getDailyLossOverride: () => NEVER, setDailyLossOverride: () => NEVER,
+      },
     });
     TestBed.overrideProvider(TradingWorkspaceService, {
       useValue: {
@@ -156,6 +162,7 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Previous-session context');
     expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
     expect(fixture.nativeElement.textContent).toContain('18/21 candles');
+    expect(fixture.nativeElement.textContent).toContain('Ignore limit today');
     expect(fixture.nativeElement.textContent).toContain('RESEARCH LOGS');
     expect(fixture.nativeElement.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
     const logsButton = Array.from(fixture.nativeElement.querySelectorAll('button'))

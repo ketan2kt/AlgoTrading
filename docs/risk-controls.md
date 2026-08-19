@@ -13,6 +13,9 @@ Defaults are fail-closed. Numeric defaults that depend on account capital, instr
 - Live gateway absent before Phase 9 and live disabled by default thereafter.
 - Server-authoritative mode, account binding, activation lease, allowed host, and readiness checks.
 - Emergency kill switch blocks entries immediately and starts the configured controlled-exit policy.
+- Paper mode provides an administrator-only, audited daily-loss override for controlled research.
+  It applies only to new paper entries, is visibly flagged, and expires when the IST date changes.
+  It does not alter live-mode risk controls.
 
 ### Session
 

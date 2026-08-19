@@ -36,6 +36,20 @@ public sealed class PaperPortfolioRiskPolicyTests
     }
 
     [Fact]
+    public void DailyLossOverrideAllowsPaperEntryBeyondDailyStop()
+    {
+        var result = PaperPortfolioRiskPolicy.Evaluate(Valid() with
+        {
+            DailyRealisedPnl = -5_100m,
+            MaximumDailyLoss = 5_000m,
+            DailyLossLimitOverridden = true
+        });
+
+        Assert.True(result.Approved);
+        Assert.DoesNotContain(result.RejectionReasons, reason => reason.Contains("Daily loss"));
+    }
+
+    [Fact]
     public void AggregateExposureCannotExceedPortfolioLimit()
     {
         var result = PaperPortfolioRiskPolicy.Evaluate(Valid() with

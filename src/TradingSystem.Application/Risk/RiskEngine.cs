@@ -15,7 +15,7 @@ public sealed class PreliminaryRiskOptions
 
 public sealed record RiskContext(DateTimeOffset NowUtc, int TradesToday, int OpenPositions,
     decimal DailyRealisedPnl, decimal MaximumDailyLoss, bool KillSwitchActive,
-    bool BrokerConnected, bool DataTradingPermitted);
+    bool BrokerConnected, bool DataTradingPermitted, bool DailyLossLimitOverridden = false);
 
 public sealed record RiskDecisionResult(bool Approved, int ApprovedQuantity,
     decimal FinalStopLoss, decimal FinalTarget, IReadOnlyList<string> RejectionReasons,
@@ -36,7 +36,8 @@ public sealed class PreliminaryRiskEngine(PreliminaryRiskOptions options)
         if (options.EnforceDailyTradeLimit && context.TradesToday >= options.MaximumTradesPerDay)
             reasons.Add("Daily trade limit reached.");
         if (context.OpenPositions >= options.MaximumOpenPositions) reasons.Add("Open-position limit reached.");
-        if (context.DailyRealisedPnl <= -context.MaximumDailyLoss) reasons.Add("Daily loss limit reached.");
+        if (!context.DailyLossLimitOverridden && context.DailyRealisedPnl <= -context.MaximumDailyLoss)
+            reasons.Add("Daily loss limit reached.");
         if (signal.RewardToRiskRatio < options.MinimumRewardToRiskRatio) reasons.Add("Reward-to-risk is too low.");
         var perUnitRisk = Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss);
         if (perUnitRisk <= 0) reasons.Add("Stop loss does not define positive risk.");

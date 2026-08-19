@@ -35,6 +35,19 @@ public sealed class ApiRequestValidationTests
     }
 
     [Fact]
+    public void DailyLossOverrideRequestRequiresAnAuditReason()
+    {
+        var request = new SetDailyLossOverrideRequest { Active = true, Reason = "" };
+        var results = new List<ValidationResult>();
+
+        var valid = Validator.TryValidateObject(request,
+            new ValidationContext(request), results, validateAllProperties: true);
+
+        Assert.False(valid);
+        Assert.Contains(results, value => value.MemberNames.Contains(nameof(request.Reason)));
+    }
+
+    [Fact]
     public async Task TokenStorageSuccessIsNotHiddenByInstrumentSynchronizationFailure()
     {
         var controller = new GrowwTokenController(

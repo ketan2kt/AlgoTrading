@@ -55,6 +55,9 @@ export class App implements OnInit, OnDestroy {
   protected killSwitchActive = false;
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
+  protected dailyLossOverrideActive = false;
+  protected dailyLossOverrideBusy = false;
+  protected dailyLossOverrideMessage = '';
   protected logsOpen = false;
   protected growwPositionsOpen = false;
   protected growwPositionsLoading = false;
@@ -149,6 +152,7 @@ export class App implements OnInit, OnDestroy {
     this.loadWorkspace();
     this.loadTokenStatus();
     this.loadKillSwitch();
+    this.loadDailyLossOverride();
   }
 
   protected setChartTimeframe(value: number): void {
@@ -248,6 +252,30 @@ export class App implements OnInit, OnDestroy {
     }));
   }
 
+  protected setDailyLossOverride(active: boolean): void {
+    this.dailyLossOverrideBusy = true;
+    this.dailyLossOverrideMessage = '';
+    const reason = active
+      ? 'Administrator allowed paper entries beyond the daily loss limit for this session.'
+      : 'Administrator restored the paper daily loss limit for this session.';
+    this.subscriptions.add(this.paperRisk.setDailyLossOverride(active, reason).subscribe({
+      next: (status) => {
+        this.dailyLossOverrideActive = status.active;
+        this.dailyLossOverrideBusy = false;
+        this.dailyLossOverrideMessage = active
+          ? 'Daily loss limit ignored for today.'
+          : 'Daily loss limit restored.';
+        this.loadWorkspace();
+        this.refreshView();
+      },
+      error: () => {
+        this.dailyLossOverrideBusy = false;
+        this.dailyLossOverrideMessage = 'Unable to change the daily loss override.';
+        this.refreshView();
+      },
+    }));
+  }
+
   protected openTokenForm(): void {
     this.showTokenForm = true;
     this.tokenError = '';
@@ -311,6 +339,7 @@ export class App implements OnInit, OnDestroy {
   private startWorkspace(): void {
     this.loadTokenStatus();
     this.loadKillSwitch();
+    this.loadDailyLossOverride();
     this.loadWorkspace();
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
@@ -335,6 +364,19 @@ export class App implements OnInit, OnDestroy {
       },
       error: () => {
         this.killSwitchMessage = 'Kill-switch state is unavailable.';
+        this.refreshView();
+      },
+    }));
+  }
+
+  private loadDailyLossOverride(): void {
+    this.subscriptions.add(this.paperRisk.getDailyLossOverride().subscribe({
+      next: (status) => {
+        this.dailyLossOverrideActive = status.active;
+        this.refreshView();
+      },
+      error: () => {
+        this.dailyLossOverrideMessage = 'Daily loss override state is unavailable.';
         this.refreshView();
       },
     }));

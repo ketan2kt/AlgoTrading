@@ -186,6 +186,8 @@ Groww documents that manually generated access tokens expire daily at 06:00. The
   complete-lot quantity is bounded by per-trade risk, aggregate premium exposure, daily loss
   including open losses, open-position capacity, data freshness, reconciliation, and the kill
   switch. The dashboard exposes portfolio exposure and risk-at-stop telemetry.
+- An administrator can explicitly ignore the daily-loss entry stop for the current IST paper
+  session. The action is audited, automatically expires the next day, and cannot affect live mode.
 - Fill prices are explicit deterministic test/replay inputs. They are not a claim of realistic spread, latency, fees, or slippage modeling.
 - Backtest and Groww execution gateways are not implemented, and resolving an execution gateway outside Paper mode fails closed.
 - Groww streaming feed support is not implemented: official documentation describes the Python SDK but does not publish a .NET or wire-level feed contract.

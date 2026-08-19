@@ -247,6 +247,19 @@ button:disabled {
   padding: 0.55rem 0.7rem;
   background: #101a16;
 }
+.risk-override-button {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.68rem;
+}
+.risk-override-button--active {
+  color: #fff;
+  background: #a52e38;
+}
+.market-strip article small {
+  display: block;
+  font-size: 0.62rem;
+  line-height: 1.25;
+}
 article > span,
 .panel-heading span,
 .signal-row span {

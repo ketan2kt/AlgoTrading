@@ -15,7 +15,8 @@ public sealed record PaperPortfolioRiskInput(
     int MaximumOpenPositions,
     bool KillSwitchActive,
     bool BrokerReconciled,
-    bool MarketDataFresh);
+    bool MarketDataFresh,
+    bool DailyLossLimitOverridden = false);
 
 public static class PaperPortfolioRiskPolicy
 {
@@ -28,7 +29,8 @@ public static class PaperPortfolioRiskPolicy
         if (!input.BrokerReconciled) reasons.Add("Broker reconciliation is required.");
         if (!input.MarketDataFresh) reasons.Add("Market data is stale.");
         if (input.OpenPositions >= input.MaximumOpenPositions) reasons.Add("Open-position limit reached.");
-        if (input.DailyRealisedPnl + Math.Min(0m, input.DailyUnrealisedPnl) <= -input.MaximumDailyLoss)
+        if (!input.DailyLossLimitOverridden &&
+            input.DailyRealisedPnl + Math.Min(0m, input.DailyUnrealisedPnl) <= -input.MaximumDailyLoss)
             reasons.Add("Daily loss limit reached, including open losses.");
 
         var perUnitRisk = Math.Abs(input.EntryPrice - input.StopLoss);

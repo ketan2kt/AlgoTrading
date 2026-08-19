@@ -216,6 +216,7 @@ public static class DependencyInjection
         services.AddScoped<PaperTradeLifecycleService>();
         services.AddScoped<IPaperLifecycleAuditStore, EfPaperLifecycleAuditStore>();
         services.AddScoped<IPaperKillSwitchService, EfPaperKillSwitchService>();
+        services.AddScoped<IPaperDailyLossOverrideService, EfPaperDailyLossOverrideService>();
         services.AddOptions<AutomatedPaperTradingOptions>()
             .Bind(configuration.GetSection(AutomatedPaperTradingOptions.SectionName))
             .Validate(options => options.EvaluationIntervalSeconds is >= 2 and <= 60 &&

@@ -204,6 +204,14 @@
               ₹{{ view.paperAutomation.portfolioRisk?.dailyLossConsumed ?? 0 | number: '1.0-0' }} /
               ₹{{ view.paperAutomation.portfolioRisk?.maximumDailyLoss ?? 0 | number: '1.0-0' }}
             </strong>
+            <button type="button" class="risk-override-button"
+              [class.risk-override-button--active]="dailyLossOverrideActive"
+              [disabled]="dailyLossOverrideBusy"
+              (click)="setDailyLossOverride(!dailyLossOverrideActive)">
+              {{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore limit today' }}
+            </button>
+            @if (dailyLossOverrideActive) { <small class="bad">Daily stop overridden until the next IST trading day.</small> }
+            @if (dailyLossOverrideMessage) { <small>{{ dailyLossOverrideMessage }}</small> }
           </article>
         </section>
         <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
