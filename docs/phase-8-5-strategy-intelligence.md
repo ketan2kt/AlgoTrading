@@ -24,7 +24,23 @@ This phase adds an advisory research layer. It does not change strategy paramete
 
 The shadow layer vetoes a candidate when observed evidence indicates noisy low-efficiency chop, a continuation move that has already travelled at least three ATR, conflict with a high-quality directional path, or less than 1.10R of known room before nearby structure. Unknown room is reported as unknown rather than invented.
 
-These thresholds are hypotheses, not profitable rules. They must remain shadow-only until enough completed trades show an improvement in net expectancy and drawdown after charges across varied regimes. Promotion requires an explicit code/configuration change and approval.
+These thresholds are hypotheses, not profitable rules. Their realised results must be reviewed by
+net expectancy and drawdown after charges across varied regimes; enforcement is limited to paper
+mode and requires explicit review before any later live-mode use.
+
+## Entry-quality enforcement update (2026-08-20)
+
+Following repeated late CE/PE entries in choppy sessions, the previously recorded structure-quality
+verdict now blocks new paper entries when the path is noisy, the directional move is mature, the
+candidate conflicts with short-term structure, or the state is an ambiguous range/volatility
+transition. A clean or developing aligned trend is required. VWAP reversal additionally requires
+confirmed directional structure and matching regime bias. Opening-range breakout now enforces its
+configured 0.75 relative-futures-volume minimum instead of treating it as informational.
+
+Option open interest remains a liquidity validation input only. A single contract's OI does not
+identify whether positions were opened by buyers or sellers; directional OI confirmation requires
+time-aligned option-chain snapshots and change-in-OI analysis and is not currently used as an entry
+signal.
 - Every executed paper option order, including a partial exit, is charged using the versioned `GROWW-NSE-OPTIONS-2026-04-01` schedule. Net P&L deducts brokerage, STT, NSE transaction charges, NSE IPFT, SEBI turnover fees, GST and buy-side stamp duty.
 
 ## Paper cost schedule

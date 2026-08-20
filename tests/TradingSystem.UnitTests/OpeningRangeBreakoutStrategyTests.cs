@@ -56,7 +56,7 @@ public sealed class OpeningRangeBreakoutStrategyTests
         Assert.Null(result.Signal);
         Assert.Contains(result.FailedConditions, value => value.Contains("regime does not permit"));
         Assert.Contains(result.FailedConditions, value => value.Contains("confidence 40%"));
-        Assert.DoesNotContain(result.FailedConditions, value => value.Contains("volume 0.50"));
+        Assert.Contains(result.FailedConditions, value => value.Contains("volume 0.50"));
     }
 
     [Fact]

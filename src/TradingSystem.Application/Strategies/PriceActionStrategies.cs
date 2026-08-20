@@ -238,8 +238,12 @@ public sealed class VwapRejectionReversalStrategy(PriceActionStrategyOptions opt
             return new(null, ["VWAP was not rejected with a reversal confirmation candle."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
         var structureConfirmed = direction == Direction.Buy
-            ? context.MarketStructure.Direction is MarketStructureDirection.Bullish or MarketStructureDirection.Range
-            : context.MarketStructure.Direction is MarketStructureDirection.Bearish or MarketStructureDirection.Range;
+            ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
+            : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+        if (!structureConfirmed)
+            return new(null, ["VWAP reversal lacks confirmed directional market structure."]);
+        if (context.RegimeBias != direction)
+            return new(null, ["VWAP reversal direction conflicts with the current market bias."]);
         var stop = direction == Direction.Buy ? test.Low - tolerance : test.High + tolerance;
         return Signal(context, direction, stop, Score(context, false, structureConfirmed),
             "Price rejected VWAP and closed back on the directional side.",

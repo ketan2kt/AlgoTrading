@@ -30,6 +30,9 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         if (context.RegimeConfidence < options.MinimumRegimeConfidence)
             failed.Add(FormattableString.Invariant(
                 $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
+        if (context.RelativeVolume < options.MinimumRelativeVolume)
+            failed.Add(FormattableString.Invariant(
+                $"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}."));
         if (options.EnforceDailyTradeLimit && context.TradesToday >= options.MaximumTradesPerDay)
             failed.Add("Strategy daily trade limit reached.");
         if (context.LastSignalAtUtc is not null &&
@@ -67,9 +70,7 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
             confidence,
             context.Regime,
             ["Opening range broken with buffer.",
-             context.RelativeVolume >= options.MinimumRelativeVolume
-                 ? "Futures volume confirms direction."
-                 : "Price pattern qualified without volume confirmation."],
+             "Futures volume confirms direction."],
             ["Price returns inside opening range.", "Market-data or regime permission is withdrawn."],
             context.ObservedAtUtc.ToUniversalTime(),
             context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime());

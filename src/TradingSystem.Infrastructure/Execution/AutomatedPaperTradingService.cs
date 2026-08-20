@@ -426,6 +426,19 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
             strategyContext.OpeningRangeLow, Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
 
+        var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction);
+        if (!entryQuality.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "EntryQualityRejected", entryQuality.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("EntryQualityRejected", true, string.Join(" ", entryQuality.Reasons),
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
         if (tradeState.OpenPositions.Count >= options.Value.MaximumConcurrentPositions)
         {
             state.Record("PortfolioCapacity", false,

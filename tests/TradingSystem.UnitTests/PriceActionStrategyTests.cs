@@ -155,10 +155,31 @@ public sealed class PriceActionStrategyTests
                 Bar(99.8m, 100.2m, 99.5m, 100.1m), Bar(100.1m, 100.5m, 99.8m, 100.3m),
                 Bar(100.3m, 100.4m, 99.7m, 100.1m), Bar(100.1m, 101.5m, 100m, 101.4m)
             ],
-            MarketStructure = new(MarketStructureDirection.Range, 0.7m, 101m, 99.5m, 3)
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.7m, 101m, 99.5m, 3)
         };
 
         Assert.NotNull(new VwapRejectionReversalStrategy(new()).Evaluate(context));
+    }
+
+    [Fact]
+    public void VwapRejectionDoesNotTradeAgainstUnconfirmedRangeStructure()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 101.4m,
+            Vwap = 100m,
+            RecentCandles =
+            [
+                Bar(99.8m, 100.2m, 99.5m, 100.1m), Bar(100.1m, 100.5m, 99.8m, 100.3m),
+                Bar(100.3m, 100.4m, 99.7m, 100.1m), Bar(100.1m, 101.5m, 100m, 101.4m)
+            ],
+            MarketStructure = new(MarketStructureDirection.Range, 0.7m, 101m, 99.5m, 3)
+        };
+
+        var result = new VwapRejectionReversalStrategy(new()).EvaluateDetailed(context);
+
+        Assert.Null(result.Signal);
+        Assert.Contains(result.FailedConditions, reason => reason.Contains("directional market structure"));
     }
 
     [Fact]

@@ -337,9 +337,9 @@
                   <div><span>Confidence rule</span><strong [class.good]="evaluation.regimeConfidence >= 0.50" [class.bad]="evaluation.regimeConfidence < 0.50">{{ evaluation.regimeConfidence >= 0.50 ? 'Passed' : 'Failed' }} (50% minimum)</strong></div>
                   <div><span>Futures volume rule</span><strong [class.good]="evaluation.relativeFuturesVolume >= 0.75" [class.bad]="evaluation.relativeFuturesVolume < 0.75">{{ evaluation.relativeFuturesVolume >= 0.75 ? 'Passed' : 'Failed' }} (0.75 minimum)</strong></div>
                   @if (evaluation.shadowStructureState) {
-                    <div><span>Shadow structure</span><strong>{{evaluation.shadowStructureState}} · quality {{evaluation.shadowTrendQuality | percent:'1.0-0'}}</strong></div>
-                    <div><span>Shadow verdict</span><strong [class.good]="evaluation.shadowWouldPermit" [class.bad]="evaluation.shadowWouldPermit === false">{{evaluation.shadowWouldPermit ? 'Would permit' : 'Would reject'}}</strong></div>
-                    @if (evaluation.shadowEvidence.length) { <div class="evaluation-reasons"><span>Shadow evidence</span><strong>{{evaluation.shadowEvidence[0]}}</strong></div> }
+                    <div><span>Entry structure</span><strong>{{evaluation.shadowStructureState}} · quality {{evaluation.shadowTrendQuality | percent:'1.0-0'}}</strong></div>
+                    <div><span>Entry verdict</span><strong [class.good]="evaluation.shadowWouldPermit" [class.bad]="evaluation.shadowWouldPermit === false">{{evaluation.shadowWouldPermit ? 'Permitted' : 'Rejected'}}</strong></div>
+                    @if (evaluation.shadowEvidence.length) { <div class="evaluation-reasons"><span>Structure evidence</span><strong>{{evaluation.shadowEvidence[0]}}</strong></div> }
                   }
                   @if (evaluation.optionSymbol) {
                     <div><span>Proposed option</span><strong>{{ evaluation.optionSymbol }} @ {{ evaluation.optionPremium | number: '1.2-2' }}</strong></div>
@@ -420,9 +420,9 @@
                 <article class="evaluation-row"><div><span>Finding</span><strong>{{item.code}}</strong></div><div><span>Evidence</span><strong>{{item.supportingTrades}} trades</strong></div><div><span>Status</span><strong>{{item.eligibleForExperiment ? 'Eligible for controlled replay' : 'Collecting evidence'}}</strong></div><div class="evaluation-reasons"><span>Recommendation</span><strong>{{item.message}}</strong></div></article>
               }</div>
               @if (report.shadowStructure.length) {
-                <div class="panel-heading"><div><span>SHADOW STRUCTURE</span><strong>Current entries compared with the proposed filter</strong></div></div>
+                <div class="panel-heading"><div><span>ENTRY STRUCTURE</span><strong>Results grouped by enforced structure verdict</strong></div></div>
                 <div class="evaluation-table">@for(item of report.shadowStructure;track item.state + item.wouldPermit){
-                  <article class="evaluation-row"><div><span>State</span><strong>{{item.state}}</strong></div><div><span>Shadow verdict</span><strong [class.good]="item.wouldPermit" [class.bad]="!item.wouldPermit">{{item.wouldPermit ? 'Would permit' : 'Would reject'}}</strong></div><div><span>Trades / wins</span><strong>{{item.trades}} / {{item.wins}}</strong></div><div><span>Net P&amp;L</span><strong [class.good]="item.netPnl>=0" [class.bad]="item.netPnl<0">{{item.netPnl|number:'1.2-2'}}</strong></div><div><span>Expectancy</span><strong [class.good]="item.expectancy>=0" [class.bad]="item.expectancy<0">{{item.expectancy|number:'1.2-2'}}</strong></div></article>
+                  <article class="evaluation-row"><div><span>State</span><strong>{{item.state}}</strong></div><div><span>Entry verdict</span><strong [class.good]="item.wouldPermit" [class.bad]="!item.wouldPermit">{{item.wouldPermit ? 'Permitted' : 'Rejected'}}</strong></div><div><span>Trades / wins</span><strong>{{item.trades}} / {{item.wins}}</strong></div><div><span>Net P&amp;L</span><strong [class.good]="item.netPnl>=0" [class.bad]="item.netPnl<0">{{item.netPnl|number:'1.2-2'}}</strong></div><div><span>Expectancy</span><strong [class.good]="item.expectancy>=0" [class.bad]="item.expectancy<0">{{item.expectancy|number:'1.2-2'}}</strong></div></article>
                 }</div>
               }
               <div class="evaluation-table">
