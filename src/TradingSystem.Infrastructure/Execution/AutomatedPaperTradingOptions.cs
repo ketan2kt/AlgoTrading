@@ -11,6 +11,7 @@ public sealed class AutomatedPaperTradingOptions
     public string EntryCutoff { get; init; } = "14:30";
     public string ForcedExit { get; init; } = "15:15";
     public decimal MaximumDailyLoss { get; init; } = 1500m;
+    public bool EnforceDailyLossLimit { get; init; } = true;
     public decimal MaximumEntrySlippagePercent { get; init; } = 0.10m;
     public decimal MaximumOptionSpreadPercent { get; init; } = 1.5m;
     public decimal MaximumOptionPremium { get; init; } = 500m;

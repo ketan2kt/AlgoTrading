@@ -109,8 +109,9 @@ internal sealed partial class AutomatedPaperTradingService(
         var dailyLossOverrideJson = await db.ApplicationSettings.AsNoTracking().Where(value =>
                 value.Mode == TradingMode.Paper && value.Key == EfPaperDailyLossOverrideService.Key)
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
-        var dailyLossLimitOverridden = EfPaperDailyLossOverrideService.IsActiveForDate(
-            dailyLossOverrideJson, DateOnly.FromDateTime(indiaNow.Date));
+        var dailyLossLimitOverridden = !options.Value.EnforceDailyLossLimit ||
+            EfPaperDailyLossOverrideService.IsActiveForDate(
+                dailyLossOverrideJson, DateOnly.FromDateTime(indiaNow.Date));
         await UpdateReadinessAsync(db, instrument.Id, sessionStart, sessionEnd, now, indiaNow,
             killSwitchActive, cancellationToken);
         var tradeState = await RebuildTradeStateAsync(db, recoverySignals, sessionStart, sessionEnd,

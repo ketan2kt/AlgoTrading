@@ -6,6 +6,11 @@ The Phase 8 engineering scope is implemented in paper mode. Promotion remains bl
 manual multi-session soak and the opt-in PostgreSQL restart test are completed and reviewed. No
 Groww order endpoint exists in this release.
 
+Paper-environment note (20 August 2026): daily-loss enforcement is temporarily disabled through
+`PaperTrading:Automation:EnforceDailyLossLimit=false` for controlled paper research. The ₹5,000
+threshold, policy, audited administrator override, reporting and tests remain intact. Re-enabling
+the switch restores enforcement without a code change. This exception is prohibited in live mode.
+
 ## Safety invariants
 
 - Every paper entry is uniquely correlated by immutable signal ID and client reference.
@@ -77,4 +82,3 @@ regime, time bucket, days-to-expiry, and exit reason.
 No credentials, tokens, broker account data, or new anonymous endpoints were added. Portfolio risk
 telemetry is returned only through the existing administrator-authorised workspace API. Structured
 errors identify instruments/correlation IDs but never include the Groww access token.
-
