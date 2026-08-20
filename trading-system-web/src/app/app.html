@@ -415,6 +415,24 @@
                 <div><span>Early-exit candidates</span><strong>{{report.research.earlyExitCandidates}}</strong></div>
                 <div><span>Giveback candidates</span><strong>{{report.research.profitGivebackCandidates}}</strong></div>
               </article></div>
+              <div class="panel-heading"><div><span>DETERMINISTIC REPLAY</span><strong>Chronological 70/30 training and validation</strong></div></div>
+              <div class="evaluation-table"><article class="evaluation-row">
+                <div><span>Source trades</span><strong>{{report.replay.sourceTrades}}</strong></div>
+                <div><span>Option paths</span><strong>{{report.replay.tradesWithPricePath}}</strong></div>
+                <div><span>Rejected setups without path</span><strong>{{report.replay.rejectedEvaluationsWithoutOptionPath}}</strong></div>
+                <div class="evaluation-reasons"><span>Boundary</span><strong>No P&amp;L is invented for rejected setups without option history.</strong></div>
+              </article></div>
+              <div class="evaluation-table">@for(item of report.replay.variants;track item.code){
+                <article class="evaluation-row">
+                  <div><span>Variant</span><strong>{{item.code}}</strong></div>
+                  <div><span>Coverage</span><strong>{{item.coveredTrades}} trades</strong></div>
+                  <div><span>Training net / expectancy</span><strong [class.good]="item.training.netPnl>=0" [class.bad]="item.training.netPnl<0">{{item.training.netPnl|number:'1.2-2'}} / {{item.training.expectancy|number:'1.2-2'}}</strong></div>
+                  <div><span>Validation net / expectancy</span><strong [class.good]="item.validation.netPnl>=0" [class.bad]="item.validation.netPnl<0">{{item.validation.netPnl|number:'1.2-2'}} / {{item.validation.expectancy|number:'1.2-2'}}</strong></div>
+                  <div><span>Validation PF / drawdown</span><strong>{{item.validation.profitFactor|number:'1.2-2'}} / {{item.validation.maximumDrawdown|number:'1.2-2'}}</strong></div>
+                  <div class="evaluation-reasons"><span>Definition</span><strong>{{item.description}}</strong></div>
+                </article>
+              }</div>
+              <details><summary>Replay limitations</summary><ul>@for(item of report.replay.limitations;track item){<li>{{item}}</li>}</ul></details>
               <div class="panel-heading"><div><span>RESEARCH RECOMMENDATIONS</span><strong>Advisory only · never changes strategy automatically</strong></div></div>
               <div class="evaluation-table">@for(item of report.recommendations;track item.code + item.message){
                 <article class="evaluation-row"><div><span>Finding</span><strong>{{item.code}}</strong></div><div><span>Evidence</span><strong>{{item.supportingTrades}} trades</strong></div><div><span>Status</span><strong>{{item.eligibleForExperiment ? 'Eligible for controlled replay' : 'Collecting evidence'}}</strong></div><div class="evaluation-reasons"><span>Recommendation</span><strong>{{item.message}}</strong></div></article>

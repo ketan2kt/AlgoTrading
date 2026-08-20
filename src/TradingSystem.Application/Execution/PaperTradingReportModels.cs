@@ -43,6 +43,7 @@ public sealed record PaperTradingReport(IReadOnlyList<DailyPaperPerformance> Dai
     IReadOnlyList<ResearchRecommendation> Recommendations,
     PaperResearchSummary Research,
     IReadOnlyList<ShadowStructurePerformance> ShadowStructure,
+    PaperStrategyReplayReport Replay,
     DateTimeOffset ObservedAtUtc);
 
 public interface IPaperTradingReportReader

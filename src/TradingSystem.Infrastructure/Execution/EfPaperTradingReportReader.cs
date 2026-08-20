@@ -28,11 +28,12 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
         var priceSamples = await db.PaperTradePriceSamples.AsNoTracking()
             .Where(value => signalIds.Contains(value.SignalId))
             .OrderBy(value => value.ObservedAtUtc)
-            .Select(value => new { value.SignalId, value.OptionPrice })
+            .Select(value => new { value.SignalId, value.OptionPrice, value.ObservedAtUtc })
             .ToListAsync(cancellationToken);
         var sampleLookup = priceSamples.GroupBy(value => value.SignalId)
             .ToDictionary(group => group.Key,
-                group => (IReadOnlyList<decimal>)group.Select(value => value.OptionPrice).ToArray());
+                group => (IReadOnlyList<ReplayPricePoint>)group.Select(value =>
+                    new ReplayPricePoint(value.ObservedAtUtc, value.OptionPrice)).ToArray());
         var followUps = await db.PaperExitFollowUps.AsNoTracking()
             .Where(value => signalIds.Contains(value.SignalId))
             .Select(value => new { value.SignalId, value.IncrementalPnlAfterExit })
@@ -59,7 +60,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 PaperTradeResearchAnalyzer.Analyze(new(x.Result.Quantity, x.Result.EntryPrice,
                     x.Result.ExitPrice, x.Result.GrossPnl, x.Result.EstimatedCosts,
                     x.Result.RealisedPnl, x.Result.ExitReason,
-                    sampleLookup.GetValueOrDefault(x.Signal.Id, []),
+                    sampleLookup.GetValueOrDefault(x.Signal.Id, []).Select(value => value.Price).ToArray(),
                     followUpLookup.GetValueOrDefault(x.Signal.Id, []))),
                 context?.ShadowStructureState, context?.ShadowTrendQuality,
                 context?.ShadowWouldPermit))
@@ -90,6 +91,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             .Select(value => new { value.Outcome, value.RegimeConfidence,
                 value.RelativeFuturesVolume, value.FailedConditionsJson })
             .ToListAsync(cancellationToken);
+        var rejectedWithoutOptionPath = evaluations.Count(value => value.Outcome != "PaperPositionOpened");
         var funnel = evaluations.GroupBy(value => value.Outcome)
             .OrderByDescending(group => group.Count())
             .Select(group => new StrategyDecisionFunnel(group.Key, group.Count(),
@@ -110,7 +112,18 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 group.Key.WouldPermit, group.Count(), group.Count(value => value.RealisedPnl > 0),
                 group.Sum(value => value.RealisedPnl), group.Average(value => value.RealisedPnl)))
             .ToArray();
-        return new(daily, rows, breakdown, funnel, recommendations, research, shadow,
+        var replayInputs = baseRows.Select(x =>
+        {
+            regimes.TryGetValue(x.Signal.Id, out var context);
+            var path = sampleLookup.GetValueOrDefault(x.Signal.Id, []).ToList();
+            path.Insert(0, new ReplayPricePoint(x.Signal.MarketDataTimestampUtc, x.Result.EntryPrice));
+            path.Add(new ReplayPricePoint(x.Result.ClosedAtUtc, x.Result.ExitPrice));
+            return new ReplayTradeInput(x.Signal.Id, x.Signal.MarketDataTimestampUtc,
+                x.Result.EntryPrice, x.Result.ExitPrice, x.Result.Quantity, x.Result.RealisedPnl,
+                context?.Regime.ToString() ?? "Unknown", context?.ShadowWouldPermit, path);
+        }).ToArray();
+        var replay = PaperStrategyReplay.Analyze(replayInputs, rejectedWithoutOptionPath);
+        return new(daily, rows, breakdown, funnel, recommendations, research, shadow, replay,
             timeProvider.GetUtcNow());
     }
 
