@@ -117,7 +117,17 @@ export interface PaperAutomationSnapshot {
   selectedOptionLotSize: number | null;
   readinessChecks: PaperReadinessCheck[] | null;
   currentOptionPrice: number | null;
+  activePositionMarks?: PaperPositionMark[] | null;
   portfolioRisk?: PaperPortfolioRiskSnapshot | null;
+}
+
+export interface PaperPositionMark {
+  signalId: string;
+  currentPrice: number | null;
+  executablePrice: number | null;
+  unrealisedPnl: number | null;
+  observedAtUtc: string;
+  quoteAvailable: boolean;
 }
 
 export interface PaperPortfolioRiskSnapshot {

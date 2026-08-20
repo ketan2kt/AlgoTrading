@@ -142,6 +142,12 @@ describe('App', () => {
             selectedOptionSymbol: null, selectedOptionType: null, selectedOptionExpiry: null,
             selectedOptionStrike: null, selectedOptionLotSize: null,
             currentOptionPrice: null,
+            portfolioRisk: {
+              openPositions: 0, capitalExposure: 0, openRiskAtStops: 0,
+              dailyLossConsumed: 0, maximumDailyLoss: 5000,
+              quoteUnavailablePositions: 0, reconciliationHealthy: true,
+              observedAtUtc: '2026-08-03T08:30:00Z',
+            },
             readinessChecks: [
               { code: 'history', label: 'Previous-session context', ready: true,
                 detail: 'Previous close available' },

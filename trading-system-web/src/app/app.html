@@ -79,7 +79,9 @@
         <div class="workspace-actions">
           <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
           <button class="secondary-button" type="button" (click)="openGrowwPositions()">Groww live positions</button>
-          <button class="secondary-button" type="button" (click)="openReport()">Performance &amp; history</button>
+          @if (selectedMarket === 'nifty') {
+            <button class="secondary-button" type="button" (click)="openReport()">Performance &amp; history</button>
+          }
           <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>
         </div>
       </section>
@@ -152,7 +154,7 @@
         <section class="instrument-sync-card" aria-label="Groww instrument synchronisation">
           <div>
             <span>INSTRUMENT MASTER</span>
-            <strong>Groww Nifty instrument</strong>
+            <strong>Groww {{ preparedMarketName() }} instrument</strong>
             <p>Refresh broker instrument identifiers whenever the feed reports InstrumentUnavailable.</p>
           </div>
           <button type="button" class="secondary-button" [disabled]="instrumentSyncBusy"
@@ -163,7 +165,7 @@
       }
 
       @if (workspace; as view) {
-        <section class="market-strip" aria-label="Live Nifty feed status">
+        <section class="market-strip" [attr.aria-label]="'Live ' + preparedMarketName() + ' feed status'">
           <article>
             <span>Instrument</span><strong>{{ view.exchange }} · {{ view.instrument }}</strong>
           </article>
@@ -211,28 +213,30 @@
             ><strong>{{ view.paperAutomation.unrealisedPnl | number: '1.2-2' }}</strong>
           </article>
           <article>
-            <span>Open positions</span><strong>{{ view.paperAutomation.portfolioRisk?.openPositions ?? 0 }}</strong>
+            <span>Open positions</span><strong>{{ view.paperAutomation.portfolioRisk?.openPositions ?? view.paperAutomation.activePositionMarks?.length ?? 0 }}</strong>
           </article>
-          <article>
-            <span>Capital exposure</span><strong>₹{{ view.paperAutomation.portfolioRisk?.capitalExposure ?? 0 | number: '1.0-0' }}</strong>
-          </article>
-          <article>
-            <span>Risk at stops</span><strong>₹{{ view.paperAutomation.portfolioRisk?.openRiskAtStops ?? 0 | number: '1.0-0' }}</strong>
-          </article>
-          <article>
-            <span>Daily loss consumed</span><strong [class.bad]="(view.paperAutomation.portfolioRisk?.dailyLossConsumed ?? 0) > 0">
-              ₹{{ view.paperAutomation.portfolioRisk?.dailyLossConsumed ?? 0 | number: '1.0-0' }} /
-              ₹{{ view.paperAutomation.portfolioRisk?.maximumDailyLoss ?? 0 | number: '1.0-0' }}
-            </strong>
-            <button type="button" class="risk-override-button"
-              [class.risk-override-button--active]="dailyLossOverrideActive"
-              [disabled]="dailyLossOverrideBusy"
-              (click)="setDailyLossOverride(!dailyLossOverrideActive)">
-              {{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore limit today' }}
-            </button>
-            @if (dailyLossOverrideActive) { <small class="bad">Daily stop overridden until the next IST trading day.</small> }
-            @if (dailyLossOverrideMessage) { <small>{{ dailyLossOverrideMessage }}</small> }
-          </article>
+          @if (view.paperAutomation.portfolioRisk; as portfolioRisk) {
+            <article>
+              <span>Capital exposure</span><strong>₹{{ portfolioRisk.capitalExposure | number: '1.0-0' }}</strong>
+            </article>
+            <article>
+              <span>Risk at stops</span><strong>₹{{ portfolioRisk.openRiskAtStops | number: '1.0-0' }}</strong>
+            </article>
+            <article>
+              <span>Daily loss consumed</span><strong [class.bad]="portfolioRisk.dailyLossConsumed > 0">
+                ₹{{ portfolioRisk.dailyLossConsumed | number: '1.0-0' }} /
+                ₹{{ portfolioRisk.maximumDailyLoss | number: '1.0-0' }}
+              </strong>
+              <button type="button" class="risk-override-button"
+                [class.risk-override-button--active]="dailyLossOverrideActive"
+                [disabled]="dailyLossOverrideBusy"
+                (click)="setDailyLossOverride(!dailyLossOverrideActive)">
+                {{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore limit today' }}
+              </button>
+              @if (dailyLossOverrideActive) { <small class="bad">Daily stop overridden until the next IST trading day.</small> }
+              @if (dailyLossOverrideMessage) { <small>{{ dailyLossOverrideMessage }}</small> }
+            </article>
+          }
         </section>
         <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
           {{ view.paperAutomation.message }}
@@ -253,6 +257,7 @@
             }
           </div>
         </section>
+        @if (selectedMarket !== 'natural-gas') {
         <section class="option-routing-panel">
           <div>
             <span>OPTION ROUTING</span>
@@ -265,6 +270,7 @@
             <div><span>Lot size</span><strong>{{ view.paperAutomation.selectedOptionLotSize }}</strong></div>
           }
         </section>
+        }
 
         @if (view.statusMessage) {
           <div class="feed-notice" [class.feed-notice--warning]="!view.isLive">
@@ -351,7 +357,7 @@
                   <div><span>Regime confidence</span><strong>{{ evaluation.regimeConfidence | percent: '1.0-0' }}</strong></div>
                   <div><span>Futures relative volume</span><strong>{{ evaluation.relativeFuturesVolume | number: '1.2-2' }}</strong></div>
                   <div><span>Regime / bias</span><strong>{{ evaluation.regime }} / {{ evaluation.regimeBias || 'None' }}</strong></div>
-                  <div><span>Nifty / VWAP</span><strong>{{ evaluation.currentPrice | number: '1.2-2' }} / {{ evaluation.vwap | number: '1.2-2' }}</strong></div>
+                  <div><span>{{ preparedMarketName() }} / VWAP</span><strong>{{ evaluation.currentPrice | number: '1.2-2' }} / {{ evaluation.vwap | number: '1.2-2' }}</strong></div>
                   <div><span>EMA 9 / EMA 21</span><strong>{{ evaluation.fastEma | number: '1.2-2' }} / {{ evaluation.slowEma | number: '1.2-2' }}</strong></div>
                   <div><span>Opening range</span><strong>{{ evaluation.openingRangeLow | number: '1.2-2' }}–{{ evaluation.openingRangeHigh | number: '1.2-2' }}</strong></div>
                   <div><span>Confidence rule</span><strong [class.good]="evaluation.regimeConfidence >= 0.50" [class.bad]="evaluation.regimeConfidence < 0.50">{{ evaluation.regimeConfidence >= 0.50 ? 'Passed' : 'Failed' }} (50% minimum)</strong></div>

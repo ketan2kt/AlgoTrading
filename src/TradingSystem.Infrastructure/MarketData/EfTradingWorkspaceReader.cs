@@ -370,8 +370,34 @@ internal sealed class EfTradingWorkspaceReader(
             [],
             [],
             [],
-            paperAutomation.GetCurrent());
+            market == TradingMarketCatalog.Nifty.Code
+                ? paperAutomation.GetCurrent()
+                : CreateUnavailableAutomation(definition, status, detail, now));
     }
+
+    internal static PaperAutomationSnapshot CreateUnavailableAutomation(
+        TradingMarketDefinition definition,
+        string status,
+        string detail,
+        DateTimeOffset observedAtUtc) => new(
+            status,
+            false,
+            detail,
+            observedAtUtc,
+            0,
+            0m,
+            0m,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            ReadinessChecks:
+            [
+                new PaperReadinessCheck("feed", $"{definition.DisplayName} live feed", false, detail)
+            ],
+            ActivePositionMarks: []);
 
     private static string FormatExitStatus(string exitReason) => exitReason switch
     {

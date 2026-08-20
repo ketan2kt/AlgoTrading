@@ -154,8 +154,9 @@ internal sealed class GrowwInstrumentSynchronizer(
     private static bool IsRequiredNaturalGasInstrument(GrowwInstrumentRecord record) =>
         string.Equals(record.Exchange, "MCX", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(record.Segment, "COMMODITY", StringComparison.OrdinalIgnoreCase) &&
-        record.InstrumentType is "FUT" or "CE" or "PE" &&
-        record.TradingSymbol.StartsWith("NATURALGASMINI", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(record.InstrumentType, "FUT", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(record.UnderlyingSymbol, "NATGASMINI", StringComparison.OrdinalIgnoreCase) &&
+        record.TradingSymbol.StartsWith("NATGASMINI", StringComparison.OrdinalIgnoreCase) &&
         !string.IsNullOrWhiteSpace(record.ExpiryDate);
 
     private static GrowwApiException Missing(GrowwInstrumentRecord record, string field) =>

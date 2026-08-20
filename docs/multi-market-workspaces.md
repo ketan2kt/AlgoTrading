@@ -21,7 +21,7 @@ initial stop/target and trails the stop after 0.8R favourable movement. Paper P&
 configured equity-option cost schedule for Sensex and a conservative estimated commodity
 transaction cost for Natural Gas.
 
-Natural Gas is intentionally different. It accepts only `NATURALGASMINI` futures with the
+Natural Gas is intentionally different. It accepts only Groww's official `NATGASMINI` futures with the
 instrument-master lot size of 250 and always models four lots (1,000 units). There is no monetary
 risk-sizing cap. Its stop is placed beyond the recent 12-candle structure with a 0.25 ATR buffer,
 the initial objective is 2R, and the stop trails after favourable progress. Calls may carry

@@ -37,7 +37,7 @@ internal sealed partial class GrowwInstrumentSynchronizationService(
     [LoggerMessage(
         EventId = 1310,
         Level = LogLevel.Information,
-        Message = "Groww Nifty instrument synchronization completed: {Inserted} inserted, {Updated} updated, {Skipped} skipped.")]
+        Message = "Groww trading instrument synchronization completed: {Inserted} inserted, {Updated} updated, {Skipped} skipped.")]
     private static partial void LogSynchronizationCompleted(
         ILogger logger,
         int inserted,
@@ -47,6 +47,6 @@ internal sealed partial class GrowwInstrumentSynchronizationService(
     [LoggerMessage(
         EventId = 1311,
         Level = LogLevel.Error,
-        Message = "Groww Nifty instrument synchronization failed; retrying in one minute.")]
+        Message = "Groww trading instrument synchronization failed; retrying in one minute.")]
     private static partial void LogSynchronizationFailed(ILogger logger, Exception exception);
 }

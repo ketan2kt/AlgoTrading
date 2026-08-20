@@ -303,6 +303,30 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public void InstrumentSynchronizationIncludesSensexAndNaturalGasMiniUsingOfficialIdentifiers()
+    {
+        var records = new[]
+        {
+            Instrument("NIFTY", "NIFTY", null, "IDX"),
+            new GrowwInstrumentRecord("BSE", "1", "SENSEX", "BSE-SENSEX", "IDX", "CASH",
+                null, null, null, null, null, null, true, true),
+            new GrowwInstrumentRecord("BSE", "2", "SENSEX26AUG80000CE", "BSE-SENSEX-26Aug26-80000-CE",
+                "CE", "FNO", null, "SENSEX", "2026-08-27", 80000m, 20, 0.05m, true, true),
+            new GrowwInstrumentRecord("MCX", "3", "NATGASMINI26AUG26FUT", "MCX-NATGASMINI-26Aug26-FUT",
+                "FUT", "COMMODITY", null, "NATGASMINI", "2026-08-26", null, 250, 10m, true, true),
+            new GrowwInstrumentRecord("MCX", "4", "NATURALGAS26AUG26FUT", "MCX-NATURALGAS-26Aug26-FUT",
+                "FUT", "COMMODITY", null, "NATURALGAS", "2026-08-26", null, 1250, 10m, true, true)
+        };
+
+        var selected = GrowwInstrumentSynchronizer.SelectRequiredTradingRecords(records);
+
+        Assert.Contains(selected, value => value.TradingSymbol == "SENSEX");
+        Assert.Contains(selected, value => value.TradingSymbol == "SENSEX26AUG80000CE");
+        Assert.Contains(selected, value => value.TradingSymbol == "NATGASMINI26AUG26FUT" && value.LotSize == 250);
+        Assert.DoesNotContain(selected, value => value.TradingSymbol == "NATURALGAS26AUG26FUT");
+    }
+
+    [Fact]
     public void HistoricalCandleTimestampsAreInterpretedAsAsiaKolkata()
     {
         var utc = GrowwHistoricalCandleImporter.ParseIndiaTimestamp("2026-08-03T09:15:00");
