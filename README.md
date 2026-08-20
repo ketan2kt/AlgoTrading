@@ -5,7 +5,7 @@ Safety-first automated intraday trading platform for the Indian market. The **Ph
 ## Status
 
 - Phase: 7 - opening-range breakout in paper mode
-- Current development gate: Nifty and Sensex monitor their cash indices and execute options in paper mode; Natural Gas monitors and simulates the nearest MCX future. All are durable and isolated. Natural Gas cannot be promoted to Groww live orders because Groww currently does not support MCX order trading.
+- Current development gate: Nifty and Sensex monitor their cash indices and execute options in paper mode; Natural Gas monitors only the nearest MCX Natural Gas Mini future and issues durable four-lot manual-execution paper alerts. Natural Gas is permanently excluded from Groww order routing.
 - Live trading: prohibited and disabled by design
 - Git repository: initialized on `main`
 

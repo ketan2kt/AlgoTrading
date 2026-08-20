@@ -180,7 +180,7 @@ export class App implements OnInit, OnDestroy {
 
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
-      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Futures';
+      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Mini Futures';
   }
 
   protected preparedMarketVenue(): string {

@@ -64,12 +64,30 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc) return;
         lastEvaluated[market.Code] = latest.OpenTimeUtc;
 
-        var decision = Evaluate(candles);
+        var decision = market == TradingMarketCatalog.NaturalGas
+            ? EvaluateNaturalGas(candles)
+            : Evaluate(candles);
         if (decision.Direction is null)
         {
             await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc, decision,
                 cancellationToken);
             return;
+        }
+
+        if (market == TradingMarketCatalog.NaturalGas)
+        {
+            var monthStartLocal = new DateTime(india.Year, india.Month, 1);
+            var monthStart = new DateTimeOffset(monthStartLocal,
+                IndiaTimeZone.GetUtcOffset(monthStartLocal)).ToUniversalTime();
+            var monthlyCalls = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                value.Market == market.Code && value.OpenedAtUtc >= monthStart, cancellationToken);
+            if (monthlyCalls >= NaturalGasMiniPositionPolicy.MaximumCallsPerCalendarMonth)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "MonthlyCallLimit",
+                    decision.Confidence, ["Natural Gas Mini positional call limit of three per calendar month is reached."],
+                    cancellationToken);
+                return;
+            }
         }
 
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
@@ -89,18 +107,45 @@ internal sealed partial class MultiMarketPaperTradingService(
         var entry = market.ExecuteOptions ? quote.OfferPrice ?? quote.LastPrice : quote.LastPrice;
         if (entry <= 0) return;
         var tick = execution.TickSize > 0 ? execution.TickSize : 0.05m;
-        var riskDistance = market.ExecuteOptions
-            ? entry * options.Value.OptionStopLossPercent / 100m
-            : Math.Max(entry * 0.015m, candles.TakeLast(15).Average(value => value.High - value.Low));
         var executionDirection = market.ExecuteOptions ? Direction.Buy : decision.Direction.Value;
-        var stop = RoundToTick(executionDirection == Direction.Buy ? entry - riskDistance : entry + riskDistance, tick);
-        var target = RoundToTick(executionDirection == Direction.Buy ? entry + riskDistance : entry - riskDistance, tick);
-        var riskPerUnit = Math.Abs(entry - stop);
-        var lotsByRisk = Math.Max(1, (int)Math.Floor(5000m / Math.Max(riskPerUnit * execution.LotSize, 0.01m)));
-        var maxLots = market.ExecuteOptions ? options.Value.MaximumOptionLots : 1;
-        var quantity = execution.LotSize * Math.Min(lotsByRisk, maxLots);
+        decimal stop;
+        decimal target;
+        int quantity;
+        if (market == TradingMarketCatalog.NaturalGas)
+        {
+            if (!NaturalGasMiniPositionPolicy.IsSupportedContract(execution.LotSize))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ContractRejected",
+                    decision.Confidence,
+                    [$"Natural Gas Mini lot size is {execution.LotSize}; expected official lot size " +
+                     $"{NaturalGasMiniPositionPolicy.ExpectedLotSize}. No call was issued."],
+                    cancellationToken);
+                return;
+            }
+            var recent = candles.TakeLast(12).ToArray();
+            var atr = AverageTrueRange(recent);
+            stop = executionDirection == Direction.Buy
+                ? RoundToTick(recent.Min(value => value.Low) - atr * 0.25m, tick)
+                : RoundToTick(recent.Max(value => value.High) + atr * 0.25m, tick);
+            var structuralRisk = Math.Abs(entry - stop);
+            target = RoundToTick(executionDirection == Direction.Buy
+                ? entry + structuralRisk * 2m
+                : entry - structuralRisk * 2m, tick);
+            quantity = NaturalGasMiniPositionPolicy.FixedQuantity;
+        }
+        else
+        {
+            var riskDistance = entry * options.Value.OptionStopLossPercent / 100m;
+            stop = RoundToTick(entry - riskDistance, tick);
+            target = RoundToTick(entry + riskDistance, tick);
+            var lotsByRisk = Math.Max(1, (int)Math.Floor(5000m /
+                Math.Max(Math.Abs(entry - stop) * execution.LotSize, 0.01m)));
+            quantity = execution.LotSize * Math.Min(lotsByRisk, options.Value.MaximumOptionLots);
+        }
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
-            execution.Id, decision.Strategy, executionDirection, quantity, entry, stop, target, now);
+            execution.Id, market == TradingMarketCatalog.NaturalGas
+                ? $"Manual execution alert · {decision.Strategy}" : decision.Strategy,
+            executionDirection, quantity, entry, stop, target, now);
         db.MarketPaperPositions.Add(position);
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id, latest.OpenTimeUtc,
             "PaperPositionOpened", decision.Confidence,
@@ -132,7 +177,8 @@ internal sealed partial class MultiMarketPaperTradingService(
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
             var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
-            var forced = TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
+            var forced = market != TradingMarketCatalog.NaturalGas &&
+                         TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
             if (stopHit || targetHit || forced)
             {
                 var costs = market.ExecuteOptions
@@ -163,6 +209,31 @@ internal sealed partial class MultiMarketPaperTradingService(
             ["EMA 9 is below EMA 21.", "Close confirmed below five-candle structure."]);
         return new(null, confidence, "Multi-market momentum breakout",
             ["No confirmed EMA-aligned five-candle structure break."]);
+    }
+
+    private static MarketDecision EvaluateNaturalGas(IReadOnlyList<Candle> candles)
+    {
+        var closes = candles.Select(value => value.Close).ToArray();
+        var fast = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
+        var slow = TechnicalIndicators.ExponentialMovingAverage(closes, 21);
+        var latest = candles[^1];
+        var prior = candles.TakeLast(9).SkipLast(1).ToArray();
+        var atr = AverageTrueRange(candles.TakeLast(15).ToArray());
+        var impulse = Math.Abs(latest.Close - latest.Open) >= atr * 0.60m;
+        var bullish = fast > slow && latest.Close > prior.Max(value => value.High) &&
+                      latest.Close > latest.Open && impulse;
+        var bearish = fast < slow && latest.Close < prior.Min(value => value.Low) &&
+                      latest.Close < latest.Open && impulse;
+        var separation = Math.Abs(fast - slow) / latest.Close;
+        var confidence = Math.Min(0.90m, 0.55m + separation * 100m);
+        if (bullish) return new(Direction.Buy, confidence, "Natural Gas Mini positional breakout",
+            ["EMA 9 is above EMA 21.", "Close confirmed above eight-candle structure.",
+             "Breakout candle has at least 0.60 ATR directional range."]);
+        if (bearish) return new(Direction.Sell, confidence, "Natural Gas Mini positional breakout",
+            ["EMA 9 is below EMA 21.", "Close confirmed below eight-candle structure.",
+             "Breakout candle has at least 0.60 ATR directional range."]);
+        return new(null, confidence, "Natural Gas Mini positional breakout",
+            ["No confirmed EMA-aligned eight-candle positional breakout."]);
     }
 
     private static async Task<Instrument?> FindUnderlyingAsync(TradingDbContext db, TradingMarketDefinition market,
@@ -219,6 +290,16 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     private static decimal RoundToTick(decimal value, decimal tick) =>
         Math.Max(tick, Math.Round(value / tick, MidpointRounding.AwayFromZero) * tick);
+    private static decimal AverageTrueRange(Candle[] candles)
+    {
+        if (candles.Length < 2) throw new ArgumentException("At least two candles are required.", nameof(candles));
+        var ranges = new List<decimal>(candles.Length - 1);
+        for (var index = 1; index < candles.Length; index++)
+            ranges.Add(Math.Max(candles[index].High - candles[index].Low,
+                Math.Max(Math.Abs(candles[index].High - candles[index - 1].Close),
+                    Math.Abs(candles[index].Low - candles[index - 1].Close))));
+        return ranges.Average();
+    }
     private static TimeZoneInfo FindIndiaTimeZone()
     {
         try { return TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata"); }

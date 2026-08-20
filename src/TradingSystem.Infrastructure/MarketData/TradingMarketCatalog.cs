@@ -14,8 +14,8 @@ internal static class TradingMarketCatalog
         InstrumentSegment.Cash, InstrumentType.Index, "NIFTY", "FNO", true, new(9, 15), new(15, 30));
     public static readonly TradingMarketDefinition Sensex = new("sensex", "Sensex", "BSE", "CASH", "SENSEX",
         InstrumentSegment.Cash, InstrumentType.Index, "SENSEX", "FNO", true, new(9, 15), new(15, 30));
-    public static readonly TradingMarketDefinition NaturalGas = new("natural-gas", "Natural Gas Futures", "MCX",
-        "COMMODITY", "NATURALGAS", InstrumentSegment.Commodity, InstrumentType.Future, "NATURALGAS",
+    public static readonly TradingMarketDefinition NaturalGas = new("natural-gas", "Natural Gas Mini Futures", "MCX",
+        "COMMODITY", "NATURALGASMINI", InstrumentSegment.Commodity, InstrumentType.Future, "NATURALGASMINI",
         "COMMODITY", false, new(9, 0), new(23, 30));
 
     public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, NaturalGas];
