@@ -26,6 +26,7 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     {
         var failures = new List<string>();
         if (!context.DataTradingPermitted) failures.Add("Market data does not permit trading.");
+        if (!context.RegimeTradingPermitted) failures.Add("Market regime does not permit directional trading.");
         if (Options.EnforceDailyTradeLimits && context.TradesToday >= Options.MaximumTradesPerDay)
             failures.Add("Paper daily trade limit reached.");
         if (Options.EnforceDailyTradeLimits && context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
@@ -172,6 +173,8 @@ public sealed class EmaPullbackContinuationStrategy(PriceActionStrategyOptions o
         if (!bullish && !bearish)
             return new(null, ["No EMA 9/21 pullback with a confirmed continuation candle."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
+        if (context.RegimeBias != direction)
+            return new(null, ["EMA continuation direction lacks matching regime bias."]);
         var structureAligned = direction == Direction.Buy
             ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
             : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
@@ -207,6 +210,8 @@ public sealed class RangeBreakoutRetestStrategy(PriceActionStrategyOptions optio
         if (!bullish && !bearish)
             return new(null, ["No intraday consolidation breakout, retest and continuation sequence."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
+        if (context.RegimeBias != direction)
+            return new(null, ["Range breakout direction lacks matching regime bias."]);
         var trendAligned = direction == Direction.Buy
             ? context.CurrentPrice > context.Vwap : context.CurrentPrice < context.Vwap;
         if (!trendAligned) return new(null, ["Range breakout is not aligned with VWAP."]);
@@ -275,6 +280,8 @@ public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options
         if (!bullish && !bearish)
             return new(null, ["Expansion candle did not close beyond recent structure and VWAP."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
+        if (context.RegimeBias != direction)
+            return new(null, ["Momentum expansion direction lacks matching regime bias."]);
         var structureAligned = direction == Direction.Buy
             ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
             : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
@@ -294,15 +301,26 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
     public StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
     {
         var results = strategies.Select(strategy => (strategy, result: strategy.EvaluateDetailed(context))).ToArray();
-        var selected = results.Where(value => value.result.Signal is not null)
-            .Select(value => value.result.Signal!)
-            .GroupBy(value => value.Direction)
-            .Select(group => group.OrderByDescending(value => value.Confidence)
-                .ThenBy(value => value.StrategyId, StringComparer.Ordinal).First())
-            .OrderByDescending(value => value.Confidence)
-            .ThenBy(value => value.StrategyId, StringComparer.Ordinal)
-            .FirstOrDefault();
-        if (selected is not null) return new(selected, []);
+        var signals = results.Where(value => value.result.Signal is not null)
+            .Select(value => value.result.Signal!).ToArray();
+        var directionalGroups = signals.GroupBy(value => value.Direction).ToArray();
+        if (directionalGroups.Length > 1)
+            return new(null, ["Price-action strategies disagree on direction; no trade is taken."]);
+        var consensus = directionalGroups.SingleOrDefault();
+        if (consensus is not null && consensus.Count() >= 2)
+        {
+            var selected = consensus.OrderByDescending(value => value.Confidence)
+                .ThenBy(value => value.StrategyId, StringComparer.Ordinal).First();
+            var members = string.Join(", ", consensus.Select(value => value.StrategyId)
+                .OrderBy(value => value, StringComparer.Ordinal));
+            return new(selected with
+            {
+                SupportingReasons = selected.SupportingReasons
+                    .Append($"Directional consensus from: {members}.").ToArray()
+            }, []);
+        }
+        if (signals.Length == 1)
+            return new(null, [$"Only {signals[0].StrategyId} qualified; two-strategy directional consensus is required."]);
         return new(null, results.SelectMany(value => value.result.FailedConditions
             .Select(reason => $"{value.strategy.StrategyId}: {reason}")).ToArray());
     }

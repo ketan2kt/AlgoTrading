@@ -246,6 +246,12 @@ public static class DependencyInjection
                                    options.ExitResearchMaximumDelayMinutes is >= 1 and <= 10 &&
                                    options.MinimumSignalCandles is >= 4 and <= 21 &&
                                    options.MinimumFuturesConfirmationCandles is >= 2 and <= 21 &&
+                                   options.MaximumResearchEntriesPerDay is >= 1 and <= 20 &&
+                                   options.MaximumConsecutiveLosses is >= 1 and <= 10 &&
+                                   options.LossCooldownMinutes is >= 5 and <= 120 &&
+                                   options.MaximumResearchEntriesPerDay is >= 1 and <= 20 &&
+                                   options.MaximumConsecutiveLosses is >= 1 and <= 10 &&
+                                   options.LossCooldownMinutes is >= 5 and <= 120 &&
                                  TimeOnly.TryParseExact(options.EntryWindowStart, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.OpeningRangeEnd, "HH:mm", out _) &&
                                  TimeOnly.TryParseExact(options.EntryCutoff, "HH:mm", out _) &&

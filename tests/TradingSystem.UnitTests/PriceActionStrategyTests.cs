@@ -70,6 +70,28 @@ public sealed class PriceActionStrategyTests
 
         Assert.NotNull(signal);
         Assert.Equal("higher", signal.StrategyId);
+        Assert.Contains(signal.SupportingReasons, reason => reason.Contains("Directional consensus"));
+    }
+
+    [Fact]
+    public void CompositeRejectsAnUnconfirmedSingleStrategySetup()
+    {
+        var result = new CompositeTradingStrategy([new StubStrategy("only", 0.82m)])
+            .EvaluateDetailed(Context());
+
+        Assert.Null(result.Signal);
+        Assert.Contains(result.FailedConditions, reason => reason.Contains("two-strategy"));
+    }
+
+    [Fact]
+    public void CompositeRejectsConflictingDirections()
+    {
+        var result = new CompositeTradingStrategy([
+            new StubStrategy("bull", 0.82m), new StubStrategy("bear", 0.80m, Direction.Sell)])
+            .EvaluateDetailed(Context());
+
+        Assert.Null(result.Signal);
+        Assert.Contains(result.FailedConditions, reason => reason.Contains("disagree"));
     }
 
     [Fact]
@@ -218,13 +240,13 @@ public sealed class PriceActionStrategyTests
     private static StrategyPriceBar Bar(decimal open, decimal high, decimal low, decimal close) =>
         new(Now, open, high, low, close);
 
-    private sealed class StubStrategy(string id, decimal confidence) : ITradingStrategy
+    private sealed class StubStrategy(string id, decimal confidence, Direction direction = Direction.Buy) : ITradingStrategy
     {
         public string StrategyId => id;
         public string Version => "1";
         public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
         public StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context) =>
-            new(new StrategySignal(Guid.NewGuid(), id, Version, context.InstrumentId, Direction.Buy,
+            new(new StrategySignal(Guid.NewGuid(), id, Version, context.InstrumentId, direction,
                 SignalEntryType.Market, 100m, 99m, 102m, 2m, confidence, context.Regime,
                 [], [], context.ObservedAtUtc, context.ObservedAtUtc.AddMinutes(1)), []);
     }

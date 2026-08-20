@@ -439,6 +439,22 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var adaptiveDecision = AdaptivePaperTradePolicy.Evaluate(tradeState.TradesToday,
+            options.Value.MaximumResearchEntriesPerDay, tradeState.ConsecutiveLosses,
+            options.Value.MaximumConsecutiveLosses, tradeState.LastLossAtUtc, now,
+            options.Value.LossCooldownMinutes);
+        if (!adaptiveDecision.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "AdaptiveRiskRejected", adaptiveDecision.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("AdaptiveRiskRejected", true, string.Join(" ", adaptiveDecision.Reasons),
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
         if (tradeState.OpenPositions.Count >= options.Value.MaximumConcurrentPositions)
         {
             state.Record("PortfolioCapacity", false,
@@ -915,6 +931,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var open = new List<OpenTrade>();
         var count = 0;
         var realised = 0m;
+        var closedToday = new List<(DateTimeOffset ExitAtUtc, decimal NetPnl)>();
         foreach (var row in signals.OrderBy(value => value.MarketDataTimestampUtc))
         {
             var entry = await broker.GetOrderAsync($"{row.Id:N}-ENTRY", cancellationToken);
@@ -947,7 +964,9 @@ internal sealed partial class AutomatedPaperTradingService(
                     transactions.Add(new(exit.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
                         PaperOptionTransactionSide.Sell, exit.AverageFillPrice.Value,
                         exit.FilledQuantity));
-                    realised += grossPnl - PaperTradingCostModel.CalculateOptionCharges(transactions).Total;
+                    var netPnl = grossPnl - PaperTradingCostModel.CalculateOptionCharges(transactions).Total;
+                    realised += netPnl;
+                    closedToday.Add((exit.UpdatedAtUtc, netPnl));
                 }
             }
             else
@@ -963,7 +982,11 @@ internal sealed partial class AutomatedPaperTradingService(
                         remaining, partial?.State == OrderState.Filled ? partial : null));
             }
         }
-        return new(count, realised, open);
+        var orderedClosed = closedToday.OrderBy(value => value.ExitAtUtc).ToArray();
+        var consecutiveLosses = orderedClosed.Reverse().TakeWhile(value => value.NetPnl < 0).Count();
+        var lastLossAtUtc = orderedClosed.Where(value => value.NetPnl < 0)
+            .Select(value => (DateTimeOffset?)value.ExitAtUtc).LastOrDefault();
+        return new(count, realised, consecutiveLosses, lastLossAtUtc, open);
     }
 
     private static async Task<IReadOnlyList<Signal>> LoadSessionSignalsAsync(TradingDbContext db,
@@ -1143,7 +1166,7 @@ internal sealed partial class AutomatedPaperTradingService(
     private sealed record OpenTrade(StrategySignal Signal, BrokerOrderSnapshot Entry,
         decimal StopLoss, decimal Target, int RemainingQuantity, BrokerOrderSnapshot? PartialExit);
     private sealed record RebuiltTradeState(int TradesToday, decimal RealisedPnl,
-        IReadOnlyList<OpenTrade> OpenPositions);
+        int ConsecutiveLosses, DateTimeOffset? LastLossAtUtc, IReadOnlyList<OpenTrade> OpenPositions);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Automated paper-trading cycle failed.")]
     private static partial void LogCycleFailed(ILogger logger, Exception exception);

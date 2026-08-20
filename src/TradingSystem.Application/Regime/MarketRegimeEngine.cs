@@ -65,7 +65,7 @@ public sealed class MarketRegimeEngine(MarketRegimeOptions options)
             Direction? bias = emaSpread > options.WeakTrendEmaSpreadPercent ? Direction.Buy :
                 emaSpread < -options.WeakTrendEmaSpreadPercent ? Direction.Sell : null;
             return Result(MarketRegime.HighVolatilityExpansion, bias, confidence,
-                support, contradict, input);
+                support, contradict, input, bias is not null && confidence >= options.MinimumTradingConfidence);
         }
 
         if (emaSpread >= options.StrongTrendEmaSpreadPercent && aboveVwap)
@@ -85,24 +85,24 @@ public sealed class MarketRegimeEngine(MarketRegimeOptions options)
             support.Add("EMA structure has a modest bullish slope.");
             if (!aboveVwap) contradict.Add("Price remains below VWAP.");
             return Result(MarketRegime.WeakBullishTrend, Direction.Buy, confidence,
-                support, contradict, input);
+                support, contradict, input, aboveVwap && confidence >= options.MinimumTradingConfidence);
         }
         if (emaSpread <= -options.WeakTrendEmaSpreadPercent)
         {
             support.Add("EMA structure has a modest bearish slope.");
             if (aboveVwap) contradict.Add("Price remains above VWAP.");
             return Result(MarketRegime.WeakBearishTrend, Direction.Sell, confidence,
-                support, contradict, input);
+                support, contradict, input, !aboveVwap && confidence >= options.MinimumTradingConfidence);
         }
         if (input.AtrPercent <= options.LowAtrPercent)
         {
             support.Add("ATR indicates volatility compression.");
             return Result(MarketRegime.LowVolatilityCompression, null, confidence,
-                support, contradict, input);
+                support, contradict, input, false);
         }
 
         support.Add("EMA spread is neutral without a confirmed directional break.");
-        return Result(MarketRegime.RangeBound, null, confidence, support, contradict, input);
+        return Result(MarketRegime.RangeBound, null, confidence, support, contradict, input, false);
     }
 
     private MarketRegimeResult Result(MarketRegime regime, Direction? bias, decimal confidence,

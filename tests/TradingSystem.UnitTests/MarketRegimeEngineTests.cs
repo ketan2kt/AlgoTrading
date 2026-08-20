@@ -6,14 +6,14 @@ namespace TradingSystem.UnitTests;
 public sealed class MarketRegimeEngineTests
 {
     [Fact]
-    public void FiftyPercentConfidenceIsPermittedByPaperDefault()
+    public void NeutralOrCompressionRegimeIsNotDirectionallyTradable()
     {
         var result = new MarketRegimeEngine(new()).Evaluate(Input(
             open: 100m, current: 100m, vwap: 100m, fast: 100m, slow: 100m,
             atr: 0.5m, relativeVolume: 1m));
 
         Assert.True(result.Confidence >= 0.50m);
-        Assert.True(result.TradingPermitted);
+        Assert.False(result.TradingPermitted);
     }
 
     private readonly MarketRegimeEngine engine = new(new MarketRegimeOptions());
@@ -59,6 +59,7 @@ public sealed class MarketRegimeEngineTests
 
         Assert.Equal(MarketRegime.WeakBullishTrend, result.Regime);
         Assert.Contains(result.ContradictingFactors, factor => factor.Contains("VWAP", StringComparison.Ordinal));
+        Assert.False(result.TradingPermitted);
     }
 
     [Fact]

@@ -41,6 +41,29 @@ Option open interest remains a liquidity validation input only. A single contrac
 identify whether positions were opened by buyers or sellers; directional OI confirmation requires
 time-aligned option-chain snapshots and change-in-OI analysis and is not currently used as an entry
 signal.
+
+## Production evidence correction (2026-08-20)
+
+The authenticated paper report contained 57 closed trades with net expectancy of -₹638.60 and a
+profit factor of 0.47 after costs. The dominant failure was repeated EMA-pullback entries during
+`LowVolatilityCompression`: 10 trades lost ₹20,392.19 on 19 August and 15 trades were approximately
+flat on 18 August despite substantial churn. Across all trades, average MAE (₹1,212.65) materially
+exceeded average MFE (₹656.21), and average profit giveback was ₹1,246.75. This is evidence of weak
+entry selection and overtrading, not evidence that targets alone are wrong.
+
+The paper engine therefore now applies these deterministic safeguards:
+
+- `LowVolatilityCompression` and `RangeBound` cannot authorize a directional entry.
+- Weak trends require price to agree with VWAP; volatility expansion requires a directional bias.
+- Every price-action strategy respects the regime permission flag.
+- EMA continuation, range breakout and momentum expansion require matching regime bias.
+- At least two independent price-action strategies must agree on direction; conflict blocks entry.
+- Paper research is limited to four entries per session, pauses after two consecutive net losses,
+  and observes a 30-minute cooldown after a net loss.
+- All vetoes are persisted as `EntryQualityRejected` or `AdaptiveRiskRejected` for reporting.
+
+These controls are paper-mode research safeguards. They do not demonstrate profitability and must
+be validated on new out-of-sample sessions before Phase 9.
 - Every executed paper option order, including a partial exit, is charged using the versioned `GROWW-NSE-OPTIONS-2026-04-01` schedule. Net P&L deducts brokerage, STT, NSE transaction charges, NSE IPFT, SEBI turnover fees, GST and buy-side stamp duty.
 
 ## Paper cost schedule

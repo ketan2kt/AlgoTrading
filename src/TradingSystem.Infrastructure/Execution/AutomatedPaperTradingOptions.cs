@@ -43,6 +43,9 @@ public sealed class AutomatedPaperTradingOptions
     public int MinimumFuturesConfirmationCandles { get; init; } = 2;
     public int PositionRecoveryLookbackDays { get; init; } = 14;
     public int MaximumConcurrentPositions { get; init; } = 8;
+    public int MaximumResearchEntriesPerDay { get; init; } = 4;
+    public int MaximumConsecutiveLosses { get; init; } = 2;
+    public int LossCooldownMinutes { get; init; } = 30;
     public bool SelectiveHedgingEnabled { get; init; } = true;
     public decimal HedgeMinimumAtrPercent { get; init; } = 0.35m;
     public decimal HedgeMinimumRelativeFuturesVolume { get; init; } = 1m;
