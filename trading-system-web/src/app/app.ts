@@ -8,6 +8,7 @@ import { NiftyChartComponent } from './nifty-chart.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { compactContractName } from './contract-name';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
@@ -205,10 +206,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected compactOptionName(overlay: WorkspaceTradeOverlay): string {
-    const strike = overlay.executionStrike == null ? '' : Math.trunc(overlay.executionStrike).toString();
-    const type = overlay.executionInstrumentType === 'PutOption' ? 'PE' :
-      overlay.executionInstrumentType === 'CallOption' ? 'CE' : '';
-    return strike && type ? `${strike}${type}` : overlay.executionInstrument || 'Option';
+    return compactContractName(overlay);
   }
 
   protected openLogs(): void {
