@@ -17,7 +17,7 @@
           <p class="eyebrow">SARTHI TRADING CONTROL</p>
           <h1>Live market visibility.<br />Paper-only execution.</h1>
           <p>
-            Sign in to view the protected Nifty feed, strategy signals, risk levels and paper
+            Sign in to view protected market feeds, strategy research, risk levels and paper
             positions.
           </p>
         </div>
@@ -46,6 +46,42 @@
           </button>
         </form>
       </section>
+    } @else if (selectedMarket === null) {
+      <section class="market-home" aria-label="Trading markets">
+        <div class="market-home__heading">
+          <p class="eyebrow">SELECT TRADING WORKSPACE</p>
+          <h1>Markets</h1>
+          <p>Each market keeps separate instruments, research evidence, risk settings and paper positions.</p>
+        </div>
+        <div class="market-cards">
+          <button class="market-card market-card--nifty" type="button" (click)="openMarket('nifty')">
+            <span>NSE · INDEX OPTIONS</span><strong>Nifty</strong><small>Live paper workspace</small>
+          </button>
+          <button class="market-card market-card--sensex" type="button" (click)="openMarket('sensex')">
+            <span>BSE · INDEX OPTIONS</span><strong>Sensex</strong><small>Workspace prepared</small>
+          </button>
+          <button class="market-card market-card--gas" type="button" (click)="openMarket('natural-gas')">
+            <span>MCX · COMMODITY FUTURES</span><strong>Natural Gas</strong><small>Research workspace prepared</small>
+          </button>
+        </div>
+      </section>
+    } @else if (selectedMarket !== 'nifty') {
+      <div class="workspace-shell prepared-workspace">
+        <section class="workspace-heading">
+          <div><p class="eyebrow">PREPARED MARKET WORKSPACE</p><h1>{{preparedMarketName()}}</h1><p>{{preparedMarketVenue()}} · isolated from Nifty configuration and records.</p></div>
+          <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
+        </section>
+        <section class="prepared-chart">
+          <div><span>LIVE CHART</span><strong>Feed integration pending</strong></div>
+          <p>No market values are displayed until the official instrument, session calendar and quote source are validated.</p>
+        </section>
+        <div class="prepared-grid">
+          <section><span>PAPER TRADES</span><strong>Separate lifecycle</strong><p>Orders, positions and P&amp;L will remain isolated by market.</p></section>
+          <section><span>STRATEGY RESEARCH</span><strong>{{selectedMarket === 'sensex' ? 'Index framework' : 'Commodity framework'}}</strong><p>{{selectedMarket === 'sensex' ? 'Nifty rules will be calibrated independently for BSE data.' : 'Dedicated volatility, expiry and session research is required.'}}</p></section>
+          <section><span>RISK CONTROLS</span><strong>Not activated</strong><p>Contract size, liquidity, exposure and session limits require approval.</p></section>
+          <section><span>DATA READINESS</span><strong class="bad">Blocked safely</strong><p>Instrument and live-feed synchronisation are not implemented yet.</p></section>
+        </div>
+      </div>
     } @else {
       <div class="workspace-shell">
       <section class="workspace-heading">
@@ -58,6 +94,7 @@
           </p>
         </div>
         <div class="workspace-actions">
+          <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
           <button class="secondary-button" type="button" (click)="openGrowwPositions()">Groww live positions</button>
           <button class="secondary-button" type="button" (click)="openReport()">Performance &amp; history</button>
           <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>

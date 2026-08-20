@@ -19,6 +19,7 @@ class MockNiftyChartComponent {
 
 describe('App', () => {
   beforeEach(async () => {
+    window.history.replaceState({}, '', '/');
     TestBed.configureTestingModule({
       imports: [App],
       providers: [provideHttpClient(), provideHttpClientTesting()],
@@ -92,6 +93,12 @@ describe('App', () => {
     currentUser.next({ username: 'administrator', roles: ['Administrator'] });
     await fixture.whenStable();
 
+    expect(fixture.nativeElement.textContent).toContain('Markets');
+    expect(fixture.nativeElement.textContent).toContain('Sensex');
+    const niftyButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Nifty')) as HTMLButtonElement;
+    niftyButton.click();
+    fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Nifty command view');
     expect(fixture.nativeElement.textContent).toContain('Checking token status');
     expect(fixture.nativeElement.textContent).not.toContain('Enable loud trade alerts');
@@ -158,6 +165,11 @@ describe('App', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
+    const niftyButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Nifty')) as HTMLButtonElement;
+    niftyButton.click();
+    fixture.detectChanges();
+
     expect(fixture.nativeElement.textContent).toContain('SESSION READINESS');
     expect(fixture.nativeElement.textContent).toContain('Previous-session context');
     expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
@@ -170,5 +182,36 @@ describe('App', () => {
     logsButton.click();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
+  });
+
+  it('opens isolated prepared workspaces for Sensex and Natural Gas', async () => {
+    TestBed.overrideProvider(AuthService, {
+      useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
+    });
+    TestBed.overrideProvider(GrowwTokenService, { useValue: { getStatus: () => NEVER } });
+    TestBed.overrideProvider(TradingWorkspaceService, {
+      useValue: { getNifty: () => NEVER, updates$: () => NEVER,
+        connect: () => Promise.resolve(), disconnect: () => Promise.resolve() },
+    });
+    TestBed.overrideProvider(PaperRiskService, { useValue: {
+      getKillSwitch: () => NEVER, setKillSwitch: () => NEVER,
+      getDailyLossOverride: () => NEVER, setDailyLossOverride: () => NEVER,
+    }});
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/api/system/status').flush({
+      mode: 'Paper', liveTradingAvailable: false, tradingEnabled: false,
+      status: 'FoundationOnly', observedAtUtc: '2026-08-20T08:30:00Z',
+    });
+    await fixture.whenStable(); fixture.detectChanges();
+
+    const sensexButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Sensex')) as HTMLButtonElement;
+    sensexButton.click(); fixture.detectChanges();
+
+    expect(window.location.pathname).toBe('/sensex');
+    expect(fixture.nativeElement.textContent).toContain('BSE index and options');
+    expect(fixture.nativeElement.textContent).toContain('Feed integration pending');
+    expect(fixture.nativeElement.textContent).toContain('Blocked safely');
   });
 });

@@ -75,6 +75,11 @@ export class App implements OnInit, OnDestroy {
   private readonly armTradeAlerts = (): void => this.ensureTradeAlertsReady();
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
+  protected selectedMarket: 'nifty' | 'sensex' | 'natural-gas' | null = this.marketFromPath();
+  private readonly marketNavigation = (): void => {
+    this.selectedMarket = this.marketFromPath();
+    this.refreshView();
+  };
 
   protected readonly status$ = this.statusService.getCurrent().pipe(
     startWith({
@@ -99,6 +104,7 @@ export class App implements OnInit, OnDestroy {
     this.ensureTradeAlertsReady();
     document.addEventListener('pointerdown', this.armTradeAlerts, { once: true, capture: true });
     document.addEventListener('keydown', this.armTradeAlerts, { once: true, capture: true });
+    window.addEventListener('popstate', this.marketNavigation);
     this.subscriptions.add(
       this.auth.currentUser().subscribe({
         next: (user) => {
@@ -120,6 +126,7 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.unsubscribe();
     document.removeEventListener('pointerdown', this.armTradeAlerts, { capture: true });
     document.removeEventListener('keydown', this.armTradeAlerts, { capture: true });
+    window.removeEventListener('popstate', this.marketNavigation);
     void this.audioContext?.close();
     void this.workspaceService.disconnect();
   }
@@ -153,6 +160,33 @@ export class App implements OnInit, OnDestroy {
     this.loadTokenStatus();
     this.loadKillSwitch();
     this.loadDailyLossOverride();
+  }
+
+  protected openMarket(market: 'nifty' | 'sensex' | 'natural-gas'): void {
+    const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
+    window.history.pushState({}, '', path);
+    this.selectedMarket = market;
+    this.refreshView();
+  }
+
+  protected backToMarkets(): void {
+    window.history.pushState({}, '', '/');
+    this.selectedMarket = null;
+    this.refreshView();
+  }
+
+  protected preparedMarketName(): string {
+    return this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Futures';
+  }
+
+  protected preparedMarketVenue(): string {
+    return this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
+  }
+
+  private marketFromPath(): 'nifty' | 'sensex' | 'natural-gas' | null {
+    const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
+    return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
+      path === '/natural-gas' ? 'natural-gas' : null;
   }
 
   protected setChartTimeframe(value: number): void {
