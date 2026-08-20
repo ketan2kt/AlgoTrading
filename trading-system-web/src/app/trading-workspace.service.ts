@@ -4,11 +4,16 @@ import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@micros
 import { Observable, Subject } from 'rxjs';
 import { TradingWorkspaceSnapshot } from './trading-workspace';
 
+export function isActiveMarketUpdate(activeMarket: string, updatedMarket: string): boolean {
+  return activeMarket === updatedMarket;
+}
+
 @Injectable({ providedIn: 'root' })
 export class TradingWorkspaceService {
   private readonly http = inject(HttpClient);
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;
+  private activeMarket = 'nifty';
 
   getMarket(market: string): Observable<TradingWorkspaceSnapshot> {
     return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=1500`);
@@ -19,6 +24,7 @@ export class TradingWorkspaceService {
   }
 
   async connect(market: string): Promise<void> {
+    this.activeMarket = market;
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke('SubscribeMarketWorkspace', market);
       return;
@@ -28,7 +34,9 @@ export class TradingWorkspaceService {
       .withAutomaticReconnect([0, 2000, 5000, 10000])
       .build();
     this.connection.on('marketWorkspaceUpdated', (updatedMarket, snapshot) => {
-      if (updatedMarket === market) this.updates.next(snapshot as TradingWorkspaceSnapshot);
+      if (isActiveMarketUpdate(this.activeMarket, updatedMarket)) {
+        this.updates.next(snapshot as TradingWorkspaceSnapshot);
+      }
     });
     await this.connection.start();
     await this.connection.invoke('SubscribeMarketWorkspace', market);

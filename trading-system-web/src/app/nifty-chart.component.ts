@@ -31,11 +31,11 @@ import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
   standalone: true,
   template: `
     <div class="chart-shell">
-      <div #chart class="chart" aria-label="Live Nifty candlestick chart"></div>
-      <div class="volume-label">NIFTY FUTURES VOLUME</div>
+      <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
+      <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
       @if (!snapshot?.candles?.length) {
         <div class="chart-empty">
-          <strong>Waiting for live Nifty candles</strong>
+          <strong>Waiting for live {{ snapshot?.instrument || 'market' }} candles</strong>
           <span>{{
             snapshot?.statusMessage || 'The chart starts only after verified live data arrives.'
           }}</span>

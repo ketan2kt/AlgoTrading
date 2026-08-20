@@ -277,7 +277,7 @@
 
         <section class="chart-panel workspace-priority-chart">
           <div class="panel-heading">
-            <div><span>NIFTY 50</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
+            <div><span>{{ view.instrument }}</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
             <label class="timeframe-control">
               <span>Timeframe</span>
               <select
@@ -291,7 +291,7 @@
               </select>
             </label>
             <div class="legend">
-              <span class="dot dot--entry"></span>Nifty trigger <span class="dot dot--risk"></span>Invalidation
+              <span class="dot dot--entry"></span>{{ selectedMarket === 'natural-gas' ? 'Futures entry' : 'Index trigger' }} <span class="dot dot--risk"></span>Invalidation
               <span class="dot dot--reward"></span>Objective
             </div>
           </div>
@@ -309,16 +309,16 @@
         <section class="detail-grid workspace-priority-events">
           <article class="positions-panel">
             <div class="panel-heading">
-              <div><span>PAPER TRADES</span><strong>Option positions and outcomes</strong></div>
+              <div><span>PAPER TRADES</span><strong>{{ selectedMarket === 'natural-gas' ? 'Natural Gas Mini futures calls and outcomes' : 'Option positions and outcomes' }}</strong></div>
             </div>
               @for (overlay of executedTrades(view); track overlay.signalId) {
                 <div class="signal-row">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
                   <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
-                  <div><span>Entry premium</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
-                  <div><span>{{ overlay.exitPrice !== null ? 'Exit premium' : 'Current premium' }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
-                    <div><span>Premium SL</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
-                    <div><span>Premium target</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
+                  <div><span>{{ selectedMarket === 'natural-gas' ? 'Entry price' : 'Entry premium' }}</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
+                  <div><span>{{ overlay.exitPrice !== null ? (selectedMarket === 'natural-gas' ? 'Exit price' : 'Exit premium') : (selectedMarket === 'natural-gas' ? 'Current price' : 'Current premium') }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
+                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Structural SL' : 'Premium SL' }}</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
+                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Objective' : 'Premium target' }}</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
                   <div><span>Quantity</span><strong>{{ overlay.quantity }} units</strong></div>
                   <div><span>Expiry</span><strong>{{ overlay.executionExpiry | date: 'dd MMM' : 'Asia/Kolkata' }}</strong></div>
                   <div><span>{{ overlay.realisedPnl !== null ? 'Realised P&L' : 'Live P&L' }}</span><strong [class.good]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) >= 0" [class.bad]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) < 0">₹{{ (overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) | number: '1.2-2' }}</strong></div>

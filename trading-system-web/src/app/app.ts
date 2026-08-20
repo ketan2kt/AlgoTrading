@@ -263,7 +263,7 @@ export class App implements OnInit, OnDestroy {
   protected operationalAlerts(view:TradingWorkspaceSnapshot):string[] {
     const alerts:string[]=[];
     if (!this.tokenStatus.isConfigured || this.tokenStatus.isExpired) alerts.push('Groww token requires attention.');
-    if (!view.isFresh) alerts.push('Nifty market data is stale or disconnected.');
+    if (!view.isFresh) alerts.push(`${view.instrument} market data is stale or disconnected.`);
     if (view.paperAutomation.status==='PositionUnmonitored') alerts.push('Open paper position quote is unavailable.');
     if (view.paperAutomation.status==='ReconciliationRequired') alerts.push('Paper broker reconciliation requires attention.');
     if (this.killSwitchActive) alerts.push('Emergency kill switch is active.');
@@ -379,7 +379,7 @@ export class App implements OnInit, OnDestroy {
     this.loadTokenStatus();
     this.loadKillSwitch();
     this.loadDailyLossOverride();
-    this.loadWorkspace();
+    if (this.selectedMarket !== null) this.loadWorkspace();
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
         this.detectTradeAlerts(snapshot);
@@ -441,15 +441,19 @@ export class App implements OnInit, OnDestroy {
   }
 
   private loadWorkspace(): void {
+    if (this.selectedMarket === null) return;
+    const requestedMarket = this.selectedMarket;
     this.subscriptions.add(
-      this.workspaceService.getMarket(this.selectedMarket ?? 'nifty').subscribe({
+      this.workspaceService.getMarket(requestedMarket).subscribe({
         next: (snapshot) => {
+          if (this.selectedMarket !== requestedMarket) return;
           this.detectTradeAlerts(snapshot);
           this.workspace = snapshot;
           this.workspaceError = '';
           this.refreshView();
         },
         error: () => {
+          if (this.selectedMarket !== requestedMarket) return;
           this.workspaceError = `Unable to load the protected ${this.preparedMarketName()} workspace.`;
           this.refreshView();
         },
