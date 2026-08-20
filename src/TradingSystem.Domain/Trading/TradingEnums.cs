@@ -3,7 +3,8 @@ namespace TradingSystem.Domain.Trading;
 public enum InstrumentSegment
 {
     Cash = 0,
-    FuturesAndOptions = 1
+    FuturesAndOptions = 1,
+    Commodity = 2
 }
 
 public enum InstrumentType

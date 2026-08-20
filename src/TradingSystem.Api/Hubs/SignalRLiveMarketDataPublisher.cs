@@ -6,9 +6,12 @@ namespace TradingSystem.Api.Hubs;
 public sealed class SignalRLiveMarketDataPublisher(IHubContext<SystemHealthHub> hubContext)
     : ILiveMarketDataPublisher
 {
+    public Task PublishAsync(string market, TradingWorkspaceSnapshot snapshot,
+        CancellationToken cancellationToken) =>
+        hubContext.Clients.Group(SystemHealthHub.WorkspaceGroup(market))
+            .SendAsync("marketWorkspaceUpdated", market, snapshot, cancellationToken);
+
     public Task PublishNiftyAsync(
         TradingWorkspaceSnapshot snapshot,
-        CancellationToken cancellationToken) =>
-        hubContext.Clients.Group(SystemHealthHub.NiftyWorkspaceGroup)
-            .SendAsync("niftyWorkspaceUpdated", snapshot, cancellationToken);
+        CancellationToken cancellationToken) => PublishAsync("nifty", snapshot, cancellationToken);
 }

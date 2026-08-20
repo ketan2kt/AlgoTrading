@@ -159,10 +159,12 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
+        services.AddSingleton<MultiMarketFeedState>();
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
+        services.AddHostedService<GrowwAdditionalMarketDataService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
         services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
         services.AddOptions<MarketRegimeOptions>()
@@ -262,6 +264,7 @@ public static class DependencyInjection
         services.AddSingleton<IPaperAutomationReader>(provider =>
             provider.GetRequiredService<PaperAutomationState>());
         services.AddHostedService<AutomatedPaperTradingService>();
+        services.AddHostedService<MultiMarketPaperTradingService>();
 
         return services;
     }

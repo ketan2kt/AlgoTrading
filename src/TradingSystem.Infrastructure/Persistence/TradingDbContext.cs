@@ -29,6 +29,8 @@ public sealed class TradingDbContext(
     public DbSet<PaperTradeResult> PaperTradeResults => Set<PaperTradeResult>();
     public DbSet<PaperExitFollowUp> PaperExitFollowUps => Set<PaperExitFollowUp>();
     public DbSet<PaperTradePriceSample> PaperTradePriceSamples => Set<PaperTradePriceSample>();
+    public DbSet<MarketPaperPosition> MarketPaperPositions => Set<MarketPaperPosition>();
+    public DbSet<MarketStrategyAudit> MarketStrategyAudits => Set<MarketStrategyAudit>();
     public DbSet<RiskDecision> RiskDecisions => Set<RiskDecision>();
     public DbSet<TradingOrder> Orders => Set<TradingOrder>();
     public DbSet<OrderEvent> OrderEvents => Set<OrderEvent>();
@@ -146,6 +148,29 @@ public sealed class TradingDbContext(
                 value.StrikePrice,
                 value.Type
             }).IsUnique();
+        });
+
+        builder.Entity<MarketPaperPosition>(entity =>
+        {
+            ConfigureMutable(entity, "market_paper_positions");
+            entity.Property(value => value.Market).HasMaxLength(40);
+            entity.Property(value => value.Strategy).HasMaxLength(120);
+            entity.Property(value => value.Status).HasMaxLength(60);
+            entity.Property(value => value.EntryPrice).HasPrecision(18, 4);
+            entity.Property(value => value.CurrentPrice).HasPrecision(18, 4);
+            entity.Property(value => value.StopLoss).HasPrecision(18, 4);
+            entity.Property(value => value.Target).HasPrecision(18, 4);
+            entity.Property(value => value.RealisedPnl).HasPrecision(18, 4);
+            entity.HasIndex(value => new { value.Market, value.Status, value.OpenedAtUtc });
+        });
+        builder.Entity<MarketStrategyAudit>(entity =>
+        {
+            ConfigureAppendOnly(entity, "market_strategy_audits");
+            entity.Property(value => value.Market).HasMaxLength(40);
+            entity.Property(value => value.Outcome).HasMaxLength(80);
+            entity.Property(value => value.Confidence).HasPrecision(7, 6);
+            entity.Property(value => value.ReasonsJson).HasColumnType("jsonb");
+            entity.HasIndex(value => new { value.Market, value.CandleTimeUtc });
         });
 
         builder.Entity<Candle>(entity =>

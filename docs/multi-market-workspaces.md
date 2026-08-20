@@ -1,35 +1,38 @@
-# Multi-market workspaces
+# Multi-market paper workspaces
 
-## Implemented shell
+## Implemented markets
 
-After administrator login, the application opens a market selector with three large cards:
+| Workspace | Signal market | Paper execution | Live data | Historical warm-up |
+|---|---|---|---|---|
+| Nifty | NSE Nifty cash index with Nifty futures confirmation | Nearest eligible Nifty CE/PE | Groww CASH/FNO | Groww CASH/FNO |
+| Sensex | BSE Sensex cash index | Nearest eligible Sensex CE/PE | Groww CASH/FNO | Groww CASH |
+| Natural Gas | Nearest active MCX Natural Gas future | Same MCX future, long or short in the isolated simulator | Groww COMMODITY quote when exposed by the account/instrument master | Live accumulation only |
 
-- Nifty (`/nifty`)
-- Sensex (`/sensex`)
-- Natural Gas Futures (`/natural-gas`)
+All three workspaces expose candles, strategy audit records, active/closed positions, current
+price, entry, stop, target, quantity, expiry, timestamps and net paper P&L. Sensex and Natural
+Gas use the market-scoped durable journal (`market_paper_positions` and
+`market_strategy_audits`) so their positions survive restarts and cannot be mistaken for Nifty
+broker-journal reconciliation mismatches.
 
-Nifty retains the existing live chart, option paper execution, risk controls and research report.
-Sensex and Natural Gas have independent prepared screens for chart, paper trades, strategy research,
-risk and data readiness. They deliberately display no prices or trading state yet.
+The additional-market engine evaluates every completed candle. It requires an EMA-aligned
+five-candle structure break, stores a no-signal explanation at most every 15 minutes, blocks a
+duplicate active contract, limits the proposed position to ₹5,000 initial paper risk, uses a 1:1
+initial stop/target and trails the stop after 0.8R favourable movement. Paper P&L includes the
+configured equity-option cost schedule for Sensex and a conservative estimated commodity
+transaction cost for Natural Gas.
 
-## Safety boundary
+## Groww capability boundary
 
-The existing backend is Nifty-specific. Sensex must validate BSE index/option symbols, expiries,
-lot sizes, session rules and Groww data availability before ingestion or paper execution is enabled.
-Natural Gas requires a separate MCX futures instrument lifecycle, commodity session calendar,
-expiry/roll handling, price limits, contract sizing and dedicated research. Nifty records and
-configuration must never be silently reused for either market.
+The official Groww instrument master and live-data documentation list BSE F&O and MCX
+COMMODITY instruments/quotes. Groww historical-candle documentation covers CASH and FNO,
+not COMMODITY. Groww's Trading API overview also states that MCX commodity order trading is
+currently unavailable. Therefore:
 
-The prepared screens are therefore fail-closed. They do not call a broker endpoint, generate a
-signal, copy Nifty statistics or claim that data is live. Each market will require separate database
-partitioning/keys, provider health, replay evidence, configuration and promotion approval.
+- Sensex is eligible for the complete current paper lifecycle and could be separately promoted
+  through the normal live-order gates later.
+- Natural Gas remains paper-only, has no broker historical backfill, and is never routed to a
+  live Groww order endpoint.
+- A future Natural Gas live promotion requires an officially supported commodity broker API,
+  a dedicated gateway implementation, contract tests and a new approval gate.
 
-## Next implementation order
-
-1. Validate official Groww capabilities and instrument identifiers for BSE Sensex and MCX Natural Gas.
-2. Generalise the market workspace contract without weakening Nifty isolation or recovery.
-3. Add read-only feed and historical ingestion per market.
-4. Add separate replay datasets and deterministic regime calibration.
-5. Promote one market at a time to paper execution after tests and manual verification.
-
-Live order placement remains absent for every market.
+No workspace enables live trading and no real order endpoint is called.

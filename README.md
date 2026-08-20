@@ -1,11 +1,11 @@
-# Automated Nifty Trading System
+# Automated Indian-Market Trading System
 
 Safety-first automated intraday trading platform for the Indian market. The **Phase 7 first-strategy paper lifecycle is implemented**. No Groww order execution or live-order code exists.
 
 ## Status
 
 - Phase: 7 - opening-range breakout in paper mode
-- Current development gate: live Nifty spot signals use Nifty futures volume confirmation, map to liquid Nifty CE/PE contracts, and execute only in the durable paper broker; controlled replay and live-market soak approval are required before further promotion
+- Current development gate: Nifty and Sensex monitor their cash indices and execute options in paper mode; Natural Gas monitors and simulates the nearest MCX future. All are durable and isolated. Natural Gas cannot be promoted to Groww live orders because Groww currently does not support MCX order trading.
 - Live trading: prohibited and disabled by design
 - Git repository: initialized on `main`
 

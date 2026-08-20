@@ -166,6 +166,9 @@ export class App implements OnInit, OnDestroy {
     const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
     window.history.pushState({}, '', path);
     this.selectedMarket = market;
+    this.workspace = null;
+    this.loadWorkspace();
+    void this.workspaceService.connect(market);
     this.refreshView();
   }
 
@@ -176,11 +179,13 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected preparedMarketName(): string {
-    return this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Futures';
+    return this.selectedMarket === 'nifty' ? 'Nifty' :
+      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Futures';
   }
 
   protected preparedMarketVenue(): string {
-    return this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
+    return this.selectedMarket === 'nifty' ? 'NSE index and options' :
+      this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
   }
 
   private marketFromPath(): 'nifty' | 'sensex' | 'natural-gas' | null {
@@ -383,7 +388,7 @@ export class App implements OnInit, OnDestroy {
         this.refreshView();
       }),
     );
-    void this.workspaceService.connect().catch(() => {
+    void this.workspaceService.connect(this.selectedMarket ?? 'nifty').catch(() => {
       this.workspaceError =
         'Real-time dashboard connection is unavailable; manual refresh remains available.';
       this.refreshView();
@@ -437,7 +442,7 @@ export class App implements OnInit, OnDestroy {
 
   private loadWorkspace(): void {
     this.subscriptions.add(
-      this.workspaceService.getNifty().subscribe({
+      this.workspaceService.getMarket(this.selectedMarket ?? 'nifty').subscribe({
         next: (snapshot) => {
           this.detectTradeAlerts(snapshot);
           this.workspace = snapshot;
@@ -445,7 +450,7 @@ export class App implements OnInit, OnDestroy {
           this.refreshView();
         },
         error: () => {
-          this.workspaceError = 'Unable to load the protected Nifty workspace.';
+          this.workspaceError = `Unable to load the protected ${this.preparedMarketName()} workspace.`;
           this.refreshView();
         },
       }),

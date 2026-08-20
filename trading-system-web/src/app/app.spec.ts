@@ -66,7 +66,7 @@ describe('App', () => {
     });
     TestBed.overrideProvider(TradingWorkspaceService, {
       useValue: {
-        getNifty: () => NEVER,
+        getMarket: () => NEVER,
         updates$: () => NEVER,
         connect: () => Promise.resolve(),
         disconnect: () => Promise.resolve(),
@@ -120,7 +120,7 @@ describe('App', () => {
     });
     TestBed.overrideProvider(TradingWorkspaceService, {
       useValue: {
-        getNifty: () => of({
+        getMarket: () => of({
           instrument: 'NIFTY', exchange: 'NSE', timeframe: '1m', mode: 'Paper',
           feedStatus: 'Live', isLive: true, isFresh: true,
           lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: '2026-08-03T08:30:00Z',
@@ -184,13 +184,13 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
   });
 
-  it('opens isolated prepared workspaces for Sensex and Natural Gas', async () => {
+  it('opens functional Sensex and Natural Gas workspaces', async () => {
     TestBed.overrideProvider(AuthService, {
       useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
     });
     TestBed.overrideProvider(GrowwTokenService, { useValue: { getStatus: () => NEVER } });
     TestBed.overrideProvider(TradingWorkspaceService, {
-      useValue: { getNifty: () => NEVER, updates$: () => NEVER,
+      useValue: { getMarket: () => NEVER, updates$: () => NEVER,
         connect: () => Promise.resolve(), disconnect: () => Promise.resolve() },
     });
     TestBed.overrideProvider(PaperRiskService, { useValue: {
@@ -210,8 +210,8 @@ describe('App', () => {
     sensexButton.click(); fixture.detectChanges();
 
     expect(window.location.pathname).toBe('/sensex');
-    expect(fixture.nativeElement.textContent).toContain('BSE index and options');
-    expect(fixture.nativeElement.textContent).toContain('Feed integration pending');
-    expect(fixture.nativeElement.textContent).toContain('Blocked safely');
+    expect(fixture.nativeElement.textContent).toContain('Sensex command view');
+    expect(fixture.nativeElement.textContent).toContain('LIVE TRADING WORKSPACE');
+    expect(fixture.nativeElement.textContent).not.toContain('Feed integration pending');
   });
 });

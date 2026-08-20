@@ -14,6 +14,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 internal sealed class EfTradingWorkspaceReader(
     TradingDbContext dbContext,
     LiveNiftyFeedState feedState,
+    MultiMarketFeedState multiFeedState,
     IOptions<LiveNiftyOptions> liveOptions,
     IOptions<MarketDataOptions> marketDataOptions,
     IOptions<TradingModeOptions> tradingMode,
@@ -24,30 +25,43 @@ internal sealed class EfTradingWorkspaceReader(
 
     public async Task<TradingWorkspaceSnapshot> GetNiftyAsync(
         int candleCount,
+        CancellationToken cancellationToken) =>
+        await GetAsync("nifty", candleCount, cancellationToken);
+
+    public async Task<TradingWorkspaceSnapshot> GetAsync(
+        string market,
+        int candleCount,
         CancellationToken cancellationToken)
     {
         var options = liveOptions.Value;
+        var definition = TradingMarketCatalog.Get(market);
         candleCount = Math.Clamp(candleCount, 30, options.WorkspaceCandleCount);
-        var instrument = await dbContext.Instruments.AsNoTracking()
-            .SingleOrDefaultAsync(value => value.Exchange == options.Exchange &&
-                                           value.TradingSymbol == options.TradingSymbol &&
-                                           value.Segment == InstrumentSegment.Cash &&
-                                           value.IsActive,
-                cancellationToken);
-        var state = feedState.GetSnapshot(TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds));
         var now = timeProvider.GetUtcNow();
         var indiaNow = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
+        var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
+        var instrumentQuery = dbContext.Instruments.AsNoTracking().Where(value =>
+            value.Exchange == definition.Exchange && value.Type == definition.InstrumentType && value.IsActive);
+        var instrument = definition.InstrumentType == InstrumentType.Index
+            ? await instrumentQuery.SingleOrDefaultAsync(value => value.TradingSymbol == definition.UnderlyingSymbol,
+                cancellationToken)
+            : await instrumentQuery.Where(value => value.TradingSymbol.StartsWith(definition.UnderlyingSymbol) &&
+                                                   value.ExpiryDate >= sessionDate)
+                .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
+                .FirstOrDefaultAsync(cancellationToken);
+        var state = market == "nifty"
+            ? feedState.GetSnapshot(TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds))
+            : multiFeedState.GetSnapshot(market, TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds));
         var localDate = indiaNow.Date;
         var sessionStartUtc = new DateTimeOffset(
-            localDate.Year, localDate.Month, localDate.Day, 9, 15, 0,
+            localDate.Year, localDate.Month, localDate.Day, definition.SessionStart.Hour, definition.SessionStart.Minute, 0,
             IndiaTimeZone.GetUtcOffset(localDate)).ToUniversalTime();
         var sessionEndUtc = new DateTimeOffset(
-            localDate.Year, localDate.Month, localDate.Day, 15, 31, 0,
+            localDate.Year, localDate.Month, localDate.Day, definition.SessionEnd.Hour, definition.SessionEnd.Minute, 59,
             IndiaTimeZone.GetUtcOffset(localDate)).ToUniversalTime();
 
         if (instrument is null)
         {
-            return Empty("InstrumentUnavailable", "Synchronise the Groww Nifty instrument before enabling the feed.");
+            return Empty("InstrumentUnavailable", $"Synchronise the Groww {definition.DisplayName} instrument before enabling the feed.");
         }
 
         var closed = await dbContext.Candles.AsNoTracking()
@@ -95,10 +109,10 @@ internal sealed class EfTradingWorkspaceReader(
                 false));
         }
 
-        var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
-        var volumeInstrument = await dbContext.Instruments.AsNoTracking()
-            .Where(value => value.Exchange == "NSE" && value.Type == InstrumentType.Future &&
-                            value.TradingSymbol.StartsWith("NIFTY") && value.IsActive &&
+        var volumeInstrument = definition.InstrumentType == InstrumentType.Future ? instrument :
+            await dbContext.Instruments.AsNoTracking()
+            .Where(value => value.Exchange == definition.Exchange && value.Type == InstrumentType.Future &&
+                            value.TradingSymbol.StartsWith(definition.ExecutionUnderlying) && value.IsActive &&
                             value.ExpiryDate >= sessionDate)
             .OrderBy(value => value.ExpiryDate)
             .ThenBy(value => value.TradingSymbol)
@@ -167,7 +181,7 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => signalIds.Contains(value.SignalId))
             .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var automation = paperAutomation.GetCurrent();
-        var overlays = signalRows.Select(value =>
+        var legacyOverlays = signalRows.Select(value =>
         {
             risk.TryGetValue(value.Id, out var decision);
             orders.TryGetValue($"{value.Id:N}-ENTRY", out var order);
@@ -221,6 +235,59 @@ internal sealed class EfTradingWorkspaceReader(
                 order?.FillTimeUtc,
                 result?.ClosedAtUtc);
         }).ToArray();
+        var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
+            .Where(value => value.Market == definition.Code && value.OpenedAtUtc >= sessionStartUtc.AddDays(-7))
+            .OrderByDescending(value => value.OpenedAtUtc).Take(30).ToListAsync(cancellationToken);
+        var marketExecutionIds = marketPositionRows.Select(value => value.ExecutionInstrumentId).Distinct().ToArray();
+        var marketExecutionInstruments = await dbContext.Instruments.AsNoTracking()
+            .Where(value => marketExecutionIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, cancellationToken);
+        var marketOverlays = marketPositionRows.Select(value =>
+        {
+            var execution = marketExecutionInstruments[value.ExecutionInstrumentId];
+            var isActive = value.Status == "Active";
+            var underlyingPrice = closed.LastOrDefault()?.Close ?? value.EntryPrice;
+            return new WorkspaceTradeOverlay(value.Id, value.Strategy, value.Direction.ToString(),
+                value.OpenedAtUtc, underlyingPrice, underlyingPrice, underlyingPrice,
+                isActive ? "Filled" : "Closed", value.Quantity, value.EntryPrice,
+                execution.TradingSymbol, execution.Type.ToString(), execution.ExpiryDate,
+                execution.StrikePrice, execution.LotSize,
+                execution.LotSize > 0 ? value.Quantity / execution.LotSize : null,
+                value.EntryPrice, Math.Abs(value.EntryPrice - value.StopLoss) * execution.LotSize,
+                value.StopLoss, value.Target, Math.Abs(value.EntryPrice - value.StopLoss) * value.Quantity,
+                value.EntryPrice * value.Quantity, [], value.Status, value.CurrentPrice,
+                isActive ? null : value.CurrentPrice, isActive ? null : value.RealisedPnl,
+                isActive ? (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
+                    value.EntryPrice - value.CurrentPrice) * value.Quantity : null,
+                value.OpenedAtUtc, value.ClosedAtUtc);
+        }).ToArray();
+        var overlays = market == "nifty" ? legacyOverlays : marketOverlays;
+        if (market != "nifty")
+        {
+            var todaysPositions = marketPositionRows.Where(value => value.OpenedAtUtc >= sessionStartUtc &&
+                                                                    value.OpenedAtUtc < sessionEndUtc).ToArray();
+            var activePosition = todaysPositions.FirstOrDefault(value => value.Status == "Active");
+            var realised = todaysPositions.Where(value => value.Status != "Active").Sum(value => value.RealisedPnl);
+            var unrealised = todaysPositions.Where(value => value.Status == "Active").Sum(value =>
+                (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
+                    value.EntryPrice - value.CurrentPrice) * value.Quantity);
+            automation = new PaperAutomationSnapshot(state.IsFresh ? "Scanning" : "DataUnavailable",
+                state.IsFresh, state.IsFresh ? $"{definition.DisplayName} paper engine is scanning completed candles."
+                    : state.Message ?? "Live data is unavailable.", now, todaysPositions.Length, realised, unrealised,
+                activePosition?.Id, activePosition?.Direction.ToString(), activePosition?.Quantity,
+                activePosition?.EntryPrice, activePosition?.StopLoss, activePosition?.Target,
+                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].TradingSymbol,
+                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].Type.ToString(),
+                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].ExpiryDate,
+                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].StrikePrice,
+                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].LotSize,
+                [new("feed", $"{definition.DisplayName} live feed", state.IsFresh,
+                    state.IsFresh ? "Current quote available" : state.Message ?? "Waiting for live quote")],
+                activePosition?.CurrentPrice,
+                todaysPositions.Where(value => value.Status == "Active").Select(value => new PaperPositionMark(
+                    value.Id, value.CurrentPrice, value.CurrentPrice,
+                    (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
+                        value.EntryPrice - value.CurrentPrice) * value.Quantity, now, true)).ToArray());
+        }
 
         var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
             .Where(value => value.InstrumentId == instrument.Id &&
@@ -229,7 +296,7 @@ internal sealed class EfTradingWorkspaceReader(
             .OrderByDescending(value => value.CandleTimeUtc)
             .Take(40)
             .ToListAsync(cancellationToken);
-        var evaluations = evaluationRows.Select(value => new WorkspaceStrategyEvaluation(
+        var legacyEvaluations = evaluationRows.Select(value => new WorkspaceStrategyEvaluation(
             value.Id,
             value.CandleTimeUtc,
             $"{value.StrategyCode} {value.StrategyVersion}",
@@ -258,13 +325,23 @@ internal sealed class EfTradingWorkspaceReader(
             value.ShadowTrendQuality,
             value.ShadowWouldPermit,
             ParseRejectionReasons(value.ShadowEvidenceJson))).ToArray();
+        var marketAudits = market == "nifty" ? [] : await dbContext.MarketStrategyAudits.AsNoTracking()
+            .Where(value => value.Market == definition.Code && value.CandleTimeUtc >= sessionStartUtc &&
+                            value.CandleTimeUtc < sessionEndUtc)
+            .OrderByDescending(value => value.CandleTimeUtc).Take(40).ToListAsync(cancellationToken);
+        var evaluations = market == "nifty" ? legacyEvaluations : marketAudits.Select(value =>
+            new WorkspaceStrategyEvaluation(value.Id, value.CandleTimeUtc,
+                "Multi-market momentum breakout 1.0.0", value.Outcome,
+                closed.LastOrDefault()?.Close ?? 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m,
+                "MarketStructure", null, value.Confidence, ParseRejectionReasons(value.ReasonsJson),
+                null, null, null, null, null, null, null, null, null, null, [])).ToArray();
 
         var message = !options.Enabled
-            ? "Live Nifty ingestion is disabled by server configuration."
+            ? $"Live {definition.DisplayName} ingestion is disabled by server configuration."
             : state.Message;
         return new TradingWorkspaceSnapshot(
-            options.TradingSymbol,
-            options.Exchange,
+            instrument.TradingSymbol,
+            definition.Exchange,
             $"{interval / 60}m",
             tradingMode.Value.Mode.ToString(),
             state.Status,
@@ -280,8 +357,8 @@ internal sealed class EfTradingWorkspaceReader(
             futuresVolume);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
-            options.TradingSymbol,
-            options.Exchange,
+            definition.UnderlyingSymbol,
+            definition.Exchange,
             $"{marketDataOptions.Value.CandleIntervalSeconds / 60}m",
             tradingMode.Value.Mode.ToString(),
             status,

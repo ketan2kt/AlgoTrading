@@ -97,16 +97,20 @@ public sealed record TradingWorkspaceSnapshot(
 
 public interface ITradingWorkspaceReader
 {
+    Task<TradingWorkspaceSnapshot> GetAsync(string market, int candleCount, CancellationToken cancellationToken);
     Task<TradingWorkspaceSnapshot> GetNiftyAsync(int candleCount, CancellationToken cancellationToken);
 }
 
 public interface ILiveMarketDataPublisher
 {
+    Task PublishAsync(string market, TradingWorkspaceSnapshot snapshot, CancellationToken cancellationToken);
     Task PublishNiftyAsync(TradingWorkspaceSnapshot snapshot, CancellationToken cancellationToken);
 }
 
 public sealed class NullLiveMarketDataPublisher : ILiveMarketDataPublisher
 {
+    public Task PublishAsync(string market, TradingWorkspaceSnapshot snapshot, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
     public Task PublishNiftyAsync(TradingWorkspaceSnapshot snapshot, CancellationToken cancellationToken) =>
         Task.CompletedTask;
 }
