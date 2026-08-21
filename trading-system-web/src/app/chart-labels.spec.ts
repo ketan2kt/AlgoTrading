@@ -13,8 +13,9 @@ describe('chartPriceLineTitles', () => {
   });
 
   it('never labels Natural Gas levels as Nifty', () => {
-    expect(chartPriceLineTitles(snapshot('MCX'))).toEqual({
-      entry: 'FUTURES ENTRY', stop: 'STRUCTURAL SL', target: 'OBJECTIVE',
+    expect(chartPriceLineTitles(snapshot('MCX'), 'Buy')).toEqual({
+      entry: 'BUY ENTRY', stop: 'STRUCTURAL SL', target: 'OBJECTIVE',
     });
+    expect(chartPriceLineTitles(snapshot('MCX'), 'Sell').entry).toBe('SELL ENTRY');
   });
 });

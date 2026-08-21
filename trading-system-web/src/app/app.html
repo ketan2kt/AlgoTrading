@@ -327,6 +327,9 @@
                 <div class="signal-row">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
                   <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
+                  @if (selectedMarket === 'natural-gas') {
+                    <div><span>Side</span><strong [class.good]="overlay.direction === 'Buy'" [class.bad]="overlay.direction === 'Sell'">{{ overlay.direction === 'Sell' ? 'SELL' : 'BUY' }}</strong></div>
+                  }
                   <div><span>{{ selectedMarket === 'natural-gas' ? 'Entry price' : 'Entry premium' }}</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
                   <div><span>{{ overlay.exitPrice !== null ? (selectedMarket === 'natural-gas' ? 'Exit price' : 'Exit premium') : (selectedMarket === 'natural-gas' ? 'Current price' : 'Current premium') }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
                     <div><span>{{ selectedMarket === 'natural-gas' ? 'Structural SL' : 'Premium SL' }}</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>

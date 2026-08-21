@@ -205,7 +205,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     const overlay = this.latestOverlay();
     if (overlay) {
       const entry = overlay.entry;
-      const lineTitles = chartPriceLineTitles(this.snapshot);
+      const lineTitles = chartPriceLineTitles(this.snapshot, overlay.direction);
       this.priceLines = [
         this.series.createPriceLine({
           price: entry,
