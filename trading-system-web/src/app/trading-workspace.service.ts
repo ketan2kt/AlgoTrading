@@ -13,6 +13,7 @@ export class TradingWorkspaceService {
   private readonly http = inject(HttpClient);
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;
+  private connectionStart: Promise<void> | null = null;
   private activeMarket = 'nifty';
 
   getMarket(market: string): Observable<TradingWorkspaceSnapshot> {
@@ -29,21 +30,27 @@ export class TradingWorkspaceService {
       await this.connection.invoke('SubscribeMarketWorkspace', market);
       return;
     }
-    this.connection = new HubConnectionBuilder()
-      .withUrl('/hubs/system-health')
-      .withAutomaticReconnect([0, 2000, 5000, 10000])
-      .build();
-    this.connection.on('marketWorkspaceUpdated', (updatedMarket, snapshot) => {
-      if (isActiveMarketUpdate(this.activeMarket, updatedMarket)) {
-        this.updates.next(snapshot as TradingWorkspaceSnapshot);
-      }
-    });
-    await this.connection.start();
-    await this.connection.invoke('SubscribeMarketWorkspace', market);
+    if (!this.connection) {
+      this.connection = new HubConnectionBuilder()
+        .withUrl('/hubs/system-health')
+        .withAutomaticReconnect([0, 2000, 5000, 10000])
+        .build();
+      this.connection.on('marketWorkspaceUpdated', (updatedMarket, snapshot) => {
+        if (isActiveMarketUpdate(this.activeMarket, updatedMarket)) {
+          this.updates.next(snapshot as TradingWorkspaceSnapshot);
+        }
+      });
+      this.connection.onreconnected(() =>
+        this.connection?.invoke('SubscribeMarketWorkspace', this.activeMarket));
+      this.connectionStart = this.connection.start();
+    }
+    await this.connectionStart;
+    await this.connection.invoke('SubscribeMarketWorkspace', this.activeMarket);
   }
 
   async disconnect(): Promise<void> {
     if (this.connection) await this.connection.stop();
     this.connection = null;
+    this.connectionStart = null;
   }
 }

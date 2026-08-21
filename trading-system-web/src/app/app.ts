@@ -78,7 +78,17 @@ export class App implements OnInit, OnDestroy {
   protected readonly chartTimeframes = [1, 5, 15];
   protected selectedMarket: 'nifty' | 'sensex' | 'natural-gas' | null = this.marketFromPath();
   private readonly marketNavigation = (): void => {
-    this.selectedMarket = this.marketFromPath();
+    const market = this.marketFromPath();
+    if (market === this.selectedMarket) return;
+    this.selectedMarket = market;
+    this.workspace = null;
+    if (market !== null) {
+      this.loadWorkspace();
+      void this.workspaceService.connect(market).catch(() => {
+        this.workspaceError = 'Real-time dashboard connection is unavailable; manual refresh remains available.';
+        this.refreshView();
+      });
+    }
     this.refreshView();
   };
 
@@ -164,6 +174,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected openMarket(market: 'nifty' | 'sensex' | 'natural-gas'): void {
+    if (market === this.selectedMarket && this.workspace !== null) return;
     const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
     window.history.pushState({}, '', path);
     this.selectedMarket = market;

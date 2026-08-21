@@ -25,6 +25,7 @@ import {
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
+import { chartPriceLineTitles } from './chart-labels';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -204,24 +205,25 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     const overlay = this.latestOverlay();
     if (overlay) {
       const entry = overlay.entry;
+      const lineTitles = chartPriceLineTitles(this.snapshot);
       this.priceLines = [
         this.series.createPriceLine({
           price: entry,
           color: '#f2c94c',
           lineWidth: 2,
-          title: 'NIFTY TRIGGER',
+          title: lineTitles.entry,
         }),
         this.series.createPriceLine({
           price: overlay.stopLoss,
           color: '#ff5d68',
           lineWidth: 2,
-          title: 'NIFTY INVALIDATION',
+          title: lineTitles.stop,
         }),
         this.series.createPriceLine({
           price: overlay.target,
           color: '#28d17c',
           lineWidth: 2,
-          title: 'NIFTY OBJECTIVE',
+          title: lineTitles.target,
         }),
       ];
       const position = overlay.direction === 'Buy' ? 'belowBar' : 'aboveBar';

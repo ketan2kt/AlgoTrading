@@ -32,6 +32,49 @@ main {
   margin: 0 auto;
   padding: 0.5rem 0 1rem;
 }
+.market-tabs {
+  position: sticky;
+  top: 27px;
+  z-index: 9;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(90px, 150px));
+  gap: 0.25rem;
+  justify-content: center;
+  margin-bottom: 0.45rem;
+  padding: 0.28rem;
+  background: rgba(9, 16, 13, 0.94);
+  border: 1px solid #26362f;
+  border-radius: 7px;
+  backdrop-filter: blur(8px);
+}
+.market-tabs button {
+  min-height: 30px;
+  padding: 0.3rem 0.65rem;
+  color: #9fb2a8;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.market-tabs button:hover { color: #edf4f0; border-color: #365245; }
+.market-tabs .market-tab--active { color: #07110c; background: #7de2ae; border-color: #a8edc8; }
+.market-theme--sensex {
+  background: radial-gradient(circle at 50% 0, rgba(70, 128, 180, 0.14), transparent 38rem);
+}
+.market-theme--sensex .market-tabs { border-color: #304d64; }
+.market-theme--sensex .market-tabs .market-tab--active { color: #07101a; background: #7db9e8; border-color: #a5d0f0; }
+.market-theme--sensex .chart-panel,
+.market-theme--sensex .positions-panel,
+.market-theme--sensex .workspace-heading { border-color: #2e4659; }
+.market-theme--gas {
+  background: radial-gradient(circle at 50% 0, rgba(190, 139, 50, 0.14), transparent 38rem);
+}
+.market-theme--gas .market-tabs { border-color: #5c4b2d; }
+.market-theme--gas .market-tabs .market-tab--active { color: #181005; background: #d8ad5c; border-color: #e8ca8a; }
+.market-theme--gas .chart-panel,
+.market-theme--gas .positions-panel,
+.market-theme--gas .workspace-heading { border-color: #514329; }
 .market-home {
   display: grid;
   align-content: center;

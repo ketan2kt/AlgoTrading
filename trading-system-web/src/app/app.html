@@ -8,7 +8,8 @@
     </header>
   }
 
-  <main>
+  <main [class.market-theme--sensex]="selectedMarket === 'sensex'"
+    [class.market-theme--gas]="selectedMarket === 'natural-gas'">
     @if (checkingSession) {
       <section class="session-card"><span class="pulse"></span>Checking secure session…</section>
     } @else if (!user) {
@@ -66,6 +67,11 @@
         </div>
       </section>
     } @else {
+      <nav class="market-tabs" aria-label="Switch trading market">
+        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" (click)="openMarket('nifty')">Nifty</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" (click)="openMarket('sensex')">Sensex</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'natural-gas'" (click)="openMarket('natural-gas')">Natural Gas</button>
+      </nav>
       <div class="workspace-shell">
       <section class="workspace-heading">
         <div>
