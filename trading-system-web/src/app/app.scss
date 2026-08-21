@@ -48,6 +48,10 @@ main {
   backdrop-filter: blur(8px);
 }
 .market-tabs button {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
   padding: 0.3rem 0.65rem;
   color: #9fb2a8;
@@ -56,6 +60,19 @@ main {
   border-radius: 5px;
   font-size: 0.75rem;
   font-weight: 600;
+}
+.market-tabs button small { font-size: 0.58rem; font-weight: 800; letter-spacing: 0.08em; }
+.market-tabs .market-tab--alert {
+  color: #160b04;
+  border-color: #fff1a8;
+  animation: market-tab-blink 0.55s steps(2, jump-none) infinite;
+}
+@keyframes market-tab-blink {
+  0%, 100% { background: #ffcf4d; box-shadow: 0 0 0 rgba(255, 207, 77, 0); }
+  50% { background: #ff6a5f; box-shadow: 0 0 14px rgba(255, 106, 95, 0.9); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .market-tabs .market-tab--alert { animation-duration: 1.4s; }
 }
 .market-tabs button:hover { color: #edf4f0; border-color: #365245; }
 .market-tabs .market-tab--active { color: #07110c; background: #7de2ae; border-color: #a8edc8; }

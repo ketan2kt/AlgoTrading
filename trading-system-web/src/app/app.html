@@ -68,9 +68,9 @@
       </section>
     } @else {
       <nav class="market-tabs" aria-label="Switch trading market">
-        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" (click)="openMarket('nifty')">Nifty</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" (click)="openMarket('sensex')">Sensex</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'natural-gas'" (click)="openMarket('natural-gas')">Natural Gas</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'natural-gas'" [class.market-tab--alert]="marketTabAlert('natural-gas')" (click)="openMarket('natural-gas')">Natural Gas @if (marketTabAlert('natural-gas'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
       </nav>
       <div class="workspace-shell">
       <section class="workspace-heading">

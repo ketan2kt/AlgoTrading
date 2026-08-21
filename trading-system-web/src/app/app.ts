@@ -9,6 +9,7 @@ import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
+import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMarketCode } from './trade-alerts';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
@@ -72,7 +73,9 @@ export class App implements OnInit, OnDestroy {
   protected tradeFilter = '';
   private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
-  private tradeStatesInitialized = false;
+  private initializedTradeMarkets = new Set<TradingMarketCode>();
+  protected marketTabAlerts = new Map<TradingMarketCode, TradeAlertKind>();
+  private marketTabAlertTimers = new Map<TradingMarketCode, ReturnType<typeof setTimeout>>();
   private readonly armTradeAlerts = (): void => this.ensureTradeAlertsReady();
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
@@ -138,6 +141,7 @@ export class App implements OnInit, OnDestroy {
     document.removeEventListener('pointerdown', this.armTradeAlerts, { capture: true });
     document.removeEventListener('keydown', this.armTradeAlerts, { capture: true });
     window.removeEventListener('popstate', this.marketNavigation);
+    this.marketTabAlertTimers.forEach((timer) => clearTimeout(timer));
     void this.audioContext?.close();
     void this.workspaceService.disconnect();
   }
@@ -391,7 +395,9 @@ export class App implements OnInit, OnDestroy {
     if (this.selectedMarket !== null) this.loadWorkspace();
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
-        this.detectTradeAlerts(snapshot);
+        const market = marketCodeForSnapshot(snapshot);
+        this.detectTradeAlerts(market, snapshot);
+        if (this.selectedMarket !== market) return;
         this.workspace = snapshot;
         this.workspaceError = '';
         this.refreshView();
@@ -456,7 +462,7 @@ export class App implements OnInit, OnDestroy {
       this.workspaceService.getMarket(requestedMarket).subscribe({
         next: (snapshot) => {
           if (this.selectedMarket !== requestedMarket) return;
-          this.detectTradeAlerts(snapshot);
+          this.detectTradeAlerts(requestedMarket, snapshot);
           this.workspace = snapshot;
           this.workspaceError = '';
           this.refreshView();
@@ -474,22 +480,38 @@ export class App implements OnInit, OnDestroy {
     this.changeDetector.markForCheck();
   }
 
-  private detectTradeAlerts(snapshot: TradingWorkspaceSnapshot): void {
+  protected marketTabAlert(market: TradingMarketCode): TradeAlertKind | null {
+    return this.marketTabAlerts.get(market) ?? null;
+  }
+
+  private detectTradeAlerts(market: TradingMarketCode, snapshot: TradingWorkspaceSnapshot): void {
     const trades = snapshot.overlays.filter((overlay) => overlay.fillPrice !== null);
-    if (!this.tradeStatesInitialized) {
-      trades.forEach((trade) => this.tradeStates.set(trade.signalId, trade.lifecycleStatus));
-      this.tradeStatesInitialized = true;
+    if (!this.initializedTradeMarkets.has(market)) {
+      trades.forEach((trade) => this.tradeStates.set(`${market}:${trade.signalId}`, trade.lifecycleStatus));
+      this.initializedTradeMarkets.add(market);
       return;
     }
     for (const trade of trades) {
-      const previous = this.tradeStates.get(trade.signalId);
-      if (!previous) this.playTradeAlert('entry');
-      else if (previous !== trade.lifecycleStatus &&
-               ['SL hit', 'Target hit', 'Time exit', 'Emergency exit', 'Trend reversal exit', 'Closed']
-                 .includes(trade.lifecycleStatus))
-        this.playTradeAlert('exit');
-      this.tradeStates.set(trade.signalId, trade.lifecycleStatus);
+      const key = `${market}:${trade.signalId}`;
+      const alert = tradeAlertTransition(this.tradeStates.get(key), trade.lifecycleStatus);
+      if (alert) {
+        this.playTradeAlert(alert);
+        this.flashMarketTab(market, alert);
+      }
+      this.tradeStates.set(key, trade.lifecycleStatus);
     }
+  }
+
+  private flashMarketTab(market: TradingMarketCode, kind: TradeAlertKind): void {
+    const existing = this.marketTabAlertTimers.get(market);
+    if (existing) clearTimeout(existing);
+    this.marketTabAlerts.set(market, kind);
+    this.marketTabAlertTimers.set(market, setTimeout(() => {
+      this.marketTabAlerts.delete(market);
+      this.marketTabAlertTimers.delete(market);
+      this.refreshView();
+    }, 10000));
+    this.refreshView();
   }
 
   private ensureTradeAlertsReady(): void {

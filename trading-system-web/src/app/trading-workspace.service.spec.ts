@@ -1,13 +1,9 @@
-import { isActiveMarketUpdate } from './trading-workspace.service';
+import { marketCodeForSnapshot } from './trade-alerts';
 
-describe('TradingWorkspaceService market isolation', () => {
-  it('rejects Nifty updates while Natural Gas is active', () => {
-    expect(isActiveMarketUpdate('natural-gas', 'nifty')).toBe(false);
-    expect(isActiveMarketUpdate('natural-gas', 'natural-gas')).toBe(true);
-  });
-
-  it('rejects stale Natural Gas updates after returning to Nifty', () => {
-    expect(isActiveMarketUpdate('nifty', 'natural-gas')).toBe(false);
-    expect(isActiveMarketUpdate('nifty', 'nifty')).toBe(true);
+describe('TradingWorkspaceService market routing', () => {
+  it('identifies every supported market update', () => {
+    expect(marketCodeForSnapshot({ exchange: 'NSE' })).toBe('nifty');
+    expect(marketCodeForSnapshot({ exchange: 'BSE' })).toBe('sensex');
+    expect(marketCodeForSnapshot({ exchange: 'MCX' })).toBe('natural-gas');
   });
 });
