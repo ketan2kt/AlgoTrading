@@ -84,6 +84,23 @@ public sealed class PriceActionStrategyTests
     }
 
     [Fact]
+    public void CompositeAllowsStrongAlignedMomentumWithoutSecondStrategy()
+    {
+        var context = Context() with
+        {
+            RegimeBias = Direction.Sell,
+            MarketStructure = new(MarketStructureDirection.Bearish, 0.8m, 103m, 98m, 4)
+        };
+        var result = new CompositeTradingStrategy([
+            new StubStrategy("momentum-expansion", 0.82m, Direction.Sell)])
+            .EvaluateDetailed(context);
+
+        Assert.NotNull(result.Signal);
+        Assert.Contains(result.Signal.SupportingReasons,
+            reason => reason.Contains("strong single-signal"));
+    }
+
+    [Fact]
     public void CompositeRejectsConflictingDirections()
     {
         var result = new CompositeTradingStrategy([

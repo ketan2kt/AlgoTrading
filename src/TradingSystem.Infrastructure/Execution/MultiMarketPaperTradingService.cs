@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.MarketData;
+using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
@@ -72,6 +73,20 @@ internal sealed partial class MultiMarketPaperTradingService(
             await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc, decision,
                 cancellationToken);
             return;
+        }
+
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            var reentryCutoff = now.AddMinutes(-20);
+            var recentEntry = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                value.Market == market.Code && value.OpenedAtUtc >= reentryCutoff,
+                cancellationToken);
+            if (recentEntry)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ReentryCooldown",
+                    decision.Confidence, ["Sensex 20-minute re-entry cooldown is active."], cancellationToken);
+                return;
+            }
         }
 
         if (market == TradingMarketCatalog.NaturalGas)
@@ -194,21 +209,8 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     private static MarketDecision Evaluate(IReadOnlyList<Candle> candles)
     {
-        var closes = candles.Select(value => value.Close).ToArray();
-        var fast = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
-        var slow = TechnicalIndicators.ExponentialMovingAverage(closes, 21);
-        var latest = candles[^1];
-        var prior = candles.TakeLast(6).SkipLast(1).ToArray();
-        var bullish = fast > slow && latest.Close > prior.Max(value => value.High) && latest.Close > latest.Open;
-        var bearish = fast < slow && latest.Close < prior.Min(value => value.Low) && latest.Close < latest.Open;
-        var separation = Math.Abs(fast - slow) / latest.Close;
-        var confidence = Math.Min(0.85m, 0.50m + separation * 100m);
-        if (bullish) return new(Direction.Buy, confidence, "Multi-market momentum breakout",
-            ["EMA 9 is above EMA 21.", "Close confirmed above five-candle structure."]);
-        if (bearish) return new(Direction.Sell, confidence, "Multi-market momentum breakout",
-            ["EMA 9 is below EMA 21.", "Close confirmed below five-candle structure."]);
-        return new(null, confidence, "Multi-market momentum breakout",
-            ["No confirmed EMA-aligned five-candle structure break."]);
+        var result = IndexMomentumBreakoutPolicy.Evaluate(candles);
+        return new(result.Direction, result.Confidence, "Index momentum breakout", result.Reasons);
     }
 
     private static MarketDecision EvaluateNaturalGas(IReadOnlyList<Candle> candles)

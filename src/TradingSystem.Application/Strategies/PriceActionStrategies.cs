@@ -320,7 +320,24 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
             }, []);
         }
         if (signals.Length == 1)
-            return new(null, [$"Only {signals[0].StrategyId} qualified; two-strategy directional consensus is required."]);
+        {
+            var single = signals[0];
+            var structureAligned = single.Direction == Direction.Buy
+                ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
+                : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+            var highQualityMomentum = single.StrategyId == "momentum-expansion" &&
+                                      single.Confidence >= 0.70m &&
+                                      context.RegimeBias == single.Direction &&
+                                      structureAligned;
+            if (highQualityMomentum)
+                return new(single with
+                {
+                    SupportingReasons = single.SupportingReasons
+                        .Append("High-quality momentum expansion passed the strong single-signal exception.")
+                        .ToArray()
+                }, []);
+            return new(null, [$"Only {single.StrategyId} qualified; two-strategy consensus or a high-quality momentum expansion is required."]);
+        }
         return new(null, results.SelectMany(value => value.result.FailedConditions
             .Select(reason => $"{value.strategy.StrategyId}: {reason}")).ToArray());
     }
