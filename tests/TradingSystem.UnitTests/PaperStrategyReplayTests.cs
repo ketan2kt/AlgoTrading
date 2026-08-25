@@ -44,6 +44,39 @@ public sealed class PaperStrategyReplayTests
 
         Assert.Equal(5, report.Variants.Count);
         Assert.All(report.Variants, value => Assert.Equal(0, value.Validation.Trades));
+        Assert.All(report.Variants, value => Assert.Equal("InsufficientEvidence", value.Robustness.Verdict));
+    }
+
+    [Fact]
+    public void DoesNotPromoteVariantWithoutEnoughOutOfSampleSessions()
+    {
+        var report = PaperStrategyReplay.Analyze(Enumerable.Range(0, 20)
+            .Select(index => Trade(index, 100m, "WeakBullishTrend", true)).ToArray(), 0);
+
+        var baseline = Assert.Single(report.Variants, value => value.Code == "ACTUAL_BASELINE");
+
+        Assert.Equal("InsufficientEvidence", baseline.Robustness.Verdict);
+        Assert.Contains("3 IST sessions", baseline.Robustness.Reason);
+    }
+
+    [Fact]
+    public void PromotesOnlyStableChronologicalValidationCandidate()
+    {
+        var trades = Enumerable.Range(0, 40).Select(index =>
+        {
+            var day = index / 4;
+            return Trade(index, 100m, "WeakBullishTrend", true) with
+            {
+                EntryTimeUtc = Start.AddDays(day).AddMinutes(index % 4)
+            };
+        }).ToArray();
+
+        var report = PaperStrategyReplay.Analyze(trades, 0);
+        var baseline = Assert.Single(report.Variants, value => value.Code == "ACTUAL_BASELINE");
+
+        Assert.Equal("Candidate", baseline.Robustness.Verdict);
+        Assert.Equal(3, baseline.Robustness.ValidationDays);
+        Assert.Equal(1m, baseline.Robustness.PositiveDayRate);
     }
 
     private static ReplayTradeInput Trade(int index, decimal actualPnl, string regime,

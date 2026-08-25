@@ -10,7 +10,11 @@ public sealed record ReplayMetrics(int Trades, int Wins, decimal NetPnl, decimal
     decimal Expectancy, decimal ProfitFactor, decimal MaximumDrawdown);
 
 public sealed record ReplayVariantResult(string Code, string Description,
-    ReplayMetrics Training, ReplayMetrics Validation, int CoveredTrades);
+    ReplayMetrics Training, ReplayMetrics Validation, int CoveredTrades,
+    ReplayRobustness Robustness);
+
+public sealed record ReplayRobustness(int ValidationDays, int PositiveValidationDays,
+    decimal PositiveDayRate, string Verdict, string Reason);
 
 public sealed record PaperStrategyReplayReport(int SourceTrades, int TradesWithPricePath,
     int RejectedEvaluationsWithoutOptionPath, decimal TrainingFraction,
@@ -60,17 +64,56 @@ public static class PaperStrategyReplay
     {
         var training = rows.Take(split).Where(include).Select(value => value.ActualNetPnl).ToArray();
         var validation = rows.Skip(split).Where(include).Select(value => value.ActualNetPnl).ToArray();
-        return new(code, description, Metrics(training), Metrics(validation), training.Length + validation.Length);
+        var validationRows = rows.Skip(split).Where(include).ToArray();
+        return new(code, description, Metrics(training), Metrics(validation),
+            training.Length + validation.Length, Assess(rows.Take(split).Where(include).ToArray(),
+                validationRows, value => value.ActualNetPnl));
     }
 
     private static ReplayVariantResult PathVariant(string code, string description,
         ReplayTradeInput[] covered, DateTimeOffset splitTime, Func<ReplayTradeInput, decimal> replay)
     {
-        if (covered.Length == 0) return new(code, description, Metrics([]), Metrics([]), 0);
-        var training = covered.Where(value => value.EntryTimeUtc <= splitTime).Select(replay).ToArray();
-        var validation = covered.Where(value => value.EntryTimeUtc > splitTime).Select(replay).ToArray();
-        return new(code, description, Metrics(training), Metrics(validation), covered.Length);
+        if (covered.Length == 0)
+            return new(code, description, Metrics([]), Metrics([]), 0,
+                new(0, 0, 0m, "InsufficientEvidence", "No complete option-price paths are available."));
+        var trainingRows = covered.Where(value => value.EntryTimeUtc <= splitTime).ToArray();
+        var validationRows = covered.Where(value => value.EntryTimeUtc > splitTime).ToArray();
+        var training = trainingRows.Select(replay).ToArray();
+        var validation = validationRows.Select(replay).ToArray();
+        return new(code, description, Metrics(training), Metrics(validation), covered.Length,
+            Assess(trainingRows, validationRows, replay));
     }
+
+    private static ReplayRobustness Assess(IReadOnlyList<ReplayTradeInput> trainingRows,
+        IReadOnlyList<ReplayTradeInput> validationRows, Func<ReplayTradeInput, decimal> pnl)
+    {
+        var validationDays = validationRows.GroupBy(SessionDate)
+            .Select(group => group.Sum(pnl)).ToArray();
+        var positiveDays = validationDays.Count(value => value > 0m);
+        var positiveDayRate = validationDays.Length == 0 ? 0m :
+            (decimal)positiveDays / validationDays.Length;
+        var training = Metrics(trainingRows.Select(pnl).ToArray());
+        var validation = Metrics(validationRows.Select(pnl).ToArray());
+
+        if (validation.Trades < 10 || validationDays.Length < 3)
+            return new(validationDays.Length, positiveDays, positiveDayRate,
+                "InsufficientEvidence",
+                $"Needs at least 10 validation trades across 3 IST sessions; has {validation.Trades} across {validationDays.Length}.");
+        if (training.Expectancy <= 0m)
+            return new(validationDays.Length, positiveDays, positiveDayRate, "Rejected",
+                "Training expectancy is not positive.");
+        if (validation.Expectancy <= 0m || validation.ProfitFactor <= 1m)
+            return new(validationDays.Length, positiveDays, positiveDayRate, "Rejected",
+                "The chronological validation sample has negative expectancy or profit factor at/below 1.00.");
+        if (positiveDayRate < 0.50m)
+            return new(validationDays.Length, positiveDays, positiveDayRate, "Rejected",
+                "Fewer than half of the validation sessions are net positive.");
+        return new(validationDays.Length, positiveDays, positiveDayRate, "Candidate",
+            "Positive training and validation expectancy, validation profit factor above 1.00, and at least half of validation sessions positive.");
+    }
+
+    private static DateOnly SessionDate(ReplayTradeInput trade) =>
+        DateOnly.FromDateTime(trade.EntryTimeUtc.ToOffset(TimeSpan.FromMinutes(330)).Date);
 
     private static decimal ReplayFixedOneR(ReplayTradeInput trade)
     {

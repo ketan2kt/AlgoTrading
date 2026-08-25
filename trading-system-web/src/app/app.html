@@ -464,7 +464,10 @@
                   <div><span>Training net / expectancy</span><strong [class.good]="item.training.netPnl>=0" [class.bad]="item.training.netPnl<0">{{item.training.netPnl|number:'1.2-2'}} / {{item.training.expectancy|number:'1.2-2'}}</strong></div>
                   <div><span>Validation net / expectancy</span><strong [class.good]="item.validation.netPnl>=0" [class.bad]="item.validation.netPnl<0">{{item.validation.netPnl|number:'1.2-2'}} / {{item.validation.expectancy|number:'1.2-2'}}</strong></div>
                   <div><span>Validation PF / drawdown</span><strong>{{item.validation.profitFactor|number:'1.2-2'}} / {{item.validation.maximumDrawdown|number:'1.2-2'}}</strong></div>
+                  <div><span>Out-of-sample verdict</span><strong [class.good]="item.robustness.verdict==='Candidate'" [class.bad]="item.robustness.verdict==='Rejected'">{{item.robustness.verdict==='InsufficientEvidence' ? 'Collecting evidence' : item.robustness.verdict}}</strong></div>
+                  <div><span>Positive validation days</span><strong>{{item.robustness.positiveValidationDays}} / {{item.robustness.validationDays}} ({{item.robustness.positiveDayRate|percent:'1.0-0'}})</strong></div>
                   <div class="evaluation-reasons"><span>Definition</span><strong>{{item.description}}</strong></div>
+                  <div class="evaluation-reasons"><span>Evidence decision</span><strong>{{item.robustness.reason}}</strong></div>
                 </article>
               }</div>
               <details><summary>Replay limitations</summary><ul>@for(item of report.replay.limitations;track item){<li>{{item}}</li>}</ul></details>

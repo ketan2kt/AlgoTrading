@@ -12,7 +12,8 @@ export interface ResearchRecommendation { code:string; severity:string; message:
 export interface PaperResearchSummary { closedTrades:number; expectancy:number; profitFactor:number; averageMaximumFavourableExcursion:number; averageMaximumAdverseExcursion:number; averageProfitGiveback:number; earlyExitCandidates:number; profitGivebackCandidates:number; }
 export interface ShadowStructurePerformance { state:string; wouldPermit:boolean; trades:number; wins:number; netPnl:number; expectancy:number; }
 export interface ReplayMetrics { trades:number; wins:number; netPnl:number; winRate:number; expectancy:number; profitFactor:number; maximumDrawdown:number; }
-export interface ReplayVariantResult { code:string; description:string; training:ReplayMetrics; validation:ReplayMetrics; coveredTrades:number; }
+export interface ReplayRobustness { validationDays:number; positiveValidationDays:number; positiveDayRate:number; verdict:'Candidate'|'Rejected'|'InsufficientEvidence'; reason:string; }
+export interface ReplayVariantResult { code:string; description:string; training:ReplayMetrics; validation:ReplayMetrics; coveredTrades:number; robustness:ReplayRobustness; }
 export interface PaperStrategyReplayReport { sourceTrades:number; tradesWithPricePath:number; rejectedEvaluationsWithoutOptionPath:number; trainingFraction:number; variants:ReplayVariantResult[]; limitations:string[]; }
 export interface PaperTradingReport { daily:DailyPaperPerformance[]; trades:PaperTradeHistoryItem[]; breakdown:StrategyPerformanceBreakdown[]; decisionFunnel:StrategyDecisionFunnel[]; recommendations:ResearchRecommendation[]; research:PaperResearchSummary; shadowStructure:ShadowStructurePerformance[]; replay:PaperStrategyReplayReport; observedAtUtc:string; }
 @Injectable({providedIn:'root'})
