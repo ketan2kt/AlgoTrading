@@ -5,6 +5,28 @@ namespace TradingSystem.ContractTests;
 
 public sealed class TradingWorkspaceIsolationTests
 {
+    [Fact]
+    public void SensexLiveGridStartsAtCurrentIstSession()
+    {
+        var sessionStart = DateTimeOffset.Parse("2026-08-25T03:45:00Z", CultureInfo.InvariantCulture);
+
+        var result = EfTradingWorkspaceReader.PositionHistoryStartUtc(
+            TradingMarketCatalog.Sensex, sessionStart);
+
+        Assert.Equal(sessionStart, result);
+    }
+
+    [Fact]
+    public void NaturalGasRetainsHistoryForPositionalCarryForward()
+    {
+        var sessionStart = DateTimeOffset.Parse("2026-08-25T03:30:00Z", CultureInfo.InvariantCulture);
+
+        var result = EfTradingWorkspaceReader.PositionHistoryStartUtc(
+            TradingMarketCatalog.NaturalGas, sessionStart);
+
+        Assert.Equal(sessionStart.AddDays(-7), result);
+    }
+
     [Theory]
     [InlineData("sensex", "Sensex")]
     [InlineData("natural-gas", "Natural Gas Mini Futures")]

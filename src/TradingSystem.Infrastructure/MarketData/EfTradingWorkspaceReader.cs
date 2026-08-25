@@ -235,8 +235,10 @@ internal sealed class EfTradingWorkspaceReader(
                 order?.FillTimeUtc,
                 result?.ClosedAtUtc);
         }).ToArray();
+        var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
-            .Where(value => value.Market == definition.Code && value.OpenedAtUtc >= sessionStartUtc.AddDays(-7))
+            .Where(value => value.Market == definition.Code && value.OpenedAtUtc >= positionHistoryStartUtc &&
+                            value.OpenedAtUtc < sessionEndUtc)
             .OrderByDescending(value => value.OpenedAtUtc).Take(30).ToListAsync(cancellationToken);
         var marketExecutionIds = marketPositionRows.Select(value => value.ExecutionInstrumentId).Distinct().ToArray();
         var marketExecutionInstruments = await dbContext.Instruments.AsNoTracking()
@@ -408,6 +410,13 @@ internal sealed class EfTradingWorkspaceReader(
         "UnderlyingTrendInvalidated" => "Trend reversal exit",
         _ => "Closed"
     };
+
+    internal static DateTimeOffset PositionHistoryStartUtc(
+        TradingMarketDefinition definition,
+        DateTimeOffset sessionStartUtc) =>
+        definition == TradingMarketCatalog.NaturalGas
+            ? sessionStartUtc.AddDays(-7)
+            : sessionStartUtc;
 
     private static PaperOrderProjection? ParsePaperOrder(IEnumerable<PaperBrokerEventProjection> events)
     {
