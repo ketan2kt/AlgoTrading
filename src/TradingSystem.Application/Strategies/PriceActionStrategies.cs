@@ -22,11 +22,13 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
     public abstract StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context);
 
-    protected List<string> SafetyFailures(StrategyEvaluationContext context)
+    protected List<string> SafetyFailures(StrategyEvaluationContext context,
+        bool permitRegimeOverride = false)
     {
         var failures = new List<string>();
         if (!context.DataTradingPermitted) failures.Add("Market data does not permit trading.");
-        if (!context.RegimeTradingPermitted) failures.Add("Market regime does not permit directional trading.");
+        if (!context.RegimeTradingPermitted && !permitRegimeOverride)
+            failures.Add("Market regime does not permit directional trading.");
         if (Options.EnforceDailyTradeLimits && context.TradesToday >= Options.MaximumTradesPerDay)
             failures.Add("Paper daily trade limit reached.");
         if (Options.EnforceDailyTradeLimits && context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
@@ -264,7 +266,7 @@ public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options
     public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var failures = SafetyFailures(context);
+        var failures = SafetyFailures(context, permitRegimeOverride: true);
         if (failures.Count > 0) return new(null, failures);
         var bars = context.RecentCandles;
         var confirmation = bars[^1];
@@ -280,15 +282,22 @@ public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options
         if (!bullish && !bearish)
             return new(null, ["Expansion candle did not close beyond recent structure and VWAP."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
-        if (context.RegimeBias != direction)
-            return new(null, ["Momentum expansion direction lacks matching regime bias."]);
         var structureAligned = direction == Direction.Buy
             ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
             : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+        var trendAligned = direction == Direction.Buy
+            ? context.FastEma > context.SlowEma && context.CurrentPrice > context.Vwap
+            : context.FastEma < context.SlowEma && context.CurrentPrice < context.Vwap;
+        if (!trendAligned)
+            return new(null, ["Momentum expansion is not aligned with EMA 9/21 and VWAP."]);
+        var regimeAligned = context.RegimeBias is null || context.RegimeBias == direction;
         var stop = direction == Direction.Buy ? confirmation.Low : confirmation.High;
-        return Signal(context, direction, stop, Score(context, true, structureAligned),
+        var score = Score(context, true, structureAligned) - (regimeAligned ? 0m : 0.10m);
+        return Signal(context, direction, stop, score,
             "Candle range expanded beyond its recent baseline.",
-            "Close broke recent structure on the directional side of VWAP.");
+            "Close broke recent structure on the directional side of VWAP.",
+            regimeAligned ? "Regime direction supports the move." :
+                "Price expansion overrode lagging regime direction with a 10% confidence penalty.");
     }
 }
 
@@ -336,9 +345,36 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
                         .Append("High-quality momentum expansion passed the strong single-signal exception.")
                         .ToArray()
                 }, []);
+            var explorationEligible = IsExplorationEligible(single, context);
+            if (explorationEligible)
+                return new(single with
+                {
+                    StrategyId = $"exploration-{single.StrategyId}",
+                    SupportingReasons = single.SupportingReasons
+                        .Append("Exploration lane: one strong strategy qualified with EMA/VWAP and structure alignment, and no opposing signal.")
+                        .ToArray()
+                }, []);
             return new(null, [$"Only {single.StrategyId} qualified; two-strategy consensus or a high-quality momentum expansion is required."]);
         }
         return new(null, results.SelectMany(value => value.result.FailedConditions
             .Select(reason => $"{value.strategy.StrategyId}: {reason}")).ToArray());
     }
+
+    private static bool IsExplorationEligible(StrategySignal signal,
+        StrategyEvaluationContext context)
+    {
+        if (signal.Confidence < 0.62m || !KnownExplorationStrategy(signal.StrategyId)) return false;
+        var emaVwapAligned = signal.Direction == Direction.Buy
+            ? context.FastEma > context.SlowEma && context.CurrentPrice > context.Vwap
+            : context.FastEma < context.SlowEma && context.CurrentPrice < context.Vwap;
+        var structureAligned = signal.Direction == Direction.Buy
+            ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
+            : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
+        return emaVwapAligned && structureAligned;
+    }
+
+    private static bool KnownExplorationStrategy(string strategyId) => strategyId is
+        "opening-range-breakout" or "opening-range-retest" or "vwap-trend-pullback" or
+        "ema-pullback-continuation" or "intraday-range-breakout-retest" or
+        "vwap-rejection-reversal" or "momentum-expansion";
 }

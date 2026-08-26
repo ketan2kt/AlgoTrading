@@ -8,7 +8,8 @@ public static class PaperEntryQualityPolicy
 {
     public static PaperEntryQualityDecision Evaluate(
         MarketStructureQualitySnapshot structure,
-        Direction candidateDirection)
+        Direction candidateDirection,
+        string strategyId = "")
     {
         ArgumentNullException.ThrowIfNull(structure);
         var reasons = new List<string>();
@@ -21,8 +22,11 @@ public static class PaperEntryQualityPolicy
                 reason.Contains("room", StringComparison.OrdinalIgnoreCase) ||
                 reason.Contains("twelve", StringComparison.OrdinalIgnoreCase)));
 
+        var volatilityBreakout = structure.State == MarketStructureQualityState.VolatilityTransition &&
+            (strategyId.Contains("opening-range-breakout", StringComparison.Ordinal) ||
+             strategyId.Contains("momentum-expansion", StringComparison.Ordinal));
         if (structure.State is not (MarketStructureQualityState.CleanTrend or
-            MarketStructureQualityState.DevelopingTrend))
+            MarketStructureQualityState.DevelopingTrend) && !volatilityBreakout)
             reasons.Add($"Entry blocked in {structure.State}; a clean or developing trend is required.");
 
         if (structure.ObservedBias is { } bias && bias != candidateDirection)

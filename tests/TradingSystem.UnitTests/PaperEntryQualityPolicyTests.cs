@@ -39,6 +39,18 @@ public sealed class PaperEntryQualityPolicyTests
         Assert.Empty(decision.Reasons);
     }
 
+    [Theory]
+    [InlineData("exploration-opening-range-breakout")]
+    [InlineData("exploration-momentum-expansion")]
+    public void PermitsVolatilityTransitionForBreakoutExploration(string strategyId)
+    {
+        var decision = PaperEntryQualityPolicy.Evaluate(
+            Snapshot(MarketStructureQualityState.VolatilityTransition, true),
+            Direction.Buy, strategyId);
+
+        Assert.True(decision.Permitted);
+    }
+
     private static MarketStructureQualitySnapshot Snapshot(
         MarketStructureQualityState state, bool permit) => new(
         state, Direction.Buy, 0.5m, 0.3m, 0.6m, 1.5m, 2m, 0.6m, permit,

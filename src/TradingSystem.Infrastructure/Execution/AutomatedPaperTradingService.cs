@@ -427,7 +427,8 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
             strategyContext.OpeningRangeLow, Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
 
-        var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction);
+        var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
+            signal.StrategyId);
         if (!entryQuality.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,

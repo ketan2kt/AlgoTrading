@@ -84,6 +84,37 @@ public sealed class PriceActionStrategyTests
     }
 
     [Fact]
+    public void CompositeRoutesStrongKnownSingleSignalToExplorationLane()
+    {
+        var context = Context() with
+        {
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.7m, 103m, 99m, 3)
+        };
+        var result = new CompositeTradingStrategy([
+            new StubStrategy("vwap-trend-pullback", 0.64m)])
+            .EvaluateDetailed(context);
+
+        Assert.NotNull(result.Signal);
+        Assert.Equal("exploration-vwap-trend-pullback", result.Signal.StrategyId);
+        Assert.Contains(result.Signal.SupportingReasons,
+            reason => reason.Contains("Exploration lane"));
+    }
+
+    [Fact]
+    public void CompositeRejectsExplorationSignalBelowConfidenceFloor()
+    {
+        var context = Context() with
+        {
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.7m, 103m, 99m, 3)
+        };
+        var result = new CompositeTradingStrategy([
+            new StubStrategy("vwap-trend-pullback", 0.61m)])
+            .EvaluateDetailed(context);
+
+        Assert.Null(result.Signal);
+    }
+
+    [Fact]
     public void CompositeAllowsStrongAlignedMomentumWithoutSecondStrategy()
     {
         var context = Context() with
@@ -237,6 +268,29 @@ public sealed class PriceActionStrategyTests
         };
 
         Assert.NotNull(new MomentumExpansionStrategy(new()).Evaluate(context));
+    }
+
+    [Fact]
+    public void MomentumExpansionCanOverrideLaggingRegimeWithPenalty()
+    {
+        var context = Context() with
+        {
+            CurrentPrice = 103m,
+            RegimeBias = Direction.Sell,
+            RegimeTradingPermitted = false,
+            RecentCandles =
+            [
+                Bar(100m, 100.5m, 99.8m, 100.3m), Bar(100.3m, 100.8m, 100.1m, 100.6m),
+                Bar(100.6m, 101m, 100.3m, 100.8m), Bar(100.8m, 101.2m, 100.5m, 101m),
+                Bar(101m, 101.4m, 100.8m, 101.2m), Bar(101.2m, 103.2m, 101m, 103m)
+            ],
+            MarketStructure = new(MarketStructureDirection.Bullish, 0.8m, 103.2m, 100.5m, 5)
+        };
+
+        var signal = new MomentumExpansionStrategy(new()).Evaluate(context);
+
+        Assert.NotNull(signal);
+        Assert.Contains(signal.SupportingReasons, reason => reason.Contains("lagging regime"));
     }
 
     private static StrategyEvaluationContext Context() => new(Guid.NewGuid(), Now, 102m,

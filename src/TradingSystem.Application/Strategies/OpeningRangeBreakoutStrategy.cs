@@ -25,9 +25,13 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
     {
         ArgumentNullException.ThrowIfNull(context);
         var failed = new List<string>();
-        if (!context.RegimeTradingPermitted) failed.Add("Market regime does not permit trading.");
         if (!context.DataTradingPermitted) failed.Add("Market data does not permit trading.");
-        if (context.RegimeConfidence < options.MinimumRegimeConfidence)
+        var technicalBullish = context.CurrentPrice > context.Vwap && context.FastEma > context.SlowEma;
+        var technicalBearish = context.CurrentPrice < context.Vwap && context.FastEma < context.SlowEma;
+        var technicalOverride = technicalBullish || technicalBearish;
+        if (!context.RegimeTradingPermitted && !technicalOverride)
+            failed.Add("Market regime does not permit trading and no EMA/VWAP breakout override is present.");
+        if (context.RegimeConfidence < options.MinimumRegimeConfidence && !technicalOverride)
             failed.Add(FormattableString.Invariant(
                 $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
         if (context.RelativeVolume < options.MinimumRelativeVolume)
@@ -43,16 +47,18 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
             throw new ArgumentException("Opening-range context is invalid.", nameof(context));
 
         var buffer = context.CurrentPrice * options.BreakoutBufferPercent / 100m;
-        var bullish = context.CurrentPrice > context.OpeningRangeHigh + buffer &&
-            context.RegimeBias == Direction.Buy && context.Regime is
+        var bullishRegime = context.RegimeBias == Direction.Buy && context.Regime is
                 MarketRegime.StrongBullishTrend or MarketRegime.WeakBullishTrend or
                 MarketRegime.GapUpContinuation or MarketRegime.GapDownReversal or
                 MarketRegime.HighVolatilityExpansion;
-        var bearish = context.CurrentPrice < context.OpeningRangeLow - buffer &&
-            context.RegimeBias == Direction.Sell && context.Regime is
+        var bearishRegime = context.RegimeBias == Direction.Sell && context.Regime is
                 MarketRegime.StrongBearishTrend or MarketRegime.WeakBearishTrend or
                 MarketRegime.GapDownContinuation or MarketRegime.GapUpRejection or
                 MarketRegime.HighVolatilityExpansion;
+        var bullish = context.CurrentPrice > context.OpeningRangeHigh + buffer &&
+                      (bullishRegime || technicalBullish);
+        var bearish = context.CurrentPrice < context.OpeningRangeLow - buffer &&
+                      (bearishRegime || technicalBearish);
         if (!bullish && !bearish)
             return new(null,
                 ["Price and regime direction do not form a confirmed opening-range breakout."]);
@@ -70,7 +76,9 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
             confidence,
             context.Regime,
             ["Opening range broken with buffer.",
-             "Futures volume confirms direction."],
+             "Futures volume confirms direction.",
+             context.RegimeBias == direction ? "Regime direction confirms the breakout." :
+                 "EMA 9/21 and VWAP alignment overrode lagging regime direction."],
             ["Price returns inside opening range.", "Market-data or regime permission is withdrawn."],
             context.ObservedAtUtc.ToUniversalTime(),
             context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime());
