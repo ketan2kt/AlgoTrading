@@ -733,9 +733,14 @@ internal sealed partial class AutomatedPaperTradingService(
             };
         }
 
+        var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
+                                 !invalidation.ShouldExit &&
+                                 invalidation.Behaviour == SessionBehaviour.Trending &&
+                                 open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence;
         var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
             effectiveStop, open.Target,
-            TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh);
+            TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh,
+            targetExitEnabled: !extendBeyondTarget);
         if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
@@ -778,7 +783,10 @@ internal sealed partial class AutomatedPaperTradingService(
             state.Record(fresh ? "PositionOpen" : "PositionUnmonitored", false,
                 fresh ? reversalProtected
                     ? "Confirmed reversal detected; premium profit is protected by a tightened stop."
-                    : "Monitoring premium protection and confirmed Nifty trend invalidation." :
+                    : extendBeyondTarget &&
+                      (open.Entry.Direction == Direction.Buy ? price >= open.Target : price <= open.Target)
+                        ? "Original target reached; fresh direction-aligned structure remains valid, so runner mode is trailing profit."
+                        : "Monitoring premium protection and confirmed Nifty trend invalidation." :
                     "Market data is stale; new entries are blocked and the paper position cannot be repriced.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
                 open.Entry.Direction.ToString(), open.RemainingQuantity, open.Entry.AverageFillPrice,

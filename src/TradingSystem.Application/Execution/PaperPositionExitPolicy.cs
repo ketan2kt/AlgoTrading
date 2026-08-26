@@ -15,7 +15,8 @@ public enum PaperExitReason
 public sealed class PaperPositionExitPolicy
 {
     public static PaperExitReason Evaluate(Direction direction, decimal currentPrice, decimal stopLoss,
-        decimal target, TimeOnly currentIndiaTime, TimeOnly forcedExitTime, bool marketDataFresh)
+        decimal target, TimeOnly currentIndiaTime, TimeOnly forcedExitTime, bool marketDataFresh,
+        bool targetExitEnabled = true)
     {
         if (currentPrice <= 0 || stopLoss <= 0 || target <= 0)
             throw new ArgumentOutOfRangeException(nameof(currentPrice), "Prices must be positive.");
@@ -24,7 +25,7 @@ public sealed class PaperPositionExitPolicy
         var stopHit = direction == Direction.Buy ? currentPrice <= stopLoss : currentPrice >= stopLoss;
         if (stopHit) return PaperExitReason.StopLoss;
         var targetHit = direction == Direction.Buy ? currentPrice >= target : currentPrice <= target;
-        if (targetHit) return PaperExitReason.Target;
+        if (targetHit && targetExitEnabled) return PaperExitReason.Target;
         return currentIndiaTime >= forcedExitTime
             ? PaperExitReason.ForcedIntradayExit
             : PaperExitReason.None;

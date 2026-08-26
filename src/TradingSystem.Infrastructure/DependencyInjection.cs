@@ -237,6 +237,7 @@ public static class DependencyInjection
                                    options.OptionStrikeStep > 0 &&
                                    options.BreakEvenTriggerRiskMultiple is > 0 and <= 5 &&
                                    options.TrailingStopRiskMultiple is > 0 and <= 5 &&
+                                   options.TargetExtensionMinimumConfidence is >= 0.5m and <= 1m &&
                                    options.ProfitLockTriggerRiskMultiple is > 0 and <= 5 &&
                                    options.ProfitLockRiskMultiple >= 0 &&
                                    options.ProfitLockRiskMultiple < options.ProfitLockTriggerRiskMultiple &&

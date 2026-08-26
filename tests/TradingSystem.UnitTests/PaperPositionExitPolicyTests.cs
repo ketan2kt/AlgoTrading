@@ -33,4 +33,22 @@ public sealed class PaperPositionExitPolicyTests
             new TimeOnly(15, 20), new TimeOnly(15, 15), false);
         Assert.Equal(PaperExitReason.None, result);
     }
+
+    [Fact]
+    public void EvaluateLetsConfirmedRunnerContinueBeyondOriginalTarget()
+    {
+        var result = PaperPositionExitPolicy.Evaluate(Direction.Buy, 121m, 108m, 120m,
+            new TimeOnly(12, 0), new TimeOnly(15, 15), true, targetExitEnabled: false);
+
+        Assert.Equal(PaperExitReason.None, result);
+    }
+
+    [Fact]
+    public void ForcedExitStillClosesRunnerBeyondOriginalTarget()
+    {
+        var result = PaperPositionExitPolicy.Evaluate(Direction.Buy, 121m, 108m, 120m,
+            new TimeOnly(15, 15), new TimeOnly(15, 15), true, targetExitEnabled: false);
+
+        Assert.Equal(PaperExitReason.ForcedIntradayExit, result);
+    }
 }

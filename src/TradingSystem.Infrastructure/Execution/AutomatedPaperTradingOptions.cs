@@ -29,6 +29,8 @@ public sealed class AutomatedPaperTradingOptions
     public decimal BreakEvenTriggerRiskMultiple { get; init; } = 1m;
     public bool TrailingStopEnabled { get; init; } = true;
     public decimal TrailingStopRiskMultiple { get; init; } = 1m;
+    public bool TargetExtensionEnabled { get; init; } = true;
+    public decimal TargetExtensionMinimumConfidence { get; init; } = 0.60m;
     public decimal ProfitLockTriggerRiskMultiple { get; init; } = 0.90m;
     public decimal ProfitLockRiskMultiple { get; init; } = 0.80m;
     public bool PartialProfitEnabled { get; init; } = true;

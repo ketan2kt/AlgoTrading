@@ -165,20 +165,31 @@ internal sealed partial class MultiMarketPaperTradingService(
                 instrument.TradingSymbol), cancellationToken);
             var price = quote.LastPrice;
             if (price <= 0) continue;
-            var initialRisk = Math.Abs(position.EntryPrice - position.StopLoss);
+            var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas ? 2m : 1m;
+            var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var trailing = position.StopLoss;
             if (favourable >= initialRisk * 0.8m)
                 trailing = position.Direction == Direction.Buy
                     ? position.EntryPrice + initialRisk * 0.5m
                     : position.EntryPrice - initialRisk * 0.5m;
+            if (favourable >= initialRisk)
+                trailing = position.Direction == Direction.Buy
+                    ? Math.Max(trailing, price - initialRisk * options.Value.TrailingStopRiskMultiple)
+                    : Math.Min(trailing, price + initialRisk * options.Value.TrailingStopRiskMultiple);
             position.Mark(price, trailing);
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
+            var expectedUnderlyingDirection = market.ExecuteOptions
+                ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
+                : position.Direction;
+            var continuationConfirmed = targetHit && options.Value.TargetExtensionEnabled &&
+                                        await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
+                                            expectedUnderlyingDirection, cancellationToken);
             var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
-            if (stopHit || targetHit || forced)
+            if (stopHit || (targetHit && !continuationConfirmed) || forced)
             {
                 var costs = market.ExecuteOptions
                     ? PaperTradingCostModel.CalculateOptionCharges([
@@ -189,6 +200,27 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
         }
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> HasContinuationStructureAsync(TradingDbContext db, Guid underlyingInstrumentId,
+        Direction direction, CancellationToken cancellationToken)
+    {
+        var candles = await db.Candles.AsNoTracking()
+            .Where(value => value.InstrumentId == underlyingInstrumentId &&
+                            value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
+                            value.Source == "Groww")
+            .OrderByDescending(value => value.OpenTimeUtc)
+            .Take(21)
+            .OrderBy(value => value.OpenTimeUtc)
+            .ToListAsync(cancellationToken);
+        if (candles.Count < 9) return false;
+        var closes = candles.Select(value => value.Close).ToArray();
+        var fast = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
+        var slow = TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length));
+        var latest = candles[^1];
+        return direction == Direction.Buy
+            ? fast > slow && latest.Close >= fast
+            : fast < slow && latest.Close <= fast;
     }
 
     private static MarketDecision Evaluate(IReadOnlyList<Candle> candles)
