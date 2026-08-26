@@ -115,6 +115,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private priceLines: IPriceLine[] = [];
   private hasFittedContent = false;
   private renderedTimeframeMinutes = 0;
+  private renderedInstrument = '';
 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
@@ -173,6 +174,11 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private render(): void {
     if (!this.series || !this.chart || !this.snapshot) return;
+    const instrumentIdentity = `${this.snapshot.exchange}:${this.snapshot.instrument}`;
+    if (instrumentIdentity !== this.renderedInstrument) {
+      this.hasFittedContent = false;
+      this.renderedInstrument = instrumentIdentity;
+    }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
     const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime() / 1000) as Time,
@@ -240,7 +246,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.markerApi?.setMarkers([]);
     }
     if (candles.length && (!this.hasFittedContent || this.renderedTimeframeMinutes !== this.timeframeMinutes)) {
-      const initialRange = currentSessionLogicalRange(displayCandles, this.timeframeMinutes);
+      const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
+      const initialRange = currentSessionLogicalRange(displayCandles, this.timeframeMinutes, sessionMinutes);
       if (initialRange) this.chart.timeScale().setVisibleLogicalRange(initialRange);
       this.hasFittedContent = true;
       this.renderedTimeframeMinutes = this.timeframeMinutes;

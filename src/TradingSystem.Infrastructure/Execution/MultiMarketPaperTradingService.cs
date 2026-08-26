@@ -166,7 +166,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         DateTimeOffset now, CancellationToken cancellationToken)
     {
         var active = await db.MarketPaperPositions.Where(value => value.Market == market.Code &&
-            value.Status == "Active").ToListAsync(cancellationToken);
+            value.Status == "Active" && !value.Strategy.StartsWith("Hero Zero|"))
+            .ToListAsync(cancellationToken);
         foreach (var position in active)
         {
             var instrument = await db.Instruments.AsNoTracking().SingleAsync(value =>

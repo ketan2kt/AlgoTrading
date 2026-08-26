@@ -14,6 +14,7 @@ import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
 import { PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
+import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 
 @Component({
   selector: 'app-root',
@@ -30,6 +31,7 @@ export class App implements OnInit, OnDestroy {
   private readonly paperRisk = inject(PaperRiskService);
   private readonly growwPositionsService = inject(GrowwPositionsService);
   private readonly paperReportService = inject(PaperReportService);
+  private readonly heroZeroService = inject(HeroZeroService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -71,6 +73,12 @@ export class App implements OnInit, OnDestroy {
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
   protected tradeFilter = '';
+  protected heroZeroOpen = false;
+  protected heroZeroLoading = false;
+  protected heroZeroError = '';
+  protected heroZero: HeroZeroMonitor | null = null;
+  private heroZeroPollTimer: ReturnType<typeof setInterval> | null = null;
+  protected controlsOpen = false;
   private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
   private initializedTradeMarkets = new Set<TradingMarketCode>();
@@ -142,6 +150,7 @@ export class App implements OnInit, OnDestroy {
     document.removeEventListener('keydown', this.armTradeAlerts, { capture: true });
     window.removeEventListener('popstate', this.marketNavigation);
     this.marketTabAlertTimers.forEach((timer) => clearTimeout(timer));
+    if (this.heroZeroPollTimer) clearInterval(this.heroZeroPollTimer);
     void this.audioContext?.close();
     void this.workspaceService.disconnect();
   }
@@ -194,6 +203,9 @@ export class App implements OnInit, OnDestroy {
     this.refreshView();
   }
 
+  protected openControls(): void { this.controlsOpen = true; }
+  protected closeControls(): void { this.controlsOpen = false; }
+
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
       this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Mini Futures';
@@ -225,6 +237,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected openLogs(): void {
+    this.controlsOpen = false;
     this.logsOpen = true;
   }
 
@@ -233,6 +246,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected openGrowwPositions(): void {
+    this.controlsOpen = false;
     this.growwPositionsOpen = true;
     this.growwPositionsLoading = true;
     this.growwPositionsError = '';
@@ -253,7 +267,37 @@ export class App implements OnInit, OnDestroy {
 
   protected closeGrowwPositions(): void { this.growwPositionsOpen = false; }
 
+  protected openHeroZero(): void {
+    if (this.selectedMarket !== 'nifty' && this.selectedMarket !== 'sensex') return;
+    this.heroZeroOpen = true;
+    this.loadHeroZero();
+    this.heroZeroPollTimer ??= setInterval(() => this.loadHeroZero(), 5000);
+  }
+  private loadHeroZero(): void {
+    if (!this.heroZeroOpen || (this.selectedMarket !== 'nifty' && this.selectedMarket !== 'sensex')) return;
+    this.heroZeroLoading = true;
+    this.heroZeroError = '';
+    this.subscriptions.add(this.heroZeroService.get(this.selectedMarket).subscribe({
+      next: value => {
+        this.heroZero = value;
+        this.heroZeroLoading = false;
+        this.refreshView();
+      },
+      error: () => {
+        this.heroZeroLoading = false;
+        this.heroZeroError = 'Unable to read the expiry monitor.';
+        this.refreshView();
+      },
+    }));
+  }
+  protected closeHeroZero(): void {
+    this.heroZeroOpen = false;
+    if (this.heroZeroPollTimer) clearInterval(this.heroZeroPollTimer);
+    this.heroZeroPollTimer = null;
+  }
+
   protected openReport(): void {
+    this.controlsOpen = false;
     this.reportOpen=true; this.reportLoading=true; this.reportError='';
     this.subscriptions.add(this.paperReportService.get().subscribe({
       next:value=>{this.report=value;this.reportLoading=false;this.refreshView();},

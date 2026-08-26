@@ -84,17 +84,16 @@
         </div>
         <div class="workspace-actions">
           <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
-          <button class="secondary-button" type="button" (click)="openGrowwPositions()">Groww live positions</button>
-          @if (selectedMarket === 'nifty') {
-            <button class="secondary-button" type="button" (click)="openReport()">Performance &amp; history</button>
+          @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
+            <button class="secondary-button hz-button" type="button" (click)="openHeroZero()">HZ</button>
           }
-          <button class="secondary-button" type="button" (click)="refreshWorkspace()">Refresh</button>
+          <button class="secondary-button control-center-button" type="button" (click)="openControls()">Controls</button>
         </div>
       </section>
 
       @if (tokenStatus; as token) {
         <section
-          class="token-card"
+          class="token-card legacy-control-section"
           [class.token-card--required]="!token.isConfigured || token.isExpired"
           aria-label="Groww daily access token"
         >
@@ -150,14 +149,14 @@
         </section>
       }
       @if (tokenError) {
-        <div class="feed-notice feed-notice--warning" role="alert">{{ tokenError }}</div>
+        <div class="feed-notice feed-notice--warning legacy-control-section" role="alert">{{ tokenError }}</div>
       }
       @if (tokenSuccess) {
-        <div class="feed-notice" role="status">{{ tokenSuccess }}</div>
+        <div class="feed-notice legacy-control-section" role="status">{{ tokenSuccess }}</div>
       }
 
       @if (tokenStatus.isConfigured && !tokenStatus.isExpired) {
-        <section class="instrument-sync-card" aria-label="Groww instrument synchronisation">
+        <section class="instrument-sync-card legacy-control-section" aria-label="Groww instrument synchronisation">
           <div>
             <span>INSTRUMENT MASTER</span>
             <strong>Groww {{ preparedMarketName() }} instrument</strong>
@@ -171,7 +170,46 @@
       }
 
       @if (workspace; as view) {
-        <section class="market-strip" [attr.aria-label]="'Live ' + preparedMarketName() + ' feed status'">
+        @if (controlsOpen) {
+        <div class="logs-backdrop" (click)="closeControls()">
+          <section class="evaluation-panel logs-modal control-center" role="dialog" aria-modal="true"
+            aria-label="Trading control center" (click)="$event.stopPropagation()">
+            <div class="panel-heading">
+              <div><span>CONTROL CENTER</span><strong>{{ preparedMarketName() }} settings and system state</strong></div>
+              <button type="button" (click)="closeControls()">Close</button>
+            </div>
+            <div class="control-center-actions">
+              <button type="button" (click)="refreshWorkspace()">Refresh workspace</button>
+              <button type="button" (click)="openGrowwPositions()">Groww live positions</button>
+              <button type="button" (click)="openReport()">Performance &amp; history</button>
+              <button type="button" (click)="openLogs()">Research logs</button>
+            </div>
+            <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">
+              <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add todayâ€™s token for live market data.' }}</p></div>
+              @if (!showTokenForm) { <button type="button" (click)="openTokenForm()">{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Replace token' : 'Add token' }}</button> }
+              @else { <form class="token-form" (ngSubmit)="saveGrowwToken()"><label>Groww access token<input name="controlGrowwAccessToken" type="password" autocomplete="off" [(ngModel)]="growwAccessToken" minlength="20" maxlength="8192" required /></label><button type="submit" [disabled]="tokenBusy">{{ tokenBusy ? 'Protectingâ€¦' : 'Save and reconnect' }}</button></form> }
+            </section>
+            @if (tokenError) { <div class="feed-notice feed-notice--warning">{{ tokenError }}</div> }
+            @if (tokenSuccess) { <div class="feed-notice">{{ tokenSuccess }}</div> }
+            <section class="instrument-sync-card control-center-card"><div><span>INSTRUMENT MASTER</span><strong>{{ preparedMarketName() }}</strong><p>Refresh broker identifiers when an instrument is unavailable.</p></div><button type="button" [disabled]="instrumentSyncBusy" (click)="synchronizeInstruments()">{{ instrumentSyncBusy ? 'Synchronisingâ€¦' : 'Synchronise' }}</button></section>
+            <section class="market-strip">
+              <article><span>Feed</span><strong [class.good]="view.isFresh" [class.bad]="!view.isFresh">{{ view.feedStatus }}</strong></article>
+              <article><span>Last update</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') + ' IST' : 'â€”' }}</strong></article>
+              <article><span>Automation</span><strong>{{ view.paperAutomation.status }}</strong></article>
+              <article><span>Trades today</span><strong>{{ view.paperAutomation.tradesToday }}</strong></article>
+              <article><span>Realised / unrealised</span><strong>{{ view.paperAutomation.realisedPnl | number:'1.2-2' }} / {{ view.paperAutomation.unrealisedPnl | number:'1.2-2' }}</strong></article>
+            </section>
+            @if (view.paperAutomation.portfolioRisk; as risk) {
+              <section class="market-strip"><article><span>Capital exposure</span><strong>â‚¹{{ risk.capitalExposure | number:'1.0-0' }}</strong></article><article><span>Risk at stops</span><strong>â‚¹{{ risk.openRiskAtStops | number:'1.0-0' }}</strong></article><article><span>Daily loss</span><strong>â‚¹{{ risk.dailyLossConsumed | number:'1.0-0' }} / â‚¹{{ risk.maximumDailyLoss | number:'1.0-0' }}</strong><button type="button" (click)="setDailyLossOverride(!dailyLossOverrideActive)">{{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore today' }}</button></article></section>
+            }
+            <section class="readiness-panel"><div class="panel-heading"><div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div></div><div class="readiness-grid">@for (check of view.paperAutomation.readinessChecks || []; track check.code) { <article [class.readiness-pass]="check.ready"><span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span><strong>{{ check.label }}</strong><p>{{ check.detail }}</p></article> }</div></section>
+            @if (selectedMarket !== 'natural-gas') { <section class="option-routing-panel"><div><span>OPTION ROUTING</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for signal' }}</strong></div>@if (view.paperAutomation.selectedOptionSymbol) { <div><span>Type / strike</span><strong>{{ view.paperAutomation.selectedOptionType }} / {{ view.paperAutomation.selectedOptionStrike | number:'1.0-0' }}</strong></div><div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date:'dd MMM':'Asia/Kolkata' }}</strong></div> }</section> }
+            @if (operationalAlerts(view).length) { <div class="feed-notice feed-notice--warning">{{ operationalAlerts(view)[0] }}</div> }
+            <section class="safety-panel control-center-card"><span>EMERGENCY CONTROL</span><strong>{{ killSwitchActive ? 'Kill switch active' : 'Paper automation available' }}</strong><button type="button" [disabled]="killSwitchBusy" (click)="setKillSwitch(!killSwitchActive)">{{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}</button></section>
+          </section>
+        </div>
+        }
+        <section class="market-strip legacy-control-section" [attr.aria-label]="'Live ' + preparedMarketName() + ' feed status'">
           <article>
             <span>Instrument</span><strong>{{ view.exchange }} · {{ view.instrument }}</strong>
           </article>
@@ -197,7 +235,7 @@
           </article>
         </section>
 
-        <section class="market-strip" aria-label="Automated paper trading status">
+        <section class="market-strip legacy-control-section" aria-label="Automated paper trading status">
           <article>
             <span>Paper automation</span
             ><strong [class.good]="view.paperAutomation.tradingPermitted"
@@ -244,10 +282,10 @@
             </article>
           }
         </section>
-        <div class="feed-notice" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
+        <div class="feed-notice legacy-control-section" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
           {{ view.paperAutomation.message }}
         </div>
-        <section class="readiness-panel" aria-label="Paper trading readiness">
+        <section class="readiness-panel legacy-control-section" aria-label="Paper trading readiness">
           <div class="panel-heading">
             <div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div>
           </div>
@@ -264,7 +302,7 @@
           </div>
         </section>
         @if (selectedMarket !== 'natural-gas') {
-        <section class="option-routing-panel">
+        <section class="option-routing-panel legacy-control-section">
           <div>
             <span>OPTION ROUTING</span>
             <strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for a directional signal' }}</strong>
@@ -279,12 +317,12 @@
         }
 
         @if (view.statusMessage) {
-          <div class="feed-notice" [class.feed-notice--warning]="!view.isLive">
+          <div class="feed-notice legacy-control-section" [class.feed-notice--warning]="!view.isLive">
             {{ view.statusMessage }}
           </div>
         }
         @if (workspaceError) {
-          <div class="feed-notice feed-notice--warning">{{ workspaceError }}</div>
+          <div class="feed-notice feed-notice--warning legacy-control-section">{{ workspaceError }}</div>
         }
 
         <section class="chart-panel workspace-priority-chart">
@@ -314,7 +352,7 @@
         </section>
 
         @if (operationalAlerts(view).length) {
-          <section class="logs-launch workspace-priority-events alert-strip"><div><span>OPERATIONAL ALERTS</span><strong>{{operationalAlerts(view)[0]}}</strong></div><span>{{operationalAlerts(view).length}} active</span></section>
+          <section class="logs-launch workspace-priority-events alert-strip legacy-control-section"><div><span>OPERATIONAL ALERTS</span><strong>{{operationalAlerts(view)[0]}}</strong></div><span>{{operationalAlerts(view).length}} active</span></section>
         }
 
         @if (executedTrades(view).length) {
@@ -345,7 +383,7 @@
         </section>
         }
 
-        <section class="logs-launch workspace-priority-audit">
+        <section class="logs-launch workspace-priority-audit legacy-control-section">
           <div><span>RESEARCH LOGS</span><strong>{{ view.evaluations.length }} session records</strong></div>
           <button type="button" (click)="openLogs()">View logs</button>
         </section>
@@ -427,6 +465,57 @@
                 }
               </div>
               <p class="empty-copy">Updated {{ growwPositionsObservedAt | date:'HH:mm:ss':'Asia/Kolkata' }} IST · Open, non-zero positions only. This screen cannot place or modify orders.</p>
+            }
+          </section>
+        </div>
+        }
+
+        @if (heroZeroOpen) {
+        <div class="logs-backdrop" (click)="closeHeroZero()">
+          <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true"
+            aria-label="Hero Zero expiry monitor" (click)="$event.stopPropagation()">
+            <div class="panel-heading">
+              <div><span>HERO ZERO Â· PAPER ONLY</span><strong>{{ preparedMarketName() }} expiry monitor</strong></div>
+              <div class="modal-actions">
+                <button type="button" (click)="openHeroZero()" [disabled]="heroZeroLoading">Refresh</button>
+                <button type="button" (click)="closeHeroZero()">Close</button>
+              </div>
+            </div>
+            @if (heroZeroLoading) { <p class="empty-copy">Reading live expiry candidatesâ€¦</p> }
+            @else if (heroZeroError) { <p class="form-error">{{ heroZeroError }}</p> }
+            @else if (heroZero; as hz) {
+              <div class="hz-summary">
+                <div><span>Status</span><strong>{{ hz.status }}</strong></div>
+                <div><span>Expiry</span><strong>{{ hz.expiry ? (hz.expiry | date:'dd MMM':'Asia/Kolkata') : 'Not available' }}</strong></div>
+                <div><span>Spot</span><strong>{{ hz.spotPrice !== null ? (hz.spotPrice | number:'1.2-2') : 'â€”' }}</strong></div>
+                <div><span>Combined P&amp;L</span><strong [class.good]="hz.combinedPnl >= 0" [class.bad]="hz.combinedPnl < 0">â‚¹{{ hz.combinedPnl | number:'1.2-2' }}</strong></div>
+                <p>{{ hz.explanation }}</p>
+              </div>
+              <div class="evaluation-table">
+                @for (candidate of [hz.callCandidate, hz.putCandidate]; track candidate?.optionType) {
+                  @if (candidate) {
+                    <article class="evaluation-row hz-candidate">
+                      <div><span>Candidate</span><strong>{{ candidate.optionType }} Â· {{ candidate.strike | number:'1.0-0' }}</strong></div>
+                      <div><span>Premium</span><strong>{{ candidate.premium | number:'1.2-2' }}</strong></div>
+                      <div><span>Bid / ask</span><strong>{{ candidate.bid | number:'1.2-2' }} / {{ candidate.ask | number:'1.2-2' }}</strong></div>
+                      <div><span>Spread</span><strong>{{ candidate.spreadPercent | number:'1.1-1' }}%</strong></div>
+                      <div><span>OI / change</span><strong>{{ candidate.openInterest | number:'1.0-0' }} / {{ candidate.openInterestChange | number:'1.0-0' }}</strong></div>
+                      <div><span>Volume</span><strong>{{ candidate.volume | number:'1.0-0' }}</strong></div>
+                      <div><span>Quality</span><strong>{{ candidate.score | percent:'1.0-0' }}</strong></div>
+                    </article>
+                  }
+                }
+                @for (leg of hz.activeLegs; track leg.positionId) {
+                  <article class="evaluation-row hz-active-leg">
+                    <div><span>Active leg</span><strong>{{ leg.optionType }} Â· {{ leg.strike | number:'1.0-0' }}</strong></div>
+                    <div><span>Quantity</span><strong>{{ leg.quantity }}</strong></div>
+                    <div><span>Entry / current</span><strong>{{ leg.entryPremium | number:'1.2-2' }} / {{ leg.currentPremium | number:'1.2-2' }}</strong></div>
+                    <div><span>Trailing protection</span><strong>{{ leg.stopPremium | number:'1.2-2' }}</strong></div>
+                    <div><span>Live P&amp;L</span><strong [class.good]="leg.unrealisedPnl >= 0" [class.bad]="leg.unrealisedPnl < 0">â‚¹{{ leg.unrealisedPnl | number:'1.2-2' }}</strong></div>
+                  </article>
+                }
+              </div>
+              <p class="empty-copy">The monitor is view-only. Candidate selection and paper execution continue while this popup is closed.</p>
             }
           </section>
         </div>

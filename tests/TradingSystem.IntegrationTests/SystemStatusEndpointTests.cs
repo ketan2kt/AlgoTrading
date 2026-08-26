@@ -119,6 +119,7 @@ public sealed class SystemStatusEndpointTests :
     public void TradingWorkspaceAndRealtimeHubRequireAdministratorRole()
     {
         AssertAdministratorOnly(typeof(TradingWorkspaceController));
+        AssertAdministratorOnly(typeof(HeroZeroController));
         AssertAdministratorOnly(typeof(SystemHealthHub));
     }
 

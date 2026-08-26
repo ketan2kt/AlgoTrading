@@ -586,7 +586,26 @@ article > span,
   z-index: 1;
   background: #0c1813;
 }
+.legacy-control-section { display: none !important; }
+.control-center { width: min(1040px, 96vw); }
+.control-center-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  padding: .6rem .75rem;
+  border-bottom: 1px solid #24332c;
+}
+.control-center-card { margin: .65rem .75rem; }
+.control-center .market-strip,
+.control-center .readiness-panel,
+.control-center .option-routing-panel { margin: .65rem .75rem; }
 .modal-actions { display: flex; align-items: center; gap: 0.4rem; }
+.hz-button{border-color:#b99438;color:#f4cf67}
+.hz-summary { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:1px; background:#24332c; }
+.hz-summary > div { display:grid; gap:.3rem; padding:.65rem .75rem; background:#101a16; }
+.hz-summary > div span { color:#8da095; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
+.hz-summary p { grid-column:1/-1; margin:0; padding:.6rem .75rem; background:#0c1813; color:#a5b6ad; }
+.hz-candidate { border-left:3px solid #d8ad5c; }
 .report-tools { display:flex; gap:.5rem; padding:.55rem .75rem; position:sticky; top:3.2rem; z-index:1; background:#0c1813; }
 .report-tools input { flex:1; min-width:180px; }
 .evaluation-table {
@@ -615,6 +634,7 @@ article > span,
   border-top: 1px solid #3c2929;
 }
 @media (max-width: 900px) {
+  .hz-summary { grid-template-columns:1fr 1fr; }
   .login-layout,
   .detail-grid {
     grid-template-columns: 1fr;

@@ -160,6 +160,8 @@ public static class DependencyInjection
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
         services.AddSingleton<MultiMarketFeedState>();
+        services.AddSingleton<HeroZeroMonitorState>();
+        services.AddSingleton<IHeroZeroMonitorReader>(provider => provider.GetRequiredService<HeroZeroMonitorState>());
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
@@ -167,6 +169,20 @@ public static class DependencyInjection
         services.AddHostedService<GrowwAdditionalMarketDataService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
         services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
+        services.AddOptions<HeroZeroOptions>()
+            .Bind(configuration.GetSection(HeroZeroOptions.SectionName))
+            .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&
+                               value.TargetPremium > 0 && value.MinimumPremium > 0 &&
+                               value.MaximumPremium > value.MinimumPremium &&
+                               value.MaximumSpreadPercent is > 0 and <= 30 &&
+                               value.MinimumCandidateScore is >= 0.5m and <= 1m &&
+                               value.MaximumCombinedPremium > 0 &&
+                               value.CombinedStopLossPercent is > 0 and <= 50 &&
+                               value.WinnerActivationMultiple is >= 1.25m and <= 5m &&
+                               value.WinnerTrailingFraction is > 0 and < 0.5m,
+                "Hero Zero paper strategy settings are invalid.")
+            .ValidateOnStart();
+        services.AddHostedService<HeroZeroPaperTradingService>();
         services.AddOptions<MarketRegimeOptions>()
             .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
             .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&

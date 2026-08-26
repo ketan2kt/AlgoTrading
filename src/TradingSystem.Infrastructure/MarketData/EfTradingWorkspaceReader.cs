@@ -262,7 +262,10 @@ internal sealed class EfTradingWorkspaceReader(
                     value.EntryPrice - value.CurrentPrice) * value.Quantity : null,
                 value.OpenedAtUtc, value.ClosedAtUtc);
         }).ToArray();
-        var overlays = market == "nifty" ? legacyOverlays : marketOverlays;
+        var overlays = market == "nifty"
+            ? legacyOverlays.Concat(marketOverlays.Where(value =>
+                value.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal))).ToArray()
+            : marketOverlays;
         if (market != "nifty")
         {
             var todaysPositions = marketPositionRows.Where(value => value.OpenedAtUtc >= sessionStartUtc &&
@@ -413,10 +416,7 @@ internal sealed class EfTradingWorkspaceReader(
 
     internal static DateTimeOffset PositionHistoryStartUtc(
         TradingMarketDefinition definition,
-        DateTimeOffset sessionStartUtc) =>
-        definition == TradingMarketCatalog.NaturalGas
-            ? sessionStartUtc.AddDays(-7)
-            : sessionStartUtc;
+        DateTimeOffset sessionStartUtc) => sessionStartUtc;
 
     private static PaperOrderProjection? ParsePaperOrder(IEnumerable<PaperBrokerEventProjection> events)
     {

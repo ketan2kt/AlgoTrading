@@ -65,6 +65,34 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 context?.ShadowStructureState, context?.ShadowTrendQuality,
                 context?.ShadowWouldPermit))
             .ToList();
+        var marketRows = await (from position in db.MarketPaperPositions.AsNoTracking()
+            join instrument in db.Instruments.AsNoTracking()
+                on position.ExecutionInstrumentId equals instrument.Id
+            where position.ClosedAtUtc != null && position.ClosedAtUtc >= cutoff
+            orderby position.ClosedAtUtc descending
+            select new { Position = position, instrument.TradingSymbol, instrument.ExpiryDate })
+            .Take(500).ToListAsync(cancellationToken);
+        rows.AddRange(marketRows.Select(x =>
+        {
+            var gross = (x.Position.Direction == TradingSystem.Domain.Trading.Direction.Buy
+                ? x.Position.CurrentPrice - x.Position.EntryPrice
+                : x.Position.EntryPrice - x.Position.CurrentPrice) * x.Position.Quantity;
+            var costs = Math.Max(0m, gross - x.Position.RealisedPnl);
+            var costBreakdown = new PaperTradingCostBreakdown("paper-multi-market-estimate",
+                0m, 0m, 0m, 0m, 0m, 0m, 0m, costs);
+            return new PaperTradeHistoryItem(x.Position.Id, x.TradingSymbol,
+                x.Position.Direction.ToString(), x.Position.Quantity, x.Position.EntryPrice,
+                x.Position.CurrentPrice, x.Position.RealisedPnl, x.Position.Status,
+                x.Position.OpenedAtUtc, x.Position.ClosedAtUtc!.Value, x.Position.Strategy,
+                x.Position.Market, x.ExpiryDate is { } expiry
+                    ? Math.Max(0, expiry.DayNumber - DateOnly.FromDateTime(
+                        TimeZoneInfo.ConvertTime(x.Position.OpenedAtUtc, India).Date).DayNumber)
+                    : -1, costBreakdown,
+                PaperTradeResearchAnalyzer.Analyze(new(x.Position.Quantity,
+                    x.Position.EntryPrice, x.Position.CurrentPrice, gross, costs,
+                    x.Position.RealisedPnl, x.Position.Status, [], [])), null, null, null);
+        }));
+        rows = rows.OrderByDescending(value => value.ExitTimeUtc).Take(1000).ToList();
         var daily = rows.GroupBy(value => DateOnly.FromDateTime(
                 TimeZoneInfo.ConvertTime(value.ExitTimeUtc, India).Date))
             .OrderByDescending(group => group.Key).Take(days)

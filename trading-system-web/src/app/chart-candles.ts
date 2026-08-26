@@ -6,11 +6,12 @@ export interface ChartLogicalRange {
 }
 
 const IST_OFFSET_MILLISECONDS = 330 * 60_000;
-const NIFTY_SESSION_MINUTES = 375;
+const DEFAULT_SESSION_MINUTES = 375;
 
 export function currentSessionLogicalRange(
   candles: WorkspaceCandle[],
   timeframeMinutes: number,
+  sessionMinutes = DEFAULT_SESSION_MINUTES,
 ): ChartLogicalRange | null {
   if (!candles.length || timeframeMinutes < 1) return null;
 
@@ -20,7 +21,7 @@ export function currentSessionLogicalRange(
   );
   if (firstCurrentSessionIndex < 0) return null;
 
-  const expectedSessionBars = Math.ceil(NIFTY_SESSION_MINUTES / timeframeMinutes);
+  const expectedSessionBars = Math.ceil(sessionMinutes / timeframeMinutes);
   return {
     from: firstCurrentSessionIndex - 0.5,
     to: Math.max(candles.length + 1, firstCurrentSessionIndex + expectedSessionBars - 0.5),

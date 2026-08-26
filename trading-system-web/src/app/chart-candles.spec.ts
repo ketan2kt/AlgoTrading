@@ -53,6 +53,16 @@ describe('currentSessionLogicalRange', () => {
 
     expect(currentSessionLogicalRange(candles, 5)).toEqual({ from: 1.5, to: 76.5 });
   });
+
+  it('uses the full Natural Gas session width without exposing the prior session on the left', () => {
+    const candles = [
+      candle('2026-08-25T17:55:00.000Z', 260, 260, 260, 260, 1),
+      candle('2026-08-26T03:30:00.000Z', 261, 261, 261, 261, 1),
+      candle('2026-08-26T03:35:00.000Z', 262, 262, 262, 262, 1),
+    ];
+
+    expect(currentSessionLogicalRange(candles, 5, 870)).toEqual({ from: 0.5, to: 174.5 });
+  });
 });
 
 function candle(

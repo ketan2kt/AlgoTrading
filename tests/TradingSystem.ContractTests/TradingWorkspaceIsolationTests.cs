@@ -17,14 +17,14 @@ public sealed class TradingWorkspaceIsolationTests
     }
 
     [Fact]
-    public void NaturalGasRetainsHistoryForPositionalCarryForward()
+    public void NaturalGasLiveGridStartsAtCurrentIstSessionWhileDatabaseRetainsHistory()
     {
         var sessionStart = DateTimeOffset.Parse("2026-08-25T03:30:00Z", CultureInfo.InvariantCulture);
 
         var result = EfTradingWorkspaceReader.PositionHistoryStartUtc(
             TradingMarketCatalog.NaturalGas, sessionStart);
 
-        Assert.Equal(sessionStart.AddDays(-7), result);
+        Assert.Equal(sessionStart, result);
     }
 
     [Theory]
