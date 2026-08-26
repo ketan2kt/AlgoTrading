@@ -89,22 +89,6 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
         }
 
-        if (market == TradingMarketCatalog.NaturalGas)
-        {
-            var monthStartLocal = new DateTime(india.Year, india.Month, 1);
-            var monthStart = new DateTimeOffset(monthStartLocal,
-                IndiaTimeZone.GetUtcOffset(monthStartLocal)).ToUniversalTime();
-            var monthlyCalls = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                value.Market == market.Code && value.OpenedAtUtc >= monthStart, cancellationToken);
-            if (monthlyCalls >= NaturalGasMiniPositionPolicy.MaximumCallsPerCalendarMonth)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "MonthlyCallLimit",
-                    decision.Confidence, ["Natural Gas Mini positional call limit of three per calendar month is reached."],
-                    cancellationToken);
-                return;
-            }
-        }
-
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
             latest.Close, today, cancellationToken);
         if (execution is null)
