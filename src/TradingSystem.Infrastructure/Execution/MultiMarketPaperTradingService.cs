@@ -105,7 +105,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             execution.TradingSymbol), cancellationToken);
         var entry = market.ExecuteOptions ? quote.OfferPrice ?? quote.LastPrice : quote.LastPrice;
         if (entry <= 0) return;
-        var tick = execution.TickSize > 0 ? execution.TickSize : 0.05m;
+        var tick = execution.TickSize > 0
+            ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize)
+            : 0.05m;
         var executionDirection = market.ExecuteOptions ? Direction.Buy : decision.Direction.Value;
         decimal stop;
         decimal target;
@@ -131,6 +133,14 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ? entry + structuralRisk * 2m
                 : entry - structuralRisk * 2m, tick);
             quantity = NaturalGasMiniPositionPolicy.FixedQuantity;
+            if (!PaperPriceGeometryPolicy.IsValid(executionDirection, entry, stop, target))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "InvalidPriceGeometry",
+                    decision.Confidence,
+                    [$"Rejected {executionDirection} call because entry {entry}, stop {stop}, and target {target} are not directionally valid."],
+                    cancellationToken);
+                return;
+            }
         }
         else
         {

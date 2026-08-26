@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.MarketData;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
 
@@ -73,7 +74,8 @@ internal sealed class GrowwInstrumentSynchronizer(
                     mapping.ExpiryDate,
                     strikePrice,
                     item.Record.LotSize ?? throw Missing(item.Record, "lot_size"),
-                    item.Record.TickSize ?? throw Missing(item.Record, "tick_size"));
+                    InstrumentPriceIncrement.FromGrowwInstrumentMaster(
+                        item.Record.TickSize ?? throw Missing(item.Record, "tick_size")));
             }
         }
 
