@@ -27,6 +27,7 @@ jobs:
           echo "name=$app" >> "$GITHUB_OUTPUT"
           az webapp log config --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "$app" \
             --docker-container-logging filesystem
+          sleep 30
           for attempt in {1..60}; do
             if curl --fail --silent "https://${app}.azurewebsites.net/health/ready" >/dev/null; then
               sleep 90
