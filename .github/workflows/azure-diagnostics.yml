@@ -1,0 +1,45 @@
+name: Azure authenticated API diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    environment: azure-paper
+    steps:
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Enable container logs and wait for recovery
+        id: app
+        run: |
+          app=$(az webapp list --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --query "[?starts_with(name, 'sarthitradingweb')].name | [0]" -o tsv)
+          echo "name=$app" >> "$GITHUB_OUTPUT"
+          az webapp log config --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "$app" \
+            --docker-container-logging filesystem
+          for attempt in {1..60}; do
+            if curl --fail --silent "https://${app}.azurewebsites.net/health/ready" >/dev/null; then
+              sleep 90
+              az webapp log download --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+                --name "$app" --log-file diagnostics.zip
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sensex-api-diagnostics
+          path: diagnostics.zip
+          retention-days: 1
