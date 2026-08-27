@@ -88,6 +88,28 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
         }
+        else if (market == TradingMarketCatalog.NaturalGas)
+        {
+            var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
+            var entriesToday = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc,
+                cancellationToken);
+            if (entriesToday >= NaturalGasMiniPositionPolicy.MaximumEntriesPerSession)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "SessionEntryLimit",
+                    decision.Confidence, ["Natural Gas Mini session entry limit is reached."], cancellationToken);
+                return;
+            }
+            var reentryCutoff = now.AddMinutes(-NaturalGasMiniPositionPolicy.ReentryCooldownMinutes);
+            if (await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                    value.Market == market.Code && value.OpenedAtUtc >= reentryCutoff,
+                    cancellationToken))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ReentryCooldown",
+                    decision.Confidence, ["Natural Gas Mini 90-minute re-entry cooldown is active."], cancellationToken);
+                return;
+            }
+        }
 
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
             latest.Close, today, cancellationToken);
@@ -125,13 +147,15 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
             var recent = candles.TakeLast(12).ToArray();
             var atr = AverageTrueRange(recent);
-            stop = executionDirection == Direction.Buy
+            var structuralStop = executionDirection == Direction.Buy
                 ? RoundToTick(recent.Min(value => value.Low) - atr * 0.25m, tick)
                 : RoundToTick(recent.Max(value => value.High) + atr * 0.25m, tick);
+            stop = RoundToTick(NaturalGasMiniPositionPolicy.WidenStop(
+                executionDirection, entry, structuralStop, atr), tick);
             var structuralRisk = Math.Abs(entry - stop);
             target = RoundToTick(executionDirection == Direction.Buy
-                ? entry + structuralRisk * 2m
-                : entry - structuralRisk * 2m, tick);
+                ? entry + structuralRisk * NaturalGasMiniPositionPolicy.TargetRiskMultiple
+                : entry - structuralRisk * NaturalGasMiniPositionPolicy.TargetRiskMultiple, tick);
             quantity = NaturalGasMiniPositionPolicy.FixedQuantity;
             if (!PaperPriceGeometryPolicy.IsValid(executionDirection, entry, stop, target))
             {
@@ -191,15 +215,21 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
             var price = quote.LastPrice;
             if (price <= 0) continue;
-            var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas ? 2m : 1m;
+            var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas
+                ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var trailing = position.StopLoss;
-            if (favourable >= initialRisk * 0.8m)
+            if (market == TradingMarketCatalog.NaturalGas)
+            {
+                trailing = NaturalGasMiniPositionPolicy.ApplyTrailingStop(position.Direction,
+                    position.EntryPrice, trailing, price, initialRisk);
+            }
+            else if (favourable >= initialRisk * 0.8m)
                 trailing = position.Direction == Direction.Buy
                     ? position.EntryPrice + initialRisk * 0.5m
                     : position.EntryPrice - initialRisk * 0.5m;
-            if (favourable >= initialRisk)
+            if (market != TradingMarketCatalog.NaturalGas && favourable >= initialRisk)
                 trailing = position.Direction == Direction.Buy
                     ? Math.Max(trailing, price - initialRisk * options.Value.TrailingStopRiskMultiple)
                     : Math.Min(trailing, price + initialRisk * options.Value.TrailingStopRiskMultiple);
