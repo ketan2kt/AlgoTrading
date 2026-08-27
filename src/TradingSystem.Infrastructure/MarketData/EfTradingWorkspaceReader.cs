@@ -131,7 +131,8 @@ internal sealed class EfTradingWorkspaceReader(
                 DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date)))
                 .ToList();
 
-        var signalRows = await (from value in dbContext.Signals.AsNoTracking()
+        var signalRows = market == TradingMarketCatalog.Nifty.Code
+            ? await (from value in dbContext.Signals.AsNoTracking()
             join version in dbContext.StrategyVersions.AsNoTracking()
                 on value.StrategyVersionId equals version.Id
             join strategy in dbContext.Strategies.AsNoTracking()
@@ -152,7 +153,8 @@ internal sealed class EfTradingWorkspaceReader(
                 Strategy = strategy.Code + " " + version.Version
             })
             .Take(30)
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken)
+            : [];
         var signalIds = signalRows.Select(value => value.Id).ToArray();
         var risk = await dbContext.RiskDecisions.AsNoTracking()
             .Where(value => signalIds.Contains(value.SignalId))
@@ -301,13 +303,15 @@ internal sealed class EfTradingWorkspaceReader(
                     out var resolved) ? resolved : null;
         }
 
-        var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
+        var evaluationRows = market == TradingMarketCatalog.Nifty.Code
+            ? await dbContext.StrategyEvaluations.AsNoTracking()
             .Where(value => value.InstrumentId == instrument.Id &&
                             value.CandleTimeUtc >= sessionStartUtc &&
                             value.CandleTimeUtc < sessionEndUtc)
             .OrderByDescending(value => value.CandleTimeUtc)
             .Take(40)
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken)
+            : [];
         var legacyEvaluations = evaluationRows.Select(value => new WorkspaceStrategyEvaluation(
             value.Id,
             value.CandleTimeUtc,
