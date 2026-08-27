@@ -185,22 +185,22 @@
               <button type="button" (click)="openLogs()">Research logs</button>
             </div>
             <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">
-              <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add todayâ€™s token for live market data.' }}</p></div>
+              <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add today’s token for live market data.' }}</p></div>
               @if (!showTokenForm) { <button type="button" (click)="openTokenForm()">{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Replace token' : 'Add token' }}</button> }
-              @else { <form class="token-form" (ngSubmit)="saveGrowwToken()"><label>Groww access token<input name="controlGrowwAccessToken" type="password" autocomplete="off" [(ngModel)]="growwAccessToken" minlength="20" maxlength="8192" required /></label><button type="submit" [disabled]="tokenBusy">{{ tokenBusy ? 'Protectingâ€¦' : 'Save and reconnect' }}</button></form> }
+              @else { <form class="token-form" (ngSubmit)="saveGrowwToken()"><label>Groww access token<input name="controlGrowwAccessToken" type="password" autocomplete="off" [(ngModel)]="growwAccessToken" minlength="20" maxlength="8192" required /></label><button type="submit" [disabled]="tokenBusy">{{ tokenBusy ? 'Protecting…' : 'Save and reconnect' }}</button></form> }
             </section>
             @if (tokenError) { <div class="feed-notice feed-notice--warning">{{ tokenError }}</div> }
             @if (tokenSuccess) { <div class="feed-notice">{{ tokenSuccess }}</div> }
-            <section class="instrument-sync-card control-center-card"><div><span>INSTRUMENT MASTER</span><strong>{{ preparedMarketName() }}</strong><p>Refresh broker identifiers when an instrument is unavailable.</p></div><button type="button" [disabled]="instrumentSyncBusy" (click)="synchronizeInstruments()">{{ instrumentSyncBusy ? 'Synchronisingâ€¦' : 'Synchronise' }}</button></section>
+            <section class="instrument-sync-card control-center-card"><div><span>INSTRUMENT MASTER</span><strong>{{ preparedMarketName() }}</strong><p>Refresh broker identifiers when an instrument is unavailable.</p></div><button type="button" [disabled]="instrumentSyncBusy" (click)="synchronizeInstruments()">{{ instrumentSyncBusy ? 'Synchronising…' : 'Synchronise' }}</button></section>
             <section class="market-strip">
               <article><span>Feed</span><strong [class.good]="view.isFresh" [class.bad]="!view.isFresh">{{ view.feedStatus }}</strong></article>
-              <article><span>Last update</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') + ' IST' : 'â€”' }}</strong></article>
+              <article><span>Last update</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') + ' IST' : '—' }}</strong></article>
               <article><span>Automation</span><strong>{{ view.paperAutomation.status }}</strong></article>
               <article><span>Trades today</span><strong>{{ view.paperAutomation.tradesToday }}</strong></article>
               <article><span>Realised / unrealised</span><strong>{{ view.paperAutomation.realisedPnl | number:'1.2-2' }} / {{ view.paperAutomation.unrealisedPnl | number:'1.2-2' }}</strong></article>
             </section>
             @if (view.paperAutomation.portfolioRisk; as risk) {
-              <section class="market-strip"><article><span>Capital exposure</span><strong>â‚¹{{ risk.capitalExposure | number:'1.0-0' }}</strong></article><article><span>Risk at stops</span><strong>â‚¹{{ risk.openRiskAtStops | number:'1.0-0' }}</strong></article><article><span>Daily loss</span><strong>â‚¹{{ risk.dailyLossConsumed | number:'1.0-0' }} / â‚¹{{ risk.maximumDailyLoss | number:'1.0-0' }}</strong><button type="button" (click)="setDailyLossOverride(!dailyLossOverrideActive)">{{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore today' }}</button></article></section>
+              <section class="market-strip"><article><span>Capital exposure</span><strong>₹{{ risk.capitalExposure | number:'1.0-0' }}</strong></article><article><span>Risk at stops</span><strong>₹{{ risk.openRiskAtStops | number:'1.0-0' }}</strong></article><article><span>Daily loss</span><strong>₹{{ risk.dailyLossConsumed | number:'1.0-0' }} / ₹{{ risk.maximumDailyLoss | number:'1.0-0' }}</strong><button type="button" (click)="setDailyLossOverride(!dailyLossOverrideActive)">{{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore today' }}</button></article></section>
             }
             <section class="readiness-panel"><div class="panel-heading"><div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div></div><div class="readiness-grid">@for (check of view.paperAutomation.readinessChecks || []; track check.code) { <article [class.readiness-pass]="check.ready"><span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span><strong>{{ check.label }}</strong><p>{{ check.detail }}</p></article> }</div></section>
             @if (selectedMarket !== 'natural-gas') { <section class="option-routing-panel"><div><span>OPTION ROUTING</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for signal' }}</strong></div>@if (view.paperAutomation.selectedOptionSymbol) { <div><span>Type / strike</span><strong>{{ view.paperAutomation.selectedOptionType }} / {{ view.paperAutomation.selectedOptionStrike | number:'1.0-0' }}</strong></div><div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date:'dd MMM':'Asia/Kolkata' }}</strong></div> }</section> }
@@ -475,27 +475,27 @@
           <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true"
             aria-label="Hero Zero expiry monitor" (click)="$event.stopPropagation()">
             <div class="panel-heading">
-              <div><span>HERO ZERO Â· PAPER ONLY</span><strong>{{ preparedMarketName() }} expiry monitor</strong></div>
+              <div><span>HERO ZERO · PAPER ONLY</span><strong>{{ preparedMarketName() }} expiry monitor</strong></div>
               <div class="modal-actions">
                 <button type="button" (click)="openHeroZero()" [disabled]="heroZeroLoading">Refresh</button>
                 <button type="button" (click)="closeHeroZero()">Close</button>
               </div>
             </div>
-            @if (heroZeroLoading) { <p class="empty-copy">Reading live expiry candidatesâ€¦</p> }
+            @if (heroZeroLoading) { <p class="empty-copy">Reading live expiry candidates…</p> }
             @else if (heroZeroError) { <p class="form-error">{{ heroZeroError }}</p> }
             @else if (heroZero; as hz) {
               <div class="hz-summary">
                 <div><span>Status</span><strong>{{ hz.status }}</strong></div>
                 <div><span>Expiry</span><strong>{{ hz.expiry ? (hz.expiry | date:'dd MMM':'Asia/Kolkata') : 'Not available' }}</strong></div>
-                <div><span>Spot</span><strong>{{ hz.spotPrice !== null ? (hz.spotPrice | number:'1.2-2') : 'â€”' }}</strong></div>
-                <div><span>Combined P&amp;L</span><strong [class.good]="hz.combinedPnl >= 0" [class.bad]="hz.combinedPnl < 0">â‚¹{{ hz.combinedPnl | number:'1.2-2' }}</strong></div>
+                <div><span>Spot</span><strong>{{ hz.spotPrice !== null ? (hz.spotPrice | number:'1.2-2') : '—' }}</strong></div>
+                <div><span>Combined P&amp;L</span><strong [class.good]="hz.combinedPnl >= 0" [class.bad]="hz.combinedPnl < 0">₹{{ hz.combinedPnl | number:'1.2-2' }}</strong></div>
                 <p>{{ hz.explanation }}</p>
               </div>
               <div class="evaluation-table">
                 @for (candidate of [hz.callCandidate, hz.putCandidate]; track candidate?.optionType) {
                   @if (candidate) {
                     <article class="evaluation-row hz-candidate">
-                      <div><span>Candidate</span><strong>{{ candidate.optionType }} Â· {{ candidate.strike | number:'1.0-0' }}</strong></div>
+                      <div><span>Candidate</span><strong>{{ candidate.optionType }} · {{ candidate.strike | number:'1.0-0' }}</strong></div>
                       <div><span>Premium</span><strong>{{ candidate.premium | number:'1.2-2' }}</strong></div>
                       <div><span>Bid / ask</span><strong>{{ candidate.bid | number:'1.2-2' }} / {{ candidate.ask | number:'1.2-2' }}</strong></div>
                       <div><span>Spread</span><strong>{{ candidate.spreadPercent | number:'1.1-1' }}%</strong></div>
@@ -507,11 +507,11 @@
                 }
                 @for (leg of hz.activeLegs; track leg.positionId) {
                   <article class="evaluation-row hz-active-leg">
-                    <div><span>Active leg</span><strong>{{ leg.optionType }} Â· {{ leg.strike | number:'1.0-0' }}</strong></div>
+                    <div><span>Active leg</span><strong>{{ leg.optionType }} · {{ leg.strike | number:'1.0-0' }}</strong></div>
                     <div><span>Quantity</span><strong>{{ leg.quantity }}</strong></div>
                     <div><span>Entry / current</span><strong>{{ leg.entryPremium | number:'1.2-2' }} / {{ leg.currentPremium | number:'1.2-2' }}</strong></div>
                     <div><span>Trailing protection</span><strong>{{ leg.stopPremium | number:'1.2-2' }}</strong></div>
-                    <div><span>Live P&amp;L</span><strong [class.good]="leg.unrealisedPnl >= 0" [class.bad]="leg.unrealisedPnl < 0">â‚¹{{ leg.unrealisedPnl | number:'1.2-2' }}</strong></div>
+                    <div><span>Live P&amp;L</span><strong [class.good]="leg.unrealisedPnl >= 0" [class.bad]="leg.unrealisedPnl < 0">₹{{ leg.unrealisedPnl | number:'1.2-2' }}</strong></div>
                   </article>
                 }
               </div>
@@ -580,7 +580,7 @@
                 <div class="panel-heading"><div><span>STRATEGY RESEARCH</span><strong>Results by setup, regime, time and expiry distance</strong></div></div>
                 <div class="evaluation-table">
                   @for(item of report.breakdown;track item.strategy + item.regime + item.timeBucket + item.daysToExpiry){
-                    <article class="evaluation-row"><div><span>Strategy</span><strong>{{item.strategy}}</strong></div><div><span>Regime</span><strong>{{item.regime}}</strong></div><div><span>Time (IST)</span><strong>{{item.timeBucket}}</strong></div><div><span>Days to expiry</span><strong>{{item.daysToExpiry}}</strong></div><div><span>Trades / win rate</span><strong>{{item.trades}} / {{item.winRate|percent:'1.0-0'}}</strong></div><div><span>Net / average P&amp;L</span><strong [class.good]="item.netPnl>=0" [class.bad]="item.netPnl<0">â‚¹{{item.netPnl|number:'1.2-2'}} / â‚¹{{item.averagePnl|number:'1.2-2'}}</strong></div></article>
+                    <article class="evaluation-row"><div><span>Strategy</span><strong>{{item.strategy}}</strong></div><div><span>Regime</span><strong>{{item.regime}}</strong></div><div><span>Time (IST)</span><strong>{{item.timeBucket}}</strong></div><div><span>Days to expiry</span><strong>{{item.daysToExpiry}}</strong></div><div><span>Trades / win rate</span><strong>{{item.trades}} / {{item.winRate|percent:'1.0-0'}}</strong></div><div><span>Net / average P&amp;L</span><strong [class.good]="item.netPnl>=0" [class.bad]="item.netPnl<0">₹{{item.netPnl|number:'1.2-2'}} / ₹{{item.averagePnl|number:'1.2-2'}}</strong></div></article>
                   }
                 </div>
               }

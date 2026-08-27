@@ -4,8 +4,11 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "check:encoding": "node scripts/check-encoding.mjs",
+    "prebuild": "npm run check:encoding",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
+    "pretest": "npm run check:encoding",
     "test": "ng test",
     "test:ci": "ng test --watch=false --isolate=false --reporters=verbose --progress=true"
   },
