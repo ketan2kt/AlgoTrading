@@ -1,10 +1,41 @@
 using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Domain.Trading;
 using System.Globalization;
 
 namespace TradingSystem.ContractTests;
 
 public sealed class TradingWorkspaceIsolationTests
 {
+    [Fact]
+    public void SensexInstrumentLookupExcludesDuplicateSymbolsFromOtherSegments()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cash = new Instrument(Guid.NewGuid(), "BSE", "SENSEX", InstrumentSegment.Cash,
+            InstrumentType.Index, now);
+        var derivative = new Instrument(Guid.NewGuid(), "BSE", "SENSEX", InstrumentSegment.FuturesAndOptions,
+            InstrumentType.Index, now);
+
+        var result = EfTradingWorkspaceReader.ScopeInstrumentQuery(
+            new[] { cash, derivative }.AsQueryable(), TradingMarketCatalog.Sensex).ToArray();
+
+        Assert.Equal([cash], result);
+    }
+
+    [Fact]
+    public void NaturalGasInstrumentLookupUsesCommoditySegmentOnly()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var commodity = new Instrument(Guid.NewGuid(), "MCX", "NATGASMINI26AUGFUT",
+            InstrumentSegment.Commodity, InstrumentType.Future, now);
+        var wrongSegment = new Instrument(Guid.NewGuid(), "MCX", "NATGASMINI26AUGFUT",
+            InstrumentSegment.FuturesAndOptions, InstrumentType.Future, now);
+
+        var result = EfTradingWorkspaceReader.ScopeInstrumentQuery(
+            new[] { commodity, wrongSegment }.AsQueryable(), TradingMarketCatalog.NaturalGas).ToArray();
+
+        Assert.Equal([commodity], result);
+    }
+
     [Fact]
     public void SensexLiveGridStartsAtCurrentIstSession()
     {

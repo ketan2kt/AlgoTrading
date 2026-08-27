@@ -170,8 +170,13 @@ internal sealed partial class MultiMarketPaperTradingService(
             .ToListAsync(cancellationToken);
         foreach (var position in active)
         {
-            var instrument = await db.Instruments.AsNoTracking().SingleAsync(value =>
+            var instrument = await db.Instruments.AsNoTracking().FirstOrDefaultAsync(value =>
                 value.Id == position.ExecutionInstrumentId, cancellationToken);
+            if (instrument is null)
+            {
+                LogMissingExecutionInstrument(logger, market.Code, position.Id, position.ExecutionInstrumentId);
+                continue;
+            }
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
             var price = quote.LastPrice;
@@ -268,10 +273,9 @@ internal sealed partial class MultiMarketPaperTradingService(
     private static async Task<Instrument?> FindUnderlyingAsync(TradingDbContext db, TradingMarketDefinition market,
         DateOnly today, CancellationToken cancellationToken)
     {
-        var query = db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
-            value.Type == market.InstrumentType && value.IsActive);
+        var query = EfTradingWorkspaceReader.ScopeInstrumentQuery(db.Instruments.AsNoTracking(), market);
         return market.InstrumentType == InstrumentType.Index
-            ? await query.SingleOrDefaultAsync(value => value.TradingSymbol == market.UnderlyingSymbol,
+            ? await query.FirstOrDefaultAsync(value => value.TradingSymbol == market.UnderlyingSymbol,
                 cancellationToken)
             : await query.Where(value => value.TradingSymbol.StartsWith(market.UnderlyingSymbol) &&
                                          value.ExpiryDate >= today)
@@ -338,4 +342,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         IReadOnlyList<string> Reasons);
     [LoggerMessage(Level = LogLevel.Error, Message = "{Market} paper automation cycle failed.")]
     private static partial void LogCycleFailed(ILogger logger, string market, Exception exception);
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Paper position {PositionId} for {Market} references missing execution instrument {InstrumentId}; management was skipped.")]
+    private static partial void LogMissingExecutionInstrument(
+        ILogger logger, string market, Guid positionId, Guid instrumentId);
 }

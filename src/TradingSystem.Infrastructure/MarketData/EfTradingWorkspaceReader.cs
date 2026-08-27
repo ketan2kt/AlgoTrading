@@ -39,10 +39,9 @@ internal sealed class EfTradingWorkspaceReader(
         var now = timeProvider.GetUtcNow();
         var indiaNow = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
-        var instrumentQuery = dbContext.Instruments.AsNoTracking().Where(value =>
-            value.Exchange == definition.Exchange && value.Type == definition.InstrumentType && value.IsActive);
+        var instrumentQuery = ScopeInstrumentQuery(dbContext.Instruments.AsNoTracking(), definition);
         var instrument = definition.InstrumentType == InstrumentType.Index
-            ? await instrumentQuery.SingleOrDefaultAsync(value => value.TradingSymbol == definition.UnderlyingSymbol,
+            ? await instrumentQuery.FirstOrDefaultAsync(value => value.TradingSymbol == definition.UnderlyingSymbol,
                 cancellationToken)
             : await instrumentQuery.Where(value => value.TradingSymbol.StartsWith(definition.UnderlyingSymbol) &&
                                                    value.ExpiryDate >= sessionDate)
@@ -425,6 +424,14 @@ internal sealed class EfTradingWorkspaceReader(
     internal static DateTimeOffset PositionHistoryStartUtc(
         TradingMarketDefinition definition,
         DateTimeOffset sessionStartUtc) => sessionStartUtc;
+
+    internal static IQueryable<Instrument> ScopeInstrumentQuery(
+        IQueryable<Instrument> instruments,
+        TradingMarketDefinition definition) => instruments.Where(value =>
+        value.Exchange == definition.Exchange &&
+        value.Segment == definition.InstrumentSegment &&
+        value.Type == definition.InstrumentType &&
+        value.IsActive);
 
     private static PaperOrderProjection? ParsePaperOrder(IEnumerable<PaperBrokerEventProjection> events)
     {
