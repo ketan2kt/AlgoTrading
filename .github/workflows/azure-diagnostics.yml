@@ -31,6 +31,7 @@ jobs:
             --name "$app" \
             --application-logging filesystem \
             --level information \
+            --docker-container-logging filesystem \
             --web-server-logging filesystem
           sleep 60
           az webapp log download \
@@ -45,6 +46,7 @@ jobs:
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "$app" \
             --application-logging off \
+            --docker-container-logging off \
             --web-server-logging off
 
       - name: Upload diagnostics
