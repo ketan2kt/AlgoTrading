@@ -19,25 +19,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Enable container logs and wait for recovery
+      - name: Download current container logs
         id: app
         run: |
           app=$(az webapp list --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --query "[?starts_with(name, 'sarthitradingweb')].name | [0]" -o tsv)
           echo "name=$app" >> "$GITHUB_OUTPUT"
-          az webapp log config --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "$app" \
-            --docker-container-logging filesystem
-          sleep 30
-          for attempt in {1..60}; do
-            if curl --fail --silent "https://${app}.azurewebsites.net/health/ready" >/dev/null; then
-              sleep 90
-              az webapp log download --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-                --name "$app" --log-file diagnostics.zip
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
+          az webapp log download --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "$app" --log-file diagnostics.zip
 
       - uses: actions/upload-artifact@v4
         with:
