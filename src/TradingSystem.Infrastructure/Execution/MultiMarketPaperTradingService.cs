@@ -177,8 +177,18 @@ internal sealed partial class MultiMarketPaperTradingService(
                 LogMissingExecutionInstrument(logger, market.Code, position.Id, position.ExecutionInstrumentId);
                 continue;
             }
-            var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
-                instrument.TradingSymbol), cancellationToken);
+            GrowwQuote quote;
+            try
+            {
+                quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
+                    instrument.TradingSymbol), cancellationToken);
+            }
+            catch (GrowwApiException exception)
+            {
+                LogPositionQuoteUnavailable(logger, market.Code, position.Id,
+                    instrument.TradingSymbol, exception);
+                continue;
+            }
             var price = quote.LastPrice;
             if (price <= 0) continue;
             var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas ? 2m : 1m;
@@ -346,4 +356,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         Message = "Paper position {PositionId} for {Market} references missing execution instrument {InstrumentId}; management was skipped.")]
     private static partial void LogMissingExecutionInstrument(
         ILogger logger, string market, Guid positionId, Guid instrumentId);
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Skipping {Market} position {PositionId}: quote unavailable for {TradingSymbol}.")]
+    private static partial void LogPositionQuoteUnavailable(ILogger logger, string market,
+        Guid positionId, string tradingSymbol, Exception exception);
 }

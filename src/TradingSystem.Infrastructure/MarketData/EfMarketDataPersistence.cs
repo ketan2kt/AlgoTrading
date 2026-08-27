@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
@@ -20,10 +21,20 @@ internal sealed class EfMarketDataPersistence(TradingDbContext dbContext, TimePr
 
     public async Task PersistCandleAsync(CompletedCandle value, CancellationToken cancellationToken)
     {
-        dbContext.Candles.Add(new Candle(Guid.NewGuid(), value.InstrumentId, value.OpenTimeUtc,
+        var candle = new Candle(Guid.NewGuid(), value.InstrumentId, value.OpenTimeUtc,
             value.IntervalSeconds, value.Open, value.High, value.Low, value.Close, value.Volume,
-            value.Source, value.OpenInterest));
-        await dbContext.SaveChangesAsync(cancellationToken);
+            value.Source, value.OpenInterest);
+        dbContext.Candles.Add(candle);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+               { SqlState: PostgresErrorCodes.UniqueViolation,
+                 ConstraintName: "IX_candles_InstrumentId_OpenTimeUtc_IntervalSeconds_Source" })
+        {
+            dbContext.Entry(candle).State = EntityState.Detached;
+        }
     }
 
     public async Task RecordProviderHealthAsync(string provider, MarketDataValidationResult result,

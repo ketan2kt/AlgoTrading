@@ -497,11 +497,38 @@ internal sealed class EfTradingWorkspaceReader(
             exposure);
     }
 
-    private static string[] ParseRejectionReasons(string? reasonsJson)
+    internal static string[] ParseRejectionReasons(string? reasonsJson)
     {
         if (string.IsNullOrWhiteSpace(reasonsJson)) return [];
-        return JsonSerializer.Deserialize<string[]>(reasonsJson) ?? [];
+        try
+        {
+            using var document = JsonDocument.Parse(reasonsJson);
+            var root = document.RootElement;
+            return root.ValueKind switch
+            {
+                JsonValueKind.Array => root.EnumerateArray()
+                    .Select(value => value.ValueKind == JsonValueKind.String
+                        ? value.GetString()
+                        : value.GetRawText())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value!)
+                    .ToArray(),
+                JsonValueKind.Object => root.EnumerateObject()
+                    .Select(value => $"{value.Name}: {FormatReasonValue(value.Value)}")
+                    .ToArray(),
+                JsonValueKind.String => [root.GetString()!],
+                JsonValueKind.Null or JsonValueKind.Undefined => [],
+                _ => [root.GetRawText()]
+            };
+        }
+        catch (JsonException)
+        {
+            return [reasonsJson];
+        }
     }
+
+    private static string FormatReasonValue(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.GetRawText();
 
     private sealed record PaperBrokerEventProjection(string ClientReference, string EventType,
         string PayloadJson, DateTimeOffset OccurredAtUtc);
