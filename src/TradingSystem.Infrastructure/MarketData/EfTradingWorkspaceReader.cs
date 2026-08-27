@@ -245,16 +245,18 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => marketExecutionIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, cancellationToken);
         var marketOverlays = marketPositionRows.Select(value =>
         {
-            var execution = marketExecutionInstruments[value.ExecutionInstrumentId];
+            marketExecutionInstruments.TryGetValue(value.ExecutionInstrumentId, out var execution);
             var isActive = value.Status == "Active";
             var underlyingPrice = closed.LastOrDefault()?.Close ?? value.EntryPrice;
             return new WorkspaceTradeOverlay(value.Id, value.Strategy, value.Direction.ToString(),
                 value.OpenedAtUtc, underlyingPrice, underlyingPrice, underlyingPrice,
                 isActive ? "Filled" : "Closed", value.Quantity, value.EntryPrice,
-                execution.TradingSymbol, execution.Type.ToString(), execution.ExpiryDate,
-                execution.StrikePrice, execution.LotSize,
-                execution.LotSize > 0 ? value.Quantity / execution.LotSize : null,
-                value.EntryPrice, Math.Abs(value.EntryPrice - value.StopLoss) * execution.LotSize,
+                execution?.TradingSymbol ?? definition.ExecutionUnderlying,
+                execution?.Type.ToString() ?? definition.InstrumentType.ToString(), execution?.ExpiryDate,
+                execution?.StrikePrice, execution?.LotSize,
+                execution is { LotSize: > 0 } ? value.Quantity / execution.LotSize : null,
+                value.EntryPrice, execution is null ? null :
+                    Math.Abs(value.EntryPrice - value.StopLoss) * execution.LotSize,
                 value.StopLoss, value.Target, Math.Abs(value.EntryPrice - value.StopLoss) * value.Quantity,
                 value.EntryPrice * value.Quantity, [], value.Status, value.CurrentPrice,
                 isActive ? null : value.CurrentPrice, isActive ? null : value.RealisedPnl,
@@ -280,18 +282,24 @@ internal sealed class EfTradingWorkspaceReader(
                     : state.Message ?? "Live data is unavailable.", now, todaysPositions.Length, realised, unrealised,
                 activePosition?.Id, activePosition?.Direction.ToString(), activePosition?.Quantity,
                 activePosition?.EntryPrice, activePosition?.StopLoss, activePosition?.Target,
-                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].TradingSymbol,
-                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].Type.ToString(),
-                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].ExpiryDate,
-                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].StrikePrice,
-                activePosition is null ? null : marketExecutionInstruments[activePosition.ExecutionInstrumentId].LotSize,
+                ActiveExecutionInstrument(activePosition)?.TradingSymbol ??
+                    (activePosition is null ? null : definition.ExecutionUnderlying),
+                ActiveExecutionInstrument(activePosition)?.Type.ToString() ??
+                    (activePosition is null ? null : definition.InstrumentType.ToString()),
+                ActiveExecutionInstrument(activePosition)?.ExpiryDate,
+                ActiveExecutionInstrument(activePosition)?.StrikePrice,
+                ActiveExecutionInstrument(activePosition)?.LotSize,
                 [new("feed", $"{definition.DisplayName} live feed", state.IsFresh,
                     state.IsFresh ? "Current quote available" : state.Message ?? "Waiting for live quote")],
                 activePosition?.CurrentPrice,
                 todaysPositions.Where(value => value.Status == "Active").Select(value => new PaperPositionMark(
                     value.Id, value.CurrentPrice, value.CurrentPrice,
                     (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
-                        value.EntryPrice - value.CurrentPrice) * value.Quantity, now, true)).ToArray());
+                    value.EntryPrice - value.CurrentPrice) * value.Quantity, now, true)).ToArray());
+
+            Instrument? ActiveExecutionInstrument(MarketPaperPosition? position) =>
+                position is not null && marketExecutionInstruments.TryGetValue(position.ExecutionInstrumentId,
+                    out var resolved) ? resolved : null;
         }
 
         var evaluationRows = await dbContext.StrategyEvaluations.AsNoTracking()
