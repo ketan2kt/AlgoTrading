@@ -25,10 +25,27 @@ jobs:
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --query "[?starts_with(name, 'sarthitradingweb')].name | [0]" \
             --output tsv)
+          echo "app=$app" >> "$GITHUB_ENV"
+          az webapp log config \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "$app" \
+            --application-logging filesystem \
+            --level information \
+            --web-server-logging filesystem
+          sleep 60
           az webapp log download \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "$app" \
             --log-file diagnostics.zip
+
+      - name: Disable temporary application logging
+        if: always() && env.app != ''
+        run: |
+          az webapp log config \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "$app" \
+            --application-logging off \
+            --web-server-logging off
 
       - name: Upload diagnostics
         uses: actions/upload-artifact@v4
