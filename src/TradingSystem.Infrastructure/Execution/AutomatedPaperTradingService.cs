@@ -79,7 +79,7 @@ internal sealed partial class AutomatedPaperTradingService(
 
         try
         {
-            await CaptureReversalExitResearchAsync(scope.ServiceProvider, db, cancellationToken);
+            await CaptureExitResearchAsync(scope.ServiceProvider, db, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -878,21 +878,20 @@ internal sealed partial class AutomatedPaperTradingService(
             options.Value.RequiredReversalEvidenceCount);
     }
 
-    private async Task CaptureReversalExitResearchAsync(IServiceProvider services,
+    private async Task CaptureExitResearchAsync(IServiceProvider services,
         TradingDbContext db, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         var oldest = now.AddMinutes(-60 - options.Value.ExitResearchMaximumDelayMinutes);
         var trades = await db.PaperTradeResults.AsNoTracking().Where(value =>
-                value.ExitReason == PaperExitReason.UnderlyingTrendInvalidated.ToString() &&
-                value.ClosedAtUtc >= oldest && value.ClosedAtUtc <= now.AddMinutes(-15))
+                value.ClosedAtUtc >= oldest && value.ClosedAtUtc <= now.AddMinutes(-5))
             .ToListAsync(cancellationToken);
         if (trades.Count == 0) return;
 
         var gateway = services.GetRequiredService<IGrowwReadOnlyGateway>();
         foreach (var trade in trades)
         {
-            foreach (var horizon in new[] { 15, 30, 60 })
+            foreach (var horizon in PaperResearchCadence.PostExitHorizonMinutes)
             {
                 var scheduled = trade.ClosedAtUtc.AddMinutes(horizon);
                 if (now < scheduled || now > scheduled.AddMinutes(options.Value.ExitResearchMaximumDelayMinutes))

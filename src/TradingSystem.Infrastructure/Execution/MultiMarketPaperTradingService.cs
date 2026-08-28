@@ -54,6 +54,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (underlying is null) return;
 
         await ManagePositionsAsync(db, market, now, cancellationToken);
+        await CaptureExitResearchAsync(db, market, now, cancellationToken);
 
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
@@ -181,8 +182,19 @@ internal sealed partial class MultiMarketPaperTradingService(
             executionDirection, quantity, entry, stop, target, now);
         db.MarketPaperPositions.Add(position);
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id, latest.OpenTimeUtc,
-            "PaperPositionOpened", decision.Confidence,
-            JsonSerializer.Serialize(decision.Reasons.Append($"Execution: {execution.TradingSymbol}").ToArray())));
+            "PaperPositionOpened", decision.Confidence, JsonSerializer.Serialize(new
+            {
+                positionId = position.Id,
+                strategy = decision.Strategy,
+                direction = executionDirection.ToString(),
+                confidence = decision.Confidence,
+                entry,
+                initialStop = stop,
+                target,
+                quantity,
+                execution = execution.TradingSymbol,
+                reasons = decision.Reasons
+            })));
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -220,6 +232,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var trailing = position.StopLoss;
+            var previousStop = position.StopLoss;
             if (market == TradingMarketCatalog.NaturalGas)
             {
                 trailing = NaturalGasMiniPositionPolicy.ApplyTrailingStop(position.Direction,
@@ -234,6 +247,25 @@ internal sealed partial class MultiMarketPaperTradingService(
                     ? Math.Max(trailing, price - initialRisk * options.Value.TrailingStopRiskMultiple)
                     : Math.Min(trailing, price + initialRisk * options.Value.TrailingStopRiskMultiple);
             position.Mark(price, trailing);
+            var sampleMinute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute,
+                0, TimeSpan.Zero);
+            var sampleOutcome = $"PositionSample:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}";
+            if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                    value.Market == market.Code && value.Outcome == sampleOutcome, cancellationToken))
+            {
+                var livePnl = (position.Direction == Direction.Buy
+                    ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, sampleMinute, sampleOutcome, 0m,
+                    JsonSerializer.Serialize(new { positionId = position.Id, price,
+                        stop = position.StopLoss, position.Target, livePnl, observedAtUtc = now })));
+            }
+            if (position.StopLoss != previousStop)
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, now,
+                    $"TrailingStop:{position.Id:N}", 0m, JsonSerializer.Serialize(new
+                    { positionId = position.Id, previousStop, newStop = position.StopLoss, price,
+                        observedAtUtc = now })));
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
             var expectedUnderlyingDirection = market.ExecuteOptions
@@ -253,9 +285,57 @@ internal sealed partial class MultiMarketPaperTradingService(
                         new(PaperOptionTransactionSide.Sell, price, position.Quantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.Quantity * 0.0005m, 2);
                 position.Close(price, costs, targetHit ? "TargetHit" : stopHit ? "StopLossHit" : "TimeExit", now);
+                var grossPnl = (position.Direction == Direction.Buy
+                    ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, now, $"PositionClosed:{position.Id:N}", 0m,
+                    JsonSerializer.Serialize(new { positionId = position.Id, exitPrice = price,
+                        exitReason = position.Status, grossPnl, costs, netPnl = position.RealisedPnl,
+                        closedAtUtc = now })));
             }
         }
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CaptureExitResearchAsync(TradingDbContext db, TradingMarketDefinition market,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var closed = await db.MarketPaperPositions.AsNoTracking().Where(value =>
+                value.Market == market.Code && value.ClosedAtUtc != null &&
+                value.ClosedAtUtc >= now.AddMinutes(-70))
+            .ToListAsync(cancellationToken);
+        foreach (var position in closed)
+        {
+            foreach (var horizon in PaperResearchCadence.PostExitHorizonMinutes)
+            {
+                var scheduled = position.ClosedAtUtc!.Value.AddMinutes(horizon);
+                if (now < scheduled || now > scheduled.AddMinutes(5)) continue;
+                var outcome = $"PostExit{horizon}:{position.Id:N}";
+                if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                        value.Market == market.Code && value.Outcome == outcome, cancellationToken)) continue;
+                var instrument = await db.Instruments.AsNoTracking().FirstOrDefaultAsync(value =>
+                    value.Id == position.ExecutionInstrumentId, cancellationToken);
+                if (instrument is null) continue;
+                GrowwQuote quote;
+                try
+                {
+                    quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
+                        instrument.TradingSymbol), cancellationToken);
+                }
+                catch (GrowwApiException) { continue; }
+                if (quote.LastPrice <= 0) continue;
+                var hypotheticalPnl = (position.Direction == Direction.Buy
+                    ? quote.LastPrice - position.EntryPrice : position.EntryPrice - quote.LastPrice) * position.Quantity;
+                var incrementalAfterExit = (position.Direction == Direction.Buy
+                    ? quote.LastPrice - position.CurrentPrice : position.CurrentPrice - quote.LastPrice) * position.Quantity;
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, scheduled, outcome, 0m,
+                    JsonSerializer.Serialize(new { positionId = position.Id, horizonMinutes = horizon,
+                        observedPrice = quote.LastPrice, hypotheticalPnl, incrementalAfterExit,
+                        scheduledAtUtc = scheduled, observedAtUtc = now })));
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     private async Task<bool> HasContinuationStructureAsync(TradingDbContext db, Guid underlyingInstrumentId,

@@ -343,7 +343,10 @@ internal sealed class EfTradingWorkspaceReader(
             ParseRejectionReasons(value.ShadowEvidenceJson))).ToArray();
         var marketAudits = market == "nifty" ? [] : await dbContext.MarketStrategyAudits.AsNoTracking()
             .Where(value => value.Market == definition.Code && value.CandleTimeUtc >= sessionStartUtc &&
-                            value.CandleTimeUtc < sessionEndUtc)
+                            value.CandleTimeUtc < sessionEndUtc &&
+                            !value.Outcome.StartsWith("PositionSample:") &&
+                            !value.Outcome.StartsWith("TrailingStop:") &&
+                            !value.Outcome.StartsWith("PostExit"))
             .OrderByDescending(value => value.CandleTimeUtc).Take(40).ToListAsync(cancellationToken);
         var evaluations = market == "nifty" ? legacyEvaluations : marketAudits.Select(value =>
             new WorkspaceStrategyEvaluation(value.Id, value.CandleTimeUtc,
