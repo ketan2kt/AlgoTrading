@@ -48,7 +48,18 @@ public sealed class GrowwReadOnlyGateway(
             ("exchange", request.Exchange),
             ("segment", request.Segment),
             ("trading_symbol", request.TradingSymbol));
-        var payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
+        QuotePayload payload;
+        try
+        {
+            payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
+        }
+        catch (GrowwApiException exception) when (
+            string.Equals(request.Exchange, "MCX", StringComparison.Ordinal) &&
+            string.Equals(request.Segment, "COMMODITY", StringComparison.Ordinal) &&
+            exception.Message.Contains("Invalid trading symbol", StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetCommodityLtpFallbackAsync(request, cancellationToken);
+        }
         if (payload.LastPrice <= 0 || payload.LastTradeTime is <= 0)
         {
             throw Malformed("Groww quote omitted a valid last price or supplied an invalid trade timestamp.");
@@ -64,6 +75,21 @@ public sealed class GrowwReadOnlyGateway(
             payload.Volume,
             payload.OpenInterest,
             payload.OpenInterestDayChange);
+    }
+
+    private async Task<GrowwQuote> GetCommodityLtpFallbackAsync(
+        GrowwQuoteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var key = $"{request.Exchange}_{request.TradingSymbol}";
+        var payload = await GetPayloadAsync<Dictionary<string, decimal>>(
+            "/v1/live-data/ltp" + BuildQuery(
+                ("segment", request.Segment),
+                ("exchange_symbols", key)),
+            cancellationToken);
+        if (!payload.TryGetValue(key, out var lastPrice) || lastPrice <= 0)
+            throw Malformed("Groww LTP fallback omitted the requested MCX instrument.");
+        return new GrowwQuote(lastPrice, null, null, null, null, null, null, null, null);
     }
 
     public async Task<GrowwHistoricalCandles> GetHistoricalCandlesAsync(

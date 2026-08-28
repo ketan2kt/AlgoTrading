@@ -56,6 +56,33 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task CommodityQuoteFallsBackToDocumentedLtpEndpointWhenQuoteRejectsValidSymbol()
+    {
+        var requests = new List<Uri>();
+        var gateway = CreateGateway(request =>
+        {
+            requests.Add(request.RequestUri!);
+            if (requests.Count == 1)
+                return Json(HttpStatusCode.BadRequest,
+                    """{"status":"FAILURE","error":{"code":"INVALID_REQUEST","message":"Invalid trading symbol: NATGASMINI25SEP26FUT"}}""");
+            return Json(HttpStatusCode.OK,
+                """{"status":"SUCCESS","payload":{"MCX_NATGASMINI25SEP26FUT":281.40}}""");
+        });
+
+        var quote = await gateway.GetQuoteAsync(
+            new GrowwQuoteRequest("MCX", "COMMODITY", "NATGASMINI25SEP26FUT"),
+            CancellationToken.None);
+
+        Assert.Equal(281.40m, quote.LastPrice);
+        Assert.Null(quote.LastTradeTimeEpochMilliseconds);
+        Assert.Equal("/v1/live-data/quote", requests[0].AbsolutePath);
+        Assert.Equal("/v1/live-data/ltp", requests[1].AbsolutePath);
+        Assert.Contains("segment=COMMODITY", requests[1].Query, StringComparison.Ordinal);
+        Assert.Contains("exchange_symbols=MCX_NATGASMINI25SEP26FUT", requests[1].Query,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CashIndexQuoteAllowsNullLastTradeTime()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
