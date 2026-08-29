@@ -10,6 +10,49 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
 {
     private static readonly TimeZoneInfo India = FindIndiaTimeZone();
 
+    public async Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly from, DateOnly to, string market,
+        CancellationToken cancellationToken)
+    {
+        var localStart = from.ToDateTime(TimeOnly.MinValue);
+        var localEndExclusive = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var startUtc = new DateTimeOffset(localStart, India.GetUtcOffset(localStart)).ToUniversalTime();
+        var endUtc = new DateTimeOffset(localEndExclusive, India.GetUtcOffset(localEndExclusive)).ToUniversalTime();
+        var observations = new List<PaperPnlObservation>();
+
+        if (market is "all" or "nifty")
+        {
+            var nifty = await db.PaperTradeResults.AsNoTracking()
+                .Where(value => value.ClosedAtUtc >= startUtc && value.ClosedAtUtc < endUtc)
+                .Select(value => new { value.RealisedPnl, value.EstimatedCosts })
+                .ToListAsync(cancellationToken);
+            observations.AddRange(nifty.Select(value =>
+                new PaperPnlObservation("nifty", value.RealisedPnl, value.EstimatedCosts)));
+        }
+
+        var marketPositions = await db.MarketPaperPositions.AsNoTracking()
+            .Where(value => value.ClosedAtUtc != null && value.ClosedAtUtc >= startUtc &&
+                            value.ClosedAtUtc < endUtc &&
+                            (market == "all" || value.Market == market))
+            .Select(value => new { value.Market, value.Direction, value.EntryPrice,
+                value.CurrentPrice, value.Quantity, value.RealisedPnl })
+            .ToListAsync(cancellationToken);
+        observations.AddRange(marketPositions
+            .Where(value => value.Market is "nifty" or "sensex" or "natural-gas")
+            .Select(value =>
+            {
+                var gross = (value.Direction == TradingSystem.Domain.Trading.Direction.Buy
+                    ? value.CurrentPrice - value.EntryPrice
+                    : value.EntryPrice - value.CurrentPrice) * value.Quantity;
+                return new PaperPnlObservation(value.Market, value.RealisedPnl,
+                    Math.Max(0m, gross - value.RealisedPnl));
+            }));
+
+        var summaries = PaperPnlSummaryCalculator.Summarise(observations);
+        return new PaperPnlSummary(from, to, market, summaries, summaries.Sum(value => value.Trades),
+            summaries.Sum(value => value.Charges), summaries.Sum(value => value.NetPnl),
+            timeProvider.GetUtcNow());
+    }
+
     public async Task<PaperTradingReport> GetAsync(int days, CancellationToken cancellationToken)
     {
         days = Math.Clamp(days, 1, 90);

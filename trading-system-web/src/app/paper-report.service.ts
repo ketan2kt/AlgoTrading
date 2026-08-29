@@ -16,8 +16,13 @@ export interface ReplayRobustness { validationDays:number; positiveValidationDay
 export interface ReplayVariantResult { code:string; description:string; training:ReplayMetrics; validation:ReplayMetrics; coveredTrades:number; robustness:ReplayRobustness; }
 export interface PaperStrategyReplayReport { sourceTrades:number; tradesWithPricePath:number; rejectedEvaluationsWithoutOptionPath:number; trainingFraction:number; variants:ReplayVariantResult[]; limitations:string[]; }
 export interface PaperTradingReport { daily:DailyPaperPerformance[]; trades:PaperTradeHistoryItem[]; breakdown:StrategyPerformanceBreakdown[]; decisionFunnel:StrategyDecisionFunnel[]; recommendations:ResearchRecommendation[]; research:PaperResearchSummary; shadowStructure:ShadowStructurePerformance[]; replay:PaperStrategyReplayReport; observedAtUtc:string; }
+export interface PaperMarketPnl { market:string; trades:number; wins:number; losses:number; grossProfit:number; grossLoss:number; charges:number; netPnl:number; }
+export interface PaperPnlSummary { from:string; to:string; market:string; markets:PaperMarketPnl[]; totalTrades:number; totalCharges:number; totalNetPnl:number; observedAtUtc:string; }
 @Injectable({providedIn:'root'})
 export class PaperReportService {
   private readonly http=inject(HttpClient);
   get(){return this.http.get<PaperTradingReport>('/api/reports/paper-trading?days=30');}
+  getPnlSummary(from:string,to:string,market:string){
+    return this.http.get<PaperPnlSummary>('/api/reports/paper-trading/pnl-summary',{params:{from,to,market}});
+  }
 }

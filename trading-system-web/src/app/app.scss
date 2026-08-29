@@ -608,6 +608,13 @@ article > span,
 .hz-candidate { border-left:3px solid #d8ad5c; }
 .report-tools { display:flex; gap:.5rem; padding:.55rem .75rem; position:sticky; top:3.2rem; z-index:1; background:#0c1813; }
 .report-tools input { flex:1; min-width:180px; }
+.pnl-report-modal { width:min(900px,96vw); }
+.pnl-report-filter { display:grid; grid-template-columns:repeat(3,minmax(140px,1fr)) auto; gap:.55rem; align-items:end; padding:.75rem; }
+.pnl-report-filter label { display:grid; gap:.3rem; color:#8da095; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; }
+.pnl-report-filter input,.pnl-report-filter select { min-width:0; }
+.pnl-total { display:grid; grid-template-columns:1fr repeat(3,minmax(120px,auto)); gap:1rem; align-items:center; margin:.75rem; padding:.8rem; border:1px solid #315444; background:#101a16; }
+.pnl-total div { display:grid; gap:.2rem; }
+.pnl-total small,.pnl-total span { color:#8da095; }
 .evaluation-table {
   display: grid;
 }
@@ -659,6 +666,7 @@ article > span,
   }
 }
 @media (max-width: 600px) {
+  .pnl-report-filter,.pnl-total { grid-template-columns:1fr; }
   .mode-banner {
     flex-wrap: wrap;
   }

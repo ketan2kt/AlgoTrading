@@ -13,7 +13,7 @@ import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMar
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
-import { PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
+import { PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 
 @Component({
@@ -72,6 +72,13 @@ export class App implements OnInit, OnDestroy {
   protected reportLoading = false;
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
+  protected pnlReportOpen = false;
+  protected pnlReportLoading = false;
+  protected pnlReportError = '';
+  protected pnlSummary: PaperPnlSummary | null = null;
+  protected pnlFrom = this.isoDateDaysAgo(30);
+  protected pnlTo = this.isoDateDaysAgo(0);
+  protected pnlMarket = 'all';
   protected tradeFilter = '';
   protected heroZeroOpen = false;
   protected heroZeroLoading = false;
@@ -305,6 +312,25 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected closeReport():void { this.reportOpen=false; }
+  protected openPnlReport():void { this.controlsOpen=false; this.pnlReportOpen=true; }
+  protected closePnlReport():void { this.pnlReportOpen=false; }
+  protected searchPnl():void {
+    if (!this.pnlFrom || !this.pnlTo || this.pnlFrom > this.pnlTo) {
+      this.pnlReportError='Select a valid From and To date range.'; return;
+    }
+    this.pnlReportLoading=true; this.pnlReportError=''; this.pnlSummary=null;
+    this.subscriptions.add(this.paperReportService.getPnlSummary(this.pnlFrom,this.pnlTo,this.pnlMarket).subscribe({
+      next:value=>{this.pnlSummary=value;this.pnlReportLoading=false;this.refreshView();},
+      error:()=>{this.pnlReportLoading=false;this.pnlReportError='Unable to load the P&L report.';this.refreshView();},
+    }));
+  }
+  protected marketReportName(market:string):string {
+    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' : 'Natural Gas';
+  }
+  private isoDateDaysAgo(days:number):string {
+    const value=new Date(Date.now()-days*86400000);
+    return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(value);
+  }
   protected filteredTrades():PaperTradeHistoryItem[] {
     const value=this.tradeFilter.trim().toLowerCase();
     return !value ? this.report?.trades || [] : (this.report?.trades || []).filter(trade=>

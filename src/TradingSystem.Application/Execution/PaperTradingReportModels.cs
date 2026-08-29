@@ -49,4 +49,31 @@ public sealed record PaperTradingReport(IReadOnlyList<DailyPaperPerformance> Dai
 public interface IPaperTradingReportReader
 {
     Task<PaperTradingReport> GetAsync(int days, CancellationToken cancellationToken);
+
+    Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly from, DateOnly to, string market,
+        CancellationToken cancellationToken);
+}
+
+public sealed record PaperPnlObservation(string Market, decimal NetPnl, decimal Charges);
+
+public sealed record PaperMarketPnl(string Market, int Trades, int Wins, int Losses,
+    decimal GrossProfit, decimal GrossLoss, decimal Charges, decimal NetPnl);
+
+public sealed record PaperPnlSummary(DateOnly From, DateOnly To, string Market,
+    IReadOnlyList<PaperMarketPnl> Markets, int TotalTrades, decimal TotalCharges,
+    decimal TotalNetPnl, DateTimeOffset ObservedAtUtc);
+
+public static class PaperPnlSummaryCalculator
+{
+    private static readonly string[] MarketOrder = ["nifty", "sensex", "natural-gas"];
+
+    public static IReadOnlyList<PaperMarketPnl> Summarise(IEnumerable<PaperPnlObservation> observations) =>
+        observations.GroupBy(value => value.Market, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => Array.IndexOf(MarketOrder, group.Key.ToLowerInvariant()))
+            .Select(group => new PaperMarketPnl(group.Key.ToLowerInvariant(), group.Count(),
+                group.Count(value => value.NetPnl > 0), group.Count(value => value.NetPnl < 0),
+                group.Where(value => value.NetPnl > 0).Sum(value => value.NetPnl),
+                group.Where(value => value.NetPnl < 0).Sum(value => value.NetPnl),
+                group.Sum(value => value.Charges), group.Sum(value => value.NetPnl)))
+            .ToArray();
 }
