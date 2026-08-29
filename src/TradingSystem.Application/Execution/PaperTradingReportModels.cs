@@ -50,7 +50,7 @@ public interface IPaperTradingReportReader
 {
     Task<PaperTradingReport> GetAsync(int days, CancellationToken cancellationToken);
 
-    Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly from, DateOnly to, string market,
+    Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly fromDate, DateOnly toDate, string market,
         CancellationToken cancellationToken);
 }
 

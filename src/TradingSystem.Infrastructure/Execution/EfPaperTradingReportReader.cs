@@ -10,11 +10,11 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
 {
     private static readonly TimeZoneInfo India = FindIndiaTimeZone();
 
-    public async Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly from, DateOnly to, string market,
+    public async Task<PaperPnlSummary> GetPnlSummaryAsync(DateOnly fromDate, DateOnly toDate, string market,
         CancellationToken cancellationToken)
     {
-        var localStart = from.ToDateTime(TimeOnly.MinValue);
-        var localEndExclusive = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var localStart = fromDate.ToDateTime(TimeOnly.MinValue);
+        var localEndExclusive = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue);
         var startUtc = new DateTimeOffset(localStart, India.GetUtcOffset(localStart)).ToUniversalTime();
         var endUtc = new DateTimeOffset(localEndExclusive, India.GetUtcOffset(localEndExclusive)).ToUniversalTime();
         var observations = new List<PaperPnlObservation>();
@@ -48,7 +48,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             }));
 
         var summaries = PaperPnlSummaryCalculator.Summarise(observations);
-        return new PaperPnlSummary(from, to, market, summaries, summaries.Sum(value => value.Trades),
+        return new PaperPnlSummary(fromDate, toDate, market, summaries, summaries.Sum(value => value.Trades),
             summaries.Sum(value => value.Charges), summaries.Sum(value => value.NetPnl),
             timeProvider.GetUtcNow());
     }
