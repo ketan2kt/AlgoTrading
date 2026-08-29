@@ -12,6 +12,10 @@ public interface IGrowwReadOnlyGateway
         GrowwHistoricalCandleRequest request,
         CancellationToken cancellationToken);
 
+    Task<GrowwOptionChain> GetOptionChainAsync(
+        GrowwOptionChainRequest request,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<GrowwInstrumentRecord>> GetInstrumentMasterAsync(
         CancellationToken cancellationToken);
 
@@ -62,6 +66,35 @@ public sealed record GrowwHistoricalCandles(
     IReadOnlyList<GrowwHistoricalCandle> Candles,
     decimal ClosingPrice,
     int IntervalInMinutes);
+
+public sealed record GrowwOptionChainRequest(
+    string Exchange,
+    string Underlying,
+    DateOnly ExpiryDate);
+
+public sealed record GrowwOptionChain(
+    decimal UnderlyingLastPrice,
+    IReadOnlyList<GrowwOptionStrike> Strikes);
+
+public sealed record GrowwOptionStrike(
+    decimal StrikePrice,
+    GrowwOptionContract? Call,
+    GrowwOptionContract? Put);
+
+public sealed record GrowwOptionContract(
+    string TradingSymbol,
+    decimal LastPrice,
+    decimal OpenInterest,
+    decimal Volume,
+    GrowwOptionGreeks? Greeks);
+
+public sealed record GrowwOptionGreeks(
+    decimal Delta,
+    decimal Gamma,
+    decimal Theta,
+    decimal Vega,
+    decimal Rho,
+    decimal ImpliedVolatility);
 
 public sealed record GrowwInstrumentRecord(
     string Exchange,

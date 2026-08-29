@@ -131,6 +131,45 @@ public sealed class GrowwReadOnlyGateway(
         return new GrowwHistoricalCandles(candles, payload.ClosingPrice, payload.IntervalInMinutes);
     }
 
+    public async Task<GrowwOptionChain> GetOptionChainAsync(
+        GrowwOptionChainRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateIdentifier(request.Exchange, nameof(request.Exchange));
+        ValidateIdentifier(request.Underlying, nameof(request.Underlying));
+        var path = $"/v1/option-chain/exchange/{Uri.EscapeDataString(request.Exchange)}" +
+                   $"/underlying/{Uri.EscapeDataString(request.Underlying)}" +
+                   BuildQuery(("expiry_date", request.ExpiryDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        var payload = await GetPayloadAsync<OptionChainPayload>(path, cancellationToken);
+        if (payload.UnderlyingLastPrice <= 0 || payload.Strikes is null || payload.Strikes.Count == 0)
+            throw Malformed("Groww option-chain response omitted the underlying price or strikes.");
+
+        var strikes = new List<GrowwOptionStrike>(payload.Strikes.Count);
+        foreach (var (key, value) in payload.Strikes)
+        {
+            if (!decimal.TryParse(key, NumberStyles.Number, CultureInfo.InvariantCulture, out var strike) || strike <= 0)
+                throw Malformed($"Groww option-chain returned invalid strike key '{key}'.");
+            strikes.Add(new GrowwOptionStrike(strike, MapContract(value.Call), MapContract(value.Put)));
+        }
+
+        return new GrowwOptionChain(payload.UnderlyingLastPrice,
+            strikes.OrderBy(value => value.StrikePrice).ToArray());
+    }
+
+    private static GrowwOptionContract? MapContract(OptionContractPayload? value)
+    {
+        if (value is null) return null;
+        if (string.IsNullOrWhiteSpace(value.TradingSymbol) || value.LastPrice < 0 ||
+            value.OpenInterest < 0 || value.Volume < 0)
+            throw Malformed("Groww option-chain returned an invalid option contract.");
+        var greeks = value.Greeks is null ? null : new GrowwOptionGreeks(
+            value.Greeks.Delta, value.Greeks.Gamma, value.Greeks.Theta,
+            value.Greeks.Vega, value.Greeks.Rho, value.Greeks.ImpliedVolatility);
+        return new GrowwOptionContract(value.TradingSymbol, value.LastPrice,
+            value.OpenInterest, value.Volume, greeks);
+    }
+
     public async Task<IReadOnlyList<GrowwInstrumentRecord>> GetInstrumentMasterAsync(
         CancellationToken cancellationToken)
     {
@@ -337,6 +376,29 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("candles")] JsonElement[]? Candles,
         [property: JsonPropertyName("closing_price")] decimal ClosingPrice,
         [property: JsonPropertyName("interval_in_minutes")] int IntervalInMinutes);
+
+    private sealed record OptionChainPayload(
+        [property: JsonPropertyName("underlying_ltp")] decimal UnderlyingLastPrice,
+        [property: JsonPropertyName("strikes")] Dictionary<string, OptionStrikePayload>? Strikes);
+
+    private sealed record OptionStrikePayload(
+        [property: JsonPropertyName("CE")] OptionContractPayload? Call,
+        [property: JsonPropertyName("PE")] OptionContractPayload? Put);
+
+    private sealed record OptionContractPayload(
+        [property: JsonPropertyName("trading_symbol")] string? TradingSymbol,
+        [property: JsonPropertyName("ltp")] decimal LastPrice,
+        [property: JsonPropertyName("open_interest")] decimal OpenInterest,
+        [property: JsonPropertyName("volume")] decimal Volume,
+        [property: JsonPropertyName("greeks")] OptionGreeksPayload? Greeks);
+
+    private sealed record OptionGreeksPayload(
+        [property: JsonPropertyName("delta")] decimal Delta,
+        [property: JsonPropertyName("gamma")] decimal Gamma,
+        [property: JsonPropertyName("theta")] decimal Theta,
+        [property: JsonPropertyName("vega")] decimal Vega,
+        [property: JsonPropertyName("rho")] decimal Rho,
+        [property: JsonPropertyName("iv")] decimal ImpliedVolatility);
 
     private sealed record PositionsPayload(
         [property: JsonPropertyName("positions")] PositionPayload[]? Positions);

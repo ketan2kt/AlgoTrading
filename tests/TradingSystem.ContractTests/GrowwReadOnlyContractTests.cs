@@ -56,6 +56,31 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task OptionChainUsesOfficialEndpointAndMapsOiVolumeAndGreeks()
+    {
+        HttpRequestMessage? captured = null;
+        var gateway = CreateGateway(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"underlying_ltp":24525.5,"strikes":{"24500":{"CE":{"greeks":{"delta":0.55,"gamma":0.002,"theta":-8.1,"vega":13.2,"rho":2.7,"iv":12.4},"trading_symbol":"NIFTY26AUG24500CE","ltp":105.5,"open_interest":12000,"volume":45000},"PE":{"greeks":{"delta":-0.45,"gamma":0.002,"theta":-7.9,"vega":13.1,"rho":-2.2,"iv":13.0},"trading_symbol":"NIFTY26AUG24500PE","ltp":80.5,"open_interest":15000,"volume":52000}}}}}
+                """);
+        });
+
+        var chain = await gateway.GetOptionChainAsync(
+            new GrowwOptionChainRequest("NSE", "NIFTY", new DateOnly(2026, 8, 25)),
+            CancellationToken.None);
+
+        var strike = Assert.Single(chain.Strikes);
+        Assert.Equal(24525.5m, chain.UnderlyingLastPrice);
+        Assert.Equal(12000m, strike.Call!.OpenInterest);
+        Assert.Equal(52000m, strike.Put!.Volume);
+        Assert.Equal(12.4m, strike.Call.Greeks!.ImpliedVolatility);
+        Assert.Equal("/v1/option-chain/exchange/NSE/underlying/NIFTY", captured!.RequestUri!.AbsolutePath);
+        Assert.Contains("expiry_date=2026-08-25", captured.RequestUri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CommodityQuoteFallsBackToDocumentedLtpEndpointWhenQuoteRejectsValidSymbol()
     {
         var requests = new List<Uri>();

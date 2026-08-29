@@ -134,6 +134,9 @@ public abstract class DataSnapshot : Entity, IAppendOnlyEntity
         SourceTimestampUtc = sourceTimestampUtc.ToUniversalTime();
         ReceivedAtUtc = receivedAtUtc.ToUniversalTime();
         PayloadJson = payloadJson;
+        IsFresh = true;
+        IsValid = true;
+        Confidence = 1m;
     }
 
     public string Source { get; private init; }

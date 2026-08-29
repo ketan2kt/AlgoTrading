@@ -167,6 +167,15 @@ public static class DependencyInjection
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddHostedService<GrowwAdditionalMarketDataService>();
+        services.AddOptions<OptionResearchCaptureOptions>()
+            .Bind(configuration.GetSection(OptionResearchCaptureOptions.SectionName))
+            .Validate(value => value.IntervalSeconds is >= 60 and <= 900 &&
+                               value.StrikesEachSide is >= 2 and <= 30 &&
+                               TimeOnly.TryParseExact(value.SessionStart, "HH:mm", out _) &&
+                               TimeOnly.TryParseExact(value.SessionEnd, "HH:mm", out _),
+                "Option research capture settings are invalid.")
+            .ValidateOnStart();
+        services.AddHostedService<GrowwOptionResearchCaptureService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
         services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
         services.AddOptions<HeroZeroOptions>()
