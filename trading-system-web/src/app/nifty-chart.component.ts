@@ -26,7 +26,12 @@ import {
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
-import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
+import {
+  aggregateCandles,
+  aggregateVolumeBars,
+  currentSessionLogicalRange,
+  latestIstSessionDate,
+} from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
 import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlays';
@@ -135,6 +140,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private hasFittedContent = false;
   private renderedTimeframeMinutes = 0;
   private renderedInstrument = '';
+  private renderedSessionDate: string | null = null;
   protected rangeText = '';
   protected visibility = this.readVisibility();
 
@@ -202,6 +208,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     if (instrumentIdentity !== this.renderedInstrument) {
       this.hasFittedContent = false;
       this.renderedInstrument = instrumentIdentity;
+      this.renderedSessionDate = null;
     }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
     const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
@@ -287,12 +294,18 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     } else {
       this.markerApi?.setMarkers([]);
     }
-    if (candles.length && (!this.hasFittedContent || this.renderedTimeframeMinutes !== this.timeframeMinutes)) {
+    const latestSessionDate = latestIstSessionDate(displayCandles);
+    if (candles.length && (
+      !this.hasFittedContent ||
+      this.renderedTimeframeMinutes !== this.timeframeMinutes ||
+      latestSessionDate !== this.renderedSessionDate
+    )) {
       const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
       const initialRange = currentSessionLogicalRange(displayCandles, this.timeframeMinutes, sessionMinutes);
       if (initialRange) this.chart.timeScale().setVisibleLogicalRange(initialRange);
       this.hasFittedContent = true;
       this.renderedTimeframeMinutes = this.timeframeMinutes;
+      this.renderedSessionDate = latestSessionDate;
     }
     this.positionZones(overlay);
   }

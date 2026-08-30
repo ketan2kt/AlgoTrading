@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
+import {
+  aggregateCandles,
+  aggregateVolumeBars,
+  currentSessionLogicalRange,
+  latestIstSessionDate,
+} from './chart-candles';
 import { WorkspaceCandle } from './trading-workspace';
 
 describe('aggregateCandles', () => {
@@ -62,6 +67,19 @@ describe('currentSessionLogicalRange', () => {
     ];
 
     expect(currentSessionLogicalRange(candles, 5, 870)).toEqual({ from: 0.5, to: 174.5 });
+  });
+});
+
+describe('latestIstSessionDate', () => {
+  it('detects when a complete snapshot advances beyond the cached startup session', () => {
+    const cached = [candle('2026-08-26T07:30:00Z', 100, 101, 99, 100, 10)];
+    const complete = [
+      ...cached,
+      candle('2026-08-28T03:45:00Z', 102, 103, 101, 102, 10),
+    ];
+
+    expect(latestIstSessionDate(cached)).toBe('2026-08-26');
+    expect(latestIstSessionDate(complete)).toBe('2026-08-28');
   });
 });
 

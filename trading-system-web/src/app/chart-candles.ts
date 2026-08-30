@@ -28,6 +28,10 @@ export function currentSessionLogicalRange(
   };
 }
 
+export function latestIstSessionDate(candles: WorkspaceCandle[]): string | null {
+  return candles.length ? istSessionDate(candles[candles.length - 1].openTimeUtc) : null;
+}
+
 function istSessionDate(openTimeUtc: string): string {
   const timestamp = new Date(openTimeUtc).getTime() + IST_OFFSET_MILLISECONDS;
   return new Date(timestamp).toISOString().slice(0, 10);
