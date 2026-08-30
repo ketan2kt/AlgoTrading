@@ -59,6 +59,36 @@ public sealed class TradingWorkspaceIsolationTests
     }
 
     [Theory]
+    [InlineData("2026-08-28T03:45:00Z", true)]  // Friday, 09:15 IST
+    [InlineData("2026-08-30T03:45:00Z", false)] // Sunday, 09:15 IST
+    [InlineData("2026-08-28T03:44:00Z", false)] // Before the cash session
+    [InlineData("2026-08-28T10:01:00Z", false)] // After the cash session
+    public void CashWorkspaceRejectsWeekendAndOutsideSessionCandles(string timestamp, bool expected)
+    {
+        var result = EfTradingWorkspaceReader.IsTradableSessionTimestamp(
+            DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture),
+            new TimeOnly(9, 15),
+            new TimeOnly(15, 30));
+
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("2026-08-28T03:30:00Z", true)]  // Friday, 09:00 IST
+    [InlineData("2026-08-28T18:00:00Z", true)]  // Friday, 23:30 IST
+    [InlineData("2026-08-28T18:01:00Z", false)] // After the commodity session
+    [InlineData("2026-08-30T12:00:00Z", false)] // Sunday
+    public void CommodityWorkspaceRejectsWeekendAndOutsideSessionCandles(string timestamp, bool expected)
+    {
+        var result = EfTradingWorkspaceReader.IsTradableSessionTimestamp(
+            DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture),
+            new TimeOnly(9, 0),
+            new TimeOnly(23, 30));
+
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData("sensex", "Sensex")]
     [InlineData("natural-gas", "Natural Gas Mini Futures")]
     public void UnavailableNonNiftyMarketNeverInheritsNiftyAutomation(

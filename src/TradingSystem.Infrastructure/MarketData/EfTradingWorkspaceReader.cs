@@ -63,6 +63,9 @@ internal sealed class EfTradingWorkspaceReader(
             return Empty("InstrumentUnavailable", $"Synchronise the Groww {definition.DisplayName} instrument before enabling the feed.");
         }
 
+        // Read enough rows to survive stale weekend/after-hours candles without allowing
+        // those invalid observations to displace the latest real exchange sessions.
+        const int maximumDiscardedNonSessionMinutes = 2 * 24 * 60;
         var closed = await dbContext.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == instrument.Id &&
                             value.IntervalSeconds == marketDataOptions.Value.CandleIntervalSeconds &&
@@ -70,12 +73,17 @@ internal sealed class EfTradingWorkspaceReader(
                             value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
                             value.OpenTimeUtc < sessionEndUtc)
             .OrderByDescending(value => value.OpenTimeUtc)
-            .Take(candleCount)
+            .Take(candleCount + maximumDiscardedNonSessionMinutes)
             .OrderBy(value => value.OpenTimeUtc)
             .Select(value => new WorkspaceCandle(
                 value.OpenTimeUtc, value.IntervalSeconds, value.Open, value.High, value.Low,
                 value.Close, value.Volume, true))
             .ToListAsync(cancellationToken);
+        closed = closed
+            .Where(value => IsTradableSessionTimestamp(
+                value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd))
+            .TakeLast(candleCount)
+            .ToList();
         var displayedSessionDates = closed
             .Select(value => DateOnly.FromDateTime(
                 TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))
@@ -89,12 +97,14 @@ internal sealed class EfTradingWorkspaceReader(
         var interval = marketDataOptions.Value.CandleIntervalSeconds;
         var currentBucket = DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds() -
                                                                now.ToUnixTimeSeconds() % interval);
-        var observations = await dbContext.MarketObservations.AsNoTracking()
-            .Where(value => value.InstrumentId == instrument.Id &&
-                            value.Source == "Groww" &&
-                            value.SourceTimestampUtc >= currentBucket)
-            .OrderBy(value => value.SourceTimestampUtc)
-            .ToListAsync(cancellationToken);
+        var observations = IsTradableSessionTimestamp(now, definition.SessionStart, definition.SessionEnd)
+            ? await dbContext.MarketObservations.AsNoTracking()
+                .Where(value => value.InstrumentId == instrument.Id &&
+                                value.Source == "Groww" &&
+                                value.SourceTimestampUtc >= currentBucket)
+                .OrderBy(value => value.SourceTimestampUtc)
+                .ToListAsync(cancellationToken)
+            : [];
         if (observations.Count > 0)
         {
             closed.Add(new WorkspaceCandle(
@@ -127,8 +137,10 @@ internal sealed class EfTradingWorkspaceReader(
                 .Select(value => new WorkspaceVolumeBar(value.OpenTimeUtc, value.Volume, true))
                 .ToListAsync(cancellationToken);
         if (displayedSessionDates.Count > 0)
-            futuresVolume = futuresVolume.Where(value => displayedSessionDates.Contains(
-                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date)))
+            futuresVolume = futuresVolume.Where(value =>
+                    IsTradableSessionTimestamp(value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd) &&
+                    displayedSessionDates.Contains(DateOnly.FromDateTime(
+                        TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date)))
                 .ToList();
 
         var signalRows = market == TradingMarketCatalog.Nifty.Code
@@ -431,6 +443,20 @@ internal sealed class EfTradingWorkspaceReader(
     internal static DateTimeOffset PositionHistoryStartUtc(
         TradingMarketDefinition definition,
         DateTimeOffset sessionStartUtc) => sessionStartUtc;
+
+    internal static bool IsTradableSessionTimestamp(
+        DateTimeOffset timestampUtc,
+        TimeOnly sessionStart,
+        TimeOnly sessionEnd)
+    {
+        var local = TimeZoneInfo.ConvertTime(timestampUtc, IndiaTimeZone);
+        if (local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return false;
+
+        var time = TimeOnly.FromDateTime(local.DateTime);
+        return sessionStart <= sessionEnd
+            ? time >= sessionStart && time <= sessionEnd
+            : time >= sessionStart || time <= sessionEnd;
+    }
 
     internal static IQueryable<Instrument> ScopeInstrumentQuery(
         IQueryable<Instrument> instruments,
