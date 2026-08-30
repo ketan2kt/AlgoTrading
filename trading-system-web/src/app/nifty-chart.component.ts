@@ -20,18 +20,30 @@ import {
   IPriceLine,
   ISeriesApi,
   ISeriesMarkersPluginApi,
+  LineData,
+  LineSeries,
+  LineStyle,
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { aggregateCandles, aggregateVolumeBars, currentSessionLogicalRange } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
+import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlays';
 
 @Component({
   selector: 'app-nifty-chart',
   standalone: true,
   template: `
     <div class="chart-shell">
+      <div class="overlay-controls" aria-label="Chart overlays">
+        <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
+        <button type="button" [class.active]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
+        <button type="button" [class.active]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
+        <button type="button" [class.active]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
+        <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
+        @if (rangeText) { <span>{{rangeText}}</span> }
+      </div>
       <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
       <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
       @if (!snapshot?.candles?.length) {
@@ -81,6 +93,10 @@ import { chartPriceLineTitles } from './chart-labels';
         letter-spacing: 0.08em;
         pointer-events: none;
       }
+      .overlay-controls { position:absolute; z-index:2; top:7px; left:8px; display:flex; flex-wrap:wrap; gap:4px; max-width:calc(100% - 110px); }
+      .overlay-controls button { padding:3px 7px; border:1px solid #30433a; border-radius:4px; background:#0d1713dd; color:#82978c; font-size:.62rem; }
+      .overlay-controls button.active { border-color:#62ba91; color:#bce8d2; }
+      .overlay-controls span { align-self:center; padding:2px 6px; color:#b6c6be; font-size:.64rem; background:#0d1713dd; }
       .trade-zone {
         position: absolute;
         right: 64px;
@@ -110,12 +126,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private chart: IChartApi | null = null;
   private series: ISeriesApi<'Candlestick'> | null = null;
   private volumeSeries: ISeriesApi<'Histogram'> | null = null;
+  private emaFastSeries: ISeriesApi<'Line'> | null = null;
+  private emaSlowSeries: ISeriesApi<'Line'> | null = null;
+  private vwapSeries: ISeriesApi<'Line'> | null = null;
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private priceLines: IPriceLine[] = [];
   private hasFittedContent = false;
   private renderedTimeframeMinutes = 0;
   private renderedInstrument = '';
+  protected rangeText = '';
+  protected visibility = this.readVisibility();
 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
@@ -152,6 +173,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       lastValueVisible: false,
       priceLineVisible: false,
     });
+    this.emaFastSeries = this.chart.addSeries(LineSeries, { title:'EMA9', color:'#68a7ff', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
+    this.emaSlowSeries = this.chart.addSeries(LineSeries, { title:'EMA21', color:'#b68cff', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
+    this.vwapSeries = this.chart.addSeries(LineSeries, { title:'VWAP', color:'#f2c94c', lineWidth:2, lastValueVisible:true, priceLineVisible:false });
     this.chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
       borderVisible: false,
@@ -206,13 +230,31 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       };
     });
     this.volumeSeries?.setData(volume);
+    const lineData = (points:{openTimeUtc:string;value:number}[]):LineData<Time>[] => points.map(value => ({
+      time: Math.floor(new Date(value.openTimeUtc).getTime()/1000) as Time, value:value.value,
+    }));
+    this.emaFastSeries?.setData(lineData(ema(displayCandles,9)));
+    this.emaSlowSeries?.setData(lineData(ema(displayCandles,21)));
+    this.vwapSeries?.setData(lineData(sessionVwap(this.snapshot.candles,this.snapshot.futuresVolume ?? [])));
+    this.emaFastSeries?.applyOptions({visible:this.visibility.ema});
+    this.emaSlowSeries?.applyOptions({visible:this.visibility.ema});
+    this.vwapSeries?.applyOptions({visible:this.visibility.vwap});
     this.priceLines.forEach((line) => this.series?.removePriceLine(line));
     this.priceLines = [];
+    const levels=chartLevels(this.snapshot.candles);
+    this.rangeText=levels ? `Range ${levels.dayRange.toFixed(2)} · ${levels.dayRangePercent.toFixed(2)}%` : '';
+    const levelLine=(price:number|null,title:string,color:string,style:LineStyle=LineStyle.Dashed):void=>{
+      if(price==null)return;
+      this.priceLines.push(this.series!.createPriceLine({price,color,lineWidth:1,lineStyle:style,title}));
+    };
+    if(levels&&this.visibility.day){levelLine(levels.dayHigh,'DAY HIGH','#2ad18a');levelLine(levels.dayLow,'DAY LOW','#ff7380');}
+    if(levels&&this.visibility.previous){levelLine(levels.previousHigh,'PREV HIGH','#5f8fb5');levelLine(levels.previousLow,'PREV LOW','#5f8fb5');levelLine(levels.previousClose,'PREV CLOSE','#7f8d86',LineStyle.Dotted);}
+    if(levels&&this.visibility.openingRange){levelLine(levels.openingRangeHigh,'OR HIGH','#d49a4b');levelLine(levels.openingRangeLow,'OR LOW','#d49a4b');}
     const overlay = this.latestOverlay();
     if (overlay) {
       const entry = overlay.entry;
       const lineTitles = chartPriceLineTitles(this.snapshot, overlay.direction);
-      this.priceLines = [
+      this.priceLines.push(
         this.series.createPriceLine({
           price: entry,
           color: '#f2c94c',
@@ -231,7 +273,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
           lineWidth: 2,
           title: lineTitles.target,
         }),
-      ];
+      );
       const position = overlay.direction === 'Buy' ? 'belowBar' : 'aboveBar';
       this.markerApi = createSeriesMarkers(this.series, [
         {
@@ -239,7 +281,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
           position,
           color: '#f2c94c',
           shape: overlay.direction === 'Buy' ? 'arrowUp' : 'arrowDown',
-          text: `${overlay.strategy} · ${overlay.status}`,
+          text: entryExplanation(overlay,this.snapshot.evaluations),
         },
       ]);
     } else {
@@ -253,6 +295,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.renderedTimeframeMinutes = this.timeframeMinutes;
     }
     this.positionZones(overlay);
+  }
+
+  protected toggle(key:keyof ChartOverlayVisibility):void {
+    this.visibility={...this.visibility,[key]:!this.visibility[key]};
+    localStorage.setItem('sarthi.chartOverlays',JSON.stringify(this.visibility));
+    this.render();
+  }
+
+  private readVisibility():ChartOverlayVisibility {
+    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true};
+    try{return {...defaults,...JSON.parse(localStorage.getItem('sarthi.chartOverlays')||'{}')};}catch{return defaults;}
   }
 
   private latestOverlay(): WorkspaceTradeOverlay | null {
@@ -282,3 +335,5 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     element.style.height = `${Math.max(2, Math.abs(firstY - secondY))}px`;
   }
 }
+
+interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; }
