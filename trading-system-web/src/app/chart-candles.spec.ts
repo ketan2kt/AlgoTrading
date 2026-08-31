@@ -3,6 +3,7 @@ import {
   aggregateCandles,
   aggregateVolumeBars,
   currentSessionLogicalRange,
+  currentSessionTimeRange,
   latestIstSessionDate,
 } from './chart-candles';
 import { WorkspaceCandle } from './trading-workspace';
@@ -80,6 +81,32 @@ describe('latestIstSessionDate', () => {
 
     expect(latestIstSessionDate(cached)).toBe('2026-08-26');
     expect(latestIstSessionDate(complete)).toBe('2026-08-28');
+  });
+});
+
+describe('currentSessionTimeRange', () => {
+  it('focuses by absolute session timestamps so additional volume-series points cannot shift it', () => {
+    const candles = [
+      candle('2026-08-28T03:45:00Z', 100, 101, 99, 100, 10),
+      candle('2026-08-31T03:45:00Z', 102, 103, 101, 102, 10),
+      candle('2026-08-31T03:50:00Z', 102, 104, 102, 103, 10),
+    ];
+
+    const range = currentSessionTimeRange(candles, 375);
+
+    expect(range).toEqual({
+      from: new Date('2026-08-31T03:45:00Z').getTime() / 1000,
+      to: new Date('2026-08-31T10:00:00Z').getTime() / 1000,
+    });
+  });
+
+  it('uses the full MCX session duration', () => {
+    const candles = [candle('2026-08-31T03:30:00Z', 280, 281, 279, 280, 10)];
+
+    expect(currentSessionTimeRange(candles, 870)).toEqual({
+      from: new Date('2026-08-31T03:30:00Z').getTime() / 1000,
+      to: new Date('2026-08-31T18:00:00Z').getTime() / 1000,
+    });
   });
 });
 

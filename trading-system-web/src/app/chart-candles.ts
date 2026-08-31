@@ -5,6 +5,11 @@ export interface ChartLogicalRange {
   to: number;
 }
 
+export interface ChartTimeRange {
+  from: number;
+  to: number;
+}
+
 const IST_OFFSET_MILLISECONDS = 330 * 60_000;
 const DEFAULT_SESSION_MINUTES = 375;
 
@@ -30,6 +35,20 @@ export function currentSessionLogicalRange(
 
 export function latestIstSessionDate(candles: WorkspaceCandle[]): string | null {
   return candles.length ? istSessionDate(candles[candles.length - 1].openTimeUtc) : null;
+}
+
+export function currentSessionTimeRange(
+  candles: WorkspaceCandle[],
+  sessionMinutes = DEFAULT_SESSION_MINUTES,
+): ChartTimeRange | null {
+  if (!candles.length) return null;
+
+  const latestSession = istSessionDate(candles[candles.length - 1].openTimeUtc);
+  const first = candles.find((candle) => istSessionDate(candle.openTimeUtc) === latestSession);
+  if (!first) return null;
+
+  const from = Math.floor(new Date(first.openTimeUtc).getTime() / 1000);
+  return { from, to: from + sessionMinutes * 60 };
 }
 
 function istSessionDate(openTimeUtc: string): string {
