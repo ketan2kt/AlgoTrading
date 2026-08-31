@@ -17,12 +17,21 @@ export function currentSessionLogicalRange(
   candles: WorkspaceCandle[],
   timeframeMinutes: number,
   sessionMinutes = DEFAULT_SESSION_MINUTES,
+  auxiliaryTimesUtc: string[] = [],
 ): ChartLogicalRange | null {
   if (!candles.length || timeframeMinutes < 1) return null;
 
   const latestSession = istSessionDate(candles[candles.length - 1].openTimeUtc);
-  const firstCurrentSessionIndex = candles.findIndex(
-    (candle) => istSessionDate(candle.openTimeUtc) === latestSession,
+  // Lightweight Charts assigns logical indexes over the union of timestamps
+  // from every series. Futures-volume bars can contain timestamps that the
+  // spot/index candle series does not, so using only candle indexes shifts and
+  // stretches the viewport differently for each market.
+  const timeline = [...new Set([
+    ...candles.map((candle) => candle.openTimeUtc),
+    ...auxiliaryTimesUtc,
+  ].map((time) => new Date(time).getTime()))].sort((left, right) => left - right);
+  const firstCurrentSessionIndex = timeline.findIndex(
+    (timestamp) => istSessionDate(new Date(timestamp).toISOString()) === latestSession,
   );
   if (firstCurrentSessionIndex < 0) return null;
 

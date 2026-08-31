@@ -29,7 +29,7 @@ import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-works
 import {
   aggregateCandles,
   aggregateVolumeBars,
-  currentSessionTimeRange,
+  currentSessionLogicalRange,
   latestIstSessionDate,
 } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
@@ -302,12 +302,14 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       (latestSessionDate !== null && latestSessionDate > this.renderedSessionDate)
     )) {
       const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
-      const initialRange = currentSessionTimeRange(displayCandles, sessionMinutes);
+      const initialRange = currentSessionLogicalRange(
+        displayCandles,
+        this.timeframeMinutes,
+        sessionMinutes,
+        volume.map((bar) => new Date((bar.time as number) * 1000).toISOString()),
+      );
       if (initialRange) {
-        this.chart.timeScale().setVisibleRange({
-          from: initialRange.from as Time,
-          to: initialRange.to as Time,
-        });
+        this.chart.timeScale().setVisibleLogicalRange(initialRange);
       }
       this.hasFittedContent = true;
       this.renderedTimeframeMinutes = this.timeframeMinutes;

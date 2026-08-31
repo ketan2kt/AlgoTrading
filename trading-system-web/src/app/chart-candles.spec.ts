@@ -71,6 +71,27 @@ describe('currentSessionLogicalRange', () => {
   });
 });
 
+describe('currentSessionLogicalRange with auxiliary series', () => {
+  it('uses the combined chart timeline so volume-only history cannot shift the session', () => {
+    const candles = [
+      candle('2026-08-28T03:45:00.000Z', 100, 101, 99, 100, 10),
+      candle('2026-08-31T03:45:00.000Z', 101, 102, 100, 101, 10),
+      candle('2026-08-31T03:50:00.000Z', 102, 103, 101, 102, 10),
+    ];
+    const volumeTimes = [
+      '2026-08-27T03:45:00.000Z',
+      '2026-08-28T03:45:00.000Z',
+      '2026-08-31T03:45:00.000Z',
+      '2026-08-31T03:50:00.000Z',
+    ];
+
+    expect(currentSessionLogicalRange(candles, 5, 375, volumeTimes)).toEqual({
+      from: 1.5,
+      to: 76.5,
+    });
+  });
+});
+
 describe('latestIstSessionDate', () => {
   it('detects when a complete snapshot advances beyond the cached startup session', () => {
     const cached = [candle('2026-08-26T07:30:00Z', 100, 101, 99, 100, 10)];
