@@ -30,6 +30,7 @@ import {
   aggregateCandles,
   aggregateVolumeBars,
   currentSessionLogicalRange,
+  filterIstSession,
   latestIstSessionDate,
 } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
@@ -211,7 +212,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.renderedSessionDate = null;
     }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
-    const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
+    const latestSessionDate = latestIstSessionDate(displayCandles);
+    const sessionCandles = filterIstSession(displayCandles, latestSessionDate);
+    const candles: CandlestickData<Time>[] = sessionCandles.map((value) => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime() / 1000) as Time,
       open: value.open,
       high: value.high,
@@ -220,15 +223,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     }));
     this.series.setData(candles);
     const candleDirectionByTime = new Map(
-      displayCandles.map((value) => [
+      sessionCandles.map((value) => [
         Math.floor(new Date(value.openTimeUtc).getTime() / 1000),
         value.close >= value.open,
       ]),
     );
-    const volume: HistogramData<Time>[] = aggregateVolumeBars(
+    const volumeBars = aggregateVolumeBars(
       this.snapshot.futuresVolume ?? [],
       this.timeframeMinutes,
-    ).map((value) => {
+    );
+    const sessionVolumeBars = filterIstSession(volumeBars, latestSessionDate);
+    const volume: HistogramData<Time>[] = sessionVolumeBars.map((value) => {
       const time = Math.floor(new Date(value.openTimeUtc).getTime() / 1000);
       return {
         time: time as Time,
@@ -240,9 +245,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     const lineData = (points:{openTimeUtc:string;value:number}[]):LineData<Time>[] => points.map(value => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime()/1000) as Time, value:value.value,
     }));
-    this.emaFastSeries?.setData(lineData(ema(displayCandles,9)));
-    this.emaSlowSeries?.setData(lineData(ema(displayCandles,21)));
-    this.vwapSeries?.setData(lineData(sessionVwap(this.snapshot.candles,this.snapshot.futuresVolume ?? [])));
+    this.emaFastSeries?.setData(lineData(ema(sessionCandles,9)));
+    this.emaSlowSeries?.setData(lineData(ema(sessionCandles,21)));
+    this.vwapSeries?.setData(lineData(sessionVwap(sessionCandles,sessionVolumeBars)));
     this.emaFastSeries?.applyOptions({visible:this.visibility.ema});
     this.emaSlowSeries?.applyOptions({visible:this.visibility.ema});
     this.vwapSeries?.applyOptions({visible:this.visibility.vwap});
@@ -294,7 +299,6 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     } else {
       this.markerApi?.setMarkers([]);
     }
-    const latestSessionDate = latestIstSessionDate(displayCandles);
     if (candles.length && (
       !this.hasFittedContent ||
       this.renderedTimeframeMinutes !== this.timeframeMinutes ||
@@ -303,7 +307,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     )) {
       const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
       const initialRange = currentSessionLogicalRange(
-        displayCandles,
+        sessionCandles,
         this.timeframeMinutes,
         sessionMinutes,
         volume.map((bar) => new Date((bar.time as number) * 1000).toISOString()),

@@ -4,6 +4,8 @@ import {
   aggregateVolumeBars,
   currentSessionLogicalRange,
   currentSessionTimeRange,
+  filterIstSession,
+  istSessionDate,
   latestIstSessionDate,
 } from './chart-candles';
 import { WorkspaceCandle } from './trading-workspace';
@@ -102,6 +104,27 @@ describe('latestIstSessionDate', () => {
 
     expect(latestIstSessionDate(cached)).toBe('2026-08-26');
     expect(latestIstSessionDate(complete)).toBe('2026-08-28');
+  });
+});
+
+describe('istSessionDate', () => {
+  it('assigns UTC candles to the correct IST trading date', () => {
+    expect(istSessionDate('2026-08-30T20:00:00.000Z')).toBe('2026-08-31');
+  });
+});
+
+describe('filterIstSession', () => {
+  it('removes older sessions from the visible chart data', () => {
+    const candles = [
+      candle('2026-08-27T03:45:00.000Z', 100, 101, 99, 100, 10),
+      candle('2026-08-31T03:45:00.000Z', 101, 102, 100, 101, 10),
+      candle('2026-08-31T03:50:00.000Z', 102, 103, 101, 102, 10),
+    ];
+
+    expect(filterIstSession(candles, '2026-08-31').map((value) => value.openTimeUtc)).toEqual([
+      '2026-08-31T03:45:00.000Z',
+      '2026-08-31T03:50:00.000Z',
+    ]);
   });
 });
 

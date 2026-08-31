@@ -46,6 +46,14 @@ export function latestIstSessionDate(candles: WorkspaceCandle[]): string | null 
   return candles.length ? istSessionDate(candles[candles.length - 1].openTimeUtc) : null;
 }
 
+export function filterIstSession<T extends { openTimeUtc: string }>(
+  values: T[],
+  sessionDate: string | null,
+): T[] {
+  if (sessionDate === null) return [];
+  return values.filter((value) => istSessionDate(value.openTimeUtc) === sessionDate);
+}
+
 export function currentSessionTimeRange(
   candles: WorkspaceCandle[],
   sessionMinutes = DEFAULT_SESSION_MINUTES,
@@ -60,7 +68,7 @@ export function currentSessionTimeRange(
   return { from, to: from + sessionMinutes * 60 };
 }
 
-function istSessionDate(openTimeUtc: string): string {
+export function istSessionDate(openTimeUtc: string): string {
   const timestamp = new Date(openTimeUtc).getTime() + IST_OFFSET_MILLISECONDS;
   return new Date(timestamp).toISOString().slice(0, 10);
 }
