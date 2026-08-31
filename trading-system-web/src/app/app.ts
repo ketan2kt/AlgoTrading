@@ -7,7 +7,7 @@ import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
-import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { mergeWorkspaceSnapshot, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
 import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMarketCode } from './trade-alerts';
 import { TradingWorkspaceService } from './trading-workspace.service';
@@ -468,7 +468,7 @@ export class App implements OnInit, OnDestroy {
         const market = marketCodeForSnapshot(snapshot);
         this.detectTradeAlerts(market, snapshot);
         if (this.selectedMarket !== market) return;
-        this.workspace = snapshot;
+        this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
         this.workspaceError = '';
         this.refreshView();
       }),
@@ -533,7 +533,7 @@ export class App implements OnInit, OnDestroy {
         next: (snapshot) => {
           if (this.selectedMarket !== requestedMarket) return;
           this.detectTradeAlerts(requestedMarket, snapshot);
-          this.workspace = snapshot;
+          this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
           this.workspaceError = '';
           this.refreshView();
         },

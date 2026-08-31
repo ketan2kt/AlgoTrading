@@ -66,6 +66,29 @@ export interface TradingWorkspaceSnapshot {
   futuresVolume?: WorkspaceVolumeBar[] | null;
 }
 
+export function mergeWorkspaceSnapshot(
+  current: TradingWorkspaceSnapshot | null,
+  incoming: TradingWorkspaceSnapshot,
+): TradingWorkspaceSnapshot {
+  if (!current || current.exchange !== incoming.exchange || current.instrument !== incoming.instrument) {
+    return incoming;
+  }
+
+  const currentLatest = latestCandleTimestamp(current);
+  const incomingLatest = latestCandleTimestamp(incoming);
+  const incomingIsOlder = incomingLatest < currentLatest ||
+    (incomingLatest === currentLatest && incoming.candles.length < current.candles.length);
+
+  return incomingIsOlder
+    ? { ...incoming, candles: current.candles, futuresVolume: current.futuresVolume }
+    : incoming;
+}
+
+function latestCandleTimestamp(snapshot: TradingWorkspaceSnapshot): number {
+  const timestamp = snapshot.candles.at(-1)?.openTimeUtc;
+  return timestamp ? new Date(timestamp).getTime() : Number.NEGATIVE_INFINITY;
+}
+
 export interface WorkspaceStrategyEvaluation {
   evaluationId: string;
   candleTimeUtc: string;

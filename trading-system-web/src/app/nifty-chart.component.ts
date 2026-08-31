@@ -298,7 +298,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     if (candles.length && (
       !this.hasFittedContent ||
       this.renderedTimeframeMinutes !== this.timeframeMinutes ||
-      latestSessionDate !== this.renderedSessionDate
+      this.renderedSessionDate === null ||
+      (latestSessionDate !== null && latestSessionDate > this.renderedSessionDate)
     )) {
       const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
       const initialRange = currentSessionLogicalRange(displayCandles, this.timeframeMinutes, sessionMinutes);
