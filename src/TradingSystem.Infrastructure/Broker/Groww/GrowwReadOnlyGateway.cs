@@ -44,22 +44,17 @@ public sealed class GrowwReadOnlyGateway(
         ValidateIdentifier(request.Exchange, nameof(request.Exchange));
         ValidateIdentifier(request.Segment, nameof(request.Segment));
         ValidateIdentifier(request.TradingSymbol, nameof(request.TradingSymbol));
+        // Groww's full quote endpoint does not consistently accept MCX commodity
+        // trading symbols. The documented multi-LTP endpoint does, so commodity
+        // polling must not depend on a particular quote error message to reach it.
+        if (string.Equals(request.Exchange, "MCX", StringComparison.Ordinal) &&
+            string.Equals(request.Segment, "COMMODITY", StringComparison.Ordinal))
+            return await GetCommodityLtpFallbackAsync(request, cancellationToken);
         var path = "/v1/live-data/quote" + BuildQuery(
             ("exchange", request.Exchange),
             ("segment", request.Segment),
             ("trading_symbol", request.TradingSymbol));
-        QuotePayload payload;
-        try
-        {
-            payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
-        }
-        catch (GrowwApiException exception) when (
-            string.Equals(request.Exchange, "MCX", StringComparison.Ordinal) &&
-            string.Equals(request.Segment, "COMMODITY", StringComparison.Ordinal) &&
-            exception.Message.Contains("Invalid trading symbol", StringComparison.OrdinalIgnoreCase))
-        {
-            return await GetCommodityLtpFallbackAsync(request, cancellationToken);
-        }
+        var payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
         if (payload.LastPrice <= 0 || payload.LastTradeTime is <= 0)
         {
             throw Malformed("Groww quote omitted a valid last price or supplied an invalid trade timestamp.");
