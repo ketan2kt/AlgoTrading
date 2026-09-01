@@ -5,7 +5,8 @@ namespace TradingSystem.Application.MarketData;
 
 public sealed class GrowwQuoteNormalizer
 {
-    private readonly ConcurrentDictionary<Guid, decimal> cumulativeVolumes = new();
+    private static readonly TimeSpan IndiaOffset = TimeSpan.FromMinutes(330);
+    private readonly ConcurrentDictionary<Guid, VolumeState> cumulativeVolumes = new();
 
     public MarketObservation Normalize(
         Guid instrumentId,
@@ -17,13 +18,20 @@ public sealed class GrowwQuoteNormalizer
         var currentVolume = quote.Volume ?? 0;
         if (currentVolume < 0 || currentVolume > long.MaxValue || decimal.Truncate(currentVolume) != currentVolume)
             throw new ArgumentException("Groww cumulative volume is invalid.", nameof(quote));
+        var sessionDate = DateOnly.FromDateTime(receivedAtUtc.ToOffset(IndiaOffset).DateTime);
         long delta = 0;
-        cumulativeVolumes.AddOrUpdate(instrumentId, currentVolume, (_, previous) =>
+        cumulativeVolumes.AddOrUpdate(instrumentId,
+            _ => new VolumeState(sessionDate, currentVolume),
+            (_, previous) =>
         {
-            if (currentVolume < previous)
+            if (sessionDate > previous.SessionDate)
+                return new VolumeState(sessionDate, currentVolume);
+            if (sessionDate < previous.SessionDate)
+                throw new InvalidOperationException("Groww cumulative volume belongs to an older trading session.");
+            if (currentVolume < previous.CumulativeVolume)
                 throw new InvalidOperationException("Groww cumulative volume regressed; session reconciliation is required.");
-            delta = checked((long)(currentVolume - previous));
-            return currentVolume;
+            delta = checked((long)(currentVolume - previous.CumulativeVolume));
+            return new VolumeState(sessionDate, currentVolume);
         });
 
         return new MarketObservation(
@@ -37,4 +45,6 @@ public sealed class GrowwQuoteNormalizer
             delta,
             quote.OpenInterest);
     }
+
+    private sealed record VolumeState(DateOnly SessionDate, decimal CumulativeVolume);
 }

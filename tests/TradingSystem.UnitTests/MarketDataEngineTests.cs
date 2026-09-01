@@ -138,6 +138,22 @@ public sealed class MarketDataEngineTests
     }
 
     [Fact]
+    public void GrowwNormalizerResetsCumulativeVolumeOnNextIstTradingDay()
+    {
+        var normalizer = new GrowwQuoteNormalizer();
+        var instrument = Guid.NewGuid();
+        var previousSession = new DateTimeOffset(2026, 8, 31, 17, 59, 59, TimeSpan.Zero);
+        var nextSession = new DateTimeOffset(2026, 9, 1, 3, 30, 0, TimeSpan.Zero);
+
+        normalizer.Normalize(instrument, Quote(500_000), previousSession);
+        var firstQuoteOfNextSession = normalizer.Normalize(instrument, Quote(1_250), nextSession);
+        var followingQuote = normalizer.Normalize(instrument, Quote(1_400), nextSession.AddSeconds(1));
+
+        Assert.Equal(0, firstQuoteOfNextSession.VolumeDelta);
+        Assert.Equal(150, followingQuote.VolumeDelta);
+    }
+
+    [Fact]
     public async Task ProcessorPersistsHealthAndOnlyCompletedValidatedCandles()
     {
         var persistence = new StubPersistence();
