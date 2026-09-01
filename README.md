@@ -156,7 +156,9 @@ Run with `dotnet run --project src/TradingSystem.Api`. Obtain an antiforgery tok
 5. NuGet has no known vulnerable packages; npm has no high/critical findings.
 6. Groww fake-response tests cover required headers, profile, quote/OI, historical candles, instrument CSV, documented failures, throttling, malformed JSON, cancellation, and secret redaction.
 7. Reflection tests prove the Groww read-only contract contains no order or trade mutation method.
-8. No `GrowwBrokerGateway` or broker order endpoint exists; `Trading__Mode=Live` prevents startup.
+8. A Groww live F&O adapter exists behind a disabled controlled-live gate. Normal
+   operation remains Paper; no live automation is registered and no live order is placed
+   unless the Phase 9 promotion checks and explicit daily activation are completed.
 9. Market-data tests cover stale/future/invalid/duplicate/out-of-order/gap handling, health latching, Groww normalization, OHLCV/OI aggregation, SMA, EMA, VWAP, ATR, and persistence orchestration.
 10. Regime tests cover gap continuation/rejection/reversal, bullish/bearish trends, volatility expansion/compression, conflicting evidence, low-quality blocking, and replay persistence.
 11. Strategy tests cover breakout qualification, no-signal gates, cooldown/trade limits, risk sizing/rejection, partial fills, entry, exit, realised P&L reporting, and proof that rejection submits no order.

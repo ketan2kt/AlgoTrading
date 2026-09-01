@@ -7,13 +7,14 @@ namespace TradingSystem.ContractTests;
 public sealed class FoundationCapabilityTests
 {
     [Fact]
-    public void GrowwGatewayIsAbsentFromFoundation()
+    public void GrowwGatewayIsExplicitAndSupportsBrokerSideProtection()
     {
         var implementationTypes = typeof(DependencyInjection).Assembly.GetTypes();
 
-        Assert.DoesNotContain(
-            implementationTypes,
-            type => type.Name.Contains("GrowwBrokerGateway", StringComparison.Ordinal));
+        var gateway = Assert.Single(implementationTypes,
+            type => type.Name == "GrowwBrokerGateway");
+        Assert.Contains(typeof(IBrokerGateway), gateway.GetInterfaces());
+        Assert.Contains(typeof(ILiveBrokerProtectionGateway), gateway.GetInterfaces());
     }
 
     [Fact]

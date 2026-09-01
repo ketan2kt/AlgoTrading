@@ -61,16 +61,12 @@
           <button class="market-card market-card--sensex" type="button" (click)="openMarket('sensex')">
             <span>BSE · INDEX OPTIONS</span><strong>Sensex</strong><small>Live paper workspace</small>
           </button>
-          <button class="market-card market-card--gas" type="button" (click)="openMarket('natural-gas')">
-            <span>MCX · COMMODITY FUTURES</span><strong>Natural Gas</strong><small>Live paper workspace</small>
-          </button>
         </div>
       </section>
     } @else {
       <nav class="market-tabs" aria-label="Switch trading market">
         <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'natural-gas'" [class.market-tab--alert]="marketTabAlert('natural-gas')" (click)="openMarket('natural-gas')">Natural Gas @if (marketTabAlert('natural-gas'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
       </nav>
       <div class="workspace-shell">
       <section class="workspace-heading">
@@ -219,7 +215,7 @@
             <form class="pnl-report-filter" (ngSubmit)="searchPnl()">
               <label>From<input name="pnlFrom" type="date" [(ngModel)]="pnlFrom" required /></label>
               <label>To<input name="pnlTo" type="date" [(ngModel)]="pnlTo" required /></label>
-              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="natural-gas">Natural Gas</option></select></label>
+              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option></select></label>
               <button type="submit" [disabled]="pnlReportLoading">{{pnlReportLoading ? 'Searching…' : 'Search'}}</button>
             </form>
             @if (pnlReportError) { <p class="form-error">{{pnlReportError}}</p> }

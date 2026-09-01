@@ -190,7 +190,7 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
   });
 
-  it('opens functional Sensex and Natural Gas workspaces', async () => {
+  it('opens the Sensex workspace while Natural Gas is hidden', async () => {
     TestBed.overrideProvider(AuthService, {
       useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
     });
@@ -220,13 +220,7 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('LIVE TRADING WORKSPACE');
     expect(fixture.nativeElement.textContent).not.toContain('Feed integration pending');
 
-    const naturalGasTab = Array.from(fixture.nativeElement.querySelectorAll('.market-tabs button'))
-      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Natural Gas')) as HTMLButtonElement;
-    naturalGasTab.click(); fixture.detectChanges();
-
-    expect(window.location.pathname).toBe('/natural-gas');
-    expect(fixture.nativeElement.textContent).toContain('Natural Gas Mini Futures command view');
-    expect(fixture.nativeElement.querySelector('.market-theme--gas')).not.toBeNull();
-    expect(fixture.nativeElement.textContent).not.toContain('Sensex command view');
+    expect(fixture.nativeElement.querySelector('.market-tabs')?.textContent).not.toContain('Natural Gas');
+    expect(fixture.nativeElement.textContent).not.toContain('Natural Gas Mini Futures command view');
   });
 });

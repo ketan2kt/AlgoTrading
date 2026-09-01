@@ -30,7 +30,10 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (!options.Value.Enabled) return;
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var market in new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.NaturalGas })
+            var markets = options.Value.NaturalGasEnabled
+                ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.NaturalGas }
+                : [TradingMarketCatalog.Sensex];
+            foreach (var market in markets)
             {
                 try { await RunMarketAsync(market, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }

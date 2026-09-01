@@ -31,6 +31,9 @@ Legend: **Documented** means an official page describes it; **Partial** means us
 | Order types/products | Documented | MARKET, LIMIT, SL, SL-M; CNC, MIS, NRML; DAY validity (per annexures) | Exact segment/product combinations and exchange restrictions require validation |
 | Smart orders | Partial | Changelog/docs claim GTT and OCO | Atomicity, supported F&O use, trigger hosting, failure semantics, and modify/cancel contract require Phase 4 research |
 | Positions | Documented | Position retrieval and P&L fields, including realised P&L per changelog | Reconciliation mapping needed; derivative feed updates appear supported, equity position feed coverage unclear |
+| F&O order create/status/cancel | Implemented behind disabled live gate | Official `/v1/order/create`, status-by-reference and cancel contracts; client reference is the idempotency key | Create calls are never automatically retried; ambiguous outcomes require reconciliation |
+| F&O OCO protection | Implemented behind disabled live gate | Official Smart Order OCO create/modify/cancel contracts | Uses NRML and broker-side target/SL; controlled-live validation still required |
+| MCX order execution | Unsupported by Groww | Official documentation limits trading APIs to CASH and FNO | Natural Gas remains alert/manual execution only |
 | Holdings | Documented | Holdings retrieval | Not required for initial intraday scope except account safety/reconciliation |
 | Margin | Documented | Available margin and order margin calculation are documented categories | Define whether values are authoritative/pre-trade and timestamp semantics |
 | User profile | Implemented | `/v1/user/detail` returns account identifiers, exchange flags, DDPI, and active segments | Used for read-only account/entitlement validation; identifiers must not appear in normal logs |

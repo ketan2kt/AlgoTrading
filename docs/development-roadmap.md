@@ -134,8 +134,21 @@ paper sizing, complete-lot risk/exposure limits, unrealised-loss daily stop, dis
 concurrency, duplicate active-contract suppression, append-before-mutate broker journal,
 unknown-commit replay, partial-fill/restart recovery, reconciliation blocking, per-position quote
 isolation, kill-switch/forced exits, portfolio dashboard telemetry, failure simulations, and a Phase 8
-runbook are implemented. Live orders remain absent. Promotion is blocked until the documented
+runbook are implemented. Automated live orders remain disabled. Promotion is blocked until the documented
 multi-session soak and opt-in PostgreSQL restart verification are reviewed.
+
+### Phase 9 controlled-live foundation (in progress, 2026-09-01)
+
+- Added a Groww F&O execution adapter for create, status-by-reference, cancellation,
+  trades/fill-price retrieval, positions, and reconciliation.
+- Added official Groww Smart Order OCO protection for broker-side target and stop-loss.
+- The execution HTTP client has no automatic retry policy. Unknown POST outcomes block
+  resubmission and require reference lookup/reconciliation.
+- Added an administrator-only, password-confirmed, daily live-arm record. It is disabled
+  by server configuration, restricted to NIFTY/SENSEX and exactly one lot per order.
+- Live strategy automation is not yet connected and no real order has been placed.
+- Promotion remains blocked until restart/partial-fill/rejection tests, controlled UI,
+  full reconciliation, and minimum-quantity market validation pass.
 
 **Acceptance criteria**
 

@@ -4,6 +4,7 @@ public sealed class AutomatedPaperTradingOptions
 {
     public const string SectionName = "PaperTrading:Automation";
     public bool Enabled { get; init; }
+    public bool NaturalGasEnabled { get; init; }
     public int EvaluationIntervalSeconds { get; init; } = 5;
     public int NoTradeAuditIntervalMinutes { get; init; } = 15;
     public string EntryWindowStart { get; init; } = "09:15";

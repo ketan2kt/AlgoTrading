@@ -33,7 +33,13 @@ public sealed record BrokerOrderRequest(
     Direction Direction,
     int Quantity,
     decimal ExecutionPrice,
-    int MaximumFillQuantityPerCycle = int.MaxValue);
+    int MaximumFillQuantityPerCycle = int.MaxValue,
+    string? TradingSymbol = null,
+    string? Exchange = null,
+    string Segment = "FNO",
+    string Product = "MIS",
+    string OrderType = "MARKET",
+    decimal? TriggerPrice = null);
 
 public sealed record BrokerOrderSnapshot(
     string ClientReference,
@@ -67,3 +73,8 @@ public sealed class DuplicateBrokerOrderException(string message) : InvalidOpera
 
 public sealed class BrokerOrderNotFoundException(string clientReference)
     : InvalidOperationException($"Broker order '{clientReference}' was not found.");
+
+public sealed class BrokerOrderOutcomeUnknownException(string clientReference, Exception? innerException = null)
+    : InvalidOperationException(
+        $"Broker order '{clientReference}' has an unknown submission outcome. Reconciliation is required before another submission.",
+        innerException);

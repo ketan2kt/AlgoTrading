@@ -114,6 +114,26 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(groww.ApiBaseUrl, UriKind.Absolute);
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
         }).AddStandardResilienceHandler();
+        // Execution calls intentionally have no automatic retry handler. An ambiguous
+        // order-creation outcome is resolved by client reference before any new submit.
+        services.AddHttpClient(GrowwBrokerGateway.ApiClientName, (provider, client) =>
+        {
+            var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
+            client.BaseAddress = new Uri(groww.ApiBaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
+        });
+        services.AddSingleton<GrowwBrokerGateway>();
+        services.AddOptions<LiveExecutionOptions>()
+            .Bind(configuration.GetSection(LiveExecutionOptions.SectionName))
+            .Validate(value => value.MaximumLotsPerOrder == 5,
+                "Restricted live operation is configured for exactly five lots per order.")
+            .Validate(value => value.ControlledTestLotsPerOrder == 1,
+                "The first controlled broker test is restricted to exactly one lot per order.")
+            .Validate(value => value.AllowedMarkets.Length > 0 && value.AllowedMarkets.All(market =>
+                    market is "NIFTY" or "SENSEX"),
+                "Only NIFTY and SENSEX may be enabled for controlled live testing.")
+            .ValidateOnStart();
+        services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
