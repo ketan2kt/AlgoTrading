@@ -181,6 +181,21 @@
               <button type="button" (click)="openPnlReport()">P&amp;L report</button>
               <button type="button" (click)="openLogs()">Research logs</button>
             </div>
+            @if (selectedMarket !== 'natural-gas') {
+              <section class="safety-panel control-center-card live-execution-card">
+                <span>LIVE EXECUTION</span>
+                <strong [class.good]="liveExecution?.armed" [class.bad]="!liveExecution?.armed">
+                  {{ liveExecution?.armed ? 'ARMED · automatic Groww orders enabled' : 'DISARMED · no live orders' }}
+                </strong>
+                <p>{{ liveExecution?.buildEnabled ? (liveExecution?.controlledBrokerTestCompleted ? ('Broker validation complete · automatic orders use ' + liveExecution?.maximumLotsPerOrder + ' lots') : 'First eligible order will run the mandatory one-lot broker validation; later orders use five lots.') : 'Live execution is disabled by server configuration.' }}</p>
+                <label>Activation reason<input name="liveExecutionReason" [(ngModel)]="liveExecutionReason" minlength="10" maxlength="500" /></label>
+                <label>Administrator password<input name="liveExecutionPassword" type="password" autocomplete="current-password" [(ngModel)]="liveExecutionPassword" /></label>
+                <button type="button" [disabled]="liveExecutionBusy || !liveExecution?.buildEnabled" (click)="setLiveExecution(!liveExecution?.armed)">
+                  {{ liveExecutionBusy ? 'Applying…' : (liveExecution?.armed ? 'Emergency disarm' : 'Arm live trading for today') }}
+                </button>
+                @if (liveExecutionMessage) { <p>{{ liveExecutionMessage }}</p> }
+              </section>
+            }
             <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">
               <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add today’s token for live market data.' }}</p></div>
               @if (!showTokenForm) { <button type="button" (click)="openTokenForm()">{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Replace token' : 'Add token' }}</button> }

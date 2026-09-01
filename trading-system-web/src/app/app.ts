@@ -15,6 +15,7 @@ import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
 import { PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
+import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
 
 @Component({
   selector: 'app-root',
@@ -32,6 +33,7 @@ export class App implements OnInit, OnDestroy {
   private readonly growwPositionsService = inject(GrowwPositionsService);
   private readonly paperReportService = inject(PaperReportService);
   private readonly heroZeroService = inject(HeroZeroService);
+  private readonly liveExecutionService = inject(LiveExecutionService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -86,6 +88,11 @@ export class App implements OnInit, OnDestroy {
   protected heroZero: HeroZeroMonitor | null = null;
   private heroZeroPollTimer: ReturnType<typeof setInterval> | null = null;
   protected controlsOpen = false;
+  protected liveExecution: LiveExecutionStatus | null = null;
+  protected liveExecutionBusy = false;
+  protected liveExecutionPassword = '';
+  protected liveExecutionReason = 'Daily automatic Nifty and Sensex live trading activation.';
+  protected liveExecutionMessage = '';
   private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
   private initializedTradeMarkets = new Set<TradingMarketCode>();
@@ -210,8 +217,38 @@ export class App implements OnInit, OnDestroy {
     this.refreshView();
   }
 
-  protected openControls(): void { this.controlsOpen = true; }
+  protected openControls(): void { this.controlsOpen = true; this.loadLiveExecution(); }
   protected closeControls(): void { this.controlsOpen = false; }
+
+  protected loadLiveExecution(): void {
+    this.subscriptions.add(this.liveExecutionService.getStatus().subscribe({
+      next: status => { this.liveExecution = status; this.refreshView(); },
+      error: () => { this.liveExecutionMessage = 'Live execution status is unavailable.'; this.refreshView(); },
+    }));
+  }
+
+  protected setLiveExecution(armed: boolean): void {
+    if (!this.liveExecutionPassword || this.liveExecutionReason.trim().length < 10) return;
+    this.liveExecutionBusy = true;
+    this.liveExecutionMessage = '';
+    this.subscriptions.add(this.liveExecutionService.setArmed(armed,
+      this.liveExecutionReason.trim(), this.liveExecutionPassword).subscribe({
+      next: status => {
+        this.liveExecution = status;
+        this.liveExecutionPassword = '';
+        this.liveExecutionBusy = false;
+        this.liveExecutionMessage = armed ? 'Automatic live execution is armed for today.' :
+          'Automatic live execution is disarmed; no new live entries will be submitted.';
+        this.refreshView();
+      },
+      error: () => {
+        this.liveExecutionPassword = '';
+        this.liveExecutionBusy = false;
+        this.liveExecutionMessage = 'Live execution change failed. Check the password and server readiness.';
+        this.refreshView();
+      },
+    }));
+  }
 
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :

@@ -18,6 +18,9 @@ param postgresAdministratorPassword string
 ])
 param tradingMode string = 'Paper'
 
+@description('Enables the separately armed Groww live-order worker while strategy evaluation remains in paper/shadow mode.')
+param liveExecutionBuildEnabled bool = false
+
 var normalizedPrefix = toLower(replace(prefix, '-', ''))
 var deploymentSuffix = uniqueString(resourceGroup().id)
 var postgresServerName = '${normalizedPrefix}pg${deploymentSuffix}'
@@ -206,6 +209,18 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'PaperTrading__Automation__Enabled'
           value: 'true'
+        }
+        {
+          name: 'LiveExecution__BuildEnabled'
+          value: string(liveExecutionBuildEnabled)
+        }
+        {
+          name: 'LiveExecution__MaximumLotsPerOrder'
+          value: '5'
+        }
+        {
+          name: 'LiveExecution__ControlledTestLotsPerOrder'
+          value: '1'
         }
         {
           name: 'ConnectionStrings__TradingDatabase'

@@ -6,5 +6,7 @@ public sealed class LiveExecutionOptions
     public bool BuildEnabled { get; init; }
     public int MaximumLotsPerOrder { get; init; } = 5;
     public int ControlledTestLotsPerOrder { get; init; } = 1;
+    public int PollIntervalSeconds { get; init; } = 2;
+    public int SignalMaximumAgeSeconds { get; init; } = 90;
     public string[] AllowedMarkets { get; init; } = ["NIFTY", "SENSEX"];
 }

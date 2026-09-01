@@ -37,6 +37,7 @@ public sealed class TradingDbContext(
     public DbSet<Trade> Trades => Set<Trade>();
     public DbSet<Position> Positions => Set<Position>();
     public DbSet<PositionEvent> PositionEvents => Set<PositionEvent>();
+    public DbSet<LiveExecutionIntent> LiveExecutionIntents => Set<LiveExecutionIntent>();
     public DbSet<DailyRisk> DailyRisks => Set<DailyRisk>();
     public DbSet<TradingSession> TradingSessions => Set<TradingSession>();
     public DbSet<ProviderHealth> ProviderHealth => Set<ProviderHealth>();
@@ -370,6 +371,24 @@ public sealed class TradingDbContext(
             ConfigureAppendOnly(entity, "position_events");
             entity.Property(value => value.Reason).HasMaxLength(500);
             entity.HasIndex(value => new { value.PositionId, value.OccurredAtUtc });
+        });
+        builder.Entity<LiveExecutionIntent>(entity =>
+        {
+            ConfigureMutable(entity, "live_execution_intents");
+            entity.Property(value => value.SourceType).HasMaxLength(40);
+            entity.Property(value => value.Market).HasMaxLength(20);
+            entity.Property(value => value.ClientReference).HasMaxLength(20);
+            entity.Property(value => value.Status).HasMaxLength(40);
+            entity.Property(value => value.BrokerOrderId).HasMaxLength(100);
+            entity.Property(value => value.ProtectionId).HasMaxLength(100);
+            entity.Property(value => value.RequestedEntry).HasPrecision(18, 4);
+            entity.Property(value => value.StopLoss).HasPrecision(18, 4);
+            entity.Property(value => value.Target).HasPrecision(18, 4);
+            entity.Property(value => value.AverageFillPrice).HasPrecision(18, 4);
+            entity.Property(value => value.LastError).HasMaxLength(1000);
+            entity.HasIndex(value => new { value.SourceType, value.SourceId }).IsUnique();
+            entity.HasIndex(value => value.ClientReference).IsUnique();
+            entity.HasIndex(value => value.Status);
         });
 
         builder.Entity<DailyRisk>(entity =>

@@ -2,11 +2,13 @@ using Microsoft.Extensions.Options;
 using System.Reflection;
 using TradingSystem.Application.SystemStatus;
 using TradingSystem.Domain;
+using TradingSystem.Infrastructure.Execution;
 
 namespace TradingSystem.Infrastructure.SystemStatus;
 
 public sealed class FoundationSystemStatusReader(
     IOptions<TradingModeOptions> options,
+    IOptions<LiveExecutionOptions> liveOptions,
     TimeProvider timeProvider) : ISystemStatusReader
 {
     private static readonly string BuildVersion =
@@ -24,11 +26,12 @@ public sealed class FoundationSystemStatusReader(
                 "Live mode is structurally unavailable during the Phase 1 foundation.");
         }
 
+        var liveAvailable = liveOptions.Value.BuildEnabled;
         return new(
             mode,
-            LiveTradingAvailable: false,
+            LiveTradingAvailable: liveAvailable,
             TradingEnabled: false,
-            Status: "FoundationOnly",
+            Status: liveAvailable ? "ControlledLiveAvailable" : "FoundationOnly",
             ObservedAtUtc: timeProvider.GetUtcNow(),
             BuildVersion: BuildVersion);
     }

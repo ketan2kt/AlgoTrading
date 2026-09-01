@@ -129,11 +129,15 @@ public static class DependencyInjection
                 "Restricted live operation is configured for exactly five lots per order.")
             .Validate(value => value.ControlledTestLotsPerOrder == 1,
                 "The first controlled broker test is restricted to exactly one lot per order.")
+            .Validate(value => value.PollIntervalSeconds is >= 1 and <= 30 &&
+                               value.SignalMaximumAgeSeconds is >= 30 and <= 300,
+                "Live execution polling and signal freshness settings are invalid.")
             .Validate(value => value.AllowedMarkets.Length > 0 && value.AllowedMarkets.All(market =>
                     market is "NIFTY" or "SENSEX"),
                 "Only NIFTY and SENSEX may be enabled for controlled live testing.")
             .ValidateOnStart();
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
+        services.AddHostedService<AutomaticLiveExecutionService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;

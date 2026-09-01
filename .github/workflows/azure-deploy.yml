@@ -1,10 +1,10 @@
-name: Azure paper deployment
+name: Azure controlled-live deployment
 
 on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Type DEPLOY-PAPER to confirm a paper-only deployment
+        description: Type DEPLOY-LIVE to deploy the armed-controlled live-capable build
         required: true
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: inputs.deploy == 'DEPLOY-PAPER'
+    if: inputs.deploy == 'DEPLOY-LIVE'
     runs-on: ubuntu-latest
     environment: azure-paper
     steps:
@@ -41,6 +41,7 @@ jobs:
               location=centralindia \
               prefix=sarthitrading \
               tradingMode=Paper \
+              liveExecutionBuildEnabled=true \
               postgresAdministratorPassword="${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}" \
             --query properties.outputs -o json)
           echo "app=$(jq -r '.webAppName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
@@ -125,7 +126,7 @@ jobs:
           echo "Application did not recover after disabling migration mode." >&2
           exit 1
 
-      - name: Verify paper-only configuration
+      - name: Verify shadow strategy and controlled-live configuration
         run: |
           mode=$(az webapp config appsettings list \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
@@ -137,6 +138,11 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --query "[?name=='PaperTrading__Automation__Enabled'].value | [0]" -o tsv)
           test "$automation" = "true"
+          live=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --query "[?name=='LiveExecution__BuildEnabled'].value | [0]" -o tsv)
+          test "$live" = "true"
 
       - name: Verify deployed commit identity
         run: |
