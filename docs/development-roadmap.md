@@ -145,8 +145,9 @@ multi-session soak and opt-in PostgreSQL restart verification are reviewed.
 - The execution HTTP client has no automatic retry policy. Unknown POST outcomes block
   resubmission and require reference lookup/reconciliation.
 - Added an administrator-only, password-confirmed, daily live-arm record. It is disabled
-  by server configuration, restricted to NIFTY/SENSEX and exactly one lot per order.
-- Live strategy automation is not yet connected and no real order has been placed.
+  by server configuration, restricted to NIFTY/SENSEX and exactly five lots per order.
+- Live strategy automation consumes durable filled paper entries and creates idempotent
+  broker intents only while the daily arm and reconciliation gates remain healthy.
 - Promotion remains blocked until restart/partial-fill/rejection tests, controlled UI,
   full reconciliation, and minimum-quantity market validation pass.
 

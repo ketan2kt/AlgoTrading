@@ -127,8 +127,8 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(LiveExecutionOptions.SectionName))
             .Validate(value => value.MaximumLotsPerOrder == 5,
                 "Restricted live operation is configured for exactly five lots per order.")
-            .Validate(value => value.ControlledTestLotsPerOrder == 1,
-                "The first controlled broker test is restricted to exactly one lot per order.")
+            .Validate(value => value.ControlledTestLotsPerOrder == value.MaximumLotsPerOrder,
+                "Controlled broker validation must use the configured five-lot order size.")
             .Validate(value => value.PollIntervalSeconds is >= 1 and <= 30 &&
                                value.SignalMaximumAgeSeconds is >= 30 and <= 300,
                 "Live execution polling and signal freshness settings are invalid.")

@@ -159,8 +159,8 @@ Run with `dotnet run --project src/TradingSystem.Api`. Obtain an antiforgery tok
 8. A Groww live F&O adapter and automatic Nifty/Sensex execution worker exist behind a
    password-confirmed, daily-expiring controlled-live gate. Normal
    operation remains Paper; no live automation is registered and no live order is placed
-   unless the first one-lot broker validation, reconciliation checks, and explicit daily
-   activation are completed. After that controlled validation, eligible orders use five lots.
+   unless broker validation, reconciliation checks, and explicit daily activation are
+   completed. Controlled validation and subsequent eligible orders use five lots.
 9. Market-data tests cover stale/future/invalid/duplicate/out-of-order/gap handling, health latching, Groww normalization, OHLCV/OI aggregation, SMA, EMA, VWAP, ATR, and persistence orchestration.
 10. Regime tests cover gap continuation/rejection/reversal, bullish/bearish trends, volatility expansion/compression, conflicting evidence, low-quality blocking, and replay persistence.
 11. Strategy tests cover breakout qualification, no-signal gates, cooldown/trade limits, risk sizing/rejection, partial fills, entry, exit, realised P&L reporting, and proof that rejection submits no order.

@@ -220,7 +220,7 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
         }
         {
           name: 'LiveExecution__ControlledTestLotsPerOrder'
-          value: '1'
+          value: '5'
         }
         {
           name: 'ConnectionStrings__TradingDatabase'

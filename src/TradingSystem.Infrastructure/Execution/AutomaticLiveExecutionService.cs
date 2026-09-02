@@ -99,8 +99,8 @@ internal sealed partial class AutomaticLiveExecutionService(
             .OrderBy(value => value.OccurredAtUtc).ToListAsync(cancellationToken);
         foreach (var entry in filledEntries)
         {
-            var signalText = entry.ClientReference[..^"-ENTRY".Length];
-            if (!Guid.TryParseExact(signalText, "N", out var signalId)) continue;
+            if (!TryParseNiftyEntrySignalId(entry.EventType, entry.ClientReference,
+                    out var signalId)) continue;
             if (await db.LiveExecutionIntents.AnyAsync(value => value.SourceType == "NIFTY" &&
                     value.SourceId == signalId, cancellationToken)) continue;
             var signal = await db.Signals.AsNoTracking().SingleOrDefaultAsync(value =>
@@ -146,8 +146,10 @@ internal sealed partial class AutomaticLiveExecutionService(
     {
         var id = Guid.NewGuid();
         return new LiveExecutionIntent(id, market, sourceId, market, instrument.Id, Direction.Buy,
-            quantity, entry, stop, target, Reference("LE", id), timeProvider.GetUtcNow());
+            quantity, entry, stop, target, LiveClientReference(sourceId), timeProvider.GetUtcNow());
     }
+
+    internal static string LiveClientReference(Guid sourceId) => Reference("LE", sourceId);
 
     private async Task<int> QuantityAsync(TradingDbContext db, int lotSize,
         CancellationToken cancellationToken)
@@ -229,7 +231,19 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     private static string Reference(string prefix, Guid id) => prefix + id.ToString("N")[..16];
 
-    private static bool TryReadOptionProposal(string json, out OptionProposal proposal)
+    internal static bool TryParseNiftyEntrySignalId(string eventType, string clientReference,
+        out Guid signalId)
+    {
+        signalId = Guid.Empty;
+        const string suffix = "-ENTRY";
+        return eventType == "OrderFilled" && clientReference.EndsWith(suffix, StringComparison.Ordinal) &&
+               Guid.TryParseExact(clientReference[..^suffix.Length], "N", out signalId);
+    }
+
+    internal static bool IsSensexPaperSource(string market, string status) =>
+        market == TradingMarketCatalog.Sensex.Code && status == "Active";
+
+    internal static bool TryReadOptionProposal(string json, out OptionProposal proposal)
     {
         proposal = default;
         try
@@ -250,7 +264,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         }
     }
 
-    private readonly record struct OptionProposal(Guid InstrumentId, decimal EntryPrice,
+    internal readonly record struct OptionProposal(Guid InstrumentId, decimal EntryPrice,
         decimal StopLoss, decimal Target);
 
     [LoggerMessage(LogLevel.Error, "Automatic live execution cycle failed closed.")]
