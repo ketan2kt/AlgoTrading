@@ -88,19 +88,26 @@ jobs:
             --src-path trading-system.zip \
             --type zip \
             --clean true \
-            --restart true
+            --restart true \
+            --async true \
+            --track-status false
 
       - name: Wait for database initialization
         run: |
           app="${{ steps.infrastructure.outputs.app }}"
-          for attempt in {1..30}; do
-            if curl --fail --silent --show-error \
+          expected="1.0.0+${GITHUB_SHA}"
+          for attempt in {1..90}; do
+            if curl --fail --silent \
               "https://${app}.azurewebsites.net/health/ready" > /dev/null; then
-              exit 0
+              actual=$(curl --fail --silent \
+                "https://${app}.azurewebsites.net/api/system/status" | jq -r '.buildVersion' || true)
+              if [[ "$actual" == "$expected"* ]]; then
+                exit 0
+              fi
             fi
             sleep 10
           done
-          echo "Application did not become ready after controlled migration." >&2
+          echo "The new commit did not become ready after controlled migration." >&2
           exit 1
 
       - name: Disable database initialization
