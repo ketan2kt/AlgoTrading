@@ -92,22 +92,28 @@ internal sealed partial class AutomaticLiveExecutionService(
         DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
     {
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
-        var evaluations = await db.StrategyEvaluations.AsNoTracking()
-            .Where(value => value.Outcome == "PaperPositionOpened" && value.SignalId != null &&
-                            value.RecordedAtUtc >= armedAtUtc && value.RecordedAtUtc >= cutoff)
-            .OrderBy(value => value.RecordedAtUtc).ToListAsync(cancellationToken);
-        foreach (var evaluation in evaluations)
+        var filledEntries = await db.PaperBrokerEvents.AsNoTracking()
+            .Where(value => value.EventType == "OrderFilled" &&
+                            value.ClientReference.EndsWith("-ENTRY") &&
+                            value.OccurredAtUtc >= armedAtUtc && value.OccurredAtUtc >= cutoff)
+            .OrderBy(value => value.OccurredAtUtc).ToListAsync(cancellationToken);
+        foreach (var entry in filledEntries)
         {
+            var signalText = entry.ClientReference[..^"-ENTRY".Length];
+            if (!Guid.TryParseExact(signalText, "N", out var signalId)) continue;
             if (await db.LiveExecutionIntents.AnyAsync(value => value.SourceType == "NIFTY" &&
-                    value.SourceId == evaluation.Id, cancellationToken)) continue;
+                    value.SourceId == signalId, cancellationToken)) continue;
+            var signal = await db.Signals.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.Id == signalId, cancellationToken);
+            if (signal is null) continue;
             var risk = await db.RiskDecisions.AsNoTracking().SingleOrDefaultAsync(value =>
-                value.SignalId == evaluation.SignalId!.Value && value.Approved, cancellationToken);
+                value.SignalId == signalId && value.Approved, cancellationToken);
             if (risk is null || !TryReadOptionProposal(risk.SnapshotJson, out var proposal)) continue;
             var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.Id == proposal.InstrumentId && value.IsActive, cancellationToken);
             if (instrument is null || instrument.Exchange != "NSE") continue;
             var quantity = await QuantityAsync(db, instrument.LotSize, cancellationToken);
-            return NewIntent("NIFTY", evaluation.Id, instrument, quantity, proposal.EntryPrice,
+            return NewIntent("NIFTY", signal.Id, instrument, quantity, proposal.EntryPrice,
                 proposal.StopLoss, proposal.Target);
         }
         return null;
