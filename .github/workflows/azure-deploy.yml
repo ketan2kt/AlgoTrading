@@ -80,6 +80,7 @@ jobs:
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
             --settings DatabaseInitialization__ApplyMigrations=true \
+              LiveExecution__BuildEnabled=true \
             --output none
           az webapp deploy \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
@@ -111,6 +112,7 @@ jobs:
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
             --settings DatabaseInitialization__ApplyMigrations=false \
+              LiveExecution__BuildEnabled=true \
             --output none
 
       - name: Verify application after migration shutdown
