@@ -15,4 +15,8 @@ public sealed record LiveTradingArmStatus(
     bool ControlledBrokerTestCompleted,
     string[] AllowedMarkets,
     DateTimeOffset? ChangedAtUtc,
-    string? ChangedBy);
+    string? ChangedBy,
+    string? LatestIntentMarket,
+    string? LatestIntentStatus,
+    string? LatestIntentError,
+    DateTimeOffset? LatestIntentAtUtc);

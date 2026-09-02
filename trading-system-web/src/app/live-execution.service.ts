@@ -11,6 +11,10 @@ export interface LiveExecutionStatus {
   allowedMarkets: string[];
   changedAtUtc: string | null;
   changedBy: string | null;
+  latestIntentMarket: string | null;
+  latestIntentStatus: string | null;
+  latestIntentError: string | null;
+  latestIntentAtUtc: string | null;
 }
 
 @Injectable({ providedIn: 'root' })

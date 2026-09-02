@@ -27,7 +27,10 @@ internal sealed class EfLiveTradingArmService(
         var tested = await db.ApplicationSettings.AsNoTracking().AnyAsync(item =>
             item.Mode == TradingMode.Live && item.Key == AutomaticLiveExecutionService.ControlledTestKey &&
             item.ValueJson == "true", cancellationToken);
-        return ToStatus(value is { Armed: true } && value.TradingDate == today ? value : null, tested);
+        var latestIntent = await db.LiveExecutionIntents.AsNoTracking()
+            .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return ToStatus(value is { Armed: true } && value.TradingDate == today ? value : null,
+            tested, latestIntent);
     }
 
     public async Task<LiveTradingArmStatus> SetAsync(bool armed, string reason, string actor,
@@ -55,12 +58,16 @@ internal sealed class EfLiveTradingArmService(
         var tested = await db.ApplicationSettings.AsNoTracking().AnyAsync(item =>
             item.Mode == TradingMode.Live && item.Key == AutomaticLiveExecutionService.ControlledTestKey &&
             item.ValueJson == "true", cancellationToken);
-        return ToStatus(value, tested);
+        var latestIntent = await db.LiveExecutionIntents.AsNoTracking()
+            .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        return ToStatus(value, tested, latestIntent);
     }
 
-    private LiveTradingArmStatus ToStatus(ArmValue? value, bool tested) => new(options.Value.BuildEnabled,
+    private LiveTradingArmStatus ToStatus(ArmValue? value, bool tested, LiveExecutionIntent? latestIntent) => new(options.Value.BuildEnabled,
         value?.Armed == true, value?.TradingDate, options.Value.MaximumLotsPerOrder, tested,
-        options.Value.AllowedMarkets, value?.ChangedAtUtc, value?.ChangedBy);
+        options.Value.AllowedMarkets, value?.ChangedAtUtc, value?.ChangedBy,
+        latestIntent?.Market, latestIntent?.Status, latestIntent?.LastError,
+        latestIntent?.CreatedAtUtc);
 
     private static ArmValue? Parse(string? json)
     {

@@ -188,6 +188,10 @@
                   {{ liveExecution?.armed ? 'ARMED · automatic Groww orders enabled' : 'DISARMED · no live orders' }}
                 </strong>
                 <p>{{ liveExecution?.buildEnabled ? (liveExecution?.controlledBrokerTestCompleted ? ('Broker validation complete · automatic orders use ' + liveExecution?.maximumLotsPerOrder + ' lots') : 'First eligible order will run the mandatory one-lot broker validation; later orders use five lots.') : 'Live execution is disabled by server configuration.' }}</p>
+                @if (liveExecution?.latestIntentStatus) {
+                  <p><strong>Latest live attempt:</strong> {{ liveExecution?.latestIntentMarket }} · {{ liveExecution?.latestIntentStatus }} · {{ liveExecution?.latestIntentAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata' }} IST</p>
+                  @if (liveExecution?.latestIntentError) { <p class="bad">{{ liveExecution?.latestIntentError }}</p> }
+                }
                 <label>Activation reason<input name="liveExecutionReason" [(ngModel)]="liveExecutionReason" minlength="10" maxlength="500" /></label>
                 <label>Administrator password<input name="liveExecutionPassword" type="password" autocomplete="current-password" [(ngModel)]="liveExecutionPassword" /></label>
                 <button type="button" [disabled]="liveExecutionBusy || !liveExecution?.buildEnabled" (click)="setLiveExecution(!liveExecution?.armed)">
