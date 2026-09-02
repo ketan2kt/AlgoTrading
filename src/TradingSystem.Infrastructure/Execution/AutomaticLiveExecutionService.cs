@@ -9,6 +9,7 @@ using TradingSystem.Application.Risk;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
 
 namespace TradingSystem.Infrastructure.Execution;
@@ -117,7 +118,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     {
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
-            .Where(value => value.Market == "SENSEX" && value.Status == "Active" &&
+            .Where(value => value.Market == TradingMarketCatalog.Sensex.Code && value.Status == "Active" &&
                             value.OpenedAtUtc >= armedAtUtc && value.OpenedAtUtc >= cutoff)
             .OrderBy(value => value.OpenedAtUtc).ToListAsync(cancellationToken);
         foreach (var source in sources)
