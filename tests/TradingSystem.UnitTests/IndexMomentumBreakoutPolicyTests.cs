@@ -40,6 +40,33 @@ public sealed class IndexMomentumBreakoutPolicyTests
         Assert.Null(result.Direction);
     }
 
+    [Fact]
+    public void RejectsLocalBreakoutInsideAlternatingSessionRange()
+    {
+        decimal[] closes = [100m, 102m, 99m, 102m, 99m, 102m, 99m, 102m, 99m, 101m, 100m, 101.2m];
+        var candles = closes.Select((close, index) =>
+        {
+            var open = index == 0 ? close : closes[index - 1];
+            return Bar(open, Math.Max(open, close) + 0.35m, Math.Min(open, close) - 0.35m, close);
+        }).ToArray();
+
+        var result = IndexMomentumBreakoutPolicy.Evaluate(candles);
+
+        Assert.Null(result.Direction);
+        Assert.Contains(result.Reasons, reason => reason.Contains("range-like", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CanEvaluateAfterTwelveCurrentSessionCandles()
+    {
+        var candles = Trend(100m, 0.25m, 11).ToList();
+        candles.Add(Bar(102.6m, 103.3m, 102.5m, 103.2m));
+
+        var result = IndexMomentumBreakoutPolicy.Evaluate(candles);
+
+        Assert.DoesNotContain(result.Reasons, reason => reason.Contains("At least"));
+    }
+
     private static IEnumerable<Candle> Trend(decimal start, decimal step, int count)
     {
         for (var index = 0; index < count; index++)

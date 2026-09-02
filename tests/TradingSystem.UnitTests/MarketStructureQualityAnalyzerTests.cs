@@ -58,6 +58,18 @@ public sealed class MarketStructureQualityAnalyzerTests
         Assert.True(result.RoomToRiskRatio < 1.10m);
     }
 
+    [Fact]
+    public void RejectsMomentumEntryAtEdgeOfAlternatingRange()
+    {
+        var bars = Bars([100m, 102m, 99m, 102m, 99m, 102m, 99m, 102m, 99m, 101m, 100m, 101.9m]);
+
+        var result = MarketStructureQualityAnalyzer.Analyze(bars, Direction.Buy, 102.1m, 100.5m,
+            1m, 104m, 97m, 1m);
+
+        Assert.False(result.WouldPermit);
+        Assert.Contains(result.Reasons, reason => reason.Contains("Range-edge"));
+    }
+
     private static StrategyPriceBar[] Bars(decimal[] closes)
     {
         var start = DateTimeOffset.UtcNow.AddMinutes(-closes.Length * 5);

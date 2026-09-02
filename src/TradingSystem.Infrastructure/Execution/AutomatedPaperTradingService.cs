@@ -297,11 +297,16 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
-        var previousClose = await db.Candles.AsNoTracking().Where(value =>
+        var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == instrument.Id && value.Source == "Groww" &&
                 value.OpenTimeUtc < sessionStart)
-            .OrderByDescending(value => value.OpenTimeUtc).Select(value => (decimal?)value.Close)
-            .FirstOrDefaultAsync(cancellationToken);
+            .OrderByDescending(value => value.OpenTimeUtc).Take(150)
+            .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        var previousSessionCandles = previousCandidates
+            .GroupBy(value => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc,
+                IndiaTimeZone).Date))
+            .OrderByDescending(group => group.Key).FirstOrDefault()?.ToArray() ?? [];
+        var previousClose = previousSessionCandles.LastOrDefault()?.Close;
         if (previousClose is null)
         {
             state.Record("WarmingUp", false,
@@ -426,6 +431,24 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.RecentCandles, signal.Direction, strategyContext.CurrentPrice,
             strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
             strategyContext.OpeningRangeLow, Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
+
+        var location = MarketLocationPolicy.Evaluate(strategyContext.RecentCandles,
+            previousSessionCandles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+                value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
+            strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
+            strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
+        if (!location.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "MarketLocationRejected", location.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("MarketLocationRejected", true,
+                $"{location.Context}. {string.Join(" ", location.Reasons)}",
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
 
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
             signal.StrategyId);

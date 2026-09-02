@@ -60,11 +60,13 @@ internal sealed partial class MultiMarketPaperTradingService(
         await CaptureExitResearchAsync(db, market, now, cancellationToken);
 
         var interval = marketOptions.Value.CandleIntervalSeconds;
+        var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
-                value.IntervalSeconds == interval && value.Source == "Groww")
+                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                (market != TradingMarketCatalog.Sensex || value.OpenTimeUtc >= sessionStartUtc))
             .OrderByDescending(value => value.OpenTimeUtc).Take(40)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (candles.Count < 21) return;
+        if (candles.Count < (market == TradingMarketCatalog.Sensex ? 12 : 21)) return;
         var latest = candles[^1];
         if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc) return;
         lastEvaluated[market.Code] = latest.OpenTimeUtc;
@@ -81,6 +83,31 @@ internal sealed partial class MultiMarketPaperTradingService(
 
         if (market == TradingMarketCatalog.Sensex)
         {
+            var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
+                    value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
+                    value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
+                .OrderByDescending(value => value.OpenTimeUtc).Take(150)
+                .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+            var previousSession = previousCandidates
+                .GroupBy(value => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc,
+                    IndiaTimeZone).Date))
+                .OrderByDescending(group => group.Key).FirstOrDefault()?.ToArray() ?? [];
+            var openingBars = candles.Take(Math.Min(3, candles.Count)).ToArray();
+            var location = MarketLocationPolicy.Evaluate(
+                candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
+                    value.High, value.Low, value.Close)).ToArray(),
+                previousSession.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
+                    value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
+                AverageTrueRange(candles.TakeLast(15).ToArray()),
+                openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
+            if (!location.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "MarketLocationRejected", decision.Confidence,
+                    [$"{location.Context}.", .. location.Reasons], cancellationToken);
+                return;
+            }
+
             var reentryCutoff = now.AddMinutes(-20);
             var recentEntry = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
                 value.Market == market.Code && value.OpenedAtUtc >= reentryCutoff,
@@ -94,7 +121,6 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         else if (market == TradingMarketCatalog.NaturalGas)
         {
-            var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
             var entriesToday = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
                 value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc,
                 cancellationToken);

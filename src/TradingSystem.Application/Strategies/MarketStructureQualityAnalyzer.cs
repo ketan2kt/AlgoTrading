@@ -69,6 +69,21 @@ public static class MarketStructureQualityAnalyzer
         maturity = Math.Max(0m, maturity);
         var room = KnownRoom(candidateDirection, currentPrice, openingRangeHigh, openingRangeLow,
             recent, proposedRisk);
+        var prior = recent.SkipLast(1).ToArray();
+        var rangeLikePath = efficiency < 0.38m && flipRatio >= 0.40m;
+        var decisiveBreak = candidateDirection switch
+        {
+            Direction.Buy => currentPrice > prior.Max(value => value.High) + atr * 0.10m,
+            Direction.Sell => currentPrice < prior.Min(value => value.Low) - atr * 0.10m,
+            _ => false
+        };
+        var atRangeEdge = candidateDirection switch
+        {
+            Direction.Buy => currentPrice >= prior.Max(value => value.High) - atr * 0.20m,
+            Direction.Sell => currentPrice <= prior.Min(value => value.Low) + atr * 0.20m,
+            _ => false
+        };
+        var rangeEdgeChase = rangeLikePath && atRangeEdge && !decisiveBreak;
 
         var aligned = candidateDirection is null || observedBias is null || candidateDirection == observedBias;
         var state = chop >= 0.62m && efficiency <= 0.40m
@@ -103,6 +118,11 @@ public static class MarketStructureQualityAnalyzer
         {
             permit = false;
             reasons.Add("The candidate conflicts with the observed high-quality directional path.");
+        }
+        if (rangeEdgeChase)
+        {
+            permit = false;
+            reasons.Add("Range-edge momentum entry is blocked until a decisive close outside current-session structure.");
         }
         if (room is < 1.10m)
         {
