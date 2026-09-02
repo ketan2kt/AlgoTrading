@@ -232,8 +232,9 @@ internal sealed partial class AutomaticLiveExecutionService(
             if (!document.RootElement.TryGetProperty("optionProposal", out var node) ||
                 node.ValueKind != JsonValueKind.Object) return false;
             proposal = new(node.GetProperty("instrumentId").GetGuid(),
-                node.GetProperty("entryPrice").GetDecimal(),
-                node.GetProperty("stopLoss").GetDecimal(), node.GetProperty("target").GetDecimal());
+                node.GetProperty("proposedEntry").GetDecimal(),
+                node.GetProperty("proposedStopLoss").GetDecimal(),
+                node.GetProperty("proposedTarget").GetDecimal());
             return proposal.InstrumentId != Guid.Empty && proposal.EntryPrice > 0 &&
                    proposal.StopLoss > 0 && proposal.Target > 0;
         }
