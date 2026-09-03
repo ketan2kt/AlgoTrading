@@ -43,9 +43,13 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (!arm.Armed || arm.ChangedAtUtc is null) return;
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
 
-        if (await db.LiveExecutionIntents.AnyAsync(value =>
-                value.Status == "ReconciliationRequired" || value.Status == "ProtectionSubmitting",
-                cancellationToken))
+        var blockers = await db.LiveExecutionIntents.Where(value =>
+                value.Status == "ReconciliationRequired" || value.Status == "ProtectionSubmitting")
+            .ToListAsync(cancellationToken);
+        foreach (var stale in blockers.Where(IsDefinitivePreSubmissionRejection))
+            stale.Reject(stale.LastError!, timeProvider.GetUtcNow());
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(cancellationToken);
+        if (blockers.Any(value => value.Status is "ReconciliationRequired" or "ProtectionSubmitting"))
             return;
         if (!await ReconcileAsync(db, cancellationToken)) return;
 
@@ -151,6 +155,14 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     internal static string LiveClientReference(Guid sourceId) => Reference("LE", sourceId);
 
+    internal static bool IsDefinitivePreSubmissionRejection(LiveExecutionIntent intent) =>
+        intent.Status == "ReconciliationRequired" && intent.BrokerOrderId is null &&
+        intent.LastError is { } error &&
+        (error.Contains("returned 400", StringComparison.Ordinal) ||
+         error.Contains("returned 401", StringComparison.Ordinal) ||
+         error.Contains("returned 403", StringComparison.Ordinal) ||
+         error.Contains("returned 422", StringComparison.Ordinal));
+
     private async Task<int> QuantityAsync(TradingDbContext db, int lotSize,
         CancellationToken cancellationToken)
     {
@@ -211,6 +223,13 @@ internal sealed partial class AutomaticLiveExecutionService(
             intent.Protected(protection.BrokerProtectionId, timeProvider.GetUtcNow());
             await MarkControlledTestCompleteAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (GrowwApiException exception) when (intent.BrokerOrderId is null &&
+                                                   exception.StatusCode is 400 or 401 or 403 or 422)
+        {
+            intent.Reject(exception.Message, timeProvider.GetUtcNow());
+            await db.SaveChangesAsync(cancellationToken);
+            throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

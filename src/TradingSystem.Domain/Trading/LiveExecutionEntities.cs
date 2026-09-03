@@ -81,6 +81,15 @@ public sealed class LiveExecutionIntent : MutableEntity
         LastError = reason;
     }
 
+    public void Reject(string reason, DateTimeOffset atUtc)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("A rejection reason is required.", nameof(reason));
+        Status = "Rejected";
+        LastError = reason;
+        MarkUpdated(atUtc.ToUniversalTime());
+    }
+
     public void Closed(DateTimeOffset atUtc)
     {
         Status = "Closed";

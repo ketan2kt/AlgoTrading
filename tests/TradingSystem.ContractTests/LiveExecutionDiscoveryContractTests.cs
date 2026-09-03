@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Execution;
 
 namespace TradingSystem.ContractTests;
@@ -69,5 +70,16 @@ public sealed class LiveExecutionDiscoveryContractTests
         Assert.Equal(first, retry);
         Assert.NotEqual(first, AutomaticLiveExecutionService.LiveClientReference(Guid.NewGuid()));
         Assert.True(first.Length <= 20);
+    }
+
+    [Fact]
+    public void DefiniteUnauthorisedPreSubmissionAttemptDoesNotBlockLaterTrades()
+    {
+        var intent = new LiveExecutionIntent(Guid.NewGuid(), "SENSEX", Guid.NewGuid(), "SENSEX",
+            Guid.NewGuid(), Direction.Buy, 100, 100m, 90m, 110m, "LE12345678",
+            DateTimeOffset.UtcNow);
+        intent.RequireReconciliation("Groww execution API returned 401.");
+
+        Assert.True(AutomaticLiveExecutionService.IsDefinitivePreSubmissionRejection(intent));
     }
 }
