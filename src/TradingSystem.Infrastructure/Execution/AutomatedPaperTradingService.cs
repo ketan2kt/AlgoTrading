@@ -232,7 +232,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var entryWindowStart = ParseTime(options.Value.EntryWindowStart);
         var entryCutoff = ParseTime(options.Value.EntryCutoff);
         var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
-        if (localTime < entryWindowStart || localTime >= entryCutoff)
+        if (!IndexEntryWindowPolicy.AllowsEntry(localTime, entryWindowStart, entryCutoff))
         {
             state.Record(localTime < entryWindowStart ? "WarmingUp" : "EntryCutoff", false,
                 localTime < entryWindowStart ? "Waiting for the paper entry window." :
@@ -685,6 +685,44 @@ internal sealed partial class AutomatedPaperTradingService(
         await PersistTradePriceSampleAsync(db, signal.SignalId, selectedOption.InstrumentId,
             entry.AverageFillPrice!.Value, cancellationToken);
 
+        // Supplement the existing signal/evaluation records, never substitute Sensex rules.
+        var reasoningCharges = PaperTradingCostModel.CalculateOptionCharges([
+            new(PaperOptionTransactionSide.Buy, entry.AverageFillPrice.Value, entry.FilledQuantity),
+            new(PaperOptionTransactionSide.Sell, decision.FinalTarget, entry.FilledQuantity)]);
+        await scope.ServiceProvider.GetRequiredService<IAuditWriter>().WriteAsync(new AuditEntry(
+            "paper-automation", "NiftyTradeReasoning", "Signal", signal.SignalId.ToString("N"),
+            "Versioned observation-only entry evidence; see linked signal/evaluation and exit records.",
+            "{}", JsonSerializer.Serialize(new
+            {
+                version = "nifty-reasoning-v1", market = "nifty", advisoryOnly = true,
+                signalId = signal.SignalId, signal.StrategyId, signal.StrategyVersion,
+                underlyingDirection = signal.Direction.ToString(),
+                supportingReasons = signal.SupportingReasons,
+                invalidatingReasons = signal.InvalidatingReasons,
+                context = new { regime, shadowStructure, vwap, fast, slow, atrPercent = atr,
+                    relativeFuturesVolume = relativeVolume, openingRangeHigh, openingRangeLow },
+                location, entryQuality,
+                timing = new { signal.MarketDataTimestampUtc, signal.ExpiresAtUtc,
+                    candleDecisionTime, recordedAtUtc = timeProvider.GetUtcNow(),
+                    setupAgeSeconds = (double?)null,
+                    limitation = "Signal/candle timestamps do not establish first setup detection or broker latency." },
+                quoteSnapshot = quote,
+                pricingMode = options.Value.PermissivePaperExecution ? "PermissivePaperSimulation" : "ValidatedPaperQuote",
+                option = optionProposal,
+                filledEntry = entry.AverageFillPrice.Value, quantity = entry.FilledQuantity,
+                initialStop = decision.FinalStopLoss, target = decision.FinalTarget,
+                initialPremiumRisk = (entry.AverageFillPrice.Value - decision.FinalStopLoss) * entry.FilledQuantity,
+                plannedNetTargetReward = (decision.FinalTarget - entry.AverageFillPrice.Value) *
+                    entry.FilledQuantity - reasoningCharges.Total,
+                estimatedTargetRoundTripCharges = reasoningCharges,
+                exposure = new { existingCapitalExposure, openPositionsBeforeEntry = tradeState.OpenPositions.Count,
+                    openUnrealisedPnl },
+                adaptiveDecision,
+                limitations = "Target reward is a plan, not a forecast; unknown slippage is excluded. " +
+                    "Unknown setup age is not inferred. No Sensex thresholds or verdicts are applied. " +
+                    "Entry reasons must be compared with later net outcomes."
+            }), signal.SignalId.ToString("N"), timeProvider.GetUtcNow()), cancellationToken);
+
         state.Record("PositionOpen", false,
             $"Paper position opened in {selectedOption.TradingSymbol}; monitoring option premium SL and target.",
             tradeState.TradesToday + 1, tradeState.RealisedPnl, signalId: signal.SignalId,
@@ -1076,8 +1114,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 futuresDetail),
             new("freshness", "Live data freshness", fresh,
                 fresh ? "Latest Nifty quote is current" : "Live Nifty quote is stale"),
-            new("window", "Entry window", localTime >= start && localTime < cutoff,
-                $"{options.Value.EntryWindowStart}–{options.Value.EntryCutoff} IST"),
+            new("window", "Entry window", IndexEntryWindowPolicy.AllowsEntry(localTime, start, cutoff),
+                $"{options.Value.EntryWindowStart}–{(cutoff < IndexEntryWindowPolicy.LastEntryCutoff ? cutoff : IndexEntryWindowPolicy.LastEntryCutoff):HH:mm} IST"),
             new("risk", "Risk controls", !killSwitchActive,
                 killSwitchActive ? "Kill switch active" : "Kill switch clear")
         ]);

@@ -107,8 +107,8 @@ internal sealed partial class HeroZeroPaperTradingService(
                        call.Score >= options.Value.MinimumCandidateScore &&
                        put.Score >= options.Value.MinimumCandidateScore &&
                        call.Premium + put.Premium <= options.Value.MaximumCombinedPremium &&
-                       localTime >= ParseTime(options.Value.EntryWindowStart) &&
-                       localTime <= ParseTime(options.Value.EntryCutoff) &&
+                       IndexEntryWindowPolicy.AllowsEntry(localTime,
+                           ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff)) &&
                        await ExpansionTriggerAsync(db, underlying.Id, cancellationToken);
         var openedToday = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
             value.Market == market.Code && value.Strategy.StartsWith("Hero Zero|") &&

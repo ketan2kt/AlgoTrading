@@ -115,6 +115,18 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             orderby position.ClosedAtUtc descending
             select new { Position = position, instrument.TradingSymbol, instrument.ExpiryDate })
             .Take(500).ToListAsync(cancellationToken);
+        var sensexAudits = await db.MarketStrategyAudits.AsNoTracking()
+            .Where(x => x.Market == "sensex" && x.CandleTimeUtc >= cutoff &&
+                (x.Outcome.StartsWith("PositionSample:") || x.Outcome.StartsWith("PostExit")))
+            .Select(x => new { x.Outcome, x.ReasonsJson }).ToListAsync(cancellationToken);
+        var sensexPrices = sensexAudits.Where(x => x.Outcome.StartsWith("PositionSample:", StringComparison.Ordinal))
+            .Select(x => SensexResearchAuditParser.Parse(x.ReasonsJson, "price"))
+            .Where(x => x.HasValue && x.Value.Value > 0).Select(x => x!.Value)
+            .GroupBy(x => x.PositionId).ToDictionary(x => x.Key, x => x.Select(v => v.Value).ToArray());
+        var sensexFollowUps = sensexAudits.Where(x => x.Outcome.StartsWith("PostExit", StringComparison.Ordinal))
+            .Select(x => SensexResearchAuditParser.Parse(x.ReasonsJson, "incrementalAfterExit"))
+            .Where(x => x.HasValue).Select(x => x!.Value)
+            .GroupBy(x => x.PositionId).ToDictionary(x => x.Key, x => x.Select(v => v.Value).ToArray());
         rows.AddRange(marketRows.Select(x =>
         {
             var gross = (x.Position.Direction == TradingSystem.Domain.Trading.Direction.Buy
@@ -133,7 +145,9 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                     : -1, costBreakdown,
                 PaperTradeResearchAnalyzer.Analyze(new(x.Position.Quantity,
                     x.Position.EntryPrice, x.Position.CurrentPrice, gross, costs,
-                    x.Position.RealisedPnl, x.Position.Status, [], [])), null, null, null);
+                    x.Position.RealisedPnl, x.Position.Status,
+                    sensexPrices.GetValueOrDefault(x.Position.Id, []),
+                    sensexFollowUps.GetValueOrDefault(x.Position.Id, []))), null, null, null);
         }));
         rows = rows.OrderByDescending(value => value.ExitTimeUtc).Take(1000).ToList();
         var daily = rows.GroupBy(value => DateOnly.FromDateTime(

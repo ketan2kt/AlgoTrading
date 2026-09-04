@@ -59,6 +59,12 @@ internal sealed partial class MultiMarketPaperTradingService(
         await ManagePositionsAsync(db, market, now, cancellationToken);
         await CaptureExitResearchAsync(db, market, now, cancellationToken);
 
+        // Continue managing existing positions, but never open index trades at/after 15:00 IST.
+        if (market == TradingMarketCatalog.Sensex &&
+            !IndexEntryWindowPolicy.AllowsEntry(localTime,
+                TimeOnly.ParseExact(options.Value.EntryWindowStart, "HH:mm"),
+                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm"))) return;
+
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
@@ -83,6 +89,13 @@ internal sealed partial class MultiMarketPaperTradingService(
 
         if (market == TradingMarketCatalog.Sensex)
         {
+            var timingObservation = SensexTimingResearch.Observe(candles.Select(x =>
+                    new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(),
+                decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()), now, interval);
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                latest.OpenTimeUtc, "SensexTimingCandidate", decision.Confidence,
+                JsonSerializer.Serialize(timingObservation)));
+            await db.SaveChangesAsync(cancellationToken);
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
                     value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
@@ -205,6 +218,28 @@ internal sealed partial class MultiMarketPaperTradingService(
                 Math.Max(Math.Abs(entry - stop) * execution.LotSize, 0.01m)));
             quantity = execution.LotSize * Math.Min(lotsByRisk, options.Value.MaximumOptionLots);
         }
+        SensexReasoningSnapshot? reasoning = null;
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            var recentCutoff = now.AddMinutes(-60);
+            var sameSide = await (from p in db.MarketPaperPositions.AsNoTracking()
+                join i in db.Instruments.AsNoTracking() on p.ExecutionInstrumentId equals i.Id
+                where p.Market == market.Code && i.Type == execution.Type &&
+                    (p.Status == "Active" || p.ClosedAtUtc >= recentCutoff)
+                select new { p.Status, p.RealisedPnl }).ToListAsync(cancellationToken);
+            var charges = PaperTradingCostModel.CalculateOptionCharges([
+                new(PaperOptionTransactionSide.Buy, entry, quantity),
+                new(PaperOptionTransactionSide.Sell, target, quantity)]).Total;
+            decimal? quoteAge = quote.LastTradeTimeEpochMilliseconds is { } epoch &&
+                epoch is >= -62135596800000 and <= 253402300799999
+                ? (decimal)(timeProvider.GetUtcNow() - DateTimeOffset.FromUnixTimeMilliseconds(epoch)).TotalSeconds : null;
+            reasoning = SensexTradeReasoning.Assess(candles.Select(x => new StrategyPriceBar(
+                    x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(), decision.Direction.Value,
+                AverageTrueRange(candles.TakeLast(15).ToArray()), entry, stop, target, quantity,
+                quote.BidPrice, quote.OfferPrice, quoteAge, charges,
+                sameSide.Count(x => x.Status == "Active"),
+                sameSide.Count(x => x.Status != "Active" && x.RealisedPnl < 0));
+        }
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
             execution.Id, market == TradingMarketCatalog.NaturalGas
                 ? $"Manual execution alert · {decision.Strategy}" : decision.Strategy,
@@ -215,6 +250,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 positionId = position.Id,
                 strategy = decision.Strategy,
+                reasoning,
+                underlyingDirection = decision.Direction.ToString(),
+                quoteSnapshot = market == TradingMarketCatalog.Sensex ? quote : null,
                 direction = executionDirection.ToString(),
                 confidence = decision.Confidence,
                 entry,
@@ -222,6 +260,13 @@ internal sealed partial class MultiMarketPaperTradingService(
                 target,
                 quantity,
                 execution = execution.TradingSymbol,
+                timing = market == TradingMarketCatalog.Sensex
+                    ? SensexTimingResearch.Observe(candles.Select(x => new StrategyPriceBar(
+                        x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(), decision.Direction.Value,
+                        AverageTrueRange(candles.TakeLast(15).ToArray()), timeProvider.GetUtcNow(), interval)
+                    : null,
+                evaluationStartedAtUtc = now,
+                paperEntryRecordedAtUtc = timeProvider.GetUtcNow(),
                 reasons = decision.Reasons
             })));
         await db.SaveChangesAsync(cancellationToken);

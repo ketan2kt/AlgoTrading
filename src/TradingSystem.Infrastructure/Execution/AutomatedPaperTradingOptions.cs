@@ -9,7 +9,7 @@ public sealed class AutomatedPaperTradingOptions
     public int NoTradeAuditIntervalMinutes { get; init; } = 15;
     public string EntryWindowStart { get; init; } = "09:15";
     public string OpeningRangeEnd { get; init; } = "09:30";
-    public string EntryCutoff { get; init; } = "14:30";
+    public string EntryCutoff { get; init; } = "15:00";
     public string ForcedExit { get; init; } = "15:15";
     public decimal MaximumDailyLoss { get; init; } = 1500m;
     public bool EnforceDailyLossLimit { get; init; } = true;
