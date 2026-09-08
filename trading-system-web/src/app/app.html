@@ -533,6 +533,14 @@
                 <div><span>Combined P&amp;L</span><strong [class.good]="hz.combinedPnl >= 0" [class.bad]="hz.combinedPnl < 0">₹{{ hz.combinedPnl | number:'1.2-2' }}</strong></div>
                 <p>{{ hz.explanation }}</p>
               </div>
+              <div class="evaluation-table"><article class="evaluation-row">
+                <div><span>Expiry session</span><strong [class.good]="hz.isExpirySession" [class.bad]="!hz.isExpirySession">{{hz.isExpirySession ? 'Eligible today' : 'No entry today'}}</strong></div>
+                <div><span>Entry window</span><strong>13:30–15:00 IST</strong></div>
+                <div><span>CE candidate</span><strong [class.good]="hz.callCandidate">{{hz.callCandidate ? 'Available' : 'Unavailable'}}</strong></div>
+                <div><span>PE candidate</span><strong [class.good]="hz.putCandidate">{{hz.putCandidate ? 'Available' : 'Unavailable'}}</strong></div>
+                <div><span>Combined debit</span><strong>{{hz.callCandidate && hz.putCandidate ? ((hz.callCandidate.premium + hz.putCandidate.premium) | number:'1.2-2') : '—'}}</strong></div>
+                <div><span>Required combined ceiling</span><strong>₹70.00</strong></div>
+              </article></div>
               <div class="evaluation-table">
                 @for (candidate of [hz.callCandidate, hz.putCandidate]; track candidate?.optionType) {
                   @if (candidate) {

@@ -7,6 +7,7 @@ namespace TradingSystem.Api.Controllers;
 [Authorize(Roles = "Administrator")]
 [ApiController]
 [Route("api/hero-zero")]
+[Route("api/expiry-monitor")]
 public sealed class HeroZeroController(IHeroZeroMonitorReader reader) : ControllerBase
 {
     [HttpGet("{market}")]

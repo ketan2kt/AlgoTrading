@@ -92,9 +92,14 @@ internal sealed partial class MultiMarketPaperTradingService(
             var timingObservation = SensexTimingResearch.Observe(candles.Select(x =>
                     new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(),
                 decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()), now, interval);
+            var adaptiveObservation = SensexAdaptiveSetupPolicy.Assess(candles.Select(x =>
+                    new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(),
+                decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()),
+                Math.Abs(candles[0].Open - candles[0].Close) >
+                AverageTrueRange(candles.TakeLast(15).ToArray()));
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "SensexTimingCandidate", decision.Confidence,
-                JsonSerializer.Serialize(timingObservation)));
+                JsonSerializer.Serialize(new { timingObservation, adaptiveObservation })));
             await db.SaveChangesAsync(cancellationToken);
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
@@ -251,6 +256,11 @@ internal sealed partial class MultiMarketPaperTradingService(
                 positionId = position.Id,
                 strategy = decision.Strategy,
                 reasoning,
+                adaptiveSetup = market == TradingMarketCatalog.Sensex
+                    ? SensexAdaptiveSetupPolicy.Assess(candles.Select(x => new StrategyPriceBar(
+                        x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(),
+                        decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()), false)
+                    : null,
                 underlyingDirection = decision.Direction.ToString(),
                 quoteSnapshot = market == TradingMarketCatalog.Sensex ? quote : null,
                 direction = executionDirection.ToString(),

@@ -144,12 +144,17 @@ internal sealed partial class HeroZeroPaperTradingService(
     private async Task<List<HeroZeroCandidateInput>> LoadCandidatesAsync(TradingDbContext db,
         TradingMarketDefinition market, DateOnly expiry, decimal spot, CancellationToken cancellationToken)
     {
-        var instruments = await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
+        var available = await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
                 value.IsActive && value.ExpiryDate == expiry && value.StrikePrice != null &&
                 (value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption) &&
                 value.TradingSymbol.StartsWith(market.ExecutionUnderlying))
             .OrderBy(value => Math.Abs(value.StrikePrice!.Value - spot))
-            .Take(options.Value.NearbyContractsPerSide * 2).ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        // Guarantee equal discovery depth. A combined Take could silently crowd out CE or PE.
+        var instruments = available.Where(value => value.Type == InstrumentType.CallOption)
+            .Take(options.Value.NearbyContractsPerSide)
+            .Concat(available.Where(value => value.Type == InstrumentType.PutOption)
+                .Take(options.Value.NearbyContractsPerSide)).ToArray();
         var result = new List<HeroZeroCandidateInput>();
         foreach (var instrument in instruments)
         {
