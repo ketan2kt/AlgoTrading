@@ -52,7 +52,23 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
                 }
                 else
                 {
-                    await PollAsync(stoppingToken);
+                    // A stalled quote, database read, or SignalR publish must not permanently
+                    // stop the single Nifty ingestion loop while other market feeds continue.
+                    using var pollTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    pollTimeout.CancelAfter(TimeSpan.FromSeconds(
+                        Math.Max(15, options.Value.PollIntervalSeconds * 5)));
+                    try
+                    {
+                        await PollAsync(pollTimeout.Token);
+                    }
+                    catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested &&
+                                                              pollTimeout.IsCancellationRequested)
+                    {
+                        feedState.RecordStatus("Disconnected",
+                            "Nifty polling exceeded its safety timeout; retrying automatically.");
+                        LogPollingTimedOut(logger);
+                        delay = TimeSpan.FromSeconds(Math.Max(5, options.Value.PollIntervalSeconds));
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -181,4 +197,8 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Groww Nifty live quote polling failed.")]
     private static partial void LogPollingFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Groww Nifty live quote polling timed out; the next cycle will retry.")]
+    private static partial void LogPollingTimedOut(ILogger logger);
 }

@@ -1,5 +1,7 @@
 namespace TradingSystem.Infrastructure.MarketData;
 
+using TradingSystem.Application.MarketData;
+
 internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
 {
     private readonly object sync = new();
@@ -32,9 +34,9 @@ internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
     {
         lock (sync)
         {
-            var fresh = lastReceivedAtUtc.HasValue &&
-                        timeProvider.GetUtcNow() - lastReceivedAtUtc.Value <= freshnessLimit;
-            return new(status, message, lastMarketTimestampUtc, fresh);
+            var result = FeedFreshnessPolicy.Resolve(status, message, lastReceivedAtUtc,
+                timeProvider.GetUtcNow(), freshnessLimit);
+            return new(result.Status, result.Message, lastMarketTimestampUtc, result.IsFresh);
         }
     }
 }
