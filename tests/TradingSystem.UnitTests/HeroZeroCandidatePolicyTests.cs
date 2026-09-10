@@ -18,11 +18,24 @@ public sealed class HeroZeroCandidatePolicyTests
     }
 
     [Fact]
-    public void SelectRejectsZeroLiquidityAndWideSpread()
+    public void SelectUsesValidLtpVolumeAndOiWhenMarketDepthIsUnavailable()
     {
         var expiry = new DateOnly(2026, 8, 26);
         var selected = HeroZeroCandidatePolicy.Select([
-            Candidate("NO-BID", "PE", 20m, 0m, 20m, 1000m, 1000m, 1m, expiry),
+            Candidate("NO-DEPTH", "PE", 20m, 0m, 0m, 1000m, 1000m, 1m, expiry),
+            Candidate("WIDE", "PE", 20m, 10m, 30m, 1000m, 1000m, 1m, expiry)
+        ], "PE", 20m, 15m);
+
+        Assert.NotNull(selected);
+        Assert.Equal("NO-DEPTH", selected.Symbol);
+    }
+
+    [Fact]
+    public void SelectRejectsOneSidedOrWideMarketDepth()
+    {
+        var expiry = new DateOnly(2026, 8, 26);
+        var selected = HeroZeroCandidatePolicy.Select([
+            Candidate("ONE-SIDED", "PE", 20m, 0m, 20m, 1000m, 1000m, 1m, expiry),
             Candidate("WIDE", "PE", 20m, 10m, 30m, 1000m, 1000m, 1m, expiry)
         ], "PE", 20m, 15m);
 

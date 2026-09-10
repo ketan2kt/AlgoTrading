@@ -13,6 +13,7 @@ public sealed class HeroZeroEndpointTests
             .Cast<RouteAttribute>().Select(x => x.Template).ToArray();
         Assert.Contains("api/expiry-monitor", routes);
         Assert.Contains("api/hero-zero", routes);
+        Assert.Contains("api/market-monitor", routes);
     }
 
     [Fact]

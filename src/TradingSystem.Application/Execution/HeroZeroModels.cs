@@ -32,12 +32,15 @@ public static class HeroZeroCandidatePolicy
         string optionType, decimal targetPremium, decimal maximumSpreadPercent)
     {
         var eligible = candidates.Where(value => value.OptionType == optionType && value.Premium > 0 &&
-            value.Bid > 0 && value.Ask >= value.Bid && value.OpenInterest > 0 && value.Volume > 0)
+            value.OpenInterest > 0 && value.Volume > 0 &&
+            ((value.Bid <= 0 && value.Ask <= 0) || (value.Bid > 0 && value.Ask >= value.Bid)))
             .Select(value => new
             {
                 Value = value,
-                Spread = (value.Ask - value.Bid) / value.Premium * 100m
-            }).Where(value => value.Spread <= maximumSpreadPercent).ToArray();
+                HasMarketDepth = value.Bid > 0 && value.Ask > 0,
+                Spread = value.Bid > 0 && value.Ask > 0
+                    ? (value.Ask - value.Bid) / value.Premium * 100m : 0m
+            }).Where(value => !value.HasMarketDepth || value.Spread <= maximumSpreadPercent).ToArray();
         if (eligible.Length == 0) return null;
         var maxOi = eligible.Max(value => value.Value.OpenInterest);
         var maxVolume = eligible.Max(value => value.Value.Volume);
@@ -45,7 +48,10 @@ public static class HeroZeroCandidatePolicy
         {
             var premiumFit = Math.Max(0m, 1m - Math.Abs(value.Value.Premium - targetPremium) /
                 Math.Max(targetPremium, 1m));
-            var liquidity = 1m - value.Spread / maximumSpreadPercent;
+            // Groww index-option quotes can omit market depth while still returning valid
+            // LTP, volume and OI. Missing depth is neutral; an observed wide spread still rejects.
+            var liquidity = value.HasMarketDepth
+                ? 1m - value.Spread / maximumSpreadPercent : .5m;
             var oi = value.Value.OpenInterest / maxOi;
             var volume = value.Value.Volume / maxVolume;
             var oiChange = value.Value.OpenInterestChange > 0 ? 1m : 0m;

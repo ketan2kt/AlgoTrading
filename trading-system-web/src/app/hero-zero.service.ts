@@ -23,7 +23,7 @@ export interface HeroZeroMonitor {
 export class HeroZeroService {
   private readonly http = inject(HttpClient);
   get(market: 'nifty' | 'sensex') {
-    // Neutral route avoids browser/privacy filters that block "hero-zero" URLs.
-    return this.http.get<HeroZeroMonitor>(`/api/expiry-monitor/${market}`);
+    // Keep the route free of terms commonly blocked by privacy extensions.
+    return this.http.get<HeroZeroMonitor>(`/api/market-monitor/${market}`);
   }
 }
