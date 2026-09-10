@@ -7,15 +7,16 @@ namespace TradingSystem.UnitTests;
 public sealed class SensexAdaptiveSetupPolicyTests
 {
     [Fact]
-    public void DirectionalUnextendedMoveIsPreferredInShadowMode()
+    public void DirectionalUnextendedMoveIsPreferredAndPermitted()
     {
         var start = DateTimeOffset.UnixEpoch;
         var bars = Enumerable.Range(0, 14).Select(i => new StrategyPriceBar(start.AddMinutes(i),
             100+i, 101+i, 99+i, 100+i)).ToArray();
         var result = SensexAdaptiveSetupPolicy.Assess(bars, Direction.Buy, 2, false);
-        Assert.True(result.ShadowOnly);
+        Assert.False(result.ShadowOnly);
         Assert.Equal(SensexMarketState.DirectionalTrend, result.State);
         Assert.Equal(SensexSetupVerdict.Prefer, result.Verdict);
+        Assert.True(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
     }
 
     [Fact]
@@ -27,6 +28,7 @@ public sealed class SensexAdaptiveSetupPolicyTests
         var result = SensexAdaptiveSetupPolicy.Assess(bars, Direction.Buy, 3, false);
         Assert.NotEqual(SensexSetupVerdict.Prefer, result.Verdict);
         Assert.NotEmpty(result.Concerns);
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
     }
 
     [Fact]
@@ -35,5 +37,18 @@ public sealed class SensexAdaptiveSetupPolicyTests
         var result = SensexAdaptiveSetupPolicy.Assess([], Direction.Buy, 0, false);
         Assert.Equal(SensexSetupVerdict.Observe, result.Verdict);
         Assert.NotEmpty(result.Limitations);
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
+    }
+
+    [Fact]
+    public void RangeObservationCannotOpenMomentumTrade()
+    {
+        var result = new SensexAdaptiveSetupAssessment("test", false,
+            SensexMarketState.StructuredRange, SensexSetupVerdict.Observe,
+            "BoundaryReactionOnly", 0.20m, 0.75m, 0.45m, 0.06m, 0.60m,
+            0.10m, 0.15m, 0.80m, [],
+            ["Momentum continuation is mismatched with the current range hypothesis."], []);
+
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
     }
 }

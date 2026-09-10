@@ -18,7 +18,7 @@ public sealed record SensexAdaptiveSetupAssessment(string Version, bool ShadowOn
 public static class SensexAdaptiveSetupPolicy
 {
     private static SensexAdaptiveSetupAssessment Empty(string limitation) =>
-        new("sensex-adaptive-v1", true, SensexMarketState.Transition,
+        new("sensex-adaptive-v2", false, SensexMarketState.Transition,
             SensexSetupVerdict.Observe, "CollectEvidence", 0, 0, 1, 0, 0, 0, 0,
             null, [], [], [limitation]);
 
@@ -69,11 +69,14 @@ public static class SensexAdaptiveSetupPolicy
             : state == SensexMarketState.StructuredRange ? "BoundaryReactionOnly" : "WaitForAcceptance";
         var verdict = concerns.Count == 0 ? SensexSetupVerdict.Prefer
             : concerns.Count >= 2 || !aligned ? SensexSetupVerdict.Avoid : SensexSetupVerdict.Observe;
-        return new("sensex-adaptive-v1", true, state, verdict, setup, trend, range, transition,
+        return new("sensex-adaptive-v2", false, state, verdict, setup, trend, range, transition,
             efficiency, flipRatio, separation, extension, room, supports, concerns,
             ["Probabilities are normalized hypotheses, not calibrated win probabilities.",
-             "Observed local extremes are not guaranteed support/resistance.",
-             "Shadow verdict never changes execution."]);
+             "Observed local extremes are not guaranteed support/resistance."]);
     }
+
+    public static bool AllowsMomentumEntry(SensexAdaptiveSetupAssessment assessment) =>
+        assessment.State == SensexMarketState.DirectionalTrend &&
+        assessment.Verdict == SensexSetupVerdict.Prefer;
 
 }

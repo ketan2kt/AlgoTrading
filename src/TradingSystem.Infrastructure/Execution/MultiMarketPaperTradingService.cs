@@ -101,6 +101,16 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.OpenTimeUtc, "SensexTimingCandidate", decision.Confidence,
                 JsonSerializer.Serialize(new { timingObservation, adaptiveObservation })));
             await db.SaveChangesAsync(cancellationToken);
+            if (!SensexAdaptiveSetupPolicy.AllowsMomentumEntry(adaptiveObservation))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "AdaptiveSetupRejected", decision.Confidence,
+                    [$"{adaptiveObservation.State} / {adaptiveObservation.Verdict}: " +
+                     "momentum entry requires a preferred directional-trend setup.",
+                     .. adaptiveObservation.Concerns,
+                     .. adaptiveObservation.Limitations], cancellationToken);
+                return;
+            }
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
                     value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
