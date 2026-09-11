@@ -75,8 +75,24 @@ public static class SensexAdaptiveSetupPolicy
              "Observed local extremes are not guaranteed support/resistance."]);
     }
 
-    public static bool AllowsMomentumEntry(SensexAdaptiveSetupAssessment assessment) =>
-        assessment.State == SensexMarketState.DirectionalTrend &&
-        assessment.Verdict == SensexSetupVerdict.Prefer;
+    public static bool AllowsMomentumEntry(SensexAdaptiveSetupAssessment assessment)
+    {
+        if (assessment.State is SensexMarketState.StructuredRange or SensexMarketState.OpeningShock ||
+            assessment.Verdict == SensexSetupVerdict.Avoid)
+            return false;
+
+        if (assessment.State == SensexMarketState.DirectionalTrend)
+            return assessment.Verdict == SensexSetupVerdict.Prefer;
+
+        // A confirmed breakout can occur before the rolling classifier has accumulated
+        // enough directional history to label the session a trend. Admit only a clean,
+        // non-extended transition; the base breakout policy still has to pass first.
+        return assessment.State == SensexMarketState.Transition &&
+               assessment.Verdict == SensexSetupVerdict.Observe &&
+               assessment.Efficiency >= .32m &&
+               assessment.EmaSeparationAtr >= .25m &&
+               assessment.MoveFromTriggerAtr is >= 0m and <= .80m &&
+               (assessment.RoomToOpposingLevelAtr is null or >= .50m);
+    }
 
 }
