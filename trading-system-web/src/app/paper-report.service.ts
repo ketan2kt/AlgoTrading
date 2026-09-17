@@ -21,8 +21,8 @@ export interface PaperPnlSummary { from:string; to:string; market:string; market
 @Injectable({providedIn:'root'})
 export class PaperReportService {
   private readonly http=inject(HttpClient);
-  get(){return this.http.get<PaperTradingReport>('/api/reports/paper-trading?days=30');}
+  get(){return this.http.get<PaperTradingReport>('/api/market-analysis?days=30');}
   getPnlSummary(from:string,to:string,market:string){
-    return this.http.get<PaperPnlSummary>('/api/reports/paper-trading/pnl-summary',{params:{from,to,market}});
+    return this.http.get<PaperPnlSummary>('/api/market-analysis/pnl-summary',{params:{from,to,market}});
   }
 }

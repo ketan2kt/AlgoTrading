@@ -7,6 +7,7 @@ namespace TradingSystem.Api.Controllers;
 [Authorize(Roles = "Administrator")]
 [ApiController]
 [Route("api/reports/paper-trading")]
+[Route("api/market-analysis")]
 public sealed class PaperReportsController(IPaperTradingReportReader reader) : ControllerBase
 {
     [HttpGet]
