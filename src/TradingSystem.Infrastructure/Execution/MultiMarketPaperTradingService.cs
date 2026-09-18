@@ -87,6 +87,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             return;
         }
 
+        SensexAdaptiveSetupAssessment? adaptiveSetup = null;
         if (market == TradingMarketCatalog.Sensex)
         {
             var timingObservation = SensexTimingResearch.Observe(candles.Select(x =>
@@ -97,6 +98,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()),
                 Math.Abs(candles[0].Open - candles[0].Close) >
                 AverageTrueRange(candles.TakeLast(15).ToArray()));
+            adaptiveSetup = adaptiveObservation;
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "SensexTimingCandidate", decision.Confidence,
                 JsonSerializer.Serialize(new { timingObservation, adaptiveObservation })));
@@ -176,6 +178,22 @@ internal sealed partial class MultiMarketPaperTradingService(
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "InstrumentUnavailable",
                 decision.Confidence, ["No eligible execution contract is synchronised."], cancellationToken);
             return;
+        }
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            var daysToExpiry = execution.ExpiryDate is { } expiry
+                ? Math.Max(0, expiry.DayNumber - today.DayNumber)
+                : -1;
+            var evidenceGate = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(
+                adaptiveSetup!, localTime, daysToExpiry, decision.Confidence);
+            if (!evidenceGate.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "EvidenceGateRejected", decision.Confidence,
+                    [$"Sensex evidence gate rejected a {daysToExpiry}-DTE entry at {localTime:HH:mm} IST.",
+                     .. evidenceGate.Reasons], cancellationToken);
+                return;
+            }
         }
         if (await db.MarketPaperPositions.AnyAsync(value => value.Market == market.Code &&
                 value.ExecutionInstrumentId == execution.Id && value.Status == "Active", cancellationToken))
@@ -266,11 +284,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 positionId = position.Id,
                 strategy = decision.Strategy,
                 reasoning,
-                adaptiveSetup = market == TradingMarketCatalog.Sensex
-                    ? SensexAdaptiveSetupPolicy.Assess(candles.Select(x => new StrategyPriceBar(
-                        x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray(),
-                        decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()), false)
-                    : null,
+                adaptiveSetup,
                 underlyingDirection = decision.Direction.ToString(),
                 quoteSnapshot = market == TradingMarketCatalog.Sensex ? quote : null,
                 direction = executionDirection.ToString(),

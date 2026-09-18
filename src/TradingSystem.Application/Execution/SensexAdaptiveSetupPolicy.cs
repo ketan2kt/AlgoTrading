@@ -15,6 +15,9 @@ public sealed record SensexAdaptiveSetupAssessment(string Version, bool ShadowOn
     IReadOnlyList<string> SupportingEvidence, IReadOnlyList<string> Concerns,
     IReadOnlyList<string> Limitations);
 
+public sealed record SensexEvidenceGateDecision(bool Permitted,
+    IReadOnlyList<string> Reasons);
+
 public static class SensexAdaptiveSetupPolicy
 {
     private static SensexAdaptiveSetupAssessment Empty(string limitation) =>
@@ -93,6 +96,39 @@ public static class SensexAdaptiveSetupPolicy
                assessment.EmaSeparationAtr >= .25m &&
                assessment.MoveFromTriggerAtr is >= 0m and <= .80m &&
                (assessment.RoomToOpposingLevelAtr is null or >= .50m);
+    }
+
+    public static SensexEvidenceGateDecision EvaluateEvidenceGate(
+        SensexAdaptiveSetupAssessment assessment, TimeOnly localTime,
+        int daysToExpiry, decimal confidence)
+    {
+        var reasons = new List<string>();
+        if (!AllowsMomentumEntry(assessment))
+            reasons.Add("The adaptive structure assessment does not permit a momentum entry.");
+
+        if (localTime >= new TimeOnly(13, 0))
+        {
+            // September evidence is sharply negative for late Sensex entries one day and
+            // six-or-more days from expiry. Keep other expiry distances available, but
+            // demand a genuinely clean directional structure after 13:00.
+            if (daysToExpiry == 1 || daysToExpiry >= 6)
+                reasons.Add($"Late Sensex entries are disabled at {daysToExpiry} days to expiry based on observed negative expectancy.");
+            if (assessment.State != SensexMarketState.DirectionalTrend ||
+                assessment.Verdict != SensexSetupVerdict.Prefer)
+                reasons.Add("After 13:00, only a preferred directional-trend setup is eligible.");
+            if (assessment.Efficiency < .45m)
+                reasons.Add("After 13:00, path efficiency must be at least 0.45.");
+            if (assessment.EmaSeparationAtr < .35m)
+                reasons.Add("After 13:00, EMA separation must be at least 0.35 ATR.");
+            if (assessment.MoveFromTriggerAtr is < 0m or > .65m)
+                reasons.Add("After 13:00, the entry must clear the trigger without exceeding 0.65 ATR.");
+            if (assessment.RoomToOpposingLevelAtr is < .75m)
+                reasons.Add("After 13:00, at least 0.75 ATR room to the observed opposing level is required.");
+            if (confidence < .60m)
+                reasons.Add("After 13:00, signal confidence must be at least 60%.");
+        }
+
+        return new(reasons.Count == 0, reasons);
     }
 
 }

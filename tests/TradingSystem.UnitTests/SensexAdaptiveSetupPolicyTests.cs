@@ -78,4 +78,56 @@ public sealed class SensexAdaptiveSetupPolicyTests
 
         Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
     }
+
+    [Fact]
+    public void StrongMorningSetupRemainsEligible()
+    {
+        var result = PreferredTrend();
+
+        var decision = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(result,
+            new TimeOnly(11, 30), 1, .58m);
+
+        Assert.True(decision.Permitted);
+        Assert.Empty(decision.Reasons);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(6)]
+    public void EvidenceBackedWeakLateExpirySegmentsAreRejected(int daysToExpiry)
+    {
+        var decision = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(13, 10), daysToExpiry, .70m);
+
+        Assert.False(decision.Permitted);
+        Assert.Contains(decision.Reasons, value => value.Contains("negative expectancy"));
+    }
+
+    [Fact]
+    public void ExceptionalLateTwoDaySetupRemainsEligible()
+    {
+        var decision = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(13, 10), 2, .70m);
+
+        Assert.True(decision.Permitted);
+    }
+
+    [Fact]
+    public void LateTransitionIsRejectedEvenWhenBaseTransitionRulePermitsIt()
+    {
+        var result = new SensexAdaptiveSetupAssessment("test", false,
+            SensexMarketState.Transition, SensexSetupVerdict.Observe,
+            "WaitForAcceptance", .55m, .45m, .90m, .50m, .30m,
+            .75m, .60m, null, ["Direction is aligned with EMA 9/21."],
+            ["Transition."], []);
+
+        Assert.True(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
+        Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(result,
+            new TimeOnly(13, 10), 2, .70m).Permitted);
+    }
+
+    private static SensexAdaptiveSetupAssessment PreferredTrend() => new("test", false,
+        SensexMarketState.DirectionalTrend, SensexSetupVerdict.Prefer,
+        "ContinuationOrRetest", .75m, .20m, .45m, .60m, .10m,
+        .60m, .40m, 1.20m, ["Clean trend."], [], []);
 }
