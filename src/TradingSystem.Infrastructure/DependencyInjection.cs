@@ -188,6 +188,7 @@ public static class DependencyInjection
         services.AddSingleton<IHeroZeroMonitorReader>(provider => provider.GetRequiredService<HeroZeroMonitorState>());
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
+        services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddHostedService<GrowwAdditionalMarketDataService>();
@@ -315,6 +316,7 @@ public static class DependencyInjection
             provider.GetRequiredService<PaperAutomationState>());
         services.AddHostedService<AutomatedPaperTradingService>();
         services.AddHostedService<MultiMarketPaperTradingService>();
+        services.AddHostedService<SelfImprovementResearchService>();
 
         return services;
     }
