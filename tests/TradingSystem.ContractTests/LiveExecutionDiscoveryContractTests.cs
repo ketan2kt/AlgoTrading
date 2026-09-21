@@ -57,6 +57,8 @@ public sealed class LiveExecutionDiscoveryContractTests
         Assert.True(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active"));
         Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("SENSEX", "Active"));
         Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "StopLossHit"));
+        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active",
+            "Research|Index momentum breakout"));
     }
 
     [Fact]

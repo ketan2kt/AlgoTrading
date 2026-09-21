@@ -7,6 +7,29 @@ namespace TradingSystem.UnitTests;
 public sealed class SensexAdaptiveSetupPolicyTests
 {
     [Fact]
+    public void CleanRangeBoundaryCanRunAsPaperResearchButNotChampionMomentum()
+    {
+        var assessment = new SensexAdaptiveSetupAssessment("sensex-adaptive-v2", false,
+            SensexMarketState.StructuredRange, SensexSetupVerdict.Prefer, "BoundaryReactionOnly",
+            .35m, .70m, .50m, .20m, .55m, .60m, -.30m, .80m,
+            ["Direction is aligned with EMA 9/21."], [], []);
+
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(assessment));
+        Assert.True(SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(assessment));
+    }
+
+    [Fact]
+    public void ChasingOrPoorRoomNeverBecomesPaperResearchEntry()
+    {
+        var assessment = new SensexAdaptiveSetupAssessment("sensex-adaptive-v2", false,
+            SensexMarketState.StructuredRange, SensexSetupVerdict.Observe, "BoundaryReactionOnly",
+            .30m, .75m, .40m, .15m, .60m, .50m, 1.20m, .20m,
+            ["Direction is aligned with EMA 9/21."], ["Chase risk."], []);
+
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(assessment));
+    }
+
+    [Fact]
     public void DirectionalUnextendedMoveIsPreferredAndPermitted()
     {
         var start = DateTimeOffset.UnixEpoch;

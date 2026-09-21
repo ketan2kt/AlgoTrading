@@ -129,6 +129,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
             .Where(value => value.Market == TradingMarketCatalog.Sensex.Code && value.Status == "Active" &&
+                            !value.Strategy.StartsWith("Research|") &&
                             value.OpenedAtUtc >= armedAtUtc && value.OpenedAtUtc >= cutoff)
             .OrderBy(value => value.OpenedAtUtc).ToListAsync(cancellationToken);
         foreach (var source in sources)
@@ -259,8 +260,9 @@ internal sealed partial class AutomaticLiveExecutionService(
                Guid.TryParseExact(clientReference[..^suffix.Length], "N", out signalId);
     }
 
-    internal static bool IsSensexPaperSource(string market, string status) =>
-        market == TradingMarketCatalog.Sensex.Code && status == "Active";
+    internal static bool IsSensexPaperSource(string market, string status, string strategy = "") =>
+        market == TradingMarketCatalog.Sensex.Code && status == "Active" &&
+        !strategy.StartsWith("Research|", StringComparison.Ordinal);
 
     internal static bool TryReadOptionProposal(string json, out OptionProposal proposal)
     {

@@ -98,6 +98,25 @@ public static class SensexAdaptiveSetupPolicy
                (assessment.RoomToOpposingLevelAtr is null or >= .50m);
     }
 
+    public static bool AllowsPaperResearchEntry(SensexAdaptiveSetupAssessment assessment)
+    {
+        if (assessment.ShadowOnly || assessment.State == SensexMarketState.OpeningShock ||
+            assessment.Verdict == SensexSetupVerdict.Avoid)
+            return false;
+        if (!assessment.SupportingEvidence.Any(value =>
+                value.Contains("aligned with EMA", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        if (assessment.MoveFromTriggerAtr is < -0.80m or > 1m ||
+            assessment.RoomToOpposingLevelAtr is < .50m)
+            return false;
+
+        // Research entries deliberately cover the clean boundary/transition cases rejected by
+        // the live champion. They remain paper-only until accumulated evidence earns promotion.
+        return assessment.State == SensexMarketState.StructuredRange
+            ? assessment.Setup == "BoundaryReactionOnly" && assessment.MoveFromTriggerAtr <= 0m
+            : assessment.State == SensexMarketState.Transition;
+    }
+
     public static SensexEvidenceGateDecision EvaluateEvidenceGate(
         SensexAdaptiveSetupAssessment assessment, TimeOnly localTime,
         int daysToExpiry, decimal confidence)

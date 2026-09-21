@@ -88,6 +88,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
 
         SensexAdaptiveSetupAssessment? adaptiveSetup = null;
+        var paperResearchEntry = false;
         if (market == TradingMarketCatalog.Sensex)
         {
             var timingObservation = SensexTimingResearch.Observe(candles.Select(x =>
@@ -105,6 +106,26 @@ internal sealed partial class MultiMarketPaperTradingService(
             await db.SaveChangesAsync(cancellationToken);
             if (!SensexAdaptiveSetupPolicy.AllowsMomentumEntry(adaptiveObservation))
             {
+                if (SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(adaptiveObservation))
+                {
+                    var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                        value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
+                        value.Strategy.StartsWith("Research|"), cancellationToken);
+                    if (researchEntries < options.Value.MaximumResearchEntriesPerDay)
+                    {
+                        paperResearchEntry = true;
+                    }
+                    else
+                    {
+                        await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                            "ResearchEntryLimit", decision.Confidence,
+                            [$"Sensex paper research entry limit of {options.Value.MaximumResearchEntriesPerDay} is reached."],
+                            cancellationToken);
+                        return;
+                    }
+                }
+                else
+                {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "AdaptiveSetupRejected", decision.Confidence,
                     [$"{adaptiveObservation.State} / {adaptiveObservation.Verdict}: " +
@@ -112,6 +133,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                      .. adaptiveObservation.Concerns,
                      .. adaptiveObservation.Limitations], cancellationToken);
                 return;
+                }
             }
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
@@ -130,7 +152,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
                 AverageTrueRange(candles.TakeLast(15).ToArray()),
                 openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
-            if (!location.Permitted)
+            if (!location.Permitted && !paperResearchEntry)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MarketLocationRejected", decision.Confidence,
@@ -186,7 +208,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 : -1;
             var evidenceGate = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(
                 adaptiveSetup!, localTime, daysToExpiry, decision.Confidence);
-            if (!evidenceGate.Permitted)
+            if (!evidenceGate.Permitted && !paperResearchEntry)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "EvidenceGateRejected", decision.Confidence,
@@ -273,18 +295,22 @@ internal sealed partial class MultiMarketPaperTradingService(
                 sameSide.Count(x => x.Status == "Active"),
                 sameSide.Count(x => x.Status != "Active" && x.RealisedPnl < 0));
         }
+        var recordedStrategy = paperResearchEntry ? $"Research|{decision.Strategy}" : decision.Strategy;
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
             execution.Id, market == TradingMarketCatalog.NaturalGas
-                ? $"Manual execution alert · {decision.Strategy}" : decision.Strategy,
+                ? $"Manual execution alert · {decision.Strategy}" : recordedStrategy,
             executionDirection, quantity, entry, stop, target, now);
         db.MarketPaperPositions.Add(position);
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id, latest.OpenTimeUtc,
-            "PaperPositionOpened", decision.Confidence, JsonSerializer.Serialize(new
+            paperResearchEntry ? "PaperResearchPositionOpened" : "PaperPositionOpened",
+            decision.Confidence, JsonSerializer.Serialize(new
             {
                 positionId = position.Id,
                 strategy = decision.Strategy,
                 reasoning,
                 adaptiveSetup,
+                paperResearchEntry,
+                liveEligible = !paperResearchEntry,
                 underlyingDirection = decision.Direction.ToString(),
                 quoteSnapshot = market == TradingMarketCatalog.Sensex ? quote : null,
                 direction = executionDirection.ToString(),
