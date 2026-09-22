@@ -126,7 +126,7 @@ internal sealed class EfTradingWorkspaceReader(
             .OrderBy(value => value.ExpiryDate)
             .ThenBy(value => value.TradingSymbol)
             .FirstOrDefaultAsync(cancellationToken);
-        var futuresVolume = volumeInstrument is null
+        var futuresCandles = volumeInstrument is null
             ? []
             : await dbContext.Candles.AsNoTracking()
                 .Where(value => value.InstrumentId == volumeInstrument.Id &&
@@ -134,14 +134,17 @@ internal sealed class EfTradingWorkspaceReader(
                                 value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
                                 value.OpenTimeUtc < sessionEndUtc)
                 .OrderBy(value => value.OpenTimeUtc)
-                .Select(value => new WorkspaceVolumeBar(value.OpenTimeUtc, value.Volume, true))
+                .Select(value => new WorkspaceCandle(value.OpenTimeUtc, value.IntervalSeconds,
+                    value.Open, value.High, value.Low, value.Close, value.Volume, true))
                 .ToListAsync(cancellationToken);
         if (displayedSessionDates.Count > 0)
-            futuresVolume = futuresVolume.Where(value =>
+            futuresCandles = futuresCandles.Where(value =>
                     IsTradableSessionTimestamp(value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd) &&
                     displayedSessionDates.Contains(DateOnly.FromDateTime(
                         TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date)))
                 .ToList();
+        var futuresVolume = futuresCandles.Select(value =>
+            new WorkspaceVolumeBar(value.OpenTimeUtc, value.Volume, value.IsClosed)).ToArray();
 
         var signalRows = market == TradingMarketCatalog.Nifty.Code
             ? await (from value in dbContext.Signals.AsNoTracking()
@@ -361,11 +364,17 @@ internal sealed class EfTradingWorkspaceReader(
                             !value.Outcome.StartsWith("PostExit"))
             .OrderByDescending(value => value.CandleTimeUtc).Take(40).ToListAsync(cancellationToken);
         var evaluations = market == "nifty" ? legacyEvaluations : marketAudits.Select(value =>
-            new WorkspaceStrategyEvaluation(value.Id, value.CandleTimeUtc,
+        {
+            var telemetry = WorkspaceTelemetryCalculator.At(closed, futuresCandles,
+                value.CandleTimeUtc, sessionStartUtc);
+            return new WorkspaceStrategyEvaluation(value.Id, value.CandleTimeUtc,
                 "Multi-market momentum breakout 1.0.0", value.Outcome,
-                closed.LastOrDefault()?.Close ?? 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m,
-                "MarketStructure", null, value.Confidence, ParseRejectionReasons(value.ReasonsJson),
-                null, null, null, null, null, null, null, null, null, null, [])).ToArray();
+                telemetry.CurrentPrice, telemetry.OpeningRangeHigh, telemetry.OpeningRangeLow,
+                telemetry.Vwap, telemetry.FastEma, telemetry.SlowEma, telemetry.AtrPercent,
+                telemetry.RelativeFuturesVolume, "MarketStructure", null, value.Confidence,
+                ParseRejectionReasons(value.ReasonsJson), null, null, null, null, null, null,
+                null, null, null, null, []);
+        }).ToArray();
 
         var message = !options.Enabled
             ? $"Live {definition.DisplayName} ingestion is disabled by server configuration."

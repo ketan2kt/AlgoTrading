@@ -80,6 +80,27 @@ internal sealed partial class MultiMarketPaperTradingService(
         var decision = market == TradingMarketCatalog.NaturalGas
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
+        var paperResearchEntry = false;
+        if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
+        {
+            var early = SensexEarlyPullbackResearchPolicy.Evaluate(candles.Select(x =>
+                new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray());
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
+                JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
+            await db.SaveChangesAsync(cancellationToken);
+            if (early.Direction is { } earlyDirection)
+            {
+                var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                    value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
+                    value.Strategy.StartsWith("Research|"), cancellationToken);
+                if (researchEntries < options.Value.MaximumResearchEntriesPerDay)
+                {
+                    decision = new(earlyDirection, early.Confidence, "Sensex early pullback", early.Reasons);
+                    paperResearchEntry = true;
+                }
+            }
+        }
         if (decision.Direction is null)
         {
             await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc, decision,
@@ -88,7 +109,6 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
 
         SensexAdaptiveSetupAssessment? adaptiveSetup = null;
-        var paperResearchEntry = false;
         if (market == TradingMarketCatalog.Sensex)
         {
             var timingObservation = SensexTimingResearch.Observe(candles.Select(x =>
@@ -104,7 +124,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.OpenTimeUtc, "SensexTimingCandidate", decision.Confidence,
                 JsonSerializer.Serialize(new { timingObservation, adaptiveObservation })));
             await db.SaveChangesAsync(cancellationToken);
-            if (!SensexAdaptiveSetupPolicy.AllowsMomentumEntry(adaptiveObservation))
+            if (!paperResearchEntry && !SensexAdaptiveSetupPolicy.AllowsMomentumEntry(adaptiveObservation))
             {
                 if (SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(adaptiveObservation))
                 {

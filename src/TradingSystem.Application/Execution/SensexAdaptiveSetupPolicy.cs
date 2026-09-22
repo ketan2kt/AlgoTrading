@@ -84,18 +84,11 @@ public static class SensexAdaptiveSetupPolicy
             assessment.Verdict == SensexSetupVerdict.Avoid)
             return false;
 
-        if (assessment.State == SensexMarketState.DirectionalTrend)
-            return assessment.Verdict == SensexSetupVerdict.Prefer;
-
-        // A confirmed breakout can occur before the rolling classifier has accumulated
-        // enough directional history to label the session a trend. Admit only a clean,
-        // non-extended transition; the base breakout policy still has to pass first.
-        return assessment.State == SensexMarketState.Transition &&
-               assessment.Verdict == SensexSetupVerdict.Observe &&
-               assessment.Efficiency >= .32m &&
-               assessment.EmaSeparationAtr >= .25m &&
-               assessment.MoveFromTriggerAtr is >= 0m and <= .80m &&
-               (assessment.RoomToOpposingLevelAtr is null or >= .50m);
+        // Transition breakouts are retained as paper research, not champion/live entries.
+        // The recent failure mode was precisely an apparently clean transition that was
+        // already at the end of its impulse by the time the breakout candle completed.
+        return assessment.State == SensexMarketState.DirectionalTrend &&
+               assessment.Verdict == SensexSetupVerdict.Prefer;
     }
 
     public static bool AllowsPaperResearchEntry(SensexAdaptiveSetupAssessment assessment)

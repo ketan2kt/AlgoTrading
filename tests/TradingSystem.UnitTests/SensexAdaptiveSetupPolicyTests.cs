@@ -76,7 +76,7 @@ public sealed class SensexAdaptiveSetupPolicyTests
     }
 
     [Fact]
-    public void CleanEmergingTrendCanOpenBeforeClassifierFullyTransitions()
+    public void CleanEmergingTrendRemainsResearchOnlyUntilClassifierTransitions()
     {
         var result = new SensexAdaptiveSetupAssessment("test", false,
             SensexMarketState.Transition, SensexSetupVerdict.Observe,
@@ -84,7 +84,8 @@ public sealed class SensexAdaptiveSetupPolicyTests
             .75m, .60m, null, ["Direction is aligned with EMA 9/21."],
             ["Market state is unstable; acceptance or a boundary reaction is not confirmed."], []);
 
-        Assert.True(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
+        Assert.True(SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(result));
     }
 
     [Theory]
@@ -144,7 +145,7 @@ public sealed class SensexAdaptiveSetupPolicyTests
             .75m, .60m, null, ["Direction is aligned with EMA 9/21."],
             ["Transition."], []);
 
-        Assert.True(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
+        Assert.False(SensexAdaptiveSetupPolicy.AllowsMomentumEntry(result));
         Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(result,
             new TimeOnly(13, 10), 2, .70m).Permitted);
     }
