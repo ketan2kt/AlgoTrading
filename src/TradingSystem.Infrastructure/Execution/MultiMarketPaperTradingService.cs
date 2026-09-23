@@ -77,14 +77,25 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc) return;
         lastEvaluated[market.Code] = latest.OpenTimeUtc;
 
+        var priceBars = candles.Select(x =>
+            new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray();
+        var lifecycle = market == TradingMarketCatalog.Sensex
+            ? SensexSetupLifecyclePolicy.Evaluate(priceBars)
+            : null;
+        if (lifecycle is not null)
+        {
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                latest.OpenTimeUtc, "SensexSetupLifecycle", .50m,
+                JsonSerializer.Serialize(lifecycle)));
+            await db.SaveChangesAsync(cancellationToken);
+        }
         var decision = market == TradingMarketCatalog.NaturalGas
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
         var paperResearchEntry = false;
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
-            var early = SensexEarlyPullbackResearchPolicy.Evaluate(candles.Select(x =>
-                new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray());
+            var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
                 JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
@@ -105,6 +116,15 @@ internal sealed partial class MultiMarketPaperTradingService(
         {
             await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc, decision,
                 cancellationToken);
+            return;
+        }
+        if (market == TradingMarketCatalog.Sensex && !paperResearchEntry &&
+            lifecycle?.Phase == SensexSetupPhase.Extended)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "EntryTimingRejected", decision.Confidence,
+                ["The Sensex setup is already beyond the 0.65 ATR entry budget.",
+                 .. lifecycle.Evidence], cancellationToken);
             return;
         }
 
@@ -180,14 +200,22 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
 
-            var reentryCutoff = now.AddMinutes(-20);
-            var recentEntry = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
-                value.Market == market.Code && value.OpenedAtUtc >= reentryCutoff,
-                cancellationToken);
-            if (recentEntry)
+            var priorSameDirectionExit = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
+                join executionInstrument in db.Instruments.AsNoTracking()
+                    on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
+                where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
+                      priorPosition.ClosedAtUtc != null &&
+                      (decision.Direction == Direction.Buy
+                          ? executionInstrument.Type == InstrumentType.CallOption
+                          : executionInstrument.Type == InstrumentType.PutOption)
+                orderby priorPosition.ClosedAtUtc descending
+                select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            var reentry = StructuralReentryPolicy.Evaluate(priceBars,
+                decision.Direction.Value, priorSameDirectionExit);
+            if (!reentry.Permitted)
             {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ReentryCooldown",
-                    decision.Confidence, ["Sensex 20-minute re-entry cooldown is active."], cancellationToken);
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
                 return;
             }
         }

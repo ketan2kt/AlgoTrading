@@ -427,6 +427,31 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        // Preserve the Nifty strategy itself, but prevent the same completed move from
+        // immediately reopening after an exit. A clock-only cooldown cannot prove that
+        // a new setup exists, so require a completed pullback/rejection reset instead.
+        var priorSameDirectionExit = await (from result in db.PaperTradeResults.AsNoTracking()
+            join priorSignal in db.Signals.AsNoTracking() on result.SignalId equals priorSignal.Id
+            where priorSignal.InstrumentId == instrument.Id &&
+                  priorSignal.Direction == signal.Direction &&
+                  result.ClosedAtUtc >= sessionStart && result.ClosedAtUtc < sessionEnd
+            orderby result.ClosedAtUtc descending
+            select (DateTimeOffset?)result.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var reentryDecision = StructuralReentryPolicy.Evaluate(strategyContext.RecentCandles,
+            signal.Direction, priorSameDirectionExit);
+        if (!reentryDecision.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "StructuralReentryRejected", reentryDecision.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("StructuralReentryRejected", true,
+                string.Join(" ", reentryDecision.Reasons), tradeState.TradesToday,
+                tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
         shadowStructure = MarketStructureQualityAnalyzer.Analyze(
             strategyContext.RecentCandles, signal.Direction, strategyContext.CurrentPrice,
             strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
@@ -704,8 +729,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 location, entryQuality,
                 timing = new { signal.MarketDataTimestampUtc, signal.ExpiresAtUtc,
                     candleDecisionTime, recordedAtUtc = timeProvider.GetUtcNow(),
-                    setupAgeSeconds = (double?)null,
-                    limitation = "Signal/candle timestamps do not establish first setup detection or broker latency." },
+                    completedBarsSincePriorSameDirectionExit = reentryDecision.CompletedBarsSinceExit,
+                    structuralResetObserved = reentryDecision.NewStructureObserved,
+                    reentryEvidence = reentryDecision.Reasons,
+                    limitation = "Candle-derived setup timing does not measure broker-network latency." },
                 quoteSnapshot = quote,
                 pricingMode = options.Value.PermissivePaperExecution ? "PermissivePaperSimulation" : "ValidatedPaperQuote",
                 option = optionProposal,

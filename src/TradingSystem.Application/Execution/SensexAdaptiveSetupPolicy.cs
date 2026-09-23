@@ -58,7 +58,7 @@ public static class SensexAdaptiveSetupPolicy
         var aligned = direction == Direction.Buy ? fast > slow : fast < slow;
         var concerns = new List<string>();
         if (!aligned) concerns.Add("Direction is not aligned with EMA 9/21.");
-        if (extension > 1m) concerns.Add("Entry is more than one ATR beyond the local trigger; chase risk.");
+        if (extension > .65m) concerns.Add("Entry is more than 0.65 ATR beyond the local trigger; chase risk.");
         if (room < .5m) concerns.Add("Less than 0.5 ATR remains to the nearest observed opposing level.");
         if (state == SensexMarketState.StructuredRange && extension > 0)
             concerns.Add("Momentum continuation is mismatched with the current range hypothesis.");
@@ -66,7 +66,7 @@ public static class SensexAdaptiveSetupPolicy
             concerns.Add("Market state is unstable; acceptance or a boundary reaction is not confirmed.");
         var supports = new List<string>();
         if (aligned) supports.Add("Direction is aligned with EMA 9/21.");
-        if (extension is >= 0 and <= 1m) supports.Add("Price cleared the local trigger without exceeding one ATR.");
+        if (extension is >= 0 and <= .65m) supports.Add("Price cleared the local trigger within the 0.65 ATR entry budget.");
         if (room >= .5m) supports.Add("At least 0.5 ATR remains to an observed opposing level.");
         var setup = state == SensexMarketState.DirectionalTrend ? "ContinuationOrRetest"
             : state == SensexMarketState.StructuredRange ? "BoundaryReactionOnly" : "WaitForAcceptance";
