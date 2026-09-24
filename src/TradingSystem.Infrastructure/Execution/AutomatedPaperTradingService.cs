@@ -427,6 +427,20 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var firstEntryTiming = FirstEntryTimingPolicy.Evaluate(strategyContext.RecentCandles,
+            signal.Direction);
+        if (!firstEntryTiming.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "EntryTimingRejected", firstEntryTiming.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("EntryTimingRejected", true, string.Join(" ", firstEntryTiming.Reasons),
+                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
         // Preserve the Nifty strategy itself, but prevent the same completed move from
         // immediately reopening after an exit. A clock-only cooldown cannot prove that
         // a new setup exists, so require a completed pullback/rejection reset instead.

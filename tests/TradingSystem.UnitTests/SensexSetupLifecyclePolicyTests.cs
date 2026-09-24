@@ -1,10 +1,29 @@
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.Strategies;
+using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.UnitTests;
 
 public sealed class SensexSetupLifecyclePolicyTests
 {
+    [Fact]
+    public void RejectsMatureEmergingSetupAsChampionEntry()
+    {
+        var lifecycle = new SensexSetupLifecycle(SensexSetupPhase.Emerging, Direction.Buy,
+            8, .25m, .40m, []);
+
+        Assert.False(SensexSetupLifecyclePolicy.AllowsChampionEntry(lifecycle));
+    }
+
+    [Fact]
+    public void AllowsFreshEntryWindow()
+    {
+        var lifecycle = new SensexSetupLifecycle(SensexSetupPhase.EntryWindow, Direction.Sell,
+            5, .20m, .30m, []);
+
+        Assert.True(SensexSetupLifecyclePolicy.AllowsChampionEntry(lifecycle));
+    }
+
     [Fact]
     public void MarksLateBreakdownAsExtended()
     {

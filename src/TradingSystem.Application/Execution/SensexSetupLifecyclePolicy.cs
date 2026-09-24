@@ -12,6 +12,21 @@ public sealed record SensexSetupLifecycle(SensexSetupPhase Phase, Direction? Dir
 
 public static class SensexSetupLifecyclePolicy
 {
+    public static bool AllowsChampionEntry(SensexSetupLifecycle lifecycle)
+    {
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        return lifecycle.Phase switch
+        {
+            SensexSetupPhase.EntryWindow => lifecycle.AtrExtension is >= -.20m and <= .45m &&
+                                                lifecycle.EmaSeparationAtr >= .20m &&
+                                                lifecycle.EstimatedAgeCandles <= 12,
+            SensexSetupPhase.Emerging => lifecycle.AtrExtension is >= 0m and <= .30m &&
+                                          lifecycle.EmaSeparationAtr >= .30m &&
+                                          lifecycle.EstimatedAgeCandles <= 4,
+            _ => false
+        };
+    }
+
     public static SensexSetupLifecycle Evaluate(IReadOnlyList<StrategyPriceBar> source)
     {
         ArgumentNullException.ThrowIfNull(source);

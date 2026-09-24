@@ -92,7 +92,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         var decision = market == TradingMarketCatalog.NaturalGas
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
-        var paperResearchEntry = false;
+        // Research candidates remain shadow observations. They must never create positions or P&L.
+        const bool paperResearchEntry = false;
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
             var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);
@@ -100,17 +101,6 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
                 JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
             await db.SaveChangesAsync(cancellationToken);
-            if (early.Direction is { } earlyDirection)
-            {
-                var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                    value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
-                    value.Strategy.StartsWith("Research|"), cancellationToken);
-                if (researchEntries < options.Value.MaximumResearchEntriesPerDay)
-                {
-                    decision = new(earlyDirection, early.Confidence, "Sensex early pullback", early.Reasons);
-                    paperResearchEntry = true;
-                }
-            }
         }
         if (decision.Direction is null)
         {
@@ -118,12 +108,13 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             return;
         }
-        if (market == TradingMarketCatalog.Sensex && !paperResearchEntry &&
-            lifecycle?.Phase == SensexSetupPhase.Extended)
+        if (market == TradingMarketCatalog.Sensex && lifecycle is not null &&
+            (lifecycle.Direction != decision.Direction ||
+             !SensexSetupLifecyclePolicy.AllowsChampionEntry(lifecycle)))
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                 "EntryTimingRejected", decision.Confidence,
-                ["The Sensex setup is already beyond the 0.65 ATR entry budget.",
+                [$"The Sensex setup phase {lifecycle.Phase} is not a valid first-entry window.",
                  .. lifecycle.Evidence], cancellationToken);
             return;
         }
@@ -148,21 +139,11 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 if (SensexAdaptiveSetupPolicy.AllowsPaperResearchEntry(adaptiveObservation))
                 {
-                    var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                        value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
-                        value.Strategy.StartsWith("Research|"), cancellationToken);
-                    if (researchEntries < options.Value.MaximumResearchEntriesPerDay)
-                    {
-                        paperResearchEntry = true;
-                    }
-                    else
-                    {
-                        await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                            "ResearchEntryLimit", decision.Confidence,
-                            [$"Sensex paper research entry limit of {options.Value.MaximumResearchEntriesPerDay} is reached."],
-                            cancellationToken);
-                        return;
-                    }
+                    await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                        "PaperResearchCandidate", decision.Confidence,
+                        ["Candidate retained for research only; no position or P&L was created.",
+                         .. adaptiveObservation.Concerns], cancellationToken);
+                    return;
                 }
                 else
                 {
@@ -254,6 +235,14 @@ internal sealed partial class MultiMarketPaperTradingService(
             var daysToExpiry = execution.ExpiryDate is { } expiry
                 ? Math.Max(0, expiry.DayNumber - today.DayNumber)
                 : -1;
+            if (daysToExpiry == 0)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "RegularExpiryEntryRejected", decision.Confidence,
+                    ["Regular Sensex option entries are disabled on expiry day; Hero Zero is the dedicated expiry strategy."],
+                    cancellationToken);
+                return;
+            }
             var evidenceGate = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(
                 adaptiveSetup!, localTime, daysToExpiry, decision.Confidence);
             if (!evidenceGate.Permitted && !paperResearchEntry)

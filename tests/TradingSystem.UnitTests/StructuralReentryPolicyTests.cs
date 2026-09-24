@@ -22,7 +22,7 @@ public sealed class StructuralReentryPolicyTests
     public void AllowsReentryAfterCompletedPullbackAndBullishRejection()
     {
         var bars = Bars([100m, 101m, 102m, 103m, 104m, 105m, 106m, 107m, 108m,
-            106m, 105m, 107m]);
+            106m, 105m, 104m, 105m, 107m]);
         var exit = bars[8].OpenTimeUtc;
 
         var result = StructuralReentryPolicy.Evaluate(bars, Direction.Buy, exit);
