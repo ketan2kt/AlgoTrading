@@ -92,8 +92,9 @@ internal sealed partial class MultiMarketPaperTradingService(
         var decision = market == TradingMarketCatalog.NaturalGas
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
-        // Research candidates remain shadow observations. They must never create positions or P&L.
-        const bool paperResearchEntry = false;
+        // Only explicitly qualified Sensex challengers may become paper-only research positions.
+        // AutomaticLiveExecutionService excludes the Research| prefix from live discovery.
+        var paperResearchEntry = false;
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
             var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);
@@ -101,6 +102,25 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
                 JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
             await db.SaveChangesAsync(cancellationToken);
+            var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
+                value.Strategy.StartsWith("Research|"), cancellationToken);
+            var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                value.Market == market.Code && value.Status == "Active", cancellationToken);
+            var researchDecision = SensexPaperResearchEntryPolicy.Evaluate(early.Direction,
+                early.Confidence, lifecycle!, researchEntries, hasActivePosition);
+            if (researchDecision.Permitted)
+            {
+                decision = new(early.Direction!.Value, early.Confidence,
+                    "Sensex controlled early pullback research", early.Reasons);
+                paperResearchEntry = true;
+            }
+            else if (early.Direction is not null)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "PaperResearchCandidateRejected", early.Confidence,
+                    researchDecision.Reasons, cancellationToken);
+            }
         }
         if (decision.Direction is null)
         {
@@ -108,7 +128,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             return;
         }
-        if (market == TradingMarketCatalog.Sensex && lifecycle is not null &&
+        if (market == TradingMarketCatalog.Sensex && !paperResearchEntry && lifecycle is not null &&
             (lifecycle.Direction != decision.Direction ||
              !SensexSetupLifecyclePolicy.AllowsChampionEntry(lifecycle)))
         {
