@@ -489,8 +489,11 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var strongRegimeAligned = regime.DirectionalBias == signal.Direction &&
+            regime.Regime is MarketRegime.GapDownContinuation or MarketRegime.GapUpContinuation or
+                MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
-            signal.StrategyId);
+            signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume);
         if (!entryQuality.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,

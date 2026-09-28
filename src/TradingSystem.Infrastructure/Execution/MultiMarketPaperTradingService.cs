@@ -98,6 +98,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
             var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);
+            if (early.Direction is null)
+                early = SensexPaperResearchEntryPolicy.DeriveLifecycleCandidate(lifecycle!);
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
                 JsonSerializer.Serialize(new { early.Direction, early.Reasons })));

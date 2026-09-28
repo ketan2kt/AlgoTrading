@@ -10,6 +10,21 @@ public static class SensexPaperResearchEntryPolicy
     public const decimal MinimumConfidence = .70m;
     public const int MaximumEntriesPerDay = 2;
 
+    public static SensexEarlyPullbackDecision DeriveLifecycleCandidate(
+        SensexSetupLifecycle lifecycle)
+    {
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        if (lifecycle.Phase != SensexSetupPhase.EntryWindow || lifecycle.Direction is null ||
+            lifecycle.AtrExtension is < -.35m or > .35m || lifecycle.EmaSeparationAtr < .30m)
+            return new(null, .50m,
+                ["The unified Sensex lifecycle does not contain a qualified early entry window."]);
+        var confidence = Math.Clamp(.68m + lifecycle.EmaSeparationAtr * .10m, .70m, .76m);
+        return new(lifecycle.Direction, confidence,
+            ["The unified lifecycle confirms a completed pullback rejection.",
+             $"Entry remains within the trigger budget at {lifecycle.AtrExtension:F2} ATR.",
+             $"EMA separation is {lifecycle.EmaSeparationAtr:F2} ATR."]);
+    }
+
     public static SensexPaperResearchEntryDecision Evaluate(Direction? candidateDirection,
         decimal confidence, SensexSetupLifecycle lifecycle, int entriesToday,
         bool hasActivePosition)

@@ -6,6 +6,17 @@ namespace TradingSystem.UnitTests;
 public sealed class SensexPaperResearchEntryPolicyTests
 {
     [Fact]
+    public void DerivesCandidateFromQualifiedUnifiedLifecycle()
+    {
+        var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Buy, .09m, .33m);
+
+        var candidate = SensexPaperResearchEntryPolicy.DeriveLifecycleCandidate(lifecycle);
+
+        Assert.Equal(Direction.Buy, candidate.Direction);
+        Assert.True(candidate.Confidence >= .70m);
+    }
+
+    [Fact]
     public void AllowsHighConfidenceAlignedEntryWindowForPaperResearch()
     {
         var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Buy, -.28m, .8m);

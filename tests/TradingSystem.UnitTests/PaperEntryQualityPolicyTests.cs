@@ -5,6 +5,34 @@ namespace TradingSystem.UnitTests;
 
 public sealed class PaperEntryQualityPolicyTests
 {
+    [Fact]
+    public void AllowsBalancedDirectionalContinuationDespiteSoftRoomVeto()
+    {
+        var structure = new MarketStructureQualitySnapshot(
+            MarketStructureQualityState.DevelopingTrend, Direction.Sell, .40m, .40m,
+            .45m, 1.2m, .65m, .50m, false,
+            ["Known room before structure is only 0.65R."]);
+
+        var decision = PaperEntryQualityPolicy.Evaluate(structure, Direction.Sell,
+            "ema-pullback-continuation", true, .65m, .77m);
+
+        Assert.True(decision.Permitted);
+    }
+
+    [Fact]
+    public void DoesNotOverrideNearZeroRoom()
+    {
+        var structure = new MarketStructureQualitySnapshot(
+            MarketStructureQualityState.VolatilityTransition, Direction.Sell, .30m, .45m,
+            .45m, 1.2m, .02m, .40m, false,
+            ["Known room before structure is only 0.02R."]);
+
+        var decision = PaperEntryQualityPolicy.Evaluate(structure, Direction.Sell,
+            "ema-pullback-continuation", true, .75m, 1.5m);
+
+        Assert.False(decision.Permitted);
+    }
+
     [Theory]
     [InlineData(MarketStructureQualityState.NoisyChop)]
     [InlineData(MarketStructureQualityState.MatureTrend)]
