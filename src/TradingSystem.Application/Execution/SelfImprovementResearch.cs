@@ -19,6 +19,33 @@ public sealed record SelfImprovementResearchReport(string Version, string Market
     IReadOnlyList<ResearchChallenger> Challengers, string Verdict,
     DateTimeOffset GeneratedAtUtc);
 
+public sealed record PaperPromotionDecision(bool Eligible, IReadOnlyList<string> Reasons);
+
+public static class PaperPromotionPolicy
+{
+    public const decimal RequiredWinRate = 80m;
+    public const decimal RequiredProfitFactor = 1.50m;
+    public const int RequiredTrades = 200;
+    public const int RequiredSessions = 30;
+
+    public static PaperPromotionDecision Evaluate(SelfImprovementResearchReport? report)
+    {
+        if (report is null) return new(false, ["No completed paper-research report exists."]);
+        var reasons = new List<string>();
+        if (report.Trades < RequiredTrades)
+            reasons.Add($"Paper sample has {report.Trades}/{RequiredTrades} required trades.");
+        if (report.EvidenceSessions < RequiredSessions)
+            reasons.Add($"Paper sample has {report.EvidenceSessions}/{RequiredSessions} required sessions.");
+        if (report.ActualWinRate < RequiredWinRate)
+            reasons.Add($"Net win rate is {report.ActualWinRate:0.0}%/{RequiredWinRate:0}% required.");
+        if (report.NetPnl <= 0m) reasons.Add("Net expectancy is not positive.");
+        if (report.ProfitFactor < RequiredProfitFactor)
+            reasons.Add($"Profit factor is {report.ProfitFactor:0.00}/{RequiredProfitFactor:0.00} required.");
+        return new(reasons.Count == 0, reasons.Count == 0
+            ? ["The paper sample satisfies the formal evidence gate."] : reasons);
+    }
+}
+
 public interface ISelfImprovementResearchReader
 {
     Task<IReadOnlyList<SelfImprovementResearchReport>> GetLatestAsync(
@@ -27,10 +54,10 @@ public interface ISelfImprovementResearchReader
 
 public static class SelfImprovementResearchAnalyzer
 {
-    public const int RollingSessionLimit = 20;
-    public const int MinimumEvidenceSessions = 5;
-    public const int MinimumEvidenceTrades = 30;
-    public const decimal TargetWinRate = 70m;
+    public const int RollingSessionLimit = 60;
+    public const int MinimumEvidenceSessions = PaperPromotionPolicy.RequiredSessions;
+    public const int MinimumEvidenceTrades = PaperPromotionPolicy.RequiredTrades;
+    public const decimal TargetWinRate = PaperPromotionPolicy.RequiredWinRate;
 
     public static SelfImprovementResearchReport Analyze(string market, DateOnly sessionDate,
         IEnumerable<ResearchTradeObservation> tradeSource,
@@ -101,7 +128,9 @@ public static class SelfImprovementResearchAnalyzer
         var rejected = Math.Max(0, decisions.Length - accepted);
         var sufficientEvidence = sessionDates.Length >= MinimumEvidenceSessions &&
                                  trades.Length >= MinimumEvidenceTrades;
-        var targetMet = sufficientEvidence && winRate >= TargetWinRate && profitFactor >= 1.2m;
+        var targetMet = sufficientEvidence && winRate >= TargetWinRate &&
+                        trades.Sum(value => value.NetPnl) > 0m &&
+                        profitFactor >= PaperPromotionPolicy.RequiredProfitFactor;
         var verdict = !sufficientEvidence
             ? "CollectEvidence"
             : targetMet ? "TargetMetLockProvenEdges"

@@ -5,18 +5,18 @@ namespace TradingSystem.UnitTests;
 public sealed class SelfImprovementResearchAnalyzerTests
 {
     [Fact]
-    public void TracksSeventyPercentTradeTargetAndKeepsChangesInShadowMode()
+    public void TracksEightyPercentTradeTargetAndKeepsChangesInShadowMode()
     {
         var start = new DateOnly(2026, 9, 1);
-        var trades = Enumerable.Range(0, 10).SelectMany(day => Enumerable.Range(0, 4).Select(index =>
+        var trades = Enumerable.Range(0, 40).SelectMany(day => Enumerable.Range(0, 5).Select(index =>
             new ResearchTradeObservation(start.AddDays(day), "range", "Late",
-                index < 3 ? 500m : -300m, 50m))).ToArray();
+                index < 4 ? 500m : -300m, 50m))).ToArray();
 
-        var report = SelfImprovementResearchAnalyzer.Analyze("sensex", start.AddDays(9), trades,
+        var report = SelfImprovementResearchAnalyzer.Analyze("sensex", start.AddDays(39), trades,
             [], DateTimeOffset.UtcNow);
 
         Assert.True(report.TargetMet);
-        Assert.Equal(75m, report.ActualWinRate);
+        Assert.Equal(80m, report.ActualWinRate);
         Assert.All(report.Challengers, value => Assert.Equal("ShadowOnly", value.Status));
     }
 

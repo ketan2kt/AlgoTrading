@@ -189,6 +189,7 @@ public static class DependencyInjection
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
+        services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddHostedService<GrowwAdditionalMarketDataService>();
@@ -317,6 +318,7 @@ public static class DependencyInjection
         services.AddHostedService<AutomatedPaperTradingService>();
         services.AddHostedService<MultiMarketPaperTradingService>();
         services.AddHostedService<SelfImprovementResearchService>();
+        services.AddHostedService<DailyResearchPipelineV2Service>();
 
         return services;
     }

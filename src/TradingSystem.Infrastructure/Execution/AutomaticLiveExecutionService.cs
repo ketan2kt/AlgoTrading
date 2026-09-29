@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.Execution;
 using TradingSystem.Application.Risk;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
@@ -63,12 +64,37 @@ internal sealed partial class AutomaticLiveExecutionService(
             return;
         }
 
-        var intent = await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
-                     ?? await DiscoverSensexAsync(db, arm.ChangedAtUtc.Value, cancellationToken);
+        var niftyEligible = await IsPaperPromotionSatisfiedAsync(db, "nifty", cancellationToken);
+        var sensexEligible = await IsPaperPromotionSatisfiedAsync(db, "sensex", cancellationToken);
+        var intent = (niftyEligible
+                ? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
+                : null)
+            ?? (sensexEligible
+                ? await DiscoverSensexAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
+                : null);
         if (intent is null) return;
         db.LiveExecutionIntents.Add(intent);
         await db.SaveChangesAsync(cancellationToken); // durable idempotency boundary before broker I/O
         await SubmitAndProtectAsync(db, intent, cancellationToken);
+    }
+
+    private static async Task<bool> IsPaperPromotionSatisfiedAsync(TradingDbContext db,
+        string market, CancellationToken cancellationToken)
+    {
+        var json = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
+                value.Market == market && value.Outcome == SelfImprovementResearchService.AuditOutcome)
+            .OrderByDescending(value => value.CandleTimeUtc)
+            .Select(value => value.ReasonsJson).FirstOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            var report = JsonSerializer.Deserialize<SelfImprovementResearchReport>(json);
+            return PaperPromotionPolicy.Evaluate(report).Eligible;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private async Task<bool> ReconcileAsync(TradingDbContext db, CancellationToken cancellationToken)

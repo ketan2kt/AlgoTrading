@@ -92,6 +92,36 @@ internal sealed partial class MultiMarketPaperTradingService(
         var decision = market == TradingMarketCatalog.NaturalGas
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
+        MarketStateAssessmentV2? marketStateV2 = null;
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            var closes = candles.Select(value => value.Close).ToArray();
+            var fastV2 = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
+            var slowV2 = TechnicalIndicators.ExponentialMovingAverage(closes,
+                Math.Min(21, closes.Length));
+            var typicalVolume = candles.TakeLast(Math.Min(20, candles.Count))
+                .Average(value => (decimal)Math.Max(1L, value.Volume));
+            var relativeVolumeV2 = typicalVolume <= 0m ? 0m : latest.Volume / typicalVolume;
+            var vwapDenominator = candles.Sum(value => Math.Max(0L, value.Volume));
+            var vwapV2 = vwapDenominator <= 0m ? latest.Close : candles.Sum(value =>
+                ((value.High + value.Low + value.Close) / 3m) * Math.Max(0L, value.Volume)) /
+                vwapDenominator;
+            var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
+            marketStateV2 = stateV2;
+            var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
+            var snapshotV2 = new DecisionFeatureSnapshotV2("decision-dataset-v2", market.Code,
+                latest.OpenTimeUtc, latest.Close, decision.Strategy, decision.Direction,
+                decision.Confidence, stateV2, lifecycle?.Phase.ToString() ?? "Scanning",
+                vwapV2, fastV2, slowV2,
+                latest.Close <= 0m ? 0m : AverageTrueRange(candles.TakeLast(15).ToArray()) /
+                    latest.Close * 100m,
+                relativeVolumeV2, openingV2.Max(value => value.High),
+                openingV2.Min(value => value.Low), null, null, decision.Reasons, []);
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                latest.OpenTimeUtc, "DecisionSnapshot:v2", decision.Confidence,
+                JsonSerializer.Serialize(snapshotV2)));
+            await db.SaveChangesAsync(cancellationToken);
+        }
         // Only explicitly qualified Sensex challengers may become paper-only research positions.
         // AutomaticLiveExecutionService excludes the Research| prefix from live discovery.
         var paperResearchEntry = false;
@@ -122,6 +152,17 @@ internal sealed partial class MultiMarketPaperTradingService(
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "PaperResearchCandidateRejected", early.Confidence,
                     researchDecision.Reasons, cancellationToken);
+            }
+            if (!paperResearchEntry && researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
+                !hasActivePosition && marketStateV2 is not null)
+            {
+                var range = RangePlaybookV2.Evaluate(priceBars, marketStateV2);
+                if (range.Direction is not null)
+                {
+                    decision = new(range.Direction.Value, range.Confidence,
+                        "Sensex range-edge rejection", range.Reasons);
+                    paperResearchEntry = true;
+                }
             }
         }
         if (decision.Direction is null)

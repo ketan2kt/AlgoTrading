@@ -400,12 +400,15 @@ internal sealed partial class AutomatedPaperTradingService(
         var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
         var paperResearchEntry = false;
+        var preEntryStateV2 = MarketStateRouterV2.Analyze(strategyContext.RecentCandles,
+            vwap, fast, slow);
         if (signal is null)
         {
             var challenger = StructuralTransitionResearchPolicy.Evaluate(
                 strategyContext.RecentCandles);
-            var researchEntriesToday = tradesByStrategy.GetValueOrDefault(
-                StructuralTransitionResearchPolicy.StrategyCode);
+            var researchEntriesToday = tradesByStrategy.Where(value =>
+                value.Key.StartsWith("Research|", StringComparison.Ordinal))
+                .Sum(value => value.Value);
             if (challenger.Direction is not null &&
                 StructuralTransitionResearchPolicy.CanOpen(researchEntriesToday,
                     tradeState.OpenPositions.Count > 0))
@@ -429,6 +432,48 @@ internal sealed partial class AutomatedPaperTradingService(
                     paperResearchEntry = true;
                 }
             }
+            if (signal is null && researchEntriesToday < StructuralTransitionResearchPolicy.MaximumEntriesPerDay &&
+                tradeState.OpenPositions.Count == 0)
+            {
+                var range = RangePlaybookV2.Evaluate(strategyContext.RecentCandles,
+                    preEntryStateV2);
+                if (range.Direction is not null)
+                {
+                    var direction = range.Direction.Value;
+                    var risk = Math.Abs(latestCandle.Close - range.Stop);
+                    if (risk > 0m)
+                    {
+                        signal = new StrategySignal(Guid.NewGuid(),
+                            RangePlaybookV2.NiftyStrategyCode, RangePlaybookV2.Version,
+                            instrument.Id, direction, SignalEntryType.Market, latestCandle.Close,
+                            range.Stop, range.Target,
+                            Math.Abs(range.Target - latestCandle.Close) / risk,
+                            range.Confidence, regime.Regime, range.Reasons, [], candleDecisionTime,
+                            candleDecisionTime.AddSeconds(
+                                marketOptions.Value.CandleIntervalSeconds * 2));
+                        paperResearchEntry = true;
+                    }
+                }
+            }
+        }
+        var marketStateV2 = preEntryStateV2;
+        if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                value.Market == "nifty" && value.Outcome == "DecisionSnapshot:v2" &&
+                value.UnderlyingInstrumentId == instrument.Id &&
+                value.CandleTimeUtc == candleDecisionTime, cancellationToken))
+        {
+            var snapshot = new DecisionFeatureSnapshotV2("decision-dataset-v2", "nifty",
+                candleDecisionTime, latestCandle.Close,
+                signal?.StrategyId ?? strategy.StrategyId, signal?.Direction,
+                signal?.Confidence ?? 0m, marketStateV2,
+                signal is null ? "Scanning" : paperResearchEntry ? "ResearchEntryWindow" : "Candidate",
+                vwap, fast, slow, atr, relativeVolume, openingRangeHigh, openingRangeLow,
+                signal?.ProposedStopLoss, signal?.ProposedTarget,
+                signal?.SupportingReasons ?? [], strategyEvaluation.FailedConditions);
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", instrument.Id,
+                candleDecisionTime, "DecisionSnapshot:v2", signal?.Confidence ?? 0m,
+                JsonSerializer.Serialize(snapshot)));
+            await db.SaveChangesAsync(cancellationToken);
         }
         if (signal is null)
         {
