@@ -110,6 +110,11 @@ internal sealed partial class AutomaticLiveExecutionService(
             var signal = await db.Signals.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.Id == signalId, cancellationToken);
             if (signal is null) continue;
+            var strategyCode = await (from version in db.StrategyVersions.AsNoTracking()
+                join strategy in db.Strategies.AsNoTracking() on version.StrategyId equals strategy.Id
+                where version.Id == signal.StrategyVersionId
+                select strategy.Code).SingleOrDefaultAsync(cancellationToken);
+            if (!IsNiftyPaperSource(strategyCode)) continue;
             var risk = await db.RiskDecisions.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.SignalId == signalId && value.Approved, cancellationToken);
             if (risk is null || !TryReadOptionProposal(risk.SnapshotJson, out var proposal)) continue;
@@ -262,6 +267,10 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     internal static bool IsSensexPaperSource(string market, string status, string strategy = "") =>
         market == TradingMarketCatalog.Sensex.Code && status == "Active" &&
+        !strategy.StartsWith("Research|", StringComparison.Ordinal);
+
+    internal static bool IsNiftyPaperSource(string? strategy) =>
+        !string.IsNullOrWhiteSpace(strategy) &&
         !strategy.StartsWith("Research|", StringComparison.Ordinal);
 
     internal static bool TryReadOptionProposal(string json, out OptionProposal proposal)

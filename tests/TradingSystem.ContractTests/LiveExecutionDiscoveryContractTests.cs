@@ -62,6 +62,15 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
+    public void NiftyResearchSignalsCanNeverEnterLiveDiscovery()
+    {
+        Assert.True(AutomaticLiveExecutionService.IsNiftyPaperSource("ema-pullback"));
+        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(
+            "Research|nifty-structure-retest"));
+        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(null));
+    }
+
+    [Fact]
     public void LiveClientReferenceIsStableForTheSamePaperSource()
     {
         var sourceId = Guid.NewGuid();

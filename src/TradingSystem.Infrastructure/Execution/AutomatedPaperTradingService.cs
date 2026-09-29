@@ -399,6 +399,37 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.OpeningRangeLow);
         var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
+        var paperResearchEntry = false;
+        if (signal is null)
+        {
+            var challenger = StructuralTransitionResearchPolicy.Evaluate(
+                strategyContext.RecentCandles);
+            var researchEntriesToday = tradesByStrategy.GetValueOrDefault(
+                StructuralTransitionResearchPolicy.StrategyCode);
+            if (challenger.Direction is not null &&
+                StructuralTransitionResearchPolicy.CanOpen(researchEntriesToday,
+                    tradeState.OpenPositions.Count > 0))
+            {
+                var direction = challenger.Direction.Value;
+                var risk = Math.Abs(latestCandle.Close - challenger.StructuralStop);
+                var atrPoints = latestCandle.Close * atr / 100m;
+                if (risk >= atrPoints * .15m && risk <= atrPoints * 1.25m)
+                {
+                    var target = direction == Direction.Buy
+                        ? latestCandle.Close + risk * 1.50m
+                        : latestCandle.Close - risk * 1.50m;
+                    signal = new StrategySignal(Guid.NewGuid(),
+                        StructuralTransitionResearchPolicy.StrategyCode,
+                        StructuralTransitionResearchPolicy.Version, instrument.Id, direction,
+                        SignalEntryType.Market, latestCandle.Close, challenger.StructuralStop,
+                        target, 1.50m, challenger.Confidence, regime.Regime,
+                        challenger.Reasons, [], candleDecisionTime,
+                        candleDecisionTime.AddSeconds(
+                            marketOptions.Value.CandleIntervalSeconds * 2));
+                    paperResearchEntry = true;
+                }
+            }
+        }
         if (signal is null)
         {
             var lastNoTradeAudit = await db.StrategyEvaluations.AsNoTracking()
@@ -494,7 +525,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
             signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume);
-        if (!entryQuality.Permitted)
+        if (!entryQuality.Permitted && !paperResearchEntry)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
