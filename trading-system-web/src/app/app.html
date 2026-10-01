@@ -65,8 +65,20 @@
       </section>
     } @else {
       <nav class="market-tabs" aria-label="Switch trading market">
+        <div class="workspace-brand" aria-label="Sarthi trading workspace">
+          <span class="workspace-brand__mark">S</span>
+          <span><strong>Sarthi</strong><small>Trading desk</small></span>
+        </div>
+        <div class="market-tab-group">
         <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        </div>
+        <div class="workspace-nav-actions">
+          <button type="button" (click)="openReport()">Performance</button>
+          <button type="button" (click)="openPnlReport()">P&amp;L</button>
+          <button type="button" (click)="openLogs()">Research</button>
+          <button type="button" class="workspace-nav-actions__primary" (click)="openControls()">Controls</button>
+        </div>
       </nav>
       <div class="workspace-shell">
       <section class="workspace-heading">
@@ -77,6 +89,14 @@
             Signed in as {{ user.username }} · Chart data is accepted only from the configured Groww
             live source.
           </p>
+          @if (workspace; as summary) {
+            <div class="workspace-heading__metrics" aria-label="Current session summary">
+              <span><i [class.live]="summary.isLive && summary.isFresh"></i>{{ summary.feedStatus }}</span>
+              <span>{{ summary.paperAutomation.tradesToday }} trades</span>
+              <span [class.good]="summary.paperAutomation.realisedPnl > 0" [class.bad]="summary.paperAutomation.realisedPnl < 0">₹{{ summary.paperAutomation.realisedPnl | number:'1.0-0' }} realised</span>
+              <span>{{ summary.paperAutomation.portfolioRisk?.openPositions ?? summary.paperAutomation.activePositionMarks?.length ?? 0 }} open</span>
+            </div>
+          }
         </div>
         <div class="workspace-actions">
           <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
@@ -386,6 +406,12 @@
               <span class="dot dot--entry"></span>{{ selectedMarket === 'natural-gas' ? 'Futures entry' : 'Index trigger' }} <span class="dot dot--risk"></span>Invalidation
               <span class="dot dot--reward"></span>Objective
             </div>
+          </div>
+          <div class="chart-status-rail" aria-label="Live decision status">
+            <div><span>Automation</span><strong [class.good]="view.paperAutomation.tradingPermitted">{{ view.paperAutomation.status }}</strong></div>
+            <div><span>Selected contract</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Scanning market' }}</strong></div>
+            <div><span>Session P&amp;L</span><strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></div>
+            <div><span>Updated</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') : 'Waiting' }}</strong></div>
           </div>
           <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
           <p class="chart-attribution">

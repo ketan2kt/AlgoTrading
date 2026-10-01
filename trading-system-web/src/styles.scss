@@ -20,3 +20,151 @@ body {
   margin: 0;
   overscroll-behavior-y: none;
 }
+
+/* Trading desk shell: global so the visual layer stays separate from component logic. */
+app-root {
+  --desk-surface: #0c1512;
+  --desk-surface-raised: #101c18;
+  --desk-line: rgba(148, 181, 164, 0.16);
+  --desk-muted: #82988d;
+  --desk-accent: #71e0a9;
+}
+
+app-root .market-tabs {
+  grid-template-columns: minmax(150px, 0.6fr) minmax(240px, 1fr) minmax(320px, 0.9fr);
+  align-items: center;
+  justify-content: stretch;
+  min-height: 48px;
+  padding: 0.34rem 0.48rem;
+  background: rgba(8, 15, 12, 0.96);
+  border-color: var(--desk-line);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+}
+
+app-root .workspace-brand,
+app-root .market-tab-group,
+app-root .workspace-nav-actions {
+  display: flex;
+  align-items: center;
+}
+
+app-root .workspace-brand { gap: 0.55rem; padding-left: 0.25rem; }
+app-root .workspace-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  color: #06100c;
+  background: linear-gradient(145deg, #9bf1c7, #55cc94);
+  border-radius: 8px;
+  font-weight: 900;
+}
+app-root .workspace-brand > span:last-child { display: grid; line-height: 1.05; }
+app-root .workspace-brand strong { font-size: 0.78rem; letter-spacing: 0.02em; }
+app-root .workspace-brand small { margin-top: 0.18rem; color: var(--desk-muted); font-size: 0.58rem; letter-spacing: 0.09em; text-transform: uppercase; }
+app-root .market-tab-group { justify-content: center; gap: 0.28rem; }
+app-root .market-tab-group > button { min-width: 112px; }
+app-root .workspace-nav-actions { justify-content: flex-end; gap: 0.24rem; }
+app-root .workspace-nav-actions button { min-height: 29px; padding-inline: 0.55rem; font-size: 0.68rem; }
+app-root .workspace-nav-actions__primary { color: #07110c !important; background: var(--desk-accent) !important; }
+
+app-root .workspace-shell { gap: 0.55rem; }
+app-root .workspace-heading {
+  min-height: 62px;
+  padding: 0.65rem 0.85rem;
+  background: linear-gradient(105deg, rgba(16, 29, 24, 0.98), rgba(10, 18, 15, 0.98));
+  border-color: var(--desk-line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+app-root .workspace-heading .eyebrow { margin-bottom: 0.18rem; font-size: 0.57rem; }
+app-root .workspace-heading h1 { font-size: 1rem; letter-spacing: -0.01em; }
+app-root .workspace-heading > div > p:last-of-type { margin: 0.18rem 0 0; color: var(--desk-muted); font-size: 0.65rem; }
+app-root .workspace-heading__metrics { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
+app-root .workspace-heading__metrics span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.18rem 0.42rem;
+  color: #aebfb6;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--desk-line);
+  border-radius: 999px;
+  font-size: 0.6rem;
+}
+app-root .workspace-heading__metrics i { width: 6px; height: 6px; background: #ff6874; border-radius: 50%; }
+app-root .workspace-heading__metrics i.live { background: #4ad894; box-shadow: 0 0 8px rgba(74, 216, 148, 0.7); }
+app-root .workspace-actions { gap: 0.3rem; }
+app-root .workspace-actions button { min-height: 30px; padding: 0.3rem 0.6rem; font-size: 0.68rem; }
+
+app-root .chart-panel {
+  overflow: hidden;
+  background: var(--desk-surface);
+  border-color: var(--desk-line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+app-root .chart-panel > .panel-heading { min-height: 48px; padding: 0.5rem 0.72rem; border-bottom: 1px solid var(--desk-line); }
+app-root .chart-panel > .panel-heading strong { font-size: 0.82rem; }
+app-root .chart-status-rail {
+  display: grid;
+  grid-template-columns: 0.8fr 1.5fr 0.8fr 0.7fr;
+  gap: 1px;
+  background: var(--desk-line);
+  border-bottom: 1px solid var(--desk-line);
+}
+app-root .chart-status-rail > div { display: grid; gap: 0.18rem; min-width: 0; padding: 0.42rem 0.7rem; background: #0d1814; }
+app-root .chart-status-rail span { color: var(--desk-muted); font-size: 0.54rem; letter-spacing: 0.1em; text-transform: uppercase; }
+app-root .chart-status-rail strong { overflow: hidden; color: #dce9e2; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+app-root .chart-attribution { opacity: 0.55; }
+
+app-root .positions-panel,
+app-root .logs-launch,
+app-root .evaluation-panel {
+  background: var(--desk-surface);
+  border-color: var(--desk-line);
+  border-radius: 10px;
+}
+app-root .signal-row { background: transparent; border-top-color: var(--desk-line); }
+app-root .signal-row:hover { background: rgba(113, 224, 169, 0.035); }
+app-root .signal-row span,
+app-root .evaluation-row span { color: var(--desk-muted); font-size: 0.57rem; letter-spacing: 0.09em; }
+app-root .signal-row strong,
+app-root .evaluation-row strong { font-size: 0.72rem; }
+
+app-root .legacy-control-section { display: none !important; }
+app-root .logs-backdrop .legacy-control-section,
+app-root .controls-modal .legacy-control-section { display: initial !important; }
+
+app-root .logs-modal {
+  width: min(1160px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  border-color: rgba(132, 191, 162, 0.25);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+}
+app-root .logs-modal > .panel-heading { position: sticky; top: 0; z-index: 2; background: rgba(12, 21, 18, 0.97); backdrop-filter: blur(10px); }
+
+app-root .market-theme--sensex { --desk-accent: #78bbed; --desk-line: rgba(126, 181, 222, 0.19); }
+app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #a6d8fa, #68aee1); }
+
+@media (max-width: 900px) {
+  app-root .market-tabs { grid-template-columns: 1fr auto; }
+  app-root .workspace-brand { display: none; }
+  app-root .market-tab-group { justify-content: flex-start; }
+  app-root .workspace-nav-actions button:not(.workspace-nav-actions__primary) { display: none; }
+  app-root .chart-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  app-root .workspace-heading > div > p:last-of-type { display: none; }
+}
+
+@media (max-width: 560px) {
+  app-root .market-tabs { top: 25px; min-height: 44px; }
+  app-root .market-tab-group > button { min-width: 82px; padding-inline: 0.35rem; }
+  app-root .workspace-actions .secondary-button:not(.control-center-button):not(.hz-button) { display: none; }
+  app-root .workspace-heading { align-items: flex-start; }
+  app-root .workspace-heading__metrics span:nth-child(2),
+  app-root .workspace-heading__metrics span:nth-child(4) { display: none; }
+  app-root .chart-status-rail { grid-template-columns: 1fr 1fr; }
+  app-root .chart-status-rail > div:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  app-root .legend { display: none !important; }
+}
