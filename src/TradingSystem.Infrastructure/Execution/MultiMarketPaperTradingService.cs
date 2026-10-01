@@ -93,19 +93,38 @@ internal sealed partial class MultiMarketPaperTradingService(
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
         MarketStateAssessmentV2? marketStateV2 = null;
+        var sensexConfirmationReady = market != TradingMarketCatalog.Sensex;
         if (market == TradingMarketCatalog.Sensex)
         {
             var closes = candles.Select(value => value.Close).ToArray();
             var fastV2 = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
             var slowV2 = TechnicalIndicators.ExponentialMovingAverage(closes,
                 Math.Min(21, closes.Length));
-            var typicalVolume = candles.TakeLast(Math.Min(20, candles.Count))
-                .Average(value => (decimal)Math.Max(1L, value.Volume));
-            var relativeVolumeV2 = typicalVolume <= 0m ? 0m : latest.Volume / typicalVolume;
-            var vwapDenominator = candles.Sum(value => Math.Max(0L, value.Volume));
-            var vwapV2 = vwapDenominator <= 0m ? latest.Close : candles.Sum(value =>
-                ((value.High + value.Low + value.Close) / 3m) * Math.Max(0L, value.Volume)) /
-                vwapDenominator;
+            var future = await db.Instruments.AsNoTracking().Where(value => value.Exchange == "BSE" &&
+                    value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith("SENSEX") &&
+                    value.ExpiryDate >= today && value.IsActive)
+                .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
+                .FirstOrDefaultAsync(cancellationToken);
+            var futureCandles = future is null ? [] : await db.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == future.Id && value.IntervalSeconds == interval &&
+                                value.Source == "Groww" && value.OpenTimeUtc >= sessionStartUtc &&
+                                value.OpenTimeUtc <= latest.OpenTimeUtc)
+                .OrderByDescending(value => value.OpenTimeUtc).Take(40)
+                .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+            var volumeByTime = futureCandles.Where(value => value.Volume > 0)
+                .ToDictionary(value => value.OpenTimeUtc, value => value.Volume);
+            var aligned = candles.Where(value => volumeByTime.ContainsKey(value.OpenTimeUtc)).ToArray();
+            var totalVolume = aligned.Sum(value => volumeByTime[value.OpenTimeUtc]);
+            var latestFuture = futureCandles.LastOrDefault(value => value.Volume > 0);
+            var baseline = futureCandles.Where(value => value.Volume > 0)
+                .TakeLast(Math.Min(20, futureCandles.Count)).SkipLast(1).ToArray();
+            var averageVolume = baseline.Length == 0 ? 0m : baseline.Average(value => (decimal)value.Volume);
+            var relativeVolumeV2 = latestFuture is null || averageVolume <= 0m
+                ? 0m : latestFuture.Volume / averageVolume;
+            var vwapV2 = totalVolume <= 0m ? 0m : aligned.Sum(value =>
+                ((value.High + value.Low + value.Close) / 3m) * volumeByTime[value.OpenTimeUtc]) /
+                totalVolume;
+            sensexConfirmationReady = vwapV2 > 0m && relativeVolumeV2 > 0m;
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
@@ -125,6 +144,14 @@ internal sealed partial class MultiMarketPaperTradingService(
         // Only explicitly qualified Sensex challengers may become paper-only research positions.
         // AutomaticLiveExecutionService excludes the Research| prefix from live discovery.
         var paperResearchEntry = false;
+        if (market == TradingMarketCatalog.Sensex && !sensexConfirmationReady)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "DataIncomplete", 0m,
+                ["Fresh Sensex futures volume/VWAP confirmation is unavailable; entries fail closed."],
+                cancellationToken);
+            return;
+        }
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
             var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);

@@ -215,7 +215,11 @@ internal sealed partial class HeroZeroPaperTradingService(
         {
             var activeLegs = legs.Where(value => value.Status == "Active").ToArray();
             var winner = activeLegs.OrderByDescending(value => value.CurrentPrice / value.EntryPrice).First();
-            if (winner.CurrentPrice >= winner.EntryPrice * options.Value.WinnerActivationMultiple)
+            var combinedProfitActivated = combinedPnl >=
+                entryCost * options.Value.CombinedProfitActivationPercent / 100m;
+            var winnerActivated = winner.CurrentPrice >=
+                winner.EntryPrice * options.Value.WinnerActivationMultiple;
+            if (combinedProfitActivated || winnerActivated)
             {
                 var loser = activeLegs.SingleOrDefault(value => value.Id != winner.Id);
                 if (loser is not null) Close(loser, "HeroZeroLosingLegExit");

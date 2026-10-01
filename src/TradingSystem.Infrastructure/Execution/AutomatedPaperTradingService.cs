@@ -432,7 +432,8 @@ internal sealed partial class AutomatedPaperTradingService(
                     paperResearchEntry = true;
                 }
             }
-            if (signal is null && researchEntriesToday < StructuralTransitionResearchPolicy.MaximumEntriesPerDay &&
+            if (options.Value.EnableNiftyRangeResearchEntries && signal is null &&
+                researchEntriesToday < StructuralTransitionResearchPolicy.MaximumEntriesPerDay &&
                 tradeState.OpenPositions.Count == 0)
             {
                 var range = RangePlaybookV2.Evaluate(strategyContext.RecentCandles,
@@ -879,7 +880,18 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
         var entryPrice = open.Entry.AverageFillPrice!.Value;
-        var favourable = favourablePriceBySignal.GetValueOrDefault(open.Signal.SignalId, entryPrice);
+        var persistedPrices = await researchDb.PaperTradePriceSamples.AsNoTracking()
+            .Where(value => value.SignalId == open.Signal.SignalId)
+            .Select(value => value.OptionPrice)
+            .ToListAsync(cancellationToken);
+        var persistedFavourable = persistedPrices.Count == 0
+            ? entryPrice
+            : open.Entry.Direction == Direction.Buy ? persistedPrices.Max() : persistedPrices.Min();
+        var favourable = favourablePriceBySignal.GetValueOrDefault(open.Signal.SignalId,
+            persistedFavourable);
+        favourable = open.Entry.Direction == Direction.Buy
+            ? Math.Max(favourable, persistedFavourable)
+            : Math.Min(favourable, persistedFavourable);
         favourable = open.Entry.Direction == Direction.Buy ? Math.Max(favourable, price) : Math.Min(favourable, price);
         favourablePriceBySignal[open.Signal.SignalId] = favourable;
         var effectiveStop = open.StopLoss;

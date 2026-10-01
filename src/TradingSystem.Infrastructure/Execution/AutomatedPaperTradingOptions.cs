@@ -48,6 +48,7 @@ public sealed class AutomatedPaperTradingOptions
     public int PositionRecoveryLookbackDays { get; init; } = 14;
     public int MaximumConcurrentPositions { get; init; } = 8;
     public int MaximumResearchEntriesPerDay { get; init; } = 4;
+    public bool EnableNiftyRangeResearchEntries { get; init; }
     public int MaximumConsecutiveLosses { get; init; } = 2;
     public int LossCooldownMinutes { get; init; } = 30;
     public bool SelectiveHedgingEnabled { get; init; } = true;

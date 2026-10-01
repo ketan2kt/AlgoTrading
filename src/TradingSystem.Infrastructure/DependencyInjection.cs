@@ -204,6 +204,7 @@ public static class DependencyInjection
         services.AddHostedService<GrowwOptionResearchCaptureService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
         services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
+        services.AddHostedService<GrowwSensexFuturesMarketDataService>();
         services.AddOptions<HeroZeroOptions>()
             .Bind(configuration.GetSection(HeroZeroOptions.SectionName))
             .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&

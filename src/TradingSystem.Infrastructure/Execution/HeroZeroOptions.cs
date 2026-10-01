@@ -15,7 +15,8 @@ public sealed class HeroZeroOptions
     public decimal MinimumCandidateScore { get; init; } = 0.55m;
     public decimal MaximumCombinedPremium { get; init; } = 70m;
     public decimal CombinedStopLossPercent { get; init; } = 35m;
-    public decimal WinnerActivationMultiple { get; init; } = 1.75m;
+    public decimal CombinedProfitActivationPercent { get; init; } = 15m;
+    public decimal WinnerActivationMultiple { get; init; } = 1.35m;
     public decimal WinnerTrailingFraction { get; init; } = 0.25m;
     public int NearbyContractsPerSide { get; init; } = 8;
 }
