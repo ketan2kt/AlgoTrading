@@ -49,7 +49,8 @@ public sealed record DailyResearchPipelineReportV2(string Version, string Market
     IReadOnlyDictionary<string, int> MarketStates,
     IReadOnlyList<ProbabilityCalibrationBucketV2> Calibration,
     IReadOnlyList<StrategyValidationV2> WalkForward,
-    PaperPromotionDecision Promotion, DateTimeOffset GeneratedAtUtc);
+    PaperPromotionDecision Promotion, DateTimeOffset GeneratedAtUtc,
+    ResearchIntelligenceV3? Intelligence = null);
 
 public interface IDailyResearchPipelineV2Reader
 {

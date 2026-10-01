@@ -83,6 +83,9 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
                 .Select(value => value.ReasonsJson).FirstOrDefaultAsync(token);
             var improvement = string.IsNullOrWhiteSpace(improvementJson) ? null :
                 JsonSerializer.Deserialize<SelfImprovementResearchReport>(improvementJson);
+            var intelligence = ResearchIntelligenceAnalyzerV3.Analyze(snapshots,
+                evaluated.Select(value => new ResearchCandidateV3(value.Snapshot, value.Result))
+                    .ToArray(), candles, interval);
             var report = new DailyResearchPipelineReportV2("research-pipeline-v2", market, date,
                 snapshots.Length, evaluated.Length,
                 evaluated.Count(value => value.Result.Outcome == "TargetFirst"),
@@ -90,7 +93,8 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
                 evaluated.Count(value => value.Result.Outcome == "Unresolved"),
                 snapshots.GroupBy(value => value.State.State.ToString())
                     .ToDictionary(group => group.Key, group => group.Count()),
-                calibration, walkForward, PaperPromotionPolicy.Evaluate(improvement), now);
+                calibration, walkForward, PaperPromotionPolicy.Evaluate(improvement), now,
+                intelligence);
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, instrumentId, now, Outcome,
                 report.Promotion.Eligible ? 1m : 0m, JsonSerializer.Serialize(report)));
             await db.SaveChangesAsync(token);

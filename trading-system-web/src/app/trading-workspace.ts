@@ -80,6 +80,30 @@ export interface DailyResearchPipelineReport {
   walkForward: StrategyValidation[];
   promotion: { eligible: boolean; status: string; reasons: string[] };
   generatedAtUtc: string;
+  intelligence?: ResearchIntelligence | null;
+}
+
+export interface ResearchIntelligence {
+  version: string;
+  entryTiming: {
+    candidates: number; matureMoveEntries: number; earlierOneBarWasBetter: number;
+    earlierTwoBarsWasBetter: number; averageMoveMaturityAtr: number;
+    averageMaximumFavourableExcursionR: number; averageMaximumAdverseExcursionR: number;
+    averageDirectionalReturnByHorizon: Record<string, number>;
+  };
+  missedMoves: { noCandidateSnapshots: number; materialMissedMoves: number; leadingBlockers: Record<string, number> };
+  regimeConfusion: { assessed: number; correct: number; incorrect: number; accuracy: number; confusionPairs: Record<string, number> };
+  cohorts: ResearchCohort[];
+  exits: { assessed: number; targetFirst: number; stopFirst: number; extendedRunnerCandidates: number; tightStopCandidates: number; averageMfeR: number; averageMaeR: number };
+  execution: { chargesAppliedToExecutedTrades: boolean; bidAskAndSlippageAvailable: boolean; partialFillSimulationAvailable: boolean; status: string };
+  dataQuality: { candles: number; expectedIntervalSeconds: number; missingIntervals: number; duplicateTimestamps: number; nonPositivePrices: number; completeness: number; status: string };
+  recommendations: { code: string; priority: string; finding: string; proposedExperiment: string; supportingObservations: number }[];
+  guardrails: string[];
+}
+
+export interface ResearchCohort {
+  strategy: string; marketState: string; direction: string; timeBucket: string;
+  candidates: number; wins: number; winRate: number; averageMfeR: number; averageMaeR: number;
 }
 
 export interface StrategyValidation {

@@ -404,6 +404,50 @@
                 </article>
               }
             </section>
+            @if (research.intelligence; as intelligence) {
+              <details class="evaluation-panel">
+                <summary>Advanced daily research · timing, missed moves, regimes, exits and execution</summary>
+                <div class="evaluation-table">
+                  <article class="evaluation-row">
+                    <div><span>Entry candidates</span><strong>{{intelligence.entryTiming.candidates}}</strong></div>
+                    <div><span>Mature / late entries</span><strong [class.bad]="intelligence.entryTiming.matureMoveEntries > 0">{{intelligence.entryTiming.matureMoveEntries}}</strong></div>
+                    <div><span>1 bar earlier better</span><strong>{{intelligence.entryTiming.earlierOneBarWasBetter}}</strong></div>
+                    <div><span>2 bars earlier better</span><strong>{{intelligence.entryTiming.earlierTwoBarsWasBetter}}</strong></div>
+                    <div><span>Average maturity</span><strong>{{intelligence.entryTiming.averageMoveMaturityAtr | number:'1.2-2'}} ATR</strong></div>
+                    <div><span>Average MFE / MAE</span><strong>{{intelligence.entryTiming.averageMaximumFavourableExcursionR | number:'1.2-2'}}R / {{intelligence.entryTiming.averageMaximumAdverseExcursionR | number:'1.2-2'}}R</strong></div>
+                  </article>
+                  <article class="evaluation-row">
+                    <div><span>No-candidate decisions</span><strong>{{intelligence.missedMoves.noCandidateSnapshots}}</strong></div>
+                    <div><span>Material missed moves</span><strong [class.bad]="intelligence.missedMoves.materialMissedMoves > 0">{{intelligence.missedMoves.materialMissedMoves}}</strong></div>
+                    <div><span>Regimes assessed</span><strong>{{intelligence.regimeConfusion.assessed}}</strong></div>
+                    <div><span>Regime accuracy</span><strong [class.good]="intelligence.regimeConfusion.accuracy >= 0.6" [class.bad]="intelligence.regimeConfusion.assessed >= 10 && intelligence.regimeConfusion.accuracy < 0.6">{{intelligence.regimeConfusion.accuracy | percent:'1.0-0'}}</strong></div>
+                    <div><span>Runner opportunities</span><strong>{{intelligence.exits.extendedRunnerCandidates}}</strong></div>
+                    <div><span>Stop after +0.5R</span><strong>{{intelligence.exits.tightStopCandidates}}</strong></div>
+                  </article>
+                  <article class="evaluation-row">
+                    <div><span>Data quality</span><strong [class.good]="intelligence.dataQuality.status === 'Healthy'" [class.bad]="intelligence.dataQuality.status !== 'Healthy'">{{intelligence.dataQuality.status}}</strong></div>
+                    <div><span>Completeness</span><strong>{{intelligence.dataQuality.completeness | percent:'1.1-1'}}</strong></div>
+                    <div><span>Missing / duplicate bars</span><strong>{{intelligence.dataQuality.missingIntervals}} / {{intelligence.dataQuality.duplicateTimestamps}}</strong></div>
+                    <div class="evaluation-reasons"><span>Execution realism</span><strong>{{intelligence.execution.status}}</strong></div>
+                  </article>
+                  @for (recommendation of intelligence.recommendations; track recommendation.code) {
+                    <article class="evaluation-row">
+                      <div><span>{{recommendation.priority}} · {{recommendation.code}}</span><strong>{{recommendation.finding}}</strong></div>
+                      <div class="evaluation-reasons"><span>Guarded experiment</span><strong>{{recommendation.proposedExperiment}}</strong></div>
+                    </article>
+                  }
+                  @for (cohort of intelligence.cohorts; track cohort.strategy + cohort.marketState + cohort.direction + cohort.timeBucket) {
+                    <article class="evaluation-row">
+                      <div><span>Cohort</span><strong>{{cohort.marketState}} · {{cohort.direction}} · {{cohort.timeBucket}}</strong></div>
+                      <div><span>Strategy</span><strong>{{cohort.strategy}}</strong></div>
+                      <div><span>Candidates / wins</span><strong>{{cohort.candidates}} / {{cohort.wins}}</strong></div>
+                      <div><span>Win rate</span><strong>{{cohort.winRate | percent:'1.0-0'}}</strong></div>
+                      <div><span>MFE / MAE</span><strong>{{cohort.averageMfeR | number:'1.2-2'}}R / {{cohort.averageMaeR | number:'1.2-2'}}R</strong></div>
+                    </article>
+                  }
+                </div>
+              </details>
+            }
           }
         </section>
 
