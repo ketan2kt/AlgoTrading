@@ -485,6 +485,38 @@
                         <div class="evaluation-reasons"><span>Success / rollback</span><strong>{{experiment.successCriteria}} {{experiment.rollbackCriteria}}</strong></div>
                       </article>
                     }
+                    @if (advanced.operations; as operations) {
+                      <article class="evaluation-row">
+                        <div><span>Research release stage</span><strong>{{operations.governance.currentStage}} → {{operations.governance.nextStage}}</strong></div>
+                        <div><span>Advancement</span><strong [class.good]="operations.governance.advancementPermitted" [class.bad]="!operations.governance.advancementPermitted">{{operations.governance.advancementPermitted ? 'Eligible for review' : 'Held'}}</strong></div>
+                        <div><span>Build / configuration</span><strong>{{operations.provenance.buildVersion}} / {{operations.provenance.configurationChecksum}}</strong></div>
+                        <div><span>Replay frames</span><strong>{{operations.replayFrames.length}}</strong></div>
+                        <div><span>Backfill</span><strong>{{operations.backfillStatus}}</strong></div>
+                      </article>
+                      @for (line of operations.dailyDigest; track line) {
+                        <article class="evaluation-row"><div class="evaluation-reasons"><span>Daily research</span><strong>{{line}}</strong></div></article>
+                      }
+                      @for (line of operations.weeklyConsolidation; track line) {
+                        <article class="evaluation-row"><div class="evaluation-reasons"><span>Weekly consolidation</span><strong>{{line}}</strong></div></article>
+                      }
+                      <article class="evaluation-row">
+                        <div><span>Monte Carlo</span><strong>{{operations.monteCarlo.simulations}} simulations · median {{operations.monteCarlo.medianOutcomeR | number:'1.1-2'}}R</strong></div>
+                        <div><span>5% outcome / 95% drawdown</span><strong>{{operations.monteCarlo.fifthPercentileOutcomeR | number:'1.1-2'}}R / {{operations.monteCarlo.ninetyFifthPercentileDrawdownR | number:'1.1-2'}}R</strong></div>
+                        <div><span>5-loss run probability</span><strong>{{operations.monteCarlo.losingRunProbability | percent:'1.0-0'}}</strong></div>
+                        <div class="evaluation-reasons"><span>Evidence</span><strong>{{operations.monteCarlo.evidence}}</strong></div>
+                      </article>
+                      @for (alert of operations.alerts; track alert.code) {
+                        <article class="evaluation-row"><div><span>{{alert.severity}} · {{alert.code}}</span><strong [class.bad]="alert.severity === 'Critical'">{{alert.message}}</strong></div></article>
+                      }
+                      @for (comparison of operations.strategyComparison; track comparison.strategy + comparison.marketState + comparison.direction + comparison.timeBucket) {
+                        <article class="evaluation-row">
+                          <div><span>Strategy comparison</span><strong>{{comparison.strategy}} · {{comparison.marketState}}</strong></div>
+                          <div><span>Direction / time</span><strong>{{comparison.direction}} / {{comparison.timeBucket}}</strong></div>
+                          <div><span>Win / expectancy</span><strong>{{comparison.winRate | percent:'1.0-0'}} / {{comparison.expectancyR | number:'1.2-2'}}R</strong></div>
+                          <div><span>Verdict</span><strong>{{comparison.verdict}}</strong></div>
+                        </article>
+                      }
+                    }
                   }
                 </div>
               </details>

@@ -120,6 +120,7 @@ public sealed class SystemStatusEndpointTests :
     {
         AssertAdministratorOnly(typeof(TradingWorkspaceController));
         AssertAdministratorOnly(typeof(HeroZeroController));
+        AssertAdministratorOnly(typeof(ResearchBackfillController));
         AssertAdministratorOnly(typeof(SystemHealthHub));
     }
 

@@ -43,7 +43,8 @@ public sealed record AdvancedMarketIntelligenceV4(string Version,
     GenericSetupLifecycleV4 SetupLifecycle, MetaLabelV4 MetaLabel,
     UncertaintyV4 Uncertainty, PortfolioCoordinationV4 Portfolio,
     AdaptiveRiskV4 AdaptiveRisk, DriftDetectionV4 Drift,
-    IReadOnlyList<ExperimentDefinitionV4> Experiments);
+    IReadOnlyList<ExperimentDefinitionV4> Experiments,
+    ResearchOperationsV5? Operations = null);
 
 public static class AdvancedMarketIntelligenceAnalyzerV4
 {

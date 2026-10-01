@@ -117,6 +117,20 @@ export interface AdvancedMarketIntelligence {
   adaptiveRisk: { researchSizeMultiplier: number; verdict: string; evidence: string[] };
   drift: { status: string; volatilityRatio: number; regimeDistributionShift: number; evidence: string[] };
   experiments: { id: string; hypothesis: string; status: string; minimumCandidates: number; minimumSessions: number; successCriteria: string; rollbackCriteria: string }[];
+  operations?: ResearchOperations | null;
+}
+
+export interface ResearchOperations {
+  version: string; backfillStatus: string;
+  replayFrames: { timeUtc: string; price: number; marketState: string; setupPhase: string; candidate: string; confidence: number; reasons: string[] }[];
+  strategyComparison: { strategy: string; marketState: string; direction: string; timeBucket: string; candidates: number; winRate: number; expectancyR: number; profitFactorR: number; verdict: string }[];
+  dailyDigest: string[]; weeklyConsolidation: string[];
+  parameterSearch: { minimumConfidence: number; maximumMaturityAtr: number; candidates: number; wins: number; winRate: number; expectancyR: number; status: string }[];
+  monteCarlo: { simulations: number; tradesPerSimulation: number; medianOutcomeR: number; fifthPercentileOutcomeR: number; ninetyFifthPercentileDrawdownR: number; losingRunProbability: number; evidence: string };
+  alerts: { severity: string; code: string; message: string }[];
+  provenance: { buildVersion: string; configurationChecksum: string; strategyVersions: string[]; dataSources: string[] };
+  retention: { hotRetention: string; archiveRetention: string; exportFormats: string[]; status: string };
+  governance: { currentStage: string; nextStage: string; advancementPermitted: boolean; gates: string[] };
 }
 
 export interface ResearchCohort {

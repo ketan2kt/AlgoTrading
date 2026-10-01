@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -115,12 +118,18 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
                 .ToListAsync(token);
             var baseline = baselineJson.Select(TryRead).Where(value => value is not null)
                 .Cast<DecisionFeatureSnapshotV2>().ToArray();
-            intelligence = intelligence with
+            var advanced = AdvancedMarketIntelligenceAnalyzerV4.Analyze(candles, history, peer,
+                ReadOptionPoints(optionPayload), [], snapshots, baseline,
+                intelligence.Recommendations, now);
+            intelligence = intelligence with { Advanced = advanced };
+            var candidateRows = evaluated.Select(value =>
+                new ResearchCandidateV3(value.Snapshot, value.Result)).ToArray();
+            advanced = advanced with
             {
-                Advanced = AdvancedMarketIntelligenceAnalyzerV4.Analyze(candles, history, peer,
-                    ReadOptionPoints(optionPayload), [], snapshots, baseline,
-                    intelligence.Recommendations, now)
+                Operations = ResearchOperationsAnalyzerV5.Analyze(snapshots, baseline,
+                    candidateRows, intelligence, BuildVersion(), ConfigurationChecksum())
             };
+            intelligence = intelligence with { Advanced = advanced };
             var report = new DailyResearchPipelineReportV2("research-pipeline-v2", market, date,
                 snapshots.Length, evaluated.Length,
                 evaluated.Count(value => value.Result.Outcome == "TargetFirst"),
@@ -208,6 +217,16 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
             try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
             catch (TimeZoneNotFoundException) { }
         return TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "IST", "IST");
+    }
+
+    private static string BuildVersion() => Assembly.GetEntryAssembly()?
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ??
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+
+    private static string ConfigurationChecksum()
+    {
+        const string fingerprint = "research-pipeline-v2|intelligence-v3|advanced-v4|operations-v5|walk-forward-70-30|promotion-policy-v1|cost-model-2026-04-01";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint)))[..16];
     }
 }
 
