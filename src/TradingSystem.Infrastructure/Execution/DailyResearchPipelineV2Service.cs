@@ -57,6 +57,23 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
                 .OrderBy(value => value.OpenTimeUtc)
                 .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High,
                     value.Low, value.Close)).ToListAsync(token);
+            var historyStart = start.AddDays(-14);
+            var history = await db.Candles.AsNoTracking().Where(value =>
+                    value.InstrumentId == instrumentId && value.IntervalSeconds == interval &&
+                    value.OpenTimeUtc >= historyStart && value.OpenTimeUtc < end)
+                .OrderBy(value => value.OpenTimeUtc)
+                .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High,
+                    value.Low, value.Close, value.Volume)).ToListAsync(token);
+            var peerSymbol = market == "nifty" ? "SENSEX" : "NIFTY";
+            var peerId = await db.Instruments.AsNoTracking().Where(value =>
+                    value.TradingSymbol == peerSymbol && value.Type == InstrumentType.Index && value.IsActive)
+                .Select(value => (Guid?)value.Id).FirstOrDefaultAsync(token);
+            var peer = peerId is null ? [] : await db.Candles.AsNoTracking().Where(value =>
+                    value.InstrumentId == peerId && value.IntervalSeconds == interval &&
+                    value.OpenTimeUtc >= start && value.OpenTimeUtc < end)
+                .OrderBy(value => value.OpenTimeUtc)
+                .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High,
+                    value.Low, value.Close, value.Volume)).ToListAsync(token);
             var evaluated = snapshots.Where(value => value.CandidateDirection is not null &&
                     value.ProposedStop is not null && value.ProposedTarget is not null)
                 .Select(snapshot => new
@@ -86,6 +103,24 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
             var intelligence = ResearchIntelligenceAnalyzerV3.Analyze(snapshots,
                 evaluated.Select(value => new ResearchCandidateV3(value.Snapshot, value.Result))
                     .ToArray(), candles, interval);
+            var optionPayload = await db.OptionChainSnapshots.AsNoTracking().Where(value =>
+                    value.UnderlyingInstrumentId == instrumentId &&
+                    value.SourceTimestampUtc >= start && value.SourceTimestampUtc < end)
+                .OrderByDescending(value => value.SourceTimestampUtc)
+                .Select(value => value.PayloadJson).FirstOrDefaultAsync(token);
+            var baselineJson = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
+                    value.Market == market && value.Outcome == "DecisionSnapshot:v2" &&
+                    value.CandleTimeUtc >= historyStart && value.CandleTimeUtc < start)
+                .OrderBy(value => value.CandleTimeUtc).Select(value => value.ReasonsJson)
+                .ToListAsync(token);
+            var baseline = baselineJson.Select(TryRead).Where(value => value is not null)
+                .Cast<DecisionFeatureSnapshotV2>().ToArray();
+            intelligence = intelligence with
+            {
+                Advanced = AdvancedMarketIntelligenceAnalyzerV4.Analyze(candles, history, peer,
+                    ReadOptionPoints(optionPayload), [], snapshots, baseline,
+                    intelligence.Recommendations, now)
+            };
             var report = new DailyResearchPipelineReportV2("research-pipeline-v2", market, date,
                 snapshots.Length, evaluated.Length,
                 evaluated.Count(value => value.Result.Outcome == "TargetFirst"),
@@ -120,6 +155,45 @@ internal sealed class DailyResearchPipelineV2Service(IServiceScopeFactory scopeF
     {
         try { return JsonSerializer.Deserialize<DecisionFeatureSnapshotV2>(json); }
         catch (JsonException) { return null; }
+    }
+
+    private static List<OptionResearchPointV4> ReadOptionPoints(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("selectedStrikes", out var strikes) ||
+                strikes.ValueKind != JsonValueKind.Array) return [];
+            var result = new List<OptionResearchPointV4>();
+            foreach (var strike in strikes.EnumerateArray())
+            {
+                var price = ReadDecimal(strike, "strikePrice");
+                Add(strike, "call", true, price, result);
+                Add(strike, "put", false, price, result);
+            }
+            return result;
+        }
+        catch (JsonException) { return []; }
+
+        static void Add(JsonElement strike, string name, bool isCall, decimal price,
+            List<OptionResearchPointV4> result)
+        {
+            if (!strike.TryGetProperty(name, out var contract) ||
+                contract.ValueKind != JsonValueKind.Object) return;
+            decimal? Greek(string property) => contract.TryGetProperty("greeks", out var greeks) &&
+                greeks.ValueKind == JsonValueKind.Object ? ReadNullableDecimal(greeks, property) : null;
+            result.Add(new(price, isCall, ReadDecimal(contract, "lastPrice"),
+                ReadDecimal(contract, "openInterest"), ReadDecimal(contract, "volume"),
+                Greek("delta"), Greek("gamma"), Greek("theta"), Greek("vega"),
+                Greek("impliedVolatility")));
+        }
+
+        static decimal ReadDecimal(JsonElement element, string name) =>
+            ReadNullableDecimal(element, name) ?? 0m;
+        static decimal? ReadNullableDecimal(JsonElement element, string name) =>
+            element.TryGetProperty(name, out var value) && value.TryGetDecimal(out var number)
+                ? number : null;
     }
 
     private static DateTimeOffset ToUtc(DateOnly date)

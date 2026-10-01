@@ -99,6 +99,24 @@ export interface ResearchIntelligence {
   dataQuality: { candles: number; expectedIntervalSeconds: number; missingIntervals: number; duplicateTimestamps: number; nonPositivePrices: number; completeness: number; status: string };
   recommendations: { code: string; priority: string; finding: string; proposedExperiment: string; supportingObservations: number }[];
   guardrails: string[];
+  advanced?: AdvancedMarketIntelligence | null;
+}
+
+export interface AdvancedMarketIntelligence {
+  version: string;
+  volatility: { state: string; currentAtrPercent: number; baselineAtrPercent: number; percentile: number; expansionRatio: number };
+  options: { available: boolean; contracts: number; putCallOiRatio: number; averageImpliedVolatility: number; ivSkew: number; liquidContracts: number; spreadStatus: string; evidence: string };
+  crossMarket: { available: boolean; returnCorrelation: number; alignment: string; evidence: string };
+  capabilities: { capability: string; status: string; evidence: string }[];
+  levels: { kind: string; price: number; strength: number; evidence: string }[];
+  volumeProfile: { available: boolean; pointOfControl: number | null; valueAreaLow: number | null; valueAreaHigh: number | null; anchoredVwap: number | null; evidence: string };
+  setupLifecycle: { phase: string; direction: string | null; extensionAtr: number; ageCandles: number; evidence: string };
+  metaLabel: { acceptanceProbability: number; verdict: string; evidence: string[] };
+  uncertainty: { score: number; verdict: string; reasons: string[] };
+  portfolio: { verdict: string; correlation: number; evidence: string };
+  adaptiveRisk: { researchSizeMultiplier: number; verdict: string; evidence: string[] };
+  drift: { status: string; volatilityRatio: number; regimeDistributionShift: number; evidence: string[] };
+  experiments: { id: string; hypothesis: string; status: string; minimumCandidates: number; minimumSessions: number; successCriteria: string; rollbackCriteria: string }[];
 }
 
 export interface ResearchCohort {

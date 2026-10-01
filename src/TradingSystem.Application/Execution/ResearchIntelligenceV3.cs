@@ -40,7 +40,8 @@ public sealed record ResearchIntelligenceV3(string Version, EntryTimingResearchV
     IReadOnlyList<ResearchCohortV3> Cohorts, ExitResearchV3 Exits,
     ExecutionResearchV3 Execution, DataQualityResearchV3 DataQuality,
     IReadOnlyList<ResearchRecommendationV3> Recommendations,
-    IReadOnlyList<string> Guardrails);
+    IReadOnlyList<string> Guardrails,
+    AdvancedMarketIntelligenceV4? Advanced = null);
 
 public static class ResearchIntelligenceAnalyzerV3
 {

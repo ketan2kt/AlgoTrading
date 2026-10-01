@@ -445,6 +445,47 @@
                       <div><span>MFE / MAE</span><strong>{{cohort.averageMfeR | number:'1.2-2'}}R / {{cohort.averageMaeR | number:'1.2-2'}}R</strong></div>
                     </article>
                   }
+                  @if (intelligence.advanced; as advanced) {
+                    <article class="evaluation-row">
+                      <div><span>Volatility regime</span><strong>{{advanced.volatility.state}} · {{advanced.volatility.currentAtrPercent | number:'1.2-2'}}%</strong></div>
+                      <div><span>Volatility percentile</span><strong>{{advanced.volatility.percentile | percent:'1.0-0'}}</strong></div>
+                      <div><span>Option context</span><strong [class.good]="advanced.options.available" [class.bad]="!advanced.options.available">{{advanced.options.available ? advanced.options.contracts + ' contracts' : 'Unavailable'}}</strong></div>
+                      <div><span>Put/call OI</span><strong>{{advanced.options.putCallOiRatio | number:'1.2-2'}}</strong></div>
+                      <div><span>IV / skew</span><strong>{{advanced.options.averageImpliedVolatility | number:'1.2-2'}} / {{advanced.options.ivSkew | number:'1.2-2'}}</strong></div>
+                      <div><span>Cross-market</span><strong>{{advanced.crossMarket.alignment}} · {{advanced.crossMarket.returnCorrelation | number:'1.2-2'}}</strong></div>
+                      <div><span>Volume profile</span><strong>{{advanced.volumeProfile.available ? 'POC ' + (advanced.volumeProfile.pointOfControl | number:'1.2-2') : 'Unavailable'}}</strong></div>
+                      <div><span>Anchored VWAP</span><strong>{{advanced.volumeProfile.anchoredVwap !== null ? (advanced.volumeProfile.anchoredVwap | number:'1.2-2') : 'Unavailable'}}</strong></div>
+                    </article>
+                    @for (level of advanced.levels; track level.kind + level.price) {
+                      <article class="evaluation-row">
+                        <div><span>{{level.kind}}</span><strong>{{level.price | number:'1.2-2'}} · strength {{level.strength | percent:'1.0-0'}}</strong></div>
+                        <div class="evaluation-reasons"><span>Level evidence</span><strong>{{level.evidence}}</strong></div>
+                      </article>
+                    }
+                    <article class="evaluation-row">
+                      <div><span>Setup lifecycle</span><strong>{{advanced.setupLifecycle.phase}} · {{advanced.setupLifecycle.direction || 'None'}}</strong></div>
+                      <div><span>Extension / age</span><strong>{{advanced.setupLifecycle.extensionAtr | number:'1.2-2'}} ATR / {{advanced.setupLifecycle.ageCandles}} bars</strong></div>
+                      <div><span>Meta-label</span><strong>{{advanced.metaLabel.verdict}} · {{advanced.metaLabel.acceptanceProbability | percent:'1.0-0'}}</strong></div>
+                      <div><span>Uncertainty</span><strong [class.bad]="advanced.uncertainty.verdict === 'Abstain'">{{advanced.uncertainty.verdict}} · {{advanced.uncertainty.score | percent:'1.0-0'}}</strong></div>
+                      <div><span>Portfolio coordination</span><strong>{{advanced.portfolio.verdict}}</strong></div>
+                      <div><span>Adaptive risk research</span><strong>{{advanced.adaptiveRisk.researchSizeMultiplier | percent:'1.0-0'}} · {{advanced.adaptiveRisk.verdict}}</strong></div>
+                      <div><span>Drift</span><strong [class.bad]="advanced.drift.status === 'DriftAlert'">{{advanced.drift.status}}</strong></div>
+                    </article>
+                    @for (capability of advanced.capabilities; track capability.capability) {
+                      <article class="evaluation-row">
+                        <div><span>{{capability.capability}}</span><strong [class.good]="capability.status === 'Ready'" [class.bad]="capability.status === 'Unavailable'">{{capability.status}}</strong></div>
+                        <div class="evaluation-reasons"><span>Evidence</span><strong>{{capability.evidence}}</strong></div>
+                      </article>
+                    }
+                    @for (experiment of advanced.experiments; track experiment.id) {
+                      <article class="evaluation-row">
+                        <div><span>Experiment</span><strong>{{experiment.id}} · {{experiment.status}}</strong></div>
+                        <div><span>Minimum evidence</span><strong>{{experiment.minimumCandidates}} candidates / {{experiment.minimumSessions}} sessions</strong></div>
+                        <div class="evaluation-reasons"><span>Hypothesis</span><strong>{{experiment.hypothesis}}</strong></div>
+                        <div class="evaluation-reasons"><span>Success / rollback</span><strong>{{experiment.successCriteria}} {{experiment.rollbackCriteria}}</strong></div>
+                      </article>
+                    }
+                  }
                 </div>
               </details>
             }

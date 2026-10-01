@@ -30,7 +30,8 @@ public sealed record StrategyEvaluationContext(
 }
 
 public sealed record StrategyPriceBar(
-    DateTimeOffset OpenTimeUtc, decimal Open, decimal High, decimal Low, decimal Close);
+    DateTimeOffset OpenTimeUtc, decimal Open, decimal High, decimal Low, decimal Close,
+    decimal Volume = 0m);
 
 public enum MarketStructureDirection { Unavailable = 0, Bullish = 1, Bearish = 2, Range = 3 }
 
