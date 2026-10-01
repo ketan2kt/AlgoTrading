@@ -30,12 +30,12 @@ import {
   aggregateCandles,
   aggregateVolumeBars,
   currentSessionLogicalRange,
-  filterIstSession,
   latestIstSessionDate,
 } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
 import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlays';
+import { buildDecisionMap, DecisionMapView } from './decision-map';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -50,6 +50,22 @@ import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlay
         <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
         @if (rangeText) { <span>{{rangeText}}</span> }
       </div>
+      @if (decisionMap; as map) {
+        <aside class="decision-map" aria-label="Live decision map">
+          <div><span>REGIME</span><strong>{{map.regime}}</strong></div>
+          <div><span>BIAS</span><strong>{{map.bias}}</strong></div>
+          <div><span>SETUP</span><strong>{{map.setup}}</strong></div>
+          <div><span>LOCATION</span><strong>{{map.location}}</strong></div>
+          <div><span>ROOM</span><strong>{{map.remainingRoom}}</strong></div>
+          <div><span>VOLUME</span><strong>{{map.volume}}</strong></div>
+          <div class="decision-map__frames">
+            @for (frame of map.timeframes; track frame.label) {
+              <small [attr.data-direction]="frame.direction">{{frame.label}} {{frame.direction}}</small>
+            }
+          </div>
+          <p>{{map.reasons[0]}}</p>
+        </aside>
+      }
       <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
       <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
       @if (!snapshot?.candles?.length) {
@@ -103,6 +119,15 @@ import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlay
       .overlay-controls button { padding:3px 7px; border:1px solid #30433a; border-radius:4px; background:#0d1713dd; color:#82978c; font-size:.62rem; }
       .overlay-controls button.active { border-color:#62ba91; color:#bce8d2; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#b6c6be; font-size:.64rem; background:#0d1713dd; }
+      .decision-map { position:absolute; z-index:2; top:38px; left:8px; width:min(570px,calc(100% - 88px)); display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; padding:6px; border:1px solid #29443a; border-radius:6px; background:#09120fdd; backdrop-filter:blur(4px); pointer-events:none; }
+      .decision-map div { min-width:0; padding:3px 5px; }
+      .decision-map span { display:block; color:#6f9182; font-size:.52rem; letter-spacing:.09em; }
+      .decision-map strong { display:block; overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map__frames { grid-column:1 / -1; display:flex; gap:5px; }
+      .decision-map__frames small { padding:2px 5px; border-radius:3px; background:#17251f; color:#a7bdb2; font-size:.58rem; }
+      .decision-map__frames small[data-direction='Bullish'] { color:#58dfa0; }
+      .decision-map__frames small[data-direction='Bearish'] { color:#ff7982; }
+      .decision-map p { grid-column:1 / -1; margin:0; padding:2px 5px; color:#9eb3a8; font-size:.6rem; }
       .trade-zone {
         position: absolute;
         right: 64px;
@@ -143,6 +168,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private renderedInstrument = '';
   private renderedSessionDate: string | null = null;
   protected rangeText = '';
+  protected decisionMap: DecisionMapView | null = null;
   protected visibility = this.readVisibility();
 
   ngAfterViewInit(): void {
@@ -205,6 +231,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private render(): void {
     if (!this.series || !this.chart || !this.snapshot) return;
+    this.decisionMap = buildDecisionMap(this.snapshot);
     const instrumentIdentity = `${this.snapshot.exchange}:${this.snapshot.instrument}`;
     if (instrumentIdentity !== this.renderedInstrument) {
       this.hasFittedContent = false;
@@ -213,8 +240,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
     const latestSessionDate = latestIstSessionDate(displayCandles);
-    const sessionCandles = filterIstSession(displayCandles, latestSessionDate);
-    const candles: CandlestickData<Time>[] = sessionCandles.map((value) => ({
+    const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime() / 1000) as Time,
       open: value.open,
       high: value.high,
@@ -223,7 +249,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     }));
     this.series.setData(candles);
     const candleDirectionByTime = new Map(
-      sessionCandles.map((value) => [
+      displayCandles.map((value) => [
         Math.floor(new Date(value.openTimeUtc).getTime() / 1000),
         value.close >= value.open,
       ]),
@@ -232,8 +258,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.snapshot.futuresVolume ?? [],
       this.timeframeMinutes,
     );
-    const sessionVolumeBars = filterIstSession(volumeBars, latestSessionDate);
-    const volume: HistogramData<Time>[] = sessionVolumeBars.map((value) => {
+    const volume: HistogramData<Time>[] = volumeBars.map((value) => {
       const time = Math.floor(new Date(value.openTimeUtc).getTime() / 1000);
       return {
         time: time as Time,
@@ -245,9 +270,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     const lineData = (points:{openTimeUtc:string;value:number}[]):LineData<Time>[] => points.map(value => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime()/1000) as Time, value:value.value,
     }));
-    this.emaFastSeries?.setData(lineData(ema(sessionCandles,9)));
-    this.emaSlowSeries?.setData(lineData(ema(sessionCandles,21)));
-    this.vwapSeries?.setData(lineData(sessionVwap(sessionCandles,sessionVolumeBars)));
+    this.emaFastSeries?.setData(lineData(ema(displayCandles,9)));
+    this.emaSlowSeries?.setData(lineData(ema(displayCandles,21)));
+    this.vwapSeries?.setData(lineData(sessionVwap(displayCandles,volumeBars)));
     this.emaFastSeries?.applyOptions({visible:this.visibility.ema});
     this.emaSlowSeries?.applyOptions({visible:this.visibility.ema});
     this.vwapSeries?.applyOptions({visible:this.visibility.vwap});
@@ -286,19 +311,28 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
           title: lineTitles.target,
         }),
       );
-      const position = overlay.direction === 'Buy' ? 'belowBar' : 'aboveBar';
-      this.markerApi = createSeriesMarkers(this.series, [
-        {
-          time: Math.floor(new Date(overlay.signalTimeUtc).getTime() / 1000) as Time,
-          position,
-          color: '#f2c94c',
-          shape: overlay.direction === 'Buy' ? 'arrowUp' : 'arrowDown',
-          text: entryExplanation(overlay,this.snapshot.evaluations),
-        },
-      ]);
-    } else {
-      this.markerApi?.setMarkers([]);
     }
+    const tradeMarkers = this.snapshot.overlays.map(value => ({
+      time: Math.floor(new Date(value.signalTimeUtc).getTime() / 1000) as Time,
+      position: (value.direction === 'Buy' ? 'belowBar' : 'aboveBar') as 'belowBar'|'aboveBar',
+      color: value.status === 'RiskRejected' ? '#ff8b94' : '#f2c94c',
+      shape: (value.direction === 'Buy' ? 'arrowUp' : 'arrowDown') as 'arrowUp'|'arrowDown',
+      text: value.status === 'RiskRejected' ? `REJECTED · ${value.rejectionReasons[0] ?? value.strategy}` : entryExplanation(value,this.snapshot!.evaluations),
+    }));
+    const decisionMarkers = this.snapshot.evaluations.filter(value =>
+      value.outcome.includes('Rejected') || value.outcome === 'PaperPositionOpened').slice(0,20).map(value => ({
+      time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
+      position: 'aboveBar' as const,
+      color: value.outcome === 'PaperPositionOpened' ? '#28d17c' : '#83998e',
+      shape: 'circle' as const,
+      text: value.outcome === 'PaperPositionOpened' ? 'ENTRY ACCEPTED' : `REJECTED · ${value.failedConditions[0] ?? value.outcome}`,
+    }));
+    const visibleTimes = new Set(candles.map(value => value.time as number));
+    const markers = [...decisionMarkers, ...tradeMarkers]
+      .filter(value => visibleTimes.has(value.time as number))
+      .sort((left,right)=>(left.time as number)-(right.time as number));
+    if (this.markerApi) this.markerApi.setMarkers(markers);
+    else this.markerApi = createSeriesMarkers(this.series, markers);
     if (candles.length && (
       !this.hasFittedContent ||
       this.renderedTimeframeMinutes !== this.timeframeMinutes ||
@@ -307,7 +341,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     )) {
       const sessionMinutes = this.snapshot.exchange === 'MCX' ? 870 : 375;
       const initialRange = currentSessionLogicalRange(
-        sessionCandles,
+        displayCandles,
         this.timeframeMinutes,
         sessionMinutes,
         volume.map((bar) => new Date((bar.time as number) * 1000).toISOString()),

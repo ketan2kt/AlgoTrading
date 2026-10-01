@@ -14,7 +14,7 @@ export class TradingWorkspaceService {
   private activeMarket = 'nifty';
 
   getMarket(market: string): Observable<TradingWorkspaceSnapshot> {
-    return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=1500`);
+    return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=7000`);
   }
 
   updates$(): Observable<TradingWorkspaceSnapshot> {

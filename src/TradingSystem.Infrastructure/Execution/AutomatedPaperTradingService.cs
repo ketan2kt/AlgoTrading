@@ -458,6 +458,10 @@ internal sealed partial class AutomatedPaperTradingService(
             }
         }
         var marketStateV2 = preEntryStateV2;
+        var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(
+            candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
+                value.High, value.Low, value.Close)).ToArray(), signal?.Direction,
+            openingRangeHigh, openingRangeLow);
         if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
                 value.Market == "nifty" && value.Outcome == "DecisionSnapshot:v2" &&
                 value.UnderlyingInstrumentId == instrument.Id &&
@@ -470,7 +474,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 signal is null ? "Scanning" : paperResearchEntry ? "ResearchEntryWindow" : "Candidate",
                 vwap, fast, slow, atr, relativeVolume, openingRangeHigh, openingRangeLow,
                 signal?.ProposedStopLoss, signal?.ProposedTarget,
-                signal?.SupportingReasons ?? [], strategyEvaluation.FailedConditions);
+                [.. (signal?.SupportingReasons ?? []), .. multiTimeframeV2.Evidence],
+                strategyEvaluation.FailedConditions);
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", instrument.Id,
                 candleDecisionTime, "DecisionSnapshot:v2", signal?.Confidence ?? 0m,
                 JsonSerializer.Serialize(snapshot)));

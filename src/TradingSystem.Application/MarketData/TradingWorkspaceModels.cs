@@ -93,7 +93,8 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<WorkspaceTradeOverlay> Overlays,
     IReadOnlyList<WorkspaceStrategyEvaluation> Evaluations,
     PaperAutomationSnapshot PaperAutomation,
-    IReadOnlyList<WorkspaceVolumeBar>? FuturesVolume = null);
+    IReadOnlyList<WorkspaceVolumeBar>? FuturesVolume = null,
+    DailyResearchPipelineReportV2? Research = null);
 
 public interface ITradingWorkspaceReader
 {

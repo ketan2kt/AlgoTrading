@@ -6,6 +6,7 @@ using TradingSystem.Application.Execution;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.Execution;
 using TradingSystem.Infrastructure.Persistence;
 using TradingSystem.Infrastructure.SystemStatus;
 
@@ -22,6 +23,7 @@ internal sealed class EfTradingWorkspaceReader(
     TimeProvider timeProvider) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
+    private const int MaximumWorkspaceRequestCount = 7_000;
 
     public async Task<TradingWorkspaceSnapshot> GetNiftyAsync(
         int candleCount,
@@ -35,7 +37,11 @@ internal sealed class EfTradingWorkspaceReader(
     {
         var options = liveOptions.Value;
         var definition = TradingMarketCatalog.Get(market);
-        candleCount = Math.Clamp(candleCount, 30, options.WorkspaceCandleCount);
+        // The live engines keep their smaller configured working window, while an
+        // explicit workspace request may load enough one-minute bars for seven
+        // complete exchange sessions. Keeping these limits separate avoids making
+        // every background polling cycle read the full chart history.
+        candleCount = Math.Clamp(candleCount, 30, MaximumWorkspaceRequestCount);
         var now = timeProvider.GetUtcNow();
         var indiaNow = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
@@ -70,7 +76,7 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => value.InstrumentId == instrument.Id &&
                             value.IntervalSeconds == marketDataOptions.Value.CandleIntervalSeconds &&
                             value.Source == "Groww" &&
-                            value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
+                            value.OpenTimeUtc >= sessionStartUtc.AddDays(-14) &&
                             value.OpenTimeUtc < sessionEndUtc)
             .OrderByDescending(value => value.OpenTimeUtc)
             .Take(candleCount + maximumDiscardedNonSessionMinutes)
@@ -89,7 +95,7 @@ internal sealed class EfTradingWorkspaceReader(
                 TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))
             .Distinct()
             .OrderByDescending(value => value)
-            .Take(3)
+            .Take(7)
             .ToHashSet();
         closed = closed.Where(value => displayedSessionDates.Contains(DateOnly.FromDateTime(
             TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))).ToList();
@@ -379,6 +385,18 @@ internal sealed class EfTradingWorkspaceReader(
         var message = !options.Enabled
             ? $"Live {definition.DisplayName} ingestion is disabled by server configuration."
             : state.Message;
+        var researchJson = await dbContext.MarketStrategyAudits.AsNoTracking()
+            .Where(value => value.Market == market &&
+                            value.Outcome == DailyResearchPipelineV2Service.Outcome)
+            .OrderByDescending(value => value.CandleTimeUtc)
+            .Select(value => value.ReasonsJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        DailyResearchPipelineReportV2? research = null;
+        if (!string.IsNullOrWhiteSpace(researchJson))
+        {
+            try { research = JsonSerializer.Deserialize<DailyResearchPipelineReportV2>(researchJson); }
+            catch (JsonException) { }
+        }
         return new TradingWorkspaceSnapshot(
             instrument.TradingSymbol,
             definition.Exchange,
@@ -394,7 +412,8 @@ internal sealed class EfTradingWorkspaceReader(
             overlays,
             evaluations,
             automation,
-            futuresVolume);
+            futuresVolume,
+            research);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,

@@ -391,6 +391,20 @@
           <p class="chart-attribution">
             Charts by TradingView Lightweight Charts™. Market data source: Groww.
           </p>
+          @if (view.research; as research) {
+            <section class="market-strip" aria-label="Champion challenger research status">
+              <article><span>RESEARCH SESSION</span><strong>{{research.sessionDate}}</strong></article>
+              <article><span>DECISIONS / CANDIDATES</span><strong>{{research.decisionSnapshots}} / {{research.actionableCandidates}}</strong></article>
+              <article><span>COUNTERFACTUAL W/L</span><strong>{{research.counterfactualWins}} / {{research.counterfactualLosses}}</strong></article>
+              <article><span>PROMOTION</span><strong [class.good]="research.promotion.eligible" [class.bad]="!research.promotion.eligible">{{research.promotion.status}}</strong></article>
+              @for (candidate of research.walkForward; track candidate.strategy) {
+                <article>
+                  <strong>{{candidate.strategy}}</strong>
+                  <span>Train {{candidate.trainingWinRate | percent:'1.0-0'}} · Validate {{candidate.validationWinRate | percent:'1.0-0'}} · {{candidate.status}}</span>
+                </article>
+              }
+            </section>
+          }
         </section>
 
         @if (operationalAlerts(view).length) {

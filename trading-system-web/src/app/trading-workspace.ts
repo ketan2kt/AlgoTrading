@@ -64,6 +64,31 @@ export interface TradingWorkspaceSnapshot {
   evaluations: WorkspaceStrategyEvaluation[];
   paperAutomation: PaperAutomationSnapshot;
   futuresVolume?: WorkspaceVolumeBar[] | null;
+  research?: DailyResearchPipelineReport | null;
+}
+
+export interface DailyResearchPipelineReport {
+  version: string;
+  market: string;
+  sessionDate: string;
+  decisionSnapshots: number;
+  actionableCandidates: number;
+  counterfactualWins: number;
+  counterfactualLosses: number;
+  unresolved: number;
+  marketStates: Record<string, number>;
+  walkForward: StrategyValidation[];
+  promotion: { eligible: boolean; status: string; reasons: string[] };
+  generatedAtUtc: string;
+}
+
+export interface StrategyValidation {
+  strategy: string;
+  trainingCandidates: number;
+  trainingWinRate: number;
+  validationCandidates: number;
+  validationWinRate: number;
+  status: string;
 }
 
 export function mergeWorkspaceSnapshot(

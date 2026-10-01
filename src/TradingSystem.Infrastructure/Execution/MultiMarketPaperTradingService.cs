@@ -70,7 +70,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
                 value.IntervalSeconds == interval && value.Source == "Groww" &&
                 (market != TradingMarketCatalog.Sensex || value.OpenTimeUtc >= sessionStartUtc))
-            .OrderByDescending(value => value.OpenTimeUtc).Take(40)
+            .OrderByDescending(value => value.OpenTimeUtc).Take(90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         if (candles.Count < (market == TradingMarketCatalog.Sensex ? 12 : 21)) return;
         var latest = candles[^1];
@@ -128,6 +128,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
+            var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(priceBars,
+                decision.Direction, openingV2.Max(value => value.High),
+                openingV2.Min(value => value.Low));
             var snapshotV2 = new DecisionFeatureSnapshotV2("decision-dataset-v2", market.Code,
                 latest.OpenTimeUtc, latest.Close, decision.Strategy, decision.Direction,
                 decision.Confidence, stateV2, lifecycle?.Phase.ToString() ?? "Scanning",
@@ -135,7 +138,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.Close <= 0m ? 0m : AverageTrueRange(candles.TakeLast(15).ToArray()) /
                     latest.Close * 100m,
                 relativeVolumeV2, openingV2.Max(value => value.High),
-                openingV2.Min(value => value.Low), null, null, decision.Reasons, []);
+                openingV2.Min(value => value.Low), null, null,
+                [.. decision.Reasons, .. multiTimeframeV2.Evidence], []);
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "DecisionSnapshot:v2", decision.Confidence,
                 JsonSerializer.Serialize(snapshotV2)));
