@@ -36,10 +36,10 @@ main {
   position: sticky;
   top: 27px;
   z-index: 9;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(90px, 150px));
-  gap: 0.25rem;
-  justify-content: center;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 0.45rem;
   padding: 0.28rem;
   background: rgba(9, 16, 13, 0.94);
