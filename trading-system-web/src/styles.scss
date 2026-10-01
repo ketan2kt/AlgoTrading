@@ -31,9 +31,10 @@ app-root {
 }
 
 app-root .market-tabs {
-  grid-template-columns: minmax(150px, 0.6fr) minmax(240px, 1fr) minmax(320px, 0.9fr);
+  display: flex;
   align-items: center;
-  justify-content: stretch;
+  justify-content: space-between;
+  gap: 1rem;
   min-height: 48px;
   padding: 0.34rem 0.48rem;
   background: rgba(8, 15, 12, 0.96);
@@ -63,9 +64,10 @@ app-root .workspace-brand__mark {
 app-root .workspace-brand > span:last-child { display: grid; line-height: 1.05; }
 app-root .workspace-brand strong { font-size: 0.78rem; letter-spacing: 0.02em; }
 app-root .workspace-brand small { margin-top: 0.18rem; color: var(--desk-muted); font-size: 0.58rem; letter-spacing: 0.09em; text-transform: uppercase; }
-app-root .market-tab-group { justify-content: center; gap: 0.28rem; }
+app-root .workspace-brand { flex: 0 0 155px; }
+app-root .market-tab-group { flex: 1 1 auto; justify-content: center; gap: 0.28rem; }
 app-root .market-tab-group > button { min-width: 112px; }
-app-root .workspace-nav-actions { justify-content: flex-end; gap: 0.24rem; }
+app-root .workspace-nav-actions { flex: 0 0 auto; justify-content: flex-end; gap: 0.24rem; }
 app-root .workspace-nav-actions button { min-height: 29px; padding-inline: 0.55rem; font-size: 0.68rem; }
 app-root .workspace-nav-actions__primary { color: #07110c !important; background: var(--desk-accent) !important; }
 
@@ -149,9 +151,9 @@ app-root .market-theme--sensex { --desk-accent: #78bbed; --desk-line: rgba(126, 
 app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #a6d8fa, #68aee1); }
 
 @media (max-width: 900px) {
-  app-root .market-tabs { grid-template-columns: 1fr auto; }
+  app-root .market-tabs { gap: 0.35rem; }
   app-root .workspace-brand { display: none; }
-  app-root .market-tab-group { justify-content: flex-start; }
+  app-root .market-tab-group { justify-content: flex-start; min-width: 0; }
   app-root .workspace-nav-actions button:not(.workspace-nav-actions__primary) { display: none; }
   app-root .chart-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   app-root .workspace-heading > div > p:last-of-type { display: none; }
