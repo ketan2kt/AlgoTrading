@@ -42,6 +42,29 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
   standalone: true,
   template: `
     <div class="chart-shell">
+      @if (decisionMap; as map) {
+        <details class="decision-map" aria-label="Live decision map">
+          <summary>
+            <span>MARKET READ</span>
+            <strong>{{map.regime}} · {{map.bias}} · {{map.setup}}</strong>
+            <small>{{map.location}} · {{map.remainingRoom}}</small>
+          </summary>
+          <div class="decision-map__grid">
+            <div><span>REGIME</span><strong>{{map.regime}}</strong></div>
+            <div><span>BIAS</span><strong>{{map.bias}}</strong></div>
+            <div><span>SETUP</span><strong>{{map.setup}}</strong></div>
+            <div><span>LOCATION</span><strong>{{map.location}}</strong></div>
+            <div><span>ROOM</span><strong>{{map.remainingRoom}}</strong></div>
+            <div><span>VOLUME</span><strong>{{map.volume}}</strong></div>
+          </div>
+          <div class="decision-map__frames">
+            @for (frame of map.timeframes; track frame.label) {
+              <small [attr.data-direction]="frame.direction">{{frame.label}} {{frame.direction}}</small>
+            }
+          </div>
+          <p>{{map.reasons[0]}}</p>
+        </details>
+      }
       <div class="chart-stage">
         <div class="overlay-controls" aria-label="Chart overlays">
           <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
@@ -62,22 +85,6 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         <div #rewardZone class="trade-zone trade-zone--reward"></div>
         <div #riskZone class="trade-zone trade-zone--risk"></div>
       </div>
-      @if (decisionMap; as map) {
-        <aside class="decision-map" aria-label="Live decision map">
-          <div><span>REGIME</span><strong>{{map.regime}}</strong></div>
-          <div><span>BIAS</span><strong>{{map.bias}}</strong></div>
-          <div><span>SETUP</span><strong>{{map.setup}}</strong></div>
-          <div><span>LOCATION</span><strong>{{map.location}}</strong></div>
-          <div><span>ROOM</span><strong>{{map.remainingRoom}}</strong></div>
-          <div><span>VOLUME</span><strong>{{map.volume}}</strong></div>
-          <div class="decision-map__frames">
-            @for (frame of map.timeframes; track frame.label) {
-              <small [attr.data-direction]="frame.direction">{{frame.label}} {{frame.direction}}</small>
-            }
-          </div>
-          <p>{{map.reasons[0]}}</p>
-        </aside>
-      }
     </div>
   `,
   styles: [
@@ -87,8 +94,8 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         display: block;
         min-height: clamp(420px, calc(100vh - 110px), 680px);
       }
-      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr) 250px; align-items:start; background:#0d1512; }
-      .chart-stage { position:relative; min-width:0; min-height:clamp(420px,calc(100vh - 110px),680px); border-right:1px solid #24332c; }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#0d1512; }
+      .chart-stage { position:relative; min-width:0; min-height:clamp(420px,calc(100vh - 110px),680px); }
       .chart {
         width: 100%;
         height: clamp(420px, calc(100vh - 110px), 680px);
@@ -120,19 +127,27 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .overlay-controls button { padding:3px 7px; border:1px solid #30433a; border-radius:4px; background:#0d1713dd; color:#82978c; font-size:.62rem; }
       .overlay-controls button.active { border-color:#62ba91; color:#bce8d2; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#b6c6be; font-size:.64rem; background:#0d1713dd; }
-      .decision-map { position:sticky; top:8px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; margin:8px; padding:8px; border:1px solid #29443a; border-radius:6px; background:#09120f; pointer-events:none; }
-      .decision-map div { min-width:0; padding:3px 5px; }
+      .decision-map { margin:0; border:0; border-bottom:1px solid #29443a; background:#0a1410; }
+      .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
+      .decision-map summary::-webkit-details-marker { display:none; }
+      .decision-map summary::after { content:'Details'; color:#74a28e; font-size:.55rem; letter-spacing:.08em; text-transform:uppercase; }
+      .decision-map[open] summary::after { content:'Hide'; }
+      .decision-map summary span { color:#6f9182; font-size:.52rem; letter-spacing:.11em; }
+      .decision-map summary strong { overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map summary small { overflow:hidden; color:#9eb3a8; font-size:.6rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map__grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; padding:2px 8px 5px; }
+      .decision-map__grid div { min-width:0; padding:3px 5px; }
       .decision-map span { display:block; color:#6f9182; font-size:.52rem; letter-spacing:.09em; }
       .decision-map strong { display:block; overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
-      .decision-map__frames { grid-column:1 / -1; display:flex; gap:5px; }
+      .decision-map__frames { display:flex; gap:5px; padding:0 13px 5px; }
       .decision-map__frames small { padding:2px 5px; border-radius:3px; background:#17251f; color:#a7bdb2; font-size:.58rem; }
       .decision-map__frames small[data-direction='Bullish'] { color:#58dfa0; }
       .decision-map__frames small[data-direction='Bearish'] { color:#ff7982; }
-      .decision-map p { grid-column:1 / -1; margin:0; padding:2px 5px; color:#9eb3a8; font-size:.6rem; }
+      .decision-map p { margin:0; padding:2px 13px 7px; color:#9eb3a8; font-size:.6rem; }
       @media (max-width: 900px) {
-        .chart-shell { grid-template-columns:minmax(0,1fr); }
-        .chart-stage { border-right:0; }
-        .decision-map { position:static; grid-template-columns:repeat(3,minmax(0,1fr)); margin:8px; }
+        .decision-map summary { grid-template-columns:auto minmax(120px,1fr); }
+        .decision-map summary small { display:none; }
+        .decision-map__grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
       }
       .trade-zone {
         position: absolute;
@@ -318,23 +333,31 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
         }),
       );
     }
-    const tradeMarkers = this.snapshot.overlays.map(value => ({
+    const tradeMarkers = this.snapshot.overlays.filter(value => value.status !== 'RiskRejected').map(value => ({
       time: Math.floor(new Date(value.signalTimeUtc).getTime() / 1000) as Time,
       position: (value.direction === 'Buy' ? 'belowBar' : 'aboveBar') as 'belowBar'|'aboveBar',
-      color: value.status === 'RiskRejected' ? '#ff8b94' : '#f2c94c',
+      color: '#f2c94c',
       shape: (value.direction === 'Buy' ? 'arrowUp' : 'arrowDown') as 'arrowUp'|'arrowDown',
-      text: value.status === 'RiskRejected' ? `REJECTED · ${value.rejectionReasons[0] ?? value.strategy}` : entryExplanation(value,this.snapshot!.evaluations),
+      text: entryExplanation(value,this.snapshot!.evaluations),
     }));
-    const decisionMarkers = this.snapshot.evaluations.filter(value =>
-      value.outcome.includes('Rejected') || value.outcome === 'PaperPositionOpened').slice(0,20).map(value => ({
+    const acceptedMarkers = this.snapshot.evaluations.filter(value =>
+      value.outcome === 'PaperPositionOpened').slice(0,5).map(value => ({
       time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
       position: 'aboveBar' as const,
-      color: value.outcome === 'PaperPositionOpened' ? '#28d17c' : '#83998e',
+      color: '#28d17c',
       shape: 'circle' as const,
-      text: value.outcome === 'PaperPositionOpened' ? 'ENTRY ACCEPTED' : `REJECTED · ${value.failedConditions[0] ?? value.outcome}`,
+      text: 'ENTRY ACCEPTED',
+    }));
+    const latestRejection = this.snapshot.evaluations.filter(value =>
+      value.outcome.includes('Rejected')).slice(0,1).map(value => ({
+      time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
+      position: 'aboveBar' as const,
+      color: '#83998e',
+      shape: 'circle' as const,
+      text: 'LATEST SETUP REJECTED',
     }));
     const visibleTimes = new Set(candles.map(value => value.time as number));
-    const markers = [...decisionMarkers, ...tradeMarkers]
+    const markers = [...latestRejection, ...acceptedMarkers, ...tradeMarkers]
       .filter(value => visibleTimes.has(value.time as number))
       .sort((left,right)=>(left.time as number)-(right.time as number));
     if (this.markerApi) this.markerApi.setMarkers(markers);
