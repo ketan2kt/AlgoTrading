@@ -42,13 +42,25 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
   standalone: true,
   template: `
     <div class="chart-shell">
-      <div class="overlay-controls" aria-label="Chart overlays">
-        <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
-        <button type="button" [class.active]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
-        <button type="button" [class.active]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
-        <button type="button" [class.active]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
-        <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
-        @if (rangeText) { <span>{{rangeText}}</span> }
+      <div class="chart-stage">
+        <div class="overlay-controls" aria-label="Chart overlays">
+          <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
+          <button type="button" [class.active]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
+          <button type="button" [class.active]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
+          <button type="button" [class.active]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
+          <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
+          @if (rangeText) { <span>{{rangeText}}</span> }
+        </div>
+        <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
+        <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
+        @if (!snapshot?.candles?.length) {
+          <div class="chart-empty">
+            <strong>Waiting for live {{ snapshot?.instrument || 'market' }} candles</strong>
+            <span>{{ snapshot?.statusMessage || 'The chart starts only after verified live data arrives.' }}</span>
+          </div>
+        }
+        <div #rewardZone class="trade-zone trade-zone--reward"></div>
+        <div #riskZone class="trade-zone trade-zone--risk"></div>
       </div>
       @if (decisionMap; as map) {
         <aside class="decision-map" aria-label="Live decision map">
@@ -66,18 +78,6 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
           <p>{{map.reasons[0]}}</p>
         </aside>
       }
-      <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
-      <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
-      @if (!snapshot?.candles?.length) {
-        <div class="chart-empty">
-          <strong>Waiting for live {{ snapshot?.instrument || 'market' }} candles</strong>
-          <span>{{
-            snapshot?.statusMessage || 'The chart starts only after verified live data arrives.'
-          }}</span>
-        </div>
-      }
-      <div #rewardZone class="trade-zone trade-zone--reward"></div>
-      <div #riskZone class="trade-zone trade-zone--risk"></div>
     </div>
   `,
   styles: [
@@ -85,9 +85,10 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       :host,
       .chart-shell {
         display: block;
-        position: relative;
         min-height: clamp(420px, calc(100vh - 110px), 680px);
       }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr) 250px; align-items:start; background:#0d1512; }
+      .chart-stage { position:relative; min-width:0; min-height:clamp(420px,calc(100vh - 110px),680px); border-right:1px solid #24332c; }
       .chart {
         width: 100%;
         height: clamp(420px, calc(100vh - 110px), 680px);
@@ -119,7 +120,7 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .overlay-controls button { padding:3px 7px; border:1px solid #30433a; border-radius:4px; background:#0d1713dd; color:#82978c; font-size:.62rem; }
       .overlay-controls button.active { border-color:#62ba91; color:#bce8d2; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#b6c6be; font-size:.64rem; background:#0d1713dd; }
-      .decision-map { position:absolute; z-index:2; top:38px; left:8px; width:min(570px,calc(100% - 88px)); display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; padding:6px; border:1px solid #29443a; border-radius:6px; background:#09120fdd; backdrop-filter:blur(4px); pointer-events:none; }
+      .decision-map { position:sticky; top:8px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; margin:8px; padding:8px; border:1px solid #29443a; border-radius:6px; background:#09120f; pointer-events:none; }
       .decision-map div { min-width:0; padding:3px 5px; }
       .decision-map span { display:block; color:#6f9182; font-size:.52rem; letter-spacing:.09em; }
       .decision-map strong { display:block; overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
@@ -128,6 +129,11 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .decision-map__frames small[data-direction='Bullish'] { color:#58dfa0; }
       .decision-map__frames small[data-direction='Bearish'] { color:#ff7982; }
       .decision-map p { grid-column:1 / -1; margin:0; padding:2px 5px; color:#9eb3a8; font-size:.6rem; }
+      @media (max-width: 900px) {
+        .chart-shell { grid-template-columns:minmax(0,1fr); }
+        .chart-stage { border-right:0; }
+        .decision-map { position:static; grid-template-columns:repeat(3,minmax(0,1fr)); margin:8px; }
+      }
       .trade-zone {
         position: absolute;
         right: 64px;
