@@ -103,7 +103,8 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 PaperTradeResearchAnalyzer.Analyze(new(x.Result.Quantity, x.Result.EntryPrice,
                     x.Result.ExitPrice, x.Result.GrossPnl, x.Result.EstimatedCosts,
                     x.Result.RealisedPnl, x.Result.ExitReason,
-                    sampleLookup.GetValueOrDefault(x.Signal.Id, []).Select(value => value.Price).ToArray(),
+                    sampleLookup.GetValueOrDefault(x.Signal.Id, []).Select(value =>
+                        new PaperTradePricePoint(value.ObservedAtUtc, value.Price)).ToArray(),
                     followUpLookup.GetValueOrDefault(x.Signal.Id, []))),
                 context?.ShadowStructureState, context?.ShadowTrendQuality,
                 context?.ShadowWouldPermit))
@@ -120,9 +121,10 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 (x.Outcome.StartsWith("PositionSample:") || x.Outcome.StartsWith("PostExit")))
             .Select(x => new { x.Outcome, x.ReasonsJson }).ToListAsync(cancellationToken);
         var sensexPrices = sensexAudits.Where(x => x.Outcome.StartsWith("PositionSample:", StringComparison.Ordinal))
-            .Select(x => SensexResearchAuditParser.Parse(x.ReasonsJson, "price"))
-            .Where(x => x.HasValue && x.Value.Value > 0).Select(x => x!.Value)
-            .GroupBy(x => x.PositionId).ToDictionary(x => x.Key, x => x.Select(v => v.Value).ToArray());
+            .Select(x => SensexResearchAuditParser.ParsePricePoint(x.ReasonsJson))
+            .Where(x => x.HasValue && x.Value.Point.Price > 0).Select(x => x!.Value)
+            .GroupBy(x => x.PositionId).ToDictionary(x => x.Key,
+                x => x.Select(v => v.Point).OrderBy(v => v.ObservedAtUtc).ToArray());
         var sensexFollowUps = sensexAudits.Where(x => x.Outcome.StartsWith("PostExit", StringComparison.Ordinal))
             .Select(x => SensexResearchAuditParser.Parse(x.ReasonsJson, "incrementalAfterExit"))
             .Where(x => x.HasValue).Select(x => x!.Value)

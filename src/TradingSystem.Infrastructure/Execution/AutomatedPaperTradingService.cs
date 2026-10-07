@@ -887,11 +887,13 @@ internal sealed partial class AutomatedPaperTradingService(
         var entryPrice = open.Entry.AverageFillPrice!.Value;
         var persistedPrices = await researchDb.PaperTradePriceSamples.AsNoTracking()
             .Where(value => value.SignalId == open.Signal.SignalId)
-            .Select(value => value.OptionPrice)
+            .Select(value => new { value.OptionPrice, value.ObservedAtUtc })
             .ToListAsync(cancellationToken);
         var persistedFavourable = persistedPrices.Count == 0
             ? entryPrice
-            : open.Entry.Direction == Direction.Buy ? persistedPrices.Max() : persistedPrices.Min();
+            : open.Entry.Direction == Direction.Buy
+                ? persistedPrices.Max(value => value.OptionPrice)
+                : persistedPrices.Min(value => value.OptionPrice);
         var favourable = favourablePriceBySignal.GetValueOrDefault(open.Signal.SignalId,
             persistedFavourable);
         favourable = open.Entry.Direction == Direction.Buy
@@ -907,7 +909,29 @@ internal sealed partial class AutomatedPaperTradingService(
                 options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue,
                 options.Value.ProfitLockTriggerRiskMultiple,
                 options.Value.ProfitLockRiskMultiple);
+        var initialRiskPerUnit = Math.Abs(entryPrice - open.StopLoss);
+        var favourableMove = (favourable - entryPrice) * multiplier;
+        if (favourableMove >= initialRiskPerUnit * options.Value.BreakEvenTriggerRiskMultiple)
+        {
+            var protectionCosts = PaperTradingCostModel.CalculateOptionCharges([
+                new(PaperOptionTransactionSide.Buy, entryPrice, open.Entry.FilledQuantity),
+                new(PaperOptionTransactionSide.Sell, Math.Max(.05m, effectiveStop),
+                    open.Entry.FilledQuantity)]).Total;
+            effectiveStop = PaperProtectiveStopPolicy.ProtectNetProfit(open.Entry.Direction,
+                entryPrice, effectiveStop, open.Entry.FilledQuantity, protectionCosts);
+        }
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
+        var peakPoint = open.Entry.Direction == Direction.Buy
+            ? persistedPrices.OrderByDescending(value => value.OptionPrice).FirstOrDefault()
+            : persistedPrices.OrderBy(value => value.OptionPrice).FirstOrDefault();
+        var worstPoint = open.Entry.Direction == Direction.Buy
+            ? persistedPrices.OrderBy(value => value.OptionPrice).FirstOrDefault()
+            : persistedPrices.OrderByDescending(value => value.OptionPrice).FirstOrDefault();
+        await PersistProfitProtectionSnapshotAsync(researchDb, open, underlyingInstrumentId,
+            price, effectiveStop, peakPoint?.OptionPrice ?? price,
+            peakPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(),
+            worstPoint?.OptionPrice ?? price,
+            worstPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(), cancellationToken);
 
         var invalidation = options.Value.UnderlyingTrendInvalidationEnabled && underlyingFresh
             ? await EvaluateUnderlyingInvalidationAsync(services, open, underlyingInstrumentId,
@@ -1128,6 +1152,55 @@ internal sealed partial class AutomatedPaperTradingService(
 
         db.PaperTradePriceSamples.Add(new PaperTradePriceSample(Guid.NewGuid(), signalId,
             instrumentId, price, now));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task PersistProfitProtectionSnapshotAsync(TradingDbContext db, OpenTrade open,
+        Guid underlyingInstrumentId, decimal currentPrice, decimal effectiveStop,
+        decimal peakPrice, DateTimeOffset peakAtUtc, decimal worstPrice,
+        DateTimeOffset worstAtUtc, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var minute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0,
+            TimeSpan.Zero);
+        var outcome = $"ProfitProtection:{open.Signal.SignalId:N}:{minute:yyyyMMddHHmm}";
+        if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                value.Market == "nifty" && value.Outcome == outcome, cancellationToken)) return;
+
+        var entry = open.Entry.AverageFillPrice!.Value;
+        var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
+        var initialRisk = Math.Abs(entry - open.StopLoss);
+        var peakGrossPnl = (peakPrice - entry) * open.Entry.FilledQuantity * multiplier;
+        var worstGrossPnl = (worstPrice - entry) * open.Entry.FilledQuantity * multiplier;
+        var currentGrossPnl = (currentPrice - entry) * open.Entry.FilledQuantity * multiplier;
+        var remainingUnrealisedPnl = (currentPrice - entry) * open.RemainingQuantity * multiplier;
+        var favourableR = initialRisk <= 0m ? 0m : Math.Max(0m,
+            (peakPrice - entry) * multiplier / initialRisk);
+        var stage = effectiveStop == open.StopLoss ? "InitialRisk"
+            : (effectiveStop - entry) * multiplier <= 0m ? "BreakEven"
+            : favourableR >= options.Value.BreakEvenTriggerRiskMultiple +
+                              options.Value.TrailingStopRiskMultiple ? "Trailing"
+            : "ProfitLocked";
+        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", underlyingInstrumentId,
+            minute, outcome, 0m, JsonSerializer.Serialize(new
+            {
+                signalId = open.Signal.SignalId,
+                currentPrice,
+                currentGrossPnl,
+                remainingUnrealisedPnl,
+                initialStop = open.StopLoss,
+                effectiveStop,
+                protectionStage = stage,
+                favourableR,
+                peakPrice,
+                peakGrossPnl,
+                peakAtUtc,
+                worstPrice,
+                worstGrossPnl,
+                worstAtUtc,
+                grossProfitGiveback = Math.Max(0m, peakGrossPnl - currentGrossPnl),
+                observedAtUtc = now
+            })));
         await db.SaveChangesAsync(cancellationToken);
     }
 

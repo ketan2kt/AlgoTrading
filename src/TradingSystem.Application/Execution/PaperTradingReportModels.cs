@@ -17,7 +17,9 @@ public sealed record StrategyPerformanceBreakdown(string Strategy, string Regime
 
 public sealed record TradeExitQualityMetrics(decimal MaximumFavourableExcursion,
     decimal MaximumAdverseExcursion, decimal ProfitGiveback, decimal CapturedProfitRatio,
-    decimal BestPostExitIncrementalPnl, int PriceSamples, string Assessment);
+    decimal BestPostExitIncrementalPnl, int PriceSamples, string Assessment,
+    DateTimeOffset? MaximumFavourableAtUtc = null,
+    DateTimeOffset? MaximumAdverseAtUtc = null);
 
 public sealed record StrategyDecisionFunnel(string Outcome, int Evaluations,
     decimal AverageConfidence, decimal AverageRelativeFuturesVolume,

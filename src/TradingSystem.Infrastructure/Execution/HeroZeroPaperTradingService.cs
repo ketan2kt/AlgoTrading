@@ -207,27 +207,12 @@ internal sealed partial class HeroZeroPaperTradingService(
             ? (value.CurrentPrice - value.EntryPrice) * value.Quantity
             : value.RealisedPnl);
         var force = localTime >= ParseTime(options.Value.ForcedExit);
-        if (force || combinedPnl <= -entryCost * options.Value.CombinedStopLossPercent / 100m)
+        if (force)
         {
-            foreach (var leg in legs) Close(leg, force ? "HeroZeroTimeExit" : "HeroZeroCombinedStop");
-        }
-        else
-        {
-            var activeLegs = legs.Where(value => value.Status == "Active").ToArray();
-            var winner = activeLegs.OrderByDescending(value => value.CurrentPrice / value.EntryPrice).First();
-            var combinedProfitActivated = combinedPnl >=
-                entryCost * options.Value.CombinedProfitActivationPercent / 100m;
-            var winnerActivated = winner.CurrentPrice >=
-                winner.EntryPrice * options.Value.WinnerActivationMultiple;
-            if (combinedProfitActivated || winnerActivated)
-            {
-                var loser = activeLegs.SingleOrDefault(value => value.Id != winner.Id);
-                if (loser is not null) Close(loser, "HeroZeroLosingLegExit");
-                var trail = winner.CurrentPrice * (1m - options.Value.WinnerTrailingFraction);
-                winner.Mark(winner.CurrentPrice, trail);
-            }
-            if (winner.CurrentPrice <= winner.StopLoss && winner.StopLoss > winner.EntryPrice)
-                Close(winner, "HeroZeroTrailingStop");
+            // The expiry hedge is a defined-risk debit pair. Preserve both legs through the
+            // late-session expansion window; one leg may decay near zero while the other expands.
+            // Intraday combined-loss, losing-leg and winner-trailing exits defeated that design.
+            foreach (var leg in legs) Close(leg, "HeroZeroTimeExit");
         }
         await db.SaveChangesAsync(cancellationToken);
         var open = legs.Where(value => value.Status == "Active").Select(value =>
@@ -240,7 +225,7 @@ internal sealed partial class HeroZeroPaperTradingService(
                 (value.CurrentPrice - value.EntryPrice) * value.Quantity, null);
         }).ToArray();
         state.Set(new(market.Code, true, expiry, open.Length > 0 ? "Pair active" : "Pair closed",
-            open.Length > 0 ? "Managing combined risk and trailing any confirmed winning leg." :
+            open.Length > 0 ? $"Holding both defined-risk legs until {options.Value.ForcedExit} IST; no red-leg or combined-loss exit." :
                 "The expiry pair has completed.", now, null, null, null, open,
             entryCost, currentValue, combinedPnl));
 

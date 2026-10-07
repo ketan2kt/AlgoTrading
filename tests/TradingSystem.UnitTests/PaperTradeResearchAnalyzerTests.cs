@@ -9,7 +9,7 @@ public sealed class PaperTradeResearchAnalyzerTests
     {
         var result = PaperTradeResearchAnalyzer.Analyze(new(100, 50m, 51m,
             100m, 20m, 80m, "UnderlyingTrendInvalidated",
-            [50m, 55m, 54m, 51m], []));
+            Points(50m, 55m, 54m, 51m), []));
 
         Assert.Equal(500m, result.MaximumFavourableExcursion);
         Assert.Equal(400m, result.ProfitGiveback);
@@ -22,7 +22,7 @@ public sealed class PaperTradeResearchAnalyzerTests
     {
         var result = PaperTradeResearchAnalyzer.Analyze(new(100, 50m, 49m,
             -100m, 20m, -120m, "UnderlyingTrendInvalidated",
-            [50m, 49m, 48m], [50m, 350m, 200m]));
+            Points(50m, 49m, 48m), [50m, 350m, 200m]));
 
         Assert.Equal(350m, result.BestPostExitIncrementalPnl);
         Assert.Equal("PotentialEarlyExit", result.Assessment);
@@ -44,4 +44,20 @@ public sealed class PaperTradeResearchAnalyzerTests
         Assert.Equal(999m, PaperTradeResearchAnalyzer.ProfitFactor([100m, 50m]));
         Assert.Equal(0m, PaperTradeResearchAnalyzer.ProfitFactor([]));
     }
+
+    [Fact]
+    public void RecordsWhenPeakProfitAndWorstLossOccurred()
+    {
+        var start = new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero);
+        var result = PaperTradeResearchAnalyzer.Analyze(new(100, 50m, 51m,
+            100m, 20m, 80m, "StopLoss",
+            [new(start, 49m), new(start.AddMinutes(1), 55m), new(start.AddMinutes(2), 52m)], []));
+
+        Assert.Equal(start.AddMinutes(1), result.MaximumFavourableAtUtc);
+        Assert.Equal(start, result.MaximumAdverseAtUtc);
+    }
+
+    private static PaperTradePricePoint[] Points(params decimal[] prices) =>
+        prices.Select((price, index) => new PaperTradePricePoint(
+            DateTimeOffset.UnixEpoch.AddMinutes(index), price)).ToArray();
 }

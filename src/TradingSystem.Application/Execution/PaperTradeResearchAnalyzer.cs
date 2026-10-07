@@ -1,8 +1,10 @@
 namespace TradingSystem.Application.Execution;
 
+public sealed record PaperTradePricePoint(DateTimeOffset ObservedAtUtc, decimal Price);
+
 public sealed record PaperTradeResearchInput(int Quantity, decimal EntryPrice, decimal ExitPrice,
     decimal GrossPnl, decimal EstimatedCosts, decimal RealisedPnl, string ExitReason,
-    IReadOnlyList<decimal> OpenPositionPrices,
+    IReadOnlyList<PaperTradePricePoint> OpenPositionPrices,
     IReadOnlyList<decimal> PostExitIncrementalPnls);
 
 public static class PaperTradeResearchAnalyzer
@@ -13,8 +15,12 @@ public static class PaperTradeResearchAnalyzer
         if (input.EntryPrice <= 0 || input.ExitPrice <= 0)
             throw new ArgumentOutOfRangeException(nameof(input), "Trade prices must be positive.");
 
-        var prices = input.OpenPositionPrices.Where(value => value > 0)
+        var observed = input.OpenPositionPrices.Where(value => value.Price > 0)
+            .OrderBy(value => value.ObservedAtUtc).ToArray();
+        var prices = observed.Select(value => value.Price)
             .Append(input.EntryPrice).Append(input.ExitPrice).ToArray();
+        var maximumFavourablePoint = observed.OrderByDescending(value => value.Price).FirstOrDefault();
+        var maximumAdversePoint = observed.OrderBy(value => value.Price).FirstOrDefault();
         var maximumFavourable = Math.Max(0m, (prices.Max() - input.EntryPrice) * input.Quantity);
         var maximumAdverse = Math.Max(0m, (input.EntryPrice - prices.Min()) * input.Quantity);
         var giveback = Math.Max(0m, maximumFavourable - input.GrossPnl);
@@ -32,7 +38,13 @@ public static class PaperTradeResearchAnalyzer
             : "ExitWithinObservedRange";
 
         return new(maximumFavourable, maximumAdverse, giveback, capturedRatio,
-            bestPostExit, prices.Length, assessment);
+            bestPostExit, prices.Length, assessment,
+            maximumFavourablePoint is not null && maximumFavourablePoint.Price > input.EntryPrice &&
+            maximumFavourablePoint.Price == prices.Max()
+                ? maximumFavourablePoint.ObservedAtUtc : null,
+            maximumAdversePoint is not null && maximumAdversePoint.Price < input.EntryPrice &&
+            maximumAdversePoint.Price == prices.Min()
+                ? maximumAdversePoint.ObservedAtUtc : null);
     }
 
     public static decimal ProfitFactor(IEnumerable<decimal> pnls)

@@ -24,6 +24,7 @@ internal sealed partial class MultiMarketPaperTradingService(
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private readonly Dictionary<string, DateTimeOffset> lastEvaluated = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, decimal> favourablePriceByPosition = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -93,6 +94,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             ? EvaluateNaturalGas(candles)
             : Evaluate(candles);
         MarketStateAssessmentV2? marketStateV2 = null;
+        DecisionFeatureSnapshotV2? decisionSnapshotV2 = null;
         var sensexConfirmationReady = market != TradingMarketCatalog.Sensex;
         if (market == TradingMarketCatalog.Sensex)
         {
@@ -131,15 +133,23 @@ internal sealed partial class MultiMarketPaperTradingService(
             var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(priceBars,
                 decision.Direction, openingV2.Max(value => value.High),
                 openingV2.Min(value => value.Low));
+            var researchAtrV2 = AverageTrueRange(candles.TakeLast(15).ToArray());
+            decimal? researchStopV2 = decision.Direction == Direction.Buy
+                ? latest.Close - researchAtrV2
+                : decision.Direction == Direction.Sell ? latest.Close + researchAtrV2 : null;
+            decimal? researchTargetV2 = decision.Direction == Direction.Buy
+                ? latest.Close + researchAtrV2
+                : decision.Direction == Direction.Sell ? latest.Close - researchAtrV2 : null;
             var snapshotV2 = new DecisionFeatureSnapshotV2("decision-dataset-v2", market.Code,
                 latest.OpenTimeUtc, latest.Close, decision.Strategy, decision.Direction,
                 decision.Confidence, stateV2, lifecycle?.Phase.ToString() ?? "Scanning",
                 vwapV2, fastV2, slowV2,
-                latest.Close <= 0m ? 0m : AverageTrueRange(candles.TakeLast(15).ToArray()) /
+                latest.Close <= 0m ? 0m : researchAtrV2 /
                     latest.Close * 100m,
                 relativeVolumeV2, openingV2.Max(value => value.High),
-                openingV2.Min(value => value.Low), null, null,
+                openingV2.Min(value => value.Low), researchStopV2, researchTargetV2,
                 [.. decision.Reasons, .. multiTimeframeV2.Evidence], []);
+            decisionSnapshotV2 = snapshotV2;
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
                 latest.OpenTimeUtc, "DecisionSnapshot:v2", decision.Confidence,
                 JsonSerializer.Serialize(snapshotV2)));
@@ -460,6 +470,43 @@ internal sealed partial class MultiMarketPaperTradingService(
                 paperEntryRecordedAtUtc = timeProvider.GetUtcNow(),
                 reasons = decision.Reasons
             })));
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            if (decisionSnapshotV2?.CandidateDirection is null)
+            {
+                var linkedAtr = AverageTrueRange(candles.TakeLast(15).ToArray());
+                var linkedSnapshot = decisionSnapshotV2! with
+                {
+                    Strategy = recordedStrategy,
+                    CandidateDirection = decision.Direction,
+                    CandidateConfidence = decision.Confidence,
+                    SetupPhase = paperResearchEntry ? "ResearchEntryWindow" : "Candidate",
+                    ProposedStop = decision.Direction == Direction.Buy
+                        ? latest.Close - linkedAtr : latest.Close + linkedAtr,
+                    ProposedTarget = decision.Direction == Direction.Buy
+                        ? latest.Close + linkedAtr : latest.Close - linkedAtr,
+                    SupportingEvidence = [.. decision.Reasons,
+                        $"Linked to opened Sensex paper position {position.Id:N}."]
+                };
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                    latest.OpenTimeUtc, "DecisionSnapshot:v2", decision.Confidence,
+                    JsonSerializer.Serialize(linkedSnapshot)));
+            }
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+                latest.OpenTimeUtc, "TradeResearchLink:v2", decision.Confidence,
+                JsonSerializer.Serialize(new
+                {
+                    positionId = position.Id,
+                    decisionCandleTimeUtc = latest.OpenTimeUtc,
+                    executionInstrumentId = execution.Id,
+                    execution = execution.TradingSymbol,
+                    entry,
+                    initialStop = stop,
+                    target,
+                    strategy = recordedStrategy,
+                    paperResearchEntry
+                })));
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -496,6 +543,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
+            var favourableExtreme = price;
             var trailing = position.StopLoss;
             var previousStop = position.StopLoss;
             if (market == TradingMarketCatalog.NaturalGas)
@@ -503,14 +551,46 @@ internal sealed partial class MultiMarketPaperTradingService(
                 trailing = NaturalGasMiniPositionPolicy.ApplyTrailingStop(position.Direction,
                     position.EntryPrice, trailing, price, initialRisk);
             }
-            else if (favourable >= initialRisk * 0.8m)
+            else
+            {
+                if (!favourablePriceByPosition.TryGetValue(position.Id, out var favourablePrice))
+                {
+                    var prefix = $"PositionSample:{position.Id:N}:";
+                    var samples = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
+                            value.Market == market.Code && value.Outcome.StartsWith(prefix))
+                        .Select(value => value.ReasonsJson).ToListAsync(cancellationToken);
+                    var prices = samples.Select(value => SensexResearchAuditParser.Parse(value, "price"))
+                        .Where(value => value.HasValue).Select(value => value!.Value.Value).ToArray();
+                    favourablePrice = prices.Length == 0 ? position.EntryPrice
+                        : position.Direction == Direction.Buy ? prices.Max() : prices.Min();
+                }
+                favourablePrice = position.Direction == Direction.Buy
+                    ? Math.Max(favourablePrice, price) : Math.Min(favourablePrice, price);
+                favourablePriceByPosition[position.Id] = favourablePrice;
+                favourableExtreme = favourablePrice;
+                var initialProtectiveStop = position.Direction == Direction.Buy
+                    ? position.EntryPrice - initialRisk
+                    : position.EntryPrice + initialRisk;
+                trailing = PaperProtectiveStopPolicy.Calculate(position.Direction,
+                    position.EntryPrice, initialProtectiveStop, favourablePrice,
+                    options.Value.BreakEvenTriggerRiskMultiple,
+                    options.Value.TrailingStopRiskMultiple,
+                    options.Value.ProfitLockTriggerRiskMultiple,
+                    options.Value.ProfitLockRiskMultiple);
+                if (PeakFavourableForProtection(position.Direction, position.EntryPrice,
+                        favourablePrice) >= initialRisk * options.Value.BreakEvenTriggerRiskMultiple)
+                {
+                    var protectionCosts = PaperTradingCostModel.CalculateOptionCharges([
+                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.Quantity),
+                        new(PaperOptionTransactionSide.Sell, Math.Max(.05m, trailing),
+                            position.Quantity)]).Total;
+                    trailing = PaperProtectiveStopPolicy.ProtectNetProfit(position.Direction,
+                        position.EntryPrice, trailing, position.Quantity, protectionCosts);
+                }
                 trailing = position.Direction == Direction.Buy
-                    ? position.EntryPrice + initialRisk * 0.5m
-                    : position.EntryPrice - initialRisk * 0.5m;
-            if (market != TradingMarketCatalog.NaturalGas && favourable >= initialRisk)
-                trailing = position.Direction == Direction.Buy
-                    ? Math.Max(trailing, price - initialRisk * options.Value.TrailingStopRiskMultiple)
-                    : Math.Min(trailing, price + initialRisk * options.Value.TrailingStopRiskMultiple);
+                    ? Math.Max(position.StopLoss, trailing)
+                    : Math.Min(position.StopLoss, trailing);
+            }
             position.Mark(price, trailing);
             var sampleMinute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute,
                 0, TimeSpan.Zero);
@@ -520,10 +600,20 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 var livePnl = (position.Direction == Direction.Buy
                     ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
+                var peakFavourable = position.Direction == Direction.Buy
+                    ? favourableExtreme - position.EntryPrice
+                    : position.EntryPrice - favourableExtreme;
+                var favourableR = initialRisk <= 0m ? 0m : Math.Max(0m, peakFavourable / initialRisk);
+                var protectionStage = position.StopLoss == previousStop ? "Unchanged"
+                    : position.StopLoss == position.EntryPrice ? "BreakEven"
+                    : favourableR >= options.Value.BreakEvenTriggerRiskMultiple +
+                                      options.Value.TrailingStopRiskMultiple ? "Trailing"
+                    : "ProfitLocked";
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, sampleMinute, sampleOutcome, 0m,
                     JsonSerializer.Serialize(new { positionId = position.Id, price,
-                        stop = position.StopLoss, position.Target, livePnl, observedAtUtc = now })));
+                        initialStop = previousStop, stop = position.StopLoss, position.Target,
+                        livePnl, favourableR, protectionStage, observedAtUtc = now })));
             }
             if (position.StopLoss != previousStop)
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
@@ -550,6 +640,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                         new(PaperOptionTransactionSide.Sell, price, position.Quantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.Quantity * 0.0005m, 2);
                 position.Close(price, costs, targetHit ? "TargetHit" : stopHit ? "StopLossHit" : "TimeExit", now);
+                favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = (position.Direction == Direction.Buy
                     ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
@@ -561,6 +652,10 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
     }
+
+    private static decimal PeakFavourableForProtection(Direction direction, decimal entry,
+        decimal favourablePrice) => direction == Direction.Buy
+        ? favourablePrice - entry : entry - favourablePrice;
 
     private async Task CaptureExitResearchAsync(TradingDbContext db, TradingMarketDefinition market,
         DateTimeOffset now, CancellationToken cancellationToken)

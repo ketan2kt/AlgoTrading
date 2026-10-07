@@ -27,13 +27,13 @@ public sealed class AutomatedPaperTradingOptions
     public decimal OptionStrikeStep { get; init; } = 50m;
     public bool PermissivePaperExecution { get; init; } = true;
     public bool BreakEvenEnabled { get; init; } = true;
-    public decimal BreakEvenTriggerRiskMultiple { get; init; } = 1m;
+    public decimal BreakEvenTriggerRiskMultiple { get; init; } = .50m;
     public bool TrailingStopEnabled { get; init; } = true;
     public decimal TrailingStopRiskMultiple { get; init; } = 1m;
     public bool TargetExtensionEnabled { get; init; } = true;
     public decimal TargetExtensionMinimumConfidence { get; init; } = 0.60m;
-    public decimal ProfitLockTriggerRiskMultiple { get; init; } = 0.90m;
-    public decimal ProfitLockRiskMultiple { get; init; } = 0.80m;
+    public decimal ProfitLockTriggerRiskMultiple { get; init; } = .75m;
+    public decimal ProfitLockRiskMultiple { get; init; } = .25m;
     public bool PartialProfitEnabled { get; init; } = true;
     public decimal PartialProfitRiskMultiple { get; init; } = 1m;
     public decimal PartialExitFraction { get; init; } = 0.40m;

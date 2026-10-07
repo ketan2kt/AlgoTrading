@@ -6,6 +6,14 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperProtectiveStopPolicyTests
 {
     [Theory]
+    [InlineData(Direction.Buy, 100, 95, 100, 120, 101.25)]
+    [InlineData(Direction.Sell, 100, 105, 100, 120, 98.75)]
+    public void CostFloorProtectsAPositiveNetExit(Direction direction, decimal entry,
+        decimal currentStop, int quantity, decimal costs, decimal expected) =>
+        Assert.Equal(expected, PaperProtectiveStopPolicy.ProtectNetProfit(direction,
+            entry, currentStop, quantity, costs));
+
+    [Theory]
     [InlineData(109, 90)]
     [InlineData(110, 100)]
     [InlineData(125, 115)]

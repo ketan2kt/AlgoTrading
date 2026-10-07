@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 
-export interface TradeExitQualityMetrics { maximumFavourableExcursion:number; maximumAdverseExcursion:number; profitGiveback:number; capturedProfitRatio:number; bestPostExitIncrementalPnl:number; priceSamples:number; assessment:string; }
+export interface TradeExitQualityMetrics { maximumFavourableExcursion:number; maximumAdverseExcursion:number; profitGiveback:number; capturedProfitRatio:number; bestPostExitIncrementalPnl:number; priceSamples:number; assessment:string; maximumFavourableAtUtc:string|null; maximumAdverseAtUtc:string|null; }
 export interface PaperTradingCostBreakdown { scheduleVersion:string; brokerage:number; securitiesTransactionTax:number; exchangeTransactionCharges:number; investorProtectionFund:number; sebiTurnoverFees:number; goodsAndServicesTax:number; stampDuty:number; total:number; }
 export interface PaperTradeHistoryItem { signalId:string; contract:string; direction:string; quantity:number; entryPrice:number; exitPrice:number; realisedPnl:number; exitReason:string; signalTimeUtc:string; exitTimeUtc:string; strategy:string; regime:string; daysToExpiry:number; costs:PaperTradingCostBreakdown; exitQuality:TradeExitQualityMetrics; shadowStructureState:string|null; shadowTrendQuality:number|null; shadowWouldPermit:boolean|null; }
 export interface DailyPaperPerformance { date:string; trades:number; wins:number; losses:number; netPnl:number; grossProfit:number; grossLoss:number; winRate:number; maximumDrawdown:number; }
