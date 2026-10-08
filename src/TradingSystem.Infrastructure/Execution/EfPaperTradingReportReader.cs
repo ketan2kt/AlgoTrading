@@ -103,8 +103,11 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 PaperTradeResearchAnalyzer.Analyze(new(x.Result.Quantity, x.Result.EntryPrice,
                     x.Result.ExitPrice, x.Result.GrossPnl, x.Result.EstimatedCosts,
                     x.Result.RealisedPnl, x.Result.ExitReason,
-                    sampleLookup.GetValueOrDefault(x.Signal.Id, []).Select(value =>
-                        new PaperTradePricePoint(value.ObservedAtUtc, value.Price)).ToArray(),
+                    sampleLookup.GetValueOrDefault(x.Signal.Id, [])
+                        .Where(value => value.ObservedAtUtc >= x.Signal.MarketDataTimestampUtc &&
+                                        value.ObservedAtUtc <= x.Result.ClosedAtUtc)
+                        .Select(value => new PaperTradePricePoint(
+                            value.ObservedAtUtc, value.Price)).ToArray(),
                     followUpLookup.GetValueOrDefault(x.Signal.Id, []))),
                 context?.ShadowStructureState, context?.ShadowTrendQuality,
                 context?.ShadowWouldPermit))
@@ -148,7 +151,10 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 PaperTradeResearchAnalyzer.Analyze(new(x.Position.Quantity,
                     x.Position.EntryPrice, x.Position.CurrentPrice, gross, costs,
                     x.Position.RealisedPnl, x.Position.Status,
-                    sensexPrices.GetValueOrDefault(x.Position.Id, []),
+                    sensexPrices.GetValueOrDefault(x.Position.Id, [])
+                        .Where(value => value.ObservedAtUtc >= x.Position.OpenedAtUtc &&
+                                        value.ObservedAtUtc <= x.Position.ClosedAtUtc!.Value)
+                        .ToArray(),
                     sensexFollowUps.GetValueOrDefault(x.Position.Id, []))), null, null, null);
         }));
         rows = rows.OrderByDescending(value => value.ExitTimeUtc).Take(1000).ToList();

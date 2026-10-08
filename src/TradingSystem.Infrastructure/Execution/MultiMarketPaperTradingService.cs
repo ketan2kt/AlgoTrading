@@ -130,6 +130,12 @@ internal sealed partial class MultiMarketPaperTradingService(
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
+            // This challenger is deliberately observation-only. It persists a multi-candle
+            // directional thesis for replay without changing the Sensex champion decision.
+            await DirectionalThesisShadowAudit.RecordAsync(db, market.Code, underlying.Id,
+                latest.OpenTimeUtc, priceBars, vwapV2,
+                openingV2.Max(value => value.High), openingV2.Min(value => value.Low),
+                cancellationToken);
             var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(priceBars,
                 decision.Direction, openingV2.Max(value => value.High),
                 openingV2.Min(value => value.Low));

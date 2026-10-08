@@ -402,6 +402,11 @@ internal sealed partial class AutomatedPaperTradingService(
         var paperResearchEntry = false;
         var preEntryStateV2 = MarketStateRouterV2.Analyze(strategyContext.RecentCandles,
             vwap, fast, slow);
+        // Observation-only challenger. It records a persistent multi-candle thesis but
+        // cannot create or modify a StrategySignal, paper position, risk decision or order.
+        await DirectionalThesisShadowAudit.RecordAsync(db, "nifty", instrument.Id,
+            candleDecisionTime, strategyContext.RecentCandles, vwap,
+            openingRangeHigh, openingRangeLow, cancellationToken);
         if (signal is null)
         {
             var challenger = StructuralTransitionResearchPolicy.Evaluate(
