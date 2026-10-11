@@ -1,0 +1,21 @@
+relay.174-138-120-226.nip.io {
+	encode zstd gzip
+
+	route {
+		@health path /healthz
+		respond @health "ok" 200
+
+		@groww_execution {
+			header X-Sarthi-Relay-Key {$GROWW_EXECUTION_RELAY_KEY}
+			method GET POST PUT
+			path /v1/token/api/access /v1/order/* /v1/order-advance/* /v1/positions/user
+		}
+
+		reverse_proxy @groww_execution https://api.groww.in {
+			header_up Host api.groww.in
+			header_up -X-Sarthi-Relay-Key
+		}
+
+		respond "not found" 404
+	}
+}

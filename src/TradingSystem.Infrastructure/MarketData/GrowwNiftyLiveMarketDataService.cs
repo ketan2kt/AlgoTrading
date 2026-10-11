@@ -18,8 +18,8 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
     MarketDataValidator validator,
     CandleAggregator aggregator,
     LiveNiftyFeedState feedState,
+    IGrowwAccessTokenProvider accessTokenProvider,
     IOptions<LiveNiftyOptions> options,
-    IOptions<GrowwOptions> growwOptions,
     TimeProvider timeProvider,
     ILogger<GrowwNiftyLiveMarketDataService> logger) : BackgroundService
 {
@@ -130,15 +130,8 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
 
     private async Task<bool> HasAccessTokenAsync(CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var vault = scope.ServiceProvider.GetRequiredService<IGrowwTokenVault>();
-        if (await vault.GetValidTokenAsync(cancellationToken) is not null)
-        {
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
-            growwOptions.Value.AccessTokenEnvironmentVariable));
+        return !string.IsNullOrWhiteSpace(
+            await accessTokenProvider.GetAccessTokenAsync(cancellationToken));
     }
 
     private async Task PollAsync(CancellationToken cancellationToken)

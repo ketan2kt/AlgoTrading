@@ -98,6 +98,10 @@ public static class DependencyInjection
             .Validate(options => Uri.TryCreate(options.ApiBaseUrl, UriKind.Absolute, out var api) &&
                                  api.Scheme == Uri.UriSchemeHttps,
                 "Groww API base URL must be an absolute HTTPS URL.")
+            .Validate(options => Uri.TryCreate(options.ExecutionApiBaseUrl, UriKind.Absolute,
+                                     out var executionApi) &&
+                                 executionApi.Scheme == Uri.UriSchemeHttps,
+                "Groww execution API base URL must be an absolute HTTPS URL.")
             .Validate(options => Uri.TryCreate(options.InstrumentMasterUrl, UriKind.Absolute, out var instruments) &&
                                  instruments.Scheme == Uri.UriSchemeHttps,
                 "Groww instrument URL must be an absolute HTTPS URL.")
@@ -119,9 +123,18 @@ public static class DependencyInjection
         services.AddHttpClient(GrowwBrokerGateway.ApiClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
-            client.BaseAddress = new Uri(groww.ApiBaseUrl, UriKind.Absolute);
+            client.BaseAddress = new Uri(groww.ExecutionApiBaseUrl, UriKind.Absolute);
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
+            ConfigureExecutionRelay(client, groww);
         });
+        services.AddHttpClient(EnvironmentGrowwAccessTokenProvider.AuthClientName,
+            (provider, client) =>
+            {
+                var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
+                client.BaseAddress = new Uri(groww.ExecutionApiBaseUrl, UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
+                ConfigureExecutionRelay(client, groww);
+            });
         services.AddSingleton<GrowwBrokerGateway>();
         services.AddOptions<LiveExecutionOptions>()
             .Bind(configuration.GetSection(LiveExecutionOptions.SectionName))
@@ -342,5 +355,19 @@ public static class DependencyInjection
         services.AddHostedService<DailyResearchPipelineV2Service>();
 
         return services;
+    }
+
+    private static void ConfigureExecutionRelay(HttpClient client, GrowwOptions groww)
+    {
+        var directApi = new Uri(groww.ApiBaseUrl, UriKind.Absolute);
+        if (client.BaseAddress == directApi)
+            return;
+
+        var relayKey = Environment.GetEnvironmentVariable(
+            groww.ExecutionRelayKeyEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(relayKey))
+            throw new InvalidOperationException(
+                $"{groww.ExecutionRelayKeyEnvironmentVariable} is required when Groww execution uses a relay.");
+        client.DefaultRequestHeaders.Add("X-Sarthi-Relay-Key", relayKey);
     }
 }
