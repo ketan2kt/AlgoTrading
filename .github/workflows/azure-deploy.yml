@@ -40,11 +40,49 @@ jobs:
             --parameters \
               location=centralindia \
               prefix=sarthitrading \
-              tradingMode=Paper \
-              liveExecutionBuildEnabled=true \
               postgresAdministratorPassword="${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}" \
             --query properties.outputs -o json)
           echo "app=$(jq -r '.webAppName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
+          echo "postgres_host=$(jq -r '.postgresHostName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
+          echo "postgres_database=$(jq -r '.postgresDatabaseName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
+          echo "postgres_login=$(jq -r '.postgresAdministratorLogin.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
+
+      - name: Configure application settings without replacing secrets
+        run: |
+          az webapp config appsettings set \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --settings \
+              ASPNETCORE_ENVIRONMENT=Production \
+              Trading__Mode=Paper \
+              AllowedHosts='*' \
+              DataProtection__KeysPath=/home/data-protection-keys \
+              DatabaseInitialization__ApplyMigrations=false \
+              MarketData__LiveNifty__Enabled=true \
+              PaperTrading__Automation__Enabled=true \
+              LiveExecution__BuildEnabled=true \
+              LiveExecution__MaximumLotsPerOrder=5 \
+              LiveExecution__ControlledTestLotsPerOrder=5 \
+              "ConnectionStrings__TradingDatabase=Host=${{ steps.infrastructure.outputs.postgres_host }};Port=5432;Database=${{ steps.infrastructure.outputs.postgres_database }};Username=${{ steps.infrastructure.outputs.postgres_login }};Password=${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }};SSL Mode=Require;Trust Server Certificate=false" \
+            --output none
+
+      - name: Verify Groww relay secrets survived infrastructure deployment
+        run: |
+          app="${{ steps.infrastructure.outputs.app }}"
+          for setting in \
+            Groww__ExecutionApiBaseUrl \
+            GROWW_EXECUTION_RELAY_KEY \
+            GROWW_TOTP_API_KEY \
+            GROWW_TOTP_SECRET; do
+            value=$(az webapp config appsettings list \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "$app" \
+              --query "[?name=='$setting'].value | [0]" -o tsv)
+            if [[ -z "$value" ]]; then
+              echo "Required Groww setting '$setting' is missing after infrastructure deployment." >&2
+              exit 1
+            fi
+          done
 
       - uses: actions/setup-dotnet@v4
         with:

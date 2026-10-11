@@ -13,14 +13,6 @@ param prefix string
 @description('PostgreSQL administrator password. Supply from GitHub environment secrets.')
 param postgresAdministratorPassword string
 
-@allowed([
-  'Paper'
-])
-param tradingMode string = 'Paper'
-
-@description('Enables the separately armed Groww live-order worker while strategy evaluation remains in paper/shadow mode.')
-param liveExecutionBuildEnabled bool = false
-
 var normalizedPrefix = toLower(replace(prefix, '-', ''))
 var deploymentSuffix = uniqueString(resourceGroup().id)
 var postgresServerName = '${normalizedPrefix}pg${deploymentSuffix}'
@@ -181,52 +173,6 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
       http20Enabled: true
       linuxFxVersion: 'DOTNETCORE|10.0'
       minTlsVersion: '1.2'
-      appSettings: [
-        {
-          name: 'ASPNETCORE_ENVIRONMENT'
-          value: 'Production'
-        }
-        {
-          name: 'Trading__Mode'
-          value: tradingMode
-        }
-        {
-          name: 'AllowedHosts'
-          value: '*'
-        }
-        {
-          name: 'DataProtection__KeysPath'
-          value: '/home/data-protection-keys'
-        }
-        {
-          name: 'DatabaseInitialization__ApplyMigrations'
-          value: 'false'
-        }
-        {
-          name: 'MarketData__LiveNifty__Enabled'
-          value: 'true'
-        }
-        {
-          name: 'PaperTrading__Automation__Enabled'
-          value: 'true'
-        }
-        {
-          name: 'LiveExecution__BuildEnabled'
-          value: string(liveExecutionBuildEnabled)
-        }
-        {
-          name: 'LiveExecution__MaximumLotsPerOrder'
-          value: '5'
-        }
-        {
-          name: 'LiveExecution__ControlledTestLotsPerOrder'
-          value: '5'
-        }
-        {
-          name: 'ConnectionStrings__TradingDatabase'
-          value: 'Host=${postgres.properties.fullyQualifiedDomainName};Port=5432;Database=${postgresDatabaseName};Username=${postgresAdministratorLogin};Password=${postgresAdministratorPassword};SSL Mode=Require;Trust Server Certificate=false'
-        }
-      ]
     }
   }
   dependsOn: [
@@ -237,3 +183,6 @@ resource webApp 'Microsoft.Web/sites@2024-11-01' = {
 output webAppName string = webApp.name
 output webAppHostName string = webApp.properties.defaultHostName
 output postgresServerName string = postgres.name
+output postgresHostName string = postgres.properties.fullyQualifiedDomainName
+output postgresDatabaseName string = postgresDatabaseName
+output postgresAdministratorLogin string = postgresAdministratorLogin
