@@ -6,7 +6,7 @@ import { TradingWorkspaceSnapshot } from './trading-workspace';
 
 @Injectable({ providedIn: 'root' })
 export class TradingWorkspaceService {
-  private static readonly markets = ['nifty', 'sensex', 'natural-gas'];
+  private static readonly markets = ['nifty', 'sensex', 'nifty-scalp', 'sensex-scalp', 'natural-gas'];
   private readonly http = inject(HttpClient);
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;
@@ -33,7 +33,7 @@ export class TradingWorkspaceService {
         .withAutomaticReconnect([0, 2000, 5000, 10000])
         .build();
       this.connection.on('marketWorkspaceUpdated', (updatedMarket, snapshot) => {
-        this.updates.next(snapshot as TradingWorkspaceSnapshot);
+        this.updates.next({ ...(snapshot as TradingWorkspaceSnapshot), marketCode: updatedMarket });
       });
       this.connection.onreconnected(() => this.subscribeAllMarkets());
       this.connectionStart = this.connection.start();

@@ -7,5 +7,6 @@ describe('tradeAlertTransition', () => {
     expect(tradeAlertTransition('Active', 'Target hit')).toBe('exit');
     expect(tradeAlertTransition('Active', 'SL hit')).toBe('exit');
     expect(tradeAlertTransition('Active', 'Active')).toBeNull();
+    expect(tradeAlertTransition('Active', 'FastFailureExit')).toBe('exit');
   });
 });

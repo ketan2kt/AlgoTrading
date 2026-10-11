@@ -183,6 +183,31 @@ verification, security/risk review, and known limitations.
 
 **Backlog:** one candidate/provider at a time, licensing/terms, normalized confidence/availability, ablation and out-of-sample evaluation.
 
+### Post-observation research candidates — recorded 2026-10-11
+
+These are hypotheses for review after the observation freeze ending 2026-10-22. Recording them
+does not authorise implementation, alter the Core Nifty/Sensex engines, or change paper/live orders.
+
+- Evaluate 50 EMA and 200 EMA only as higher-timeframe context features. Measure their incremental
+  value through ablation and out-of-sample replay; do not use either average as a standalone entry,
+  exit, support, resistance, or trend guarantee.
+- Retain RSI 70/30, MACD crosses, gap-fill percentages and round-number reactions as research
+  hypotheses rather than universal rules. Any candidate must be market-, timeframe- and
+  cost-specific and must outperform the current evidence baseline after charges.
+- Consider an isolated paper-only `ScalpLab` challenger for both Nifty and Sensex. It may evaluate
+  more intraday opportunities, invalidate failed setups quickly, take a cost-aware partial profit,
+  and manage a remaining runner using structure rather than a mechanically tight trailing stop.
+- Share the licensed market-data pipeline but isolate strategy identifiers, position state, risk
+  budget, trade ledger, P&L, research telemetry and UI presentation from the Core engines. ScalpLab
+  must never open, close, trail, resize or otherwise influence a Core position.
+- Do not optimize for trade count or for a fixed four/five premium-point target across both markets.
+  Candidate thresholds must cover estimated charges and slippage and reflect each contract's lot
+  size, premium volatility, spread and structure-defined risk.
+- Compare Core and ScalpLab on net expectancy, profit factor, drawdown, charge drag, MFE/MAE,
+  peak-profit capture, profit-to-loss reversals, directional opportunity captured and regime/time
+  cohorts. Promotion remains subject to replay, shadow evidence and an independently reviewed paper
+  sample; no automatic promotion is permitted.
+
 **Acceptance criteria**
 
 - Each addition has independent contract/rule/replay tests and measurable evaluation criteria.

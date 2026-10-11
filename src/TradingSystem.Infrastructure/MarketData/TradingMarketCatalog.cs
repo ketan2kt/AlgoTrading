@@ -14,11 +14,21 @@ internal static class TradingMarketCatalog
         InstrumentSegment.Cash, InstrumentType.Index, "NIFTY", "FNO", true, new(9, 15), new(15, 30));
     public static readonly TradingMarketDefinition Sensex = new("sensex", "Sensex", "BSE", "CASH", "SENSEX",
         InstrumentSegment.Cash, InstrumentType.Index, "SENSEX", "FNO", true, new(9, 15), new(15, 30));
+    public static readonly TradingMarketDefinition NiftyScalp = new("nifty-scalp", "Nifty Scalp", "NSE", "CASH", "NIFTY",
+        InstrumentSegment.Cash, InstrumentType.Index, "NIFTY", "FNO", true, new(9, 15), new(15, 30));
+    public static readonly TradingMarketDefinition SensexScalp = new("sensex-scalp", "Sensex Scalp", "BSE", "CASH", "SENSEX",
+        InstrumentSegment.Cash, InstrumentType.Index, "SENSEX", "FNO", true, new(9, 15), new(15, 30));
     public static readonly TradingMarketDefinition NaturalGas = new("natural-gas", "Natural Gas Mini Futures", "MCX",
         "COMMODITY", "NATGASMINI", InstrumentSegment.Commodity, InstrumentType.Future, "NATGASMINI",
         "COMMODITY", false, new(9, 0), new(23, 30));
 
-    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, NaturalGas];
+    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, NiftyScalp, SensexScalp, NaturalGas];
+    public static string FeedCode(string market) => market switch
+    {
+        "nifty-scalp" => "nifty",
+        "sensex-scalp" => "sensex",
+        _ => market
+    };
     public static TradingMarketDefinition Get(string code) => All.FirstOrDefault(value =>
         string.Equals(value.Code, code, StringComparison.OrdinalIgnoreCase)) ??
         throw new ArgumentOutOfRangeException(nameof(code), code, "Unsupported trading market.");

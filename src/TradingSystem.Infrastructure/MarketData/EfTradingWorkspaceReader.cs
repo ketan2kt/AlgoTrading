@@ -53,9 +53,10 @@ internal sealed class EfTradingWorkspaceReader(
                                                    value.ExpiryDate >= sessionDate)
                 .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
                 .FirstOrDefaultAsync(cancellationToken);
-        var state = market == "nifty"
+        var feedMarket = TradingMarketCatalog.FeedCode(market);
+        var state = feedMarket == "nifty"
             ? feedState.GetSnapshot(TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds))
-            : multiFeedState.GetSnapshot(market, TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds));
+            : multiFeedState.GetSnapshot(feedMarket, TimeSpan.FromSeconds(marketDataOptions.Value.MaximumAgeSeconds));
         var localDate = indiaNow.Date;
         var sessionStartUtc = new DateTimeOffset(
             localDate.Year, localDate.Month, localDate.Day, definition.SessionStart.Hour, definition.SessionStart.Minute, 0,
@@ -374,7 +375,8 @@ internal sealed class EfTradingWorkspaceReader(
             var telemetry = WorkspaceTelemetryCalculator.At(closed, futuresCandles,
                 value.CandleTimeUtc, sessionStartUtc);
             return new WorkspaceStrategyEvaluation(value.Id, value.CandleTimeUtc,
-                "Multi-market momentum breakout 1.0.0", value.Outcome,
+                market.EndsWith("-scalp", StringComparison.Ordinal) ? "ScalpLab 1.0.0" :
+                    "Multi-market momentum breakout 1.0.0", value.Outcome,
                 telemetry.CurrentPrice, telemetry.OpeningRangeHigh, telemetry.OpeningRangeLow,
                 telemetry.Vwap, telemetry.FastEma, telemetry.SlowEma, telemetry.AtrPercent,
                 telemetry.RelativeFuturesVolume, "MarketStructure", null, value.Confidence,

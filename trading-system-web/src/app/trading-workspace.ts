@@ -49,6 +49,7 @@ export interface WorkspaceTradeOverlay {
 }
 
 export interface TradingWorkspaceSnapshot {
+  marketCode?: string;
   instrument: string;
   exchange: string;
   timeframe: string;

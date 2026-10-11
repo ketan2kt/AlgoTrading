@@ -16,6 +16,13 @@ import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.serv
 import { PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
+import {
+  buildMarketNarratorEvents,
+  MarketNarratorEvent,
+  NarratorCategory,
+  narratorCategories,
+  NarratorMode,
+} from './market-narrator';
 
 @Component({
   selector: 'app-root',
@@ -93,15 +100,25 @@ export class App implements OnInit, OnDestroy {
   protected liveExecutionPassword = '';
   protected liveExecutionReason = 'Daily automatic Nifty and Sensex live trading activation.';
   protected liveExecutionMessage = '';
-  private audioContext: AudioContext | null = null;
   private tradeStates = new Map<string, string>();
   private initializedTradeMarkets = new Set<TradingMarketCode>();
   protected marketTabAlerts = new Map<TradingMarketCode, TradeAlertKind>();
   private marketTabAlertTimers = new Map<TradingMarketCode, ReturnType<typeof setTimeout>>();
   private readonly armTradeAlerts = (): void => this.ensureTradeAlertsReady();
+  protected narratorOpen = false;
+  protected narratorMode: NarratorMode = this.readNarratorMode();
+  protected narratorVoiceEnabled = this.readNarratorVoiceEnabled();
+  protected readonly narratorCategories = narratorCategories;
+  protected enabledNarratorCategories = this.readNarratorCategories();
+  protected narratorTranscript: MarketNarratorEvent[] = [];
+  protected narratorToasts: MarketNarratorEvent[] = [];
+  private narratorSpeechArmed = false;
+  private narratorSnapshots = new Map<Exclude<TradingMarketCode, 'natural-gas'>, TradingWorkspaceSnapshot>();
+  private narratedKeys = new Map<string, number>();
+  private narratorToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
-  protected selectedMarket: 'nifty' | 'sensex' | 'natural-gas' | null = this.marketFromPath();
+  protected selectedMarket: TradingMarketCode | null = this.marketFromPath();
   private readonly marketNavigation = (): void => {
     const market = this.marketFromPath();
     if (market === this.selectedMarket) return;
@@ -164,8 +181,9 @@ export class App implements OnInit, OnDestroy {
     document.removeEventListener('keydown', this.armTradeAlerts, { capture: true });
     window.removeEventListener('popstate', this.marketNavigation);
     this.marketTabAlertTimers.forEach((timer) => clearTimeout(timer));
+    this.narratorToastTimers.forEach((timer) => clearTimeout(timer));
     if (this.heroZeroPollTimer) clearInterval(this.heroZeroPollTimer);
-    void this.audioContext?.close();
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     void this.workspaceService.disconnect();
   }
 
@@ -200,7 +218,7 @@ export class App implements OnInit, OnDestroy {
     this.loadDailyLossOverride();
   }
 
-  protected openMarket(market: 'nifty' | 'sensex' | 'natural-gas'): void {
+  protected openMarket(market: TradingMarketCode): void {
     if (market === this.selectedMarket && this.workspace !== null) return;
     const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
     window.history.pushState({}, '', path);
@@ -219,6 +237,44 @@ export class App implements OnInit, OnDestroy {
 
   protected openControls(): void { this.controlsOpen = true; this.loadLiveExecution(); }
   protected closeControls(): void { this.controlsOpen = false; }
+  protected openNarrator(): void { this.narratorOpen = true; this.ensureTradeAlertsReady(); }
+  protected closeNarrator(): void { this.narratorOpen = false; }
+  protected setNarratorMode(mode: NarratorMode): void {
+    this.narratorMode = mode;
+    localStorage.setItem('sarthi.narratorMode', mode);
+    this.refreshView();
+  }
+  protected setNarratorVoiceEnabled(enabled: boolean): void {
+    this.narratorVoiceEnabled = enabled;
+    localStorage.setItem('sarthi.narratorVoiceEnabled', String(enabled));
+    if (!enabled && typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+    this.refreshView();
+  }
+  protected toggleNarratorMute(): void {
+    this.setNarratorVoiceEnabled(!this.narratorVoiceEnabled);
+  }
+  protected narratorCategoryEnabled(category: NarratorCategory): boolean {
+    return this.enabledNarratorCategories.has(category);
+  }
+  protected toggleNarratorCategory(category: NarratorCategory): void {
+    const next = new Set(this.enabledNarratorCategories);
+    if (next.has(category)) next.delete(category); else next.add(category);
+    this.enabledNarratorCategories = next;
+    localStorage.setItem('sarthi.narratorCategories', JSON.stringify([...next]));
+    this.refreshView();
+  }
+  protected clearNarratorTranscript(): void { this.narratorTranscript = []; this.refreshView(); }
+  protected closeNarratorToast(key: string): void {
+    const timer = this.narratorToastTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.narratorToastTimers.delete(key);
+    this.narratorToasts = this.narratorToasts.filter((event) => event.key !== key);
+    this.refreshView();
+  }
+  protected testNarratorVoice(): void {
+    this.ensureTradeAlertsReady();
+    this.speakNarratorMessage('Sarthi market narrator is ready for Nifty and Sensex.');
+  }
 
   protected loadLiveExecution(): void {
     this.subscriptions.add(this.liveExecutionService.getStatus().subscribe({
@@ -252,17 +308,22 @@ export class App implements OnInit, OnDestroy {
 
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
-      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Mini Futures';
+      this.selectedMarket === 'sensex' ? 'Sensex' :
+      this.selectedMarket === 'nifty-scalp' ? 'Nifty Scalp' :
+      this.selectedMarket === 'sensex-scalp' ? 'Sensex Scalp' : 'Natural Gas Mini Futures';
   }
 
   protected preparedMarketVenue(): string {
     return this.selectedMarket === 'nifty' ? 'NSE index and options' :
-      this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
+      this.selectedMarket === 'sensex' ? 'BSE index and options' :
+      this.selectedMarket === 'nifty-scalp' ? 'NSE paper scalp laboratory' :
+      this.selectedMarket === 'sensex-scalp' ? 'BSE paper scalp laboratory' : 'MCX commodity futures';
   }
 
-  private marketFromPath(): 'nifty' | 'sensex' | 'natural-gas' | null {
+  private marketFromPath(): TradingMarketCode | null {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
+      path === '/nifty-scalp' ? 'nifty-scalp' : path === '/sensex-scalp' ? 'sensex-scalp' :
       path === '/natural-gas' ? 'natural-gas' : null;
   }
 
@@ -362,7 +423,8 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected marketReportName(market:string):string {
-    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' : 'Natural Gas';
+    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' :
+      market==='nifty-scalp' ? 'Nifty Scalp' : market==='sensex-scalp' ? 'Sensex Scalp' : 'Natural Gas';
   }
   private isoDateDaysAgo(days:number):string {
     const value=new Date(Date.now()-days*86400000);
@@ -503,6 +565,7 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
         const market = marketCodeForSnapshot(snapshot);
+        this.processMarketNarrator(market, snapshot);
         this.detectTradeAlerts(market, snapshot);
         if (this.selectedMarket !== market) return;
         this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
@@ -569,6 +632,7 @@ export class App implements OnInit, OnDestroy {
       this.workspaceService.getMarket(requestedMarket).subscribe({
         next: (snapshot) => {
           if (this.selectedMarket !== requestedMarket) return;
+          this.processMarketNarrator(requestedMarket, snapshot);
           this.detectTradeAlerts(requestedMarket, snapshot);
           this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
           this.workspaceError = '';
@@ -602,7 +666,6 @@ export class App implements OnInit, OnDestroy {
       const key = `${market}:${trade.signalId}`;
       const alert = tradeAlertTransition(this.tradeStates.get(key), trade.lifecycleStatus);
       if (alert) {
-        this.playTradeAlert(alert);
         this.flashMarketTab(market, alert);
       }
       this.tradeStates.set(key, trade.lifecycleStatus);
@@ -622,37 +685,79 @@ export class App implements OnInit, OnDestroy {
   }
 
   private ensureTradeAlertsReady(): void {
-    if (typeof AudioContext === 'undefined') return;
-    this.audioContext ??= new AudioContext();
-    if (this.audioContext.state === 'suspended') void this.audioContext.resume();
+    this.narratorSpeechArmed = true;
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.resume();
   }
 
-  private playTradeAlert(kind: 'entry' | 'exit'): void {
-    this.ensureTradeAlertsReady();
-    if (!this.audioContext) return;
-    if (this.audioContext.state === 'suspended') {
-      void this.audioContext.resume().then(() => this.emitTradeAlert(kind)).catch(() => undefined);
-      return;
+  private processMarketNarrator(market: TradingMarketCode, snapshot: TradingWorkspaceSnapshot): void {
+    if (market === 'natural-gas') return;
+    const previous = this.narratorSnapshots.get(market);
+    this.narratorSnapshots.set(market, snapshot);
+    if (!previous) return;
+    const events = buildMarketNarratorEvents(market, previous, snapshot)
+      .filter((event) => this.enabledNarratorCategories.has(event.category))
+      .filter((event) => !this.narratedKeys.has(event.key));
+    if (!events.length) return;
+    const timestamp = Date.now();
+    for (const event of events) {
+      this.narratedKeys.set(event.key, timestamp);
+      this.narratorTranscript.unshift(event);
+      this.showNarratorToast(event);
+      if (this.shouldSpeakNarratorEvent(event)) this.speakNarratorMessage(event.message, event.priority === 'critical');
     }
-    this.emitTradeAlert(kind);
+    this.narratorTranscript = this.narratorTranscript.slice(0, 150);
+    if (this.narratedKeys.size > 1000) {
+      const cutoff = timestamp - 24 * 60 * 60 * 1000;
+      for (const [key, observed] of this.narratedKeys) if (observed < cutoff) this.narratedKeys.delete(key);
+    }
+    this.refreshView();
   }
 
-  private emitTradeAlert(kind: 'entry' | 'exit'): void {
-    if (!this.audioContext) return;
-    const frequencies = kind === 'entry' ? [880, 1175, 880] : [440, 294, 220];
-    const start = this.audioContext.currentTime;
-    frequencies.forEach((frequency, index) => {
-      const oscillator = this.audioContext!.createOscillator();
-      const gain = this.audioContext!.createGain();
-      oscillator.type = 'square';
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.001, start + index * 0.22);
-      gain.gain.exponentialRampToValueAtTime(0.55, start + index * 0.22 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + index * 0.22 + 0.18);
-      oscillator.connect(gain).connect(this.audioContext!.destination);
-      oscillator.start(start + index * 0.22);
-      oscillator.stop(start + index * 0.22 + 0.2);
-    });
+  private showNarratorToast(event: MarketNarratorEvent): void {
+    this.narratorToasts = [event, ...this.narratorToasts.filter((item) => item.key !== event.key)].slice(0, 4);
+    const visibleKeys = new Set(this.narratorToasts.map((item) => item.key));
+    for (const [key, timer] of this.narratorToastTimers) {
+      if (!visibleKeys.has(key)) { clearTimeout(timer); this.narratorToastTimers.delete(key); }
+    }
+    const existing = this.narratorToastTimers.get(event.key);
+    if (existing) clearTimeout(existing);
+    this.narratorToastTimers.set(event.key, setTimeout(() => this.closeNarratorToast(event.key), 15000));
+  }
+
+  private shouldSpeakNarratorEvent(event: MarketNarratorEvent): boolean {
+    if (!this.narratorVoiceEnabled || !this.narratorSpeechArmed || this.narratorMode === 'quiet') return false;
+    if (this.narratorMode === 'learning') return true;
+    return event.category === 'trade' || (event.category === 'risk-system' && ['warning', 'critical'].includes(event.priority));
+  }
+
+  private speakNarratorMessage(message: string, interrupt = false): void {
+    if (!this.narratorVoiceEnabled || typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return;
+    if (interrupt) speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.rate = 0.96;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.lang = 'en-IN';
+    speechSynthesis.speak(utterance);
+  }
+
+  private readNarratorMode(): NarratorMode {
+    const value = localStorage.getItem('sarthi.narratorMode');
+    return value === 'quiet' || value === 'essential' || value === 'learning' ? value : 'learning';
+  }
+
+  private readNarratorVoiceEnabled(): boolean {
+    return localStorage.getItem('sarthi.narratorVoiceEnabled') !== 'false';
+  }
+
+  private readNarratorCategories(): Set<NarratorCategory> {
+    try {
+      const stored = JSON.parse(localStorage.getItem('sarthi.narratorCategories') ?? '[]') as NarratorCategory[];
+      const valid = new Set(narratorCategories.map((category) => category.id));
+      const selected = stored.filter((category) => valid.has(category));
+      if (selected.length) return new Set(selected);
+    } catch { /* Fall back to every category. */ }
+    return new Set(narratorCategories.map((category) => category.id));
   }
 
   private readChartTimeframe(): number {

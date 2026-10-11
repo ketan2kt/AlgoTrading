@@ -72,18 +72,22 @@
         <div class="market-tab-group">
         <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty-scalp'" [class.market-tab--alert]="marketTabAlert('nifty-scalp')" (click)="openMarket('nifty-scalp')">Nifty Scalp @if (marketTabAlert('nifty-scalp'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex-scalp'" [class.market-tab--alert]="marketTabAlert('sensex-scalp')" (click)="openMarket('sensex-scalp')">Sensex Scalp @if (marketTabAlert('sensex-scalp'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
           <button type="button" (click)="openReport()">Performance</button>
           <button type="button" (click)="openPnlReport()">P&amp;L</button>
           <button type="button" (click)="openLogs()">Research</button>
+          <button type="button" (click)="openNarrator()">Narrator</button>
+          <button type="button" class="mute-alerts-button" [class.muted]="!narratorVoiceEnabled" (click)="toggleNarratorMute()">{{ narratorVoiceEnabled ? 'Mute alerts' : 'Unmute alerts' }}</button>
           <button type="button" class="workspace-nav-actions__primary" (click)="openControls()">Controls</button>
         </div>
       </nav>
       <div class="workspace-shell">
       <section class="workspace-heading">
         <div>
-          <p class="eyebrow">LIVE TRADING WORKSPACE</p>
+          <p class="eyebrow">{{ selectedMarket === 'nifty-scalp' || selectedMarket === 'sensex-scalp' ? 'ISOLATED PAPER SCALP LAB' : 'LIVE TRADING WORKSPACE' }}</p>
           <h1>{{preparedMarketName()}} command view</h1>
           <p>
             Signed in as {{ user.username }} · Chart data is accepted only from the configured Groww
@@ -102,10 +106,17 @@
           <button class="secondary-button" type="button" (click)="backToMarkets()">All markets</button>
           @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
             <button class="secondary-button hz-button" type="button" (click)="openHeroZero()">HZ</button>
+            <button class="secondary-button narrator-button" type="button" (click)="openNarrator()">Narrator</button>
           }
           <button class="secondary-button control-center-button" type="button" (click)="openControls()">Controls</button>
         </div>
       </section>
+
+      @if (selectedMarket === 'nifty-scalp' || selectedMarket === 'sensex-scalp') {
+        <div class="feed-notice scalp-lab-notice" role="status">
+          Paper-only ScalpLab · independent signals, positions, P&amp;L and risk · two-tranche quick-profit plus runner management · never eligible for live execution.
+        </div>
+      }
 
       @if (tokenStatus; as token) {
         <section
@@ -186,6 +197,69 @@
       }
 
       @if (workspace; as view) {
+        @if (narratorToasts.length) {
+          <aside class="narrator-toast-stack" aria-live="assertive" aria-label="Live market alerts">
+            @for (event of narratorToasts; track event.key) {
+              <article [class]="'narrator-toast narrator-toast--' + event.priority">
+                <div>
+                  <span>{{ event.market }} · {{ event.category }}</span>
+                  <button type="button" aria-label="Dismiss alert" (click)="closeNarratorToast(event.key)">×</button>
+                </div>
+                <strong>{{ event.message }}</strong>
+                <small>{{ event.occurredAtUtc | date:'HH:mm:ss':'Asia/Kolkata' }} IST</small>
+                <i aria-hidden="true"></i>
+              </article>
+            }
+          </aside>
+        }
+        @if (narratorOpen) {
+        <div class="logs-backdrop" (click)="closeNarrator()">
+          <section class="evaluation-panel logs-modal narrator-modal" role="dialog" aria-modal="true"
+            aria-label="Spoken market narrator" (click)="$event.stopPropagation()">
+            <div class="panel-heading">
+              <div><span>MARKET NARRATOR</span><strong>Spoken Nifty and Sensex market events</strong></div>
+              <button type="button" (click)="closeNarrator()">Close</button>
+            </div>
+            <section class="narrator-controls">
+              <div class="narrator-mode" aria-label="Narrator mode">
+                <button type="button" [class.active]="narratorMode === 'learning'" (click)="setNarratorMode('learning')">Learning · all alerts</button>
+                <button type="button" [class.active]="narratorMode === 'essential'" (click)="setNarratorMode('essential')">Essential · trades and risks</button>
+                <button type="button" [class.active]="narratorMode === 'quiet'" (click)="setNarratorMode('quiet')">Quiet · transcript only</button>
+              </div>
+              <div class="narrator-voice-row">
+                <label><input type="checkbox" [checked]="narratorVoiceEnabled" (change)="setNarratorVoiceEnabled(!narratorVoiceEnabled)" /> Spoken voice enabled</label>
+                <button type="button" (click)="testNarratorVoice()">Test voice</button>
+                <button type="button" (click)="clearNarratorTranscript()">Clear transcript</button>
+              </div>
+              <p>Alerts use completed candles and available production telemetry only. They are informational and cannot change entries, exits, risk, or order execution.</p>
+            </section>
+            <section class="narrator-category-grid" aria-label="Narrator categories">
+              @for (category of narratorCategories; track category.id) {
+                <label [class.enabled]="narratorCategoryEnabled(category.id)">
+                  <input type="checkbox" [checked]="narratorCategoryEnabled(category.id)" (change)="toggleNarratorCategory(category.id)" />
+                  <span>{{ category.label }}</span>
+                </label>
+              }
+            </section>
+            <section class="narrator-transcript" aria-live="polite" aria-label="Market narrator transcript">
+              @if (narratorTranscript.length) {
+                @for (event of narratorTranscript; track event.key) {
+                  <article [class]="'narrator-event narrator-event--' + event.priority">
+                    <div>
+                      <span>{{ event.market }} · {{ event.category }} · {{ event.priority }}</span>
+                      <time>{{ event.occurredAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata' }} IST</time>
+                    </div>
+                    <strong>{{ event.message }}</strong>
+                    <p>{{ event.evidence }}</p>
+                  </article>
+                }
+              } @else {
+                <p class="empty-copy">The transcript will populate as new completed-candle, trade, risk, options and system events occur.</p>
+              }
+            </section>
+          </section>
+        </div>
+        }
         @if (controlsOpen) {
         <div class="logs-backdrop" (click)="closeControls()">
           <section class="evaluation-panel logs-modal control-center" role="dialog" aria-modal="true"
@@ -201,7 +275,7 @@
               <button type="button" (click)="openPnlReport()">P&amp;L report</button>
               <button type="button" (click)="openLogs()">Research logs</button>
             </div>
-            @if (selectedMarket !== 'natural-gas') {
+            @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
               <section class="safety-panel control-center-card live-execution-card">
                 <span>LIVE EXECUTION</span>
                 <strong [class.good]="liveExecution?.armed" [class.bad]="!liveExecution?.armed">
@@ -254,7 +328,7 @@
             <form class="pnl-report-filter" (ngSubmit)="searchPnl()">
               <label>From<input name="pnlFrom" type="date" [(ngModel)]="pnlFrom" required /></label>
               <label>To<input name="pnlTo" type="date" [(ngModel)]="pnlTo" required /></label>
-              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option></select></label>
+              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="nifty-scalp">Nifty Scalp</option><option value="sensex-scalp">Sensex Scalp</option></select></label>
               <button type="submit" [disabled]="pnlReportLoading">{{pnlReportLoading ? 'Searching…' : 'Search'}}</button>
             </form>
             @if (pnlReportError) { <p class="form-error">{{pnlReportError}}</p> }

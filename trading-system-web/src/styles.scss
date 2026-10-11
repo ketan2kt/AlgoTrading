@@ -70,6 +70,8 @@ app-root .market-tab-group > button { min-width: 112px; }
 app-root .workspace-nav-actions { flex: 0 0 auto; justify-content: flex-end; gap: 0.24rem; }
 app-root .workspace-nav-actions button { min-height: 29px; padding-inline: 0.55rem; font-size: 0.68rem; }
 app-root .workspace-nav-actions__primary { color: #07110c !important; background: var(--desk-accent) !important; }
+app-root .mute-alerts-button { min-width:78px; border-color:#6b7c74; }
+app-root .mute-alerts-button.muted { color:#07110c; border-color:#f2c94c; background:#f2c94c; }
 
 app-root .workspace-shell { gap: 0.55rem; }
 app-root .workspace-heading {
@@ -97,6 +99,7 @@ app-root .workspace-heading__metrics span {
 }
 app-root .workspace-heading__metrics i { width: 6px; height: 6px; background: #ff6874; border-radius: 50%; }
 app-root .workspace-heading__metrics i.live { background: #4ad894; box-shadow: 0 0 8px rgba(74, 216, 148, 0.7); }
+app-root .scalp-lab-notice { margin:0; border-color:rgba(125,185,232,.38); color:#b9d9ef; background:rgba(28,57,78,.48); }
 app-root .workspace-actions { gap: 0.3rem; }
 app-root .workspace-actions button { min-height: 30px; padding: 0.3rem 0.6rem; font-size: 0.68rem; }
 
@@ -150,6 +153,39 @@ app-root .logs-modal > .panel-heading { position: sticky; top: 0; z-index: 2; ba
 app-root .market-theme--sensex { --desk-accent: #78bbed; --desk-line: rgba(126, 181, 222, 0.19); }
 app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #a6d8fa, #68aee1); }
 
+app-root .narrator-button{border-color:#5a8dc1;color:#9dcbf3}
+app-root .narrator-modal { width:min(980px,96vw); }
+app-root .narrator-controls { display:grid; gap:.65rem; padding:.75rem; border-bottom:1px solid #24332c; background:#0c1813; }
+app-root .narrator-controls > p { margin:0; color:#8fa198; font-size:.75rem; line-height:1.5; }
+app-root .narrator-mode,app-root .narrator-voice-row { display:flex; flex-wrap:wrap; gap:.45rem; align-items:center; }
+app-root .narrator-mode button.active { color:#07110c; border-color:#a8edc8; background:#7de2ae; }
+app-root .narrator-voice-row label { display:flex; gap:.45rem; align-items:center; margin-right:auto; color:#c8d8d0; font-size:.78rem; }
+app-root .narrator-voice-row input,app-root .narrator-category-grid input { width:auto; accent-color:#7de2ae; }
+app-root .narrator-category-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:1px; padding:1px; background:#24332c; }
+app-root .narrator-category-grid label { display:flex; gap:.55rem; align-items:center; min-height:2.8rem; padding:.6rem .75rem; color:#7f9188; background:#0b1511; font-size:.76rem; }
+app-root .narrator-category-grid label.enabled { color:#d9e9e1; background:#102119; }
+app-root .narrator-transcript { display:grid; }
+app-root .narrator-event { display:grid; gap:.35rem; padding:.68rem .8rem; border-top:1px solid #1f2d27; border-left:3px solid #4a6659; }
+app-root .narrator-event > div { display:flex; justify-content:space-between; gap:1rem; color:#789086; font-size:.67rem; letter-spacing:.06em; text-transform:uppercase; }
+app-root .narrator-event strong { color:#e0ebe6; font-size:.84rem; }
+app-root .narrator-event p { margin:0; color:#8fa198; font-size:.73rem; line-height:1.4; }
+app-root .narrator-event--opportunity { border-left-color:#28d17c; }
+app-root .narrator-event--warning { border-left-color:#f2c94c; }
+app-root .narrator-event--critical { border-left-color:#ff5d68; background:#1a1011; }
+app-root .narrator-toast-stack { position:fixed; right:1rem; bottom:1rem; z-index:1200; display:flex; width:min(390px,calc(100vw - 2rem)); flex-direction:column-reverse; gap:.55rem; pointer-events:none; }
+app-root .narrator-toast { position:relative; display:grid; gap:.4rem; overflow:hidden; padding:.72rem .8rem .82rem; border:1px solid #365245; border-left:4px solid #4a6659; border-radius:.5rem; color:#e7f1ec; background:rgba(8,20,15,.97); box-shadow:0 .8rem 2.2rem rgba(0,0,0,.48); pointer-events:auto; animation:narrator-toast-in .28s ease-out both; }
+app-root .narrator-toast > div { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+app-root .narrator-toast span { color:#93aa9f; font-size:.67rem; letter-spacing:.07em; text-transform:uppercase; }
+app-root .narrator-toast button { display:grid; width:1.6rem; height:1.6rem; place-items:center; padding:0; border:0; color:#aebfb7; background:transparent; font-size:1.1rem; line-height:1; }
+app-root .narrator-toast strong { font-size:.84rem; line-height:1.42; }
+app-root .narrator-toast small { color:#789086; font-size:.66rem; }
+app-root .narrator-toast i { position:absolute; right:0; bottom:0; left:0; height:2px; background:#7de2ae; transform-origin:left; animation:narrator-toast-life 15s linear both; }
+app-root .narrator-toast--opportunity { border-left-color:#28d17c; }
+app-root .narrator-toast--warning { border-left-color:#f2c94c; }
+app-root .narrator-toast--critical { border-left-color:#ff5d68; background:rgba(29,12,14,.98); }
+@keyframes narrator-toast-in { from { opacity:0; transform:translateY(2rem); } to { opacity:1; transform:translateY(0); } }
+@keyframes narrator-toast-life { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+
 @media (max-width: 1250px) {
   app-root .market-tabs { flex-wrap: wrap; gap: 0.35rem 0.75rem; }
   app-root .workspace-brand { flex: 0 0 auto; }
@@ -162,12 +198,14 @@ app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradi
   app-root .market-tabs { gap: 0.35rem; }
   app-root .workspace-brand { display: none; }
   app-root .market-tab-group { justify-content: flex-start; min-width: 0; }
-  app-root .workspace-nav-actions button:not(.workspace-nav-actions__primary) { display: none; }
+  app-root .workspace-nav-actions button:not(.workspace-nav-actions__primary):not(.mute-alerts-button) { display: none; }
   app-root .chart-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   app-root .workspace-heading > div > p:last-of-type { display: none; }
 }
 
 @media (max-width: 560px) {
+  app-root .narrator-mode button,app-root .narrator-voice-row button { flex:1 1 100%; }
+  app-root .narrator-event > div { align-items:flex-start; flex-direction:column; gap:.25rem; }
   app-root .market-tabs { top: 25px; min-height: 44px; }
   app-root .market-tab-group > button { min-width: 82px; padding-inline: 0.35rem; }
   app-root .workspace-actions .secondary-button:not(.control-center-button):not(.hz-button) { display: none; }

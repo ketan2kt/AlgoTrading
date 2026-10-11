@@ -20,7 +20,7 @@ public sealed class TradingWorkspaceController(ITradingWorkspaceReader reader) :
         string market, [FromQuery] int candleCount = 180,
         CancellationToken cancellationToken = default)
     {
-        if (market is not ("sensex" or "natural-gas")) return NotFound();
+        if (market is not ("sensex" or "nifty-scalp" or "sensex-scalp" or "natural-gas")) return NotFound();
         return Ok(await reader.GetAsync(market, candleCount, cancellationToken));
     }
 }

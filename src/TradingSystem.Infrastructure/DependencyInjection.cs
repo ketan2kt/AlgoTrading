@@ -318,6 +318,26 @@ public static class DependencyInjection
             provider.GetRequiredService<PaperAutomationState>());
         services.AddHostedService<AutomatedPaperTradingService>();
         services.AddHostedService<MultiMarketPaperTradingService>();
+        services.AddOptions<ScalpPaperTradingOptions>()
+            .Bind(configuration.GetSection(ScalpPaperTradingOptions.SectionName))
+            .Validate(value => value.EvaluationIntervalSeconds is >= 2 and <= 60 &&
+                               value.MaximumCohortsPerDay is >= 1 and <= 50 &&
+                               value.CooldownMinutes is >= 1 and <= 30 &&
+                               value.MinimumConfidence is >= .5m and <= 1m &&
+                               value.StopLossPercent is > 0m and <= 20m &&
+                               value.QuickProfitPoints > 0m && value.RunnerActivationPoints > 0m &&
+                               value.RunnerTrailingGapPoints > 0m && value.RunnerTargetRiskMultiple >= 2m &&
+                               value.MaximumHoldMinutes is >= 5 and <= 120 &&
+                               value.RunnerMaximumHoldMinutes >= value.MaximumHoldMinutes &&
+                               value.LotsPerCohort is >= 2 and <= 10 &&
+                               value.MaximumDaysToExpiry is >= 1 and <= 31 &&
+                               value.MaximumDailyLoss > 0m &&
+                               TimeOnly.TryParseExact(value.EntryWindowStart, "HH:mm", out _) &&
+                               TimeOnly.TryParseExact(value.EntryCutoff, "HH:mm", out _) &&
+                               TimeOnly.TryParseExact(value.ForcedExit, "HH:mm", out _),
+                "Scalp paper-trading settings are invalid.")
+            .ValidateOnStart();
+        services.AddHostedService<ScalpPaperTradingService>();
         services.AddHostedService<SelfImprovementResearchService>();
         services.AddHostedService<DailyResearchPipelineV2Service>();
 
