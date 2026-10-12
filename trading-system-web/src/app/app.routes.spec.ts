@@ -7,8 +7,6 @@ describe('market workspace routes', () => {
       '',
       'nifty',
       'sensex',
-      'nifty-scalp',
-      'sensex-scalp',
       'natural-gas',
       '**',
     ]);

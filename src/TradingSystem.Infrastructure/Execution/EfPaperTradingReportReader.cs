@@ -37,7 +37,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
                 value.CurrentPrice, value.Quantity, value.RealisedPnl })
             .ToListAsync(cancellationToken);
         observations.AddRange(marketPositions
-            .Where(value => value.Market is "nifty" or "sensex" or "nifty-scalp" or "sensex-scalp" or "natural-gas")
+            .Where(value => value.Market is "nifty" or "sensex" or "natural-gas")
             .Select(value =>
             {
                 var gross = (value.Direction == TradingSystem.Domain.Trading.Direction.Buy

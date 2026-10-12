@@ -25,8 +25,8 @@ public sealed class PaperReportsController(IPaperTradingReportReader reader) : C
             return BadRequest("From and To dates are required and From cannot be after To.");
         if (to.DayNumber - from.DayNumber > 3660)
             return BadRequest("The selected range cannot exceed ten years.");
-        if (normalized is not ("all" or "nifty" or "sensex" or "nifty-scalp" or "sensex-scalp" or "natural-gas"))
-            return BadRequest("Market must be all, nifty, sensex, nifty-scalp, sensex-scalp, or natural-gas.");
+        if (normalized is not ("all" or "nifty" or "sensex" or "natural-gas"))
+            return BadRequest("Market must be all, nifty, sensex, or natural-gas.");
         return Ok(await reader.GetPnlSummaryAsync(from, to, normalized, cancellationToken));
     }
 }

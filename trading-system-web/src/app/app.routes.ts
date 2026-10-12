@@ -7,8 +7,6 @@ export const routes: Routes = [
   { path: '', pathMatch: 'full', children: [] },
   { path: 'nifty', children: [] },
   { path: 'sensex', children: [] },
-  { path: 'nifty-scalp', children: [] },
-  { path: 'sensex-scalp', children: [] },
   { path: 'natural-gas', redirectTo: 'nifty', pathMatch: 'full' },
   { path: '**', redirectTo: '' },
 ];

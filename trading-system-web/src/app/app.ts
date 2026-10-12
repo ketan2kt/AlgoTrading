@@ -309,22 +309,17 @@ export class App implements OnInit, OnDestroy {
 
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
-      this.selectedMarket === 'sensex' ? 'Sensex' :
-      this.selectedMarket === 'nifty-scalp' ? 'Nifty Scalp' :
-      this.selectedMarket === 'sensex-scalp' ? 'Sensex Scalp' : 'Natural Gas Mini Futures';
+      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Mini Futures';
   }
 
   protected preparedMarketVenue(): string {
     return this.selectedMarket === 'nifty' ? 'NSE index and options' :
-      this.selectedMarket === 'sensex' ? 'BSE index and options' :
-      this.selectedMarket === 'nifty-scalp' ? 'NSE paper scalp laboratory' :
-      this.selectedMarket === 'sensex-scalp' ? 'BSE paper scalp laboratory' : 'MCX commodity futures';
+      this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
   }
 
   private marketFromPath(): TradingMarketCode | null {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
-      path === '/nifty-scalp' ? 'nifty-scalp' : path === '/sensex-scalp' ? 'sensex-scalp' :
       path === '/natural-gas' ? 'natural-gas' : null;
   }
 
@@ -424,8 +419,7 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected marketReportName(market:string):string {
-    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' :
-      market==='nifty-scalp' ? 'Nifty Scalp' : market==='sensex-scalp' ? 'Sensex Scalp' : 'Natural Gas';
+    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' : 'Natural Gas';
   }
   private isoDateDaysAgo(days:number):string {
     const value=new Date(Date.now()-days*86400000);

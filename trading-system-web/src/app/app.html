@@ -72,8 +72,6 @@
         <div class="market-tab-group">
         <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty-scalp'" [class.market-tab--alert]="marketTabAlert('nifty-scalp')" (click)="openMarket('nifty-scalp')">Nifty Scalp @if (marketTabAlert('nifty-scalp'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex-scalp'" [class.market-tab--alert]="marketTabAlert('sensex-scalp')" (click)="openMarket('sensex-scalp')">Sensex Scalp @if (marketTabAlert('sensex-scalp'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
           <button type="button" (click)="openReport()">Performance</button>
@@ -87,7 +85,7 @@
       <div class="workspace-shell">
       <section class="workspace-heading">
         <div>
-          <p class="eyebrow">{{ selectedMarket === 'nifty-scalp' || selectedMarket === 'sensex-scalp' ? 'ISOLATED PAPER SCALP LAB' : 'LIVE TRADING WORKSPACE' }}</p>
+          <p class="eyebrow">LIVE TRADING WORKSPACE</p>
           <h1>{{preparedMarketName()}} command view</h1>
           <p>
             Signed in as {{ user.username }} · Chart data is accepted only from the configured Groww
@@ -112,11 +110,6 @@
         </div>
       </section>
 
-      @if (selectedMarket === 'nifty-scalp' || selectedMarket === 'sensex-scalp') {
-        <div class="feed-notice scalp-lab-notice" role="status">
-          Paper-only ScalpLab · independent signals, positions, P&amp;L and risk · two-tranche quick-profit plus runner management · never eligible for live execution.
-        </div>
-      }
 
       @if (tokenStatus; as token) {
         <section
@@ -328,7 +321,7 @@
             <form class="pnl-report-filter" (ngSubmit)="searchPnl()">
               <label>From<input name="pnlFrom" type="date" [(ngModel)]="pnlFrom" required /></label>
               <label>To<input name="pnlTo" type="date" [(ngModel)]="pnlTo" required /></label>
-              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="nifty-scalp">Nifty Scalp</option><option value="sensex-scalp">Sensex Scalp</option></select></label>
+              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option></select></label>
               <button type="submit" [disabled]="pnlReportLoading">{{pnlReportLoading ? 'Searching…' : 'Search'}}</button>
             </form>
             @if (pnlReportError) { <p class="form-error">{{pnlReportError}}</p> }

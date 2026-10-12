@@ -1,10 +1,9 @@
 import { TradingWorkspaceSnapshot } from './trading-workspace';
 
-export type TradingMarketCode = 'nifty' | 'sensex' | 'nifty-scalp' | 'sensex-scalp' | 'natural-gas';
+export type TradingMarketCode = 'nifty' | 'sensex' | 'natural-gas';
 export type TradeAlertKind = 'entry' | 'exit';
 
 export function marketCodeForSnapshot(snapshot: Pick<TradingWorkspaceSnapshot, 'exchange' | 'marketCode'>): TradingMarketCode {
-  if (snapshot.marketCode === 'nifty-scalp' || snapshot.marketCode === 'sensex-scalp') return snapshot.marketCode;
   return snapshot.exchange === 'BSE' ? 'sensex' : snapshot.exchange === 'MCX' ? 'natural-gas' : 'nifty';
 }
 
