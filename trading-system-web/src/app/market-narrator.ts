@@ -67,11 +67,16 @@ export function buildMarketNarratorEvents(
 
   detectTradeEvents(name, previous, current, add);
   detectSystemEvents(name, previous, current, add);
-  detectResearchEvents(name, previous, current, add);
 
   const priorBar = lastClosed(previous.candles);
   const bar = lastClosed(current.candles);
   if (!bar || bar.openTimeUtc === priorBar?.openTimeUtc) return events;
+
+  // Analytical narration is deliberately based on completed five-minute (or
+  // slower) bars. Workspace snapshots can arrive several times per second;
+  // evaluating research state before this boundary caused a flood of partial,
+  // contradictory alerts while the candle was still forming.
+  if (bar.intervalSeconds < 300) return events;
 
   const closed = current.candles.filter((item) => item.isClosed && Date.parse(item.openTimeUtc) <= Date.parse(bar.openTimeUtc));
   if (closed.length < 3) return events;
@@ -82,6 +87,7 @@ export function buildMarketNarratorEvents(
   const levels = sessionLevels(closed, bar.openTimeUtc);
   const at = bar.openTimeUtc;
 
+  detectResearchEvents(name, previous, current, add, at);
   detectAverageEvents(name, closed, before, bar, previousEvaluation, evaluation, atr, add, at);
   detectStructureEvents(name, closed, levels, atr, add, at);
   detectLevelEvents(name, before, bar, levels, atr, add, at);
@@ -91,6 +97,55 @@ export function buildMarketNarratorEvents(
   detectVolumeAndMomentumEvents(name, closed, current, evaluation, atr, add, at);
   detectSessionEvents(name, priorBar, bar, add, at);
   return events;
+}
+
+/**
+ * Reduces a completed candle's observations to actionable narration. The full
+ * detector intentionally remains broad for research, but the operator should
+ * hear only trade/risk events and the single strongest confirmed market event.
+ */
+export function selectHighSignalNarratorEvents(events: MarketNarratorEvent[]): MarketNarratorEvent[] {
+  const immediate = events.filter((event) => event.category === 'trade');
+  const risk = events
+    .filter((event) => event.category === 'risk-system' && event.priority !== 'info')
+    .sort((left, right) => narratorSignalScore(right) - narratorSignalScore(left))
+    .at(0);
+  const session = events.filter((event) =>
+    event.category === 'session' && event.priority === 'warning');
+  const analytical = events
+    .filter((event) => isHighSignalAnalyticalEvent(event))
+    .sort((left, right) => narratorSignalScore(right) - narratorSignalScore(left));
+  const strongest = analytical.at(0);
+  return [...immediate, ...(risk ? [risk] : []), ...session, ...(strongest ? [strongest] : [])]
+    .filter((event, index, selected) => selected.findIndex((item) => item.key === event.key) === index);
+}
+
+function isHighSignalAnalyticalEvent(event: MarketNarratorEvent): boolean {
+  if (event.category === 'risk-system' || event.category === 'trade' || event.category === 'session') return false;
+  const code = eventCode(event);
+  const allowedPrefixes = [
+    'ema-bull:', 'ema-bear:', 'vwap-extension:',
+    'impulse-up:', 'impulse-down:', 'or-retest-up:', 'or-retest-down:',
+    'local-breakout:', 'local-breakdown:', 'failed-breakout:', 'failed-breakdown:',
+    'break-above:', 'break-below:', 'regime:', 'setup:',
+    'gap-open:', 'gap-fill:', 'tight-range:', 'range-expansion:', 'mature-move:',
+    'volume-spike:', 'relative-volume:', 'momentum:', 'pcr:', 'premium-jump:',
+  ];
+  return allowedPrefixes.some((prefix) => code.startsWith(prefix));
+}
+
+function narratorSignalScore(event: MarketNarratorEvent): number {
+  const priorityScore: Record<NarratorPriority, number> = { critical: 400, warning: 300, opportunity: 200, info: 100 };
+  const categoryScore: Record<NarratorCategory, number> = {
+    trade: 100, 'risk-system': 95, structure: 90, trend: 85, levels: 80,
+    'range-volatility': 75, 'volume-momentum': 70, 'ema-vwap': 65,
+    'options-oi': 60, gap: 55, session: 50,
+  };
+  return priorityScore[event.priority] + categoryScore[event.category];
+}
+
+function eventCode(event: MarketNarratorEvent): string {
+  return event.key.split(':').slice(2).join(':');
 }
 
 type AddEvent = (category: NarratorCategory, priority: NarratorPriority, code: string,
@@ -116,20 +171,26 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
       const protectedProfit = trade.direction.toLowerCase().includes('sell')
         ? trade.stopLoss < (trade.fillPrice ?? trade.entry)
         : trade.stopLoss > (trade.fillPrice ?? trade.entry);
-      add('trade', protectedProfit ? 'opportunity' : 'info', `stop:${trade.signalId}:${trade.stopLoss}`,
-        `${name} stop loss moved to ${price(trade.stopLoss)}${protectedProfit ? ', protecting profit' : ''}.`,
-        `Previous stop ${price(before.stopLoss)}; current unrealised ${money(trade.unrealisedPnl)}`);
+      const wasProtected = trade.direction.toLowerCase().includes('sell')
+        ? before.stopLoss < (trade.fillPrice ?? trade.entry)
+        : before.stopLoss > (trade.fillPrice ?? trade.entry);
+      if (protectedProfit && !wasProtected) {
+        add('trade', 'opportunity', `profit-lock:${trade.signalId}`,
+          `${name} stop loss has crossed the entry and is now protecting profit at ${price(trade.stopLoss)}.`,
+          `Previous stop ${price(before.stopLoss)}; current unrealised ${money(trade.unrealisedPnl)}`);
+      }
     }
   }
   const oldPnl = previous.paperAutomation.unrealisedPnl;
   const pnl = current.paperAutomation.unrealisedPnl;
   const risk = current.paperAutomation.portfolioRisk?.openRiskAtStops ?? 0;
-  for (const threshold of [500, 1000, 2000, 5000, 10000]) {
-    if (oldPnl < threshold && pnl >= threshold) {
-      add('trade', 'opportunity', `open-pnl:${current.paperAutomation.activeSignalId}:${threshold}`,
-        `${name} open profit crossed ${money(threshold)}. Review profit protection.`,
-        `Unrealised ${money(pnl)}; risk at stops ${money(risk)}`);
-    }
+  const crossedProfit = [500, 1000, 2000, 5000, 10000]
+    .filter((threshold) => oldPnl < threshold && pnl >= threshold)
+    .at(-1);
+  if (crossedProfit !== undefined) {
+    add('trade', 'opportunity', `open-pnl:${current.paperAutomation.activeSignalId}:${crossedProfit}`,
+      `${name} open profit crossed ${money(crossedProfit)}. Review profit protection.`,
+      `Unrealised ${money(pnl)}; risk at stops ${money(risk)}`);
   }
   if (oldPnl >= 500 && pnl < oldPnl * 0.5) {
     add('trade', pnl <= 0 ? 'critical' : 'warning',
@@ -178,7 +239,7 @@ function detectSystemEvents(name: string, previous: TradingWorkspaceSnapshot,
 }
 
 function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
-  current: TradingWorkspaceSnapshot, add: AddEvent): void {
+  current: TradingWorkspaceSnapshot, add: AddEvent, at: string): void {
   const oldAdvanced = previous.research?.intelligence?.advanced;
   const advanced = current.research?.intelligence?.advanced;
   if (!advanced) return;
@@ -188,26 +249,26 @@ function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
     if (Math.abs(pcr - oldPcr) >= 0.1) {
       add('options-oi', 'opportunity', `pcr:${roundBucket(pcr, 0.1)}`,
         `${name} put call open interest ratio moved to ${pcr.toFixed(2)}${pcr > oldPcr ? ', put support is increasing' : ', call pressure is increasing'}.`,
-        advanced.options.evidence);
+        advanced.options.evidence, at);
     }
     if (Math.abs(advanced.options.ivSkew - oldAdvanced.options.ivSkew) >= 1) {
       add('options-oi', 'info', `iv-skew:${roundBucket(advanced.options.ivSkew, 1)}`,
-        `${name} option volatility skew changed to ${advanced.options.ivSkew.toFixed(1)}.`, advanced.options.evidence);
+        `${name} option volatility skew changed to ${advanced.options.ivSkew.toFixed(1)}.`, advanced.options.evidence, at);
     }
   } else if (!oldAdvanced?.options.available && advanced.options.available) {
     add('options-oi', 'info', `options-ready:${advanced.options.contracts}`,
-      `${name} options data available. Put call O I ratio ${advanced.options.putCallOiRatio.toFixed(2)}.`, advanced.options.evidence);
+      `${name} options data available. Put call O I ratio ${advanced.options.putCallOiRatio.toFixed(2)}.`, advanced.options.evidence, at);
   }
   if (oldAdvanced?.volatility.state !== advanced.volatility.state) {
     add('range-volatility', advanced.volatility.state.toLowerCase().includes('high') ? 'warning' : 'info',
       `volatility-state:${advanced.volatility.state}`,
       `${name} volatility regime changed to ${humanize(advanced.volatility.state)}.`,
-      `ATR percentile ${advanced.volatility.percentile.toFixed(0)}; expansion ${advanced.volatility.expansionRatio.toFixed(2)}`);
+      `ATR percentile ${advanced.volatility.percentile.toFixed(0)}; expansion ${advanced.volatility.expansionRatio.toFixed(2)}`, at);
   }
   if (oldAdvanced?.setupLifecycle.phase !== advanced.setupLifecycle.phase) {
     add('trend', 'opportunity', `setup:${advanced.setupLifecycle.phase}:${advanced.setupLifecycle.direction}`,
       `${name} setup phase is now ${humanize(advanced.setupLifecycle.phase)}${advanced.setupLifecycle.direction ? `, ${spokenDirection(advanced.setupLifecycle.direction)}` : ''}.`,
-      advanced.setupLifecycle.evidence);
+      advanced.setupLifecycle.evidence, at);
   }
   const oldPremium = latestEvaluation(previous.evaluations)?.optionPremium;
   const premium = latestEvaluation(current.evaluations)?.optionPremium;
@@ -217,14 +278,14 @@ function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
       add('options-oi', change > 0 ? 'opportunity' : 'warning',
         `premium-jump:${latestEvaluation(current.evaluations)?.optionSymbol}:${roundBucket(change, 0.1)}`,
         `${name} selected option premium ${change > 0 ? 'jumped' : 'fell'} ${Math.round(Math.abs(change) * 100)} percent to ${price(premium)}.`,
-        `Previous premium ${price(oldPremium)}`);
+        `Previous premium ${price(oldPremium)}`, at);
     }
   }
   for (const level of advanced.levels) {
     const wasKnown = oldAdvanced?.levels.some((item) => item.kind === level.kind && Math.abs(item.price - level.price) < 0.01);
     if (!wasKnown && level.strength >= 0.7) {
       add('levels', 'info', `research-level:${level.kind}:${level.price}`,
-        `${name} strong ${humanize(level.kind)} level identified near ${price(level.price)}.`, level.evidence);
+        `${name} strong ${humanize(level.kind)} level identified near ${price(level.price)}.`, level.evidence, at);
     }
   }
 }

@@ -22,6 +22,7 @@ import {
   NarratorCategory,
   narratorCategories,
   NarratorMode,
+  selectHighSignalNarratorEvents,
 } from './market-narrator';
 
 @Component({
@@ -694,7 +695,7 @@ export class App implements OnInit, OnDestroy {
     const previous = this.narratorSnapshots.get(market);
     this.narratorSnapshots.set(market, snapshot);
     if (!previous) return;
-    const events = buildMarketNarratorEvents(market, previous, snapshot)
+    const events = selectHighSignalNarratorEvents(buildMarketNarratorEvents(market, previous, snapshot))
       .filter((event) => this.enabledNarratorCategories.has(event.category))
       .filter((event) => !this.narratedKeys.has(event.key));
     if (!events.length) return;

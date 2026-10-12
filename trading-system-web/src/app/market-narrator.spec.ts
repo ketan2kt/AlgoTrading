@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMarketNarratorEvents } from './market-narrator';
+import { buildMarketNarratorEvents, selectHighSignalNarratorEvents } from './market-narrator';
 import { TradingWorkspaceSnapshot, WorkspaceCandle } from './trading-workspace';
 
 function candle(time: string, open: number, high: number, low: number, close: number, volume = 100): WorkspaceCandle {
@@ -43,6 +43,28 @@ describe('market narrator', () => {
     expect(events.some((event) => event.message.includes('bullish EMA 9 and EMA 21 crossover'))).toBe(true);
   });
 
+  it('does not evaluate analytical alerts from sub-five-minute bars', () => {
+    const bars = [
+      { ...candle('2026-10-12T03:45:00Z', 99, 100, 98, 99), intervalSeconds: 60 },
+      { ...candle('2026-10-12T03:46:00Z', 99, 100, 98, 99), intervalSeconds: 60 },
+      { ...candle('2026-10-12T03:47:00Z', 99, 102, 99, 101, 220), intervalSeconds: 60 },
+    ];
+    expect(buildMarketNarratorEvents('nifty', snapshot(bars.slice(0, 2)), snapshot(bars))).toEqual([]);
+  });
+
+  it('selects only the strongest confirmed market signal from one closed candle', () => {
+    const bars = [
+      candle('2026-10-12T03:45:00Z', 99, 100, 98, 99),
+      candle('2026-10-12T03:50:00Z', 99, 100, 98, 99),
+      candle('2026-10-12T03:55:00Z', 99, 103, 99, 102.5, 300),
+    ];
+    const all = buildMarketNarratorEvents('nifty', snapshot(bars.slice(0, 2)), snapshot(bars));
+    const selected = selectHighSignalNarratorEvents(all);
+    expect(all.length).toBeGreaterThan(1);
+    expect(selected).toHaveLength(1);
+    expect(selected[0].category).not.toBe('levels');
+  });
+
   it('announces trade entries and exits once the lifecycle changes', () => {
     const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
     const active = { signalId: 's1', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,
@@ -57,5 +79,19 @@ describe('market narrator', () => {
     const current = snapshot(bars, { overlays: [exited] });
     const events = buildMarketNarratorEvents('nifty', previous, current);
     expect(events.some((event) => event.message.includes('target or profit objective reached'))).toBe(true);
+  });
+
+  it('does not narrate every trailing-stop adjustment after profit is protected', () => {
+    const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
+    const trade = { signalId: 's1', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,
+      entry: 100, stopLoss: 101, target: 110, status: 'Active', quantity: 5, fillPrice: 100,
+      executionInstrument: 'NIFTY26OCT25000CE', executionInstrumentType: 'Option', executionExpiry: null,
+      executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
+      executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
+      executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 103,
+      exitPrice: null, realisedPnl: null, unrealisedPnl: 1000, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null };
+    const previous = snapshot(bars, { overlays: [{ ...trade, stopLoss: 100.5 }] });
+    const current = snapshot(bars, { overlays: [trade] });
+    expect(buildMarketNarratorEvents('nifty', previous, current).some((event) => event.key.includes('profit-lock'))).toBe(false);
   });
 });
