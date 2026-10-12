@@ -334,6 +334,7 @@ public static class DependencyInjection
         services.AddOptions<ScalpPaperTradingOptions>()
             .Bind(configuration.GetSection(ScalpPaperTradingOptions.SectionName))
             .Validate(value => value.EvaluationIntervalSeconds is >= 2 and <= 60 &&
+                               value.SignalTimeframeMinutes is >= 3 and <= 15 &&
                                value.MaximumCohortsPerDay is >= 1 and <= 50 &&
                                value.CooldownMinutes is >= 1 and <= 30 &&
                                value.MinimumConfidence is >= .5m and <= 1m &&

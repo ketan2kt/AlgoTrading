@@ -73,24 +73,27 @@ internal sealed partial class ScalpPaperTradingService(
             .OrderByDescending(value => value.OpenTimeUtc).Take(90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         if (candles.Count < 14) return;
-        var latest = candles[^1];
-        var bars = candles.Select(value => new ScalpPriceBar(value.OpenTimeUtc, value.Open,
+        var oneMinuteBars = candles.Select(value => new ScalpPriceBar(value.OpenTimeUtc, value.Open,
             value.High, value.Low, value.Close, value.Volume)).ToArray();
+        var bars = ScalpTradingPolicy.AggregateCompletedBars(oneMinuteBars, options.Value.SignalTimeframeMinutes);
+        if (bars.Count < 14) return;
+        var latest = bars[^1];
         var signal = ScalpTradingPolicy.Evaluate(bars);
 
         await ManagePositionsAsync(db, market, signal, now, cancellationToken);
-        if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc)
+        if (lastEvaluated.GetValueOrDefault(market.Code) == latest.TimeUtc)
         {
             await PublishAsync(scope.ServiceProvider, market.Code, cancellationToken);
             return;
         }
-        lastEvaluated[market.Code] = latest.OpenTimeUtc;
+        lastEvaluated[market.Code] = latest.TimeUtc;
 
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
-            latest.OpenTimeUtc, signal.Direction is null ? "ScalpCandidateRejected" : "ScalpCandidate",
+            latest.TimeUtc, signal.Direction is null ? "ScalpCandidateRejected" : "ScalpCandidate",
             signal.Confidence, JsonSerializer.Serialize(new
             {
-                version = "scalp-v1", signal.Direction, signal.Regime, signal.Atr,
+                version = "scalp-v2", signalTimeframeMinutes = options.Value.SignalTimeframeMinutes,
+                signal.Direction, signal.Regime, signal.Atr,
                 signal.Evidence, paperOnly = true, liveEligible = false
             })));
         await db.SaveChangesAsync(cancellationToken);
@@ -113,7 +116,7 @@ internal sealed partial class ScalpPaperTradingService(
             .SumAsync(value => value.RealisedPnl, cancellationToken);
         if (realised <= -options.Value.MaximumDailyLoss)
         {
-            await RecordAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ScalpDailyLossBlocked",
+            await RecordAsync(db, market, underlying.Id, latest.TimeUtc, "ScalpDailyLossBlocked",
                 signal.Confidence, ["The isolated scalp-engine daily loss boundary has been reached."], cancellationToken);
             await PublishAsync(scope.ServiceProvider, market.Code, cancellationToken);
             return;
@@ -139,7 +142,7 @@ internal sealed partial class ScalpPaperTradingService(
             DateOnly.FromDateTime(india.Date), cancellationToken);
         if (execution is null)
         {
-            await RecordAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ScalpInstrumentUnavailable",
+            await RecordAsync(db, market, underlying.Id, latest.TimeUtc, "ScalpInstrumentUnavailable",
                 signal.Confidence, ["No eligible option contract is synchronised."], cancellationToken);
             await PublishAsync(scope.ServiceProvider, market.Code, cancellationToken);
             return;
@@ -152,7 +155,7 @@ internal sealed partial class ScalpPaperTradingService(
         }
         catch (GrowwApiException exception)
         {
-            await RecordAsync(db, market, underlying.Id, latest.OpenTimeUtc, "ScalpQuoteUnavailable",
+            await RecordAsync(db, market, underlying.Id, latest.TimeUtc, "ScalpQuoteUnavailable",
                 signal.Confidence, [exception.Message], cancellationToken);
             await PublishAsync(scope.ServiceProvider, market.Code, cancellationToken);
             return;
@@ -183,9 +186,10 @@ internal sealed partial class ScalpPaperTradingService(
                 entry, stop, target, now));
         }
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
-            latest.OpenTimeUtc, "ScalpPositionOpened", signal.Confidence, JsonSerializer.Serialize(new
+            latest.TimeUtc, "ScalpPositionOpened", signal.Confidence, JsonSerializer.Serialize(new
             {
-                version = "scalp-v1", cohortId, paperOnly = true, liveEligible = false,
+                version = "scalp-v2", signalTimeframeMinutes = options.Value.SignalTimeframeMinutes,
+                cohortId, paperOnly = true, liveEligible = false,
                 underlyingDirection = signal.Direction.ToString(), execution = execution.TradingSymbol,
                 entry, stop, quickTarget, runnerTarget, lots = tranches, lotSize = execution.LotSize,
                 estimatedRoundTripChargesPerLot = oneLotCharges, signal.Evidence

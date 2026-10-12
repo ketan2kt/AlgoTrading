@@ -10,58 +10,93 @@ public sealed record ScalpSignal(Direction? Direction, decimal Confidence,
 
 public static class ScalpTradingPolicy
 {
+    public static IReadOnlyList<ScalpPriceBar> AggregateCompletedBars(
+        IReadOnlyList<ScalpPriceBar> oneMinuteBars, int timeframeMinutes)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeframeMinutes, 2);
+        var seconds = timeframeMinutes * 60L;
+        return oneMinuteBars.OrderBy(value => value.TimeUtc)
+            .GroupBy(value => value.TimeUtc.ToUnixTimeSeconds() / seconds)
+            .Where(group =>
+            {
+                var ordered = group.OrderBy(value => value.TimeUtc).ToArray();
+                return ordered.Length == timeframeMinutes &&
+                       ordered.Select(value => value.TimeUtc).Distinct().Count() == timeframeMinutes &&
+                       ordered.Zip(ordered.Skip(1), (left, right) => right.TimeUtc - left.TimeUtc)
+                           .All(gap => gap == TimeSpan.FromMinutes(1));
+            })
+            .Select(group =>
+            {
+                var ordered = group.OrderBy(value => value.TimeUtc).ToArray();
+                return new ScalpPriceBar(DateTimeOffset.FromUnixTimeSeconds(group.Key * seconds),
+                    ordered[0].Open, ordered.Max(value => value.High), ordered.Min(value => value.Low),
+                    ordered[^1].Close, ordered.Sum(value => value.Volume));
+            })
+            .ToArray();
+    }
+
     public static ScalpSignal Evaluate(IReadOnlyList<ScalpPriceBar> bars)
     {
         if (bars.Count < 14) return new(null, 0m, "InsufficientData", 0m,
-            ["At least fourteen completed one-minute candles are required."]);
+            ["At least fourteen completed signal-timeframe candles are required."]);
 
         var closes = bars.Select(value => value.Close).ToArray();
         var fast = Ema(closes, 5);
         var slow = Ema(closes, 13);
+        var previousFast = Ema(closes[..^1], 5);
+        var previousSlow = Ema(closes[..^1], 13);
         var atr = Atr(bars.TakeLast(14).ToArray());
         if (atr <= 0m) return new(null, 0m, "InvalidVolatility", 0m,
             ["A positive ATR is required."]);
 
         var latest = bars[^1];
         var previous = bars[^2];
-        var priorRange = bars.TakeLast(7).SkipLast(1).ToArray();
+        var priorRange = bars.TakeLast(9).SkipLast(1).ToArray();
         var priorHigh = priorRange.Max(value => value.High);
         var priorLow = priorRange.Min(value => value.Low);
-        var threeBarMove = latest.Close - bars[^4].Close;
-        var bullish = 0;
-        var bearish = 0;
+        var averageVolume = bars.TakeLast(11).SkipLast(1).Where(value => value.Volume > 0)
+            .Select(value => (decimal)value.Volume).DefaultIfEmpty(0m).Average();
+        var volumeConfirmed = averageVolume == 0m || latest.Volume >= averageVolume * 1.10m;
+        var body = Math.Abs(latest.Close - latest.Open);
+        var range = latest.High - latest.Low;
+        var bullishClose = latest.Close > latest.Open && latest.High - latest.Close <= range * .35m;
+        var bearishClose = latest.Close < latest.Open && latest.Close - latest.Low <= range * .35m;
+        var bullishTrend = fast > slow && fast > previousFast && slow >= previousSlow;
+        var bearishTrend = fast < slow && fast < previousFast && slow <= previousSlow;
+        var bullishBreakout = bullishTrend && latest.Close > priorHigh && bullishClose &&
+                              body >= atr * .25m && volumeConfirmed;
+        var bearishBreakdown = bearishTrend && latest.Close < priorLow && bearishClose &&
+                               body >= atr * .25m && volumeConfirmed;
+        var bullishPullback = bullishTrend && previous.Low <= previousFast + atr * .20m &&
+                              latest.Low <= fast + atr * .25m && bullishClose && latest.Close > previous.High;
+        var bearishPullback = bearishTrend && previous.High >= previousFast - atr * .20m &&
+                              latest.High >= fast - atr * .25m && bearishClose && latest.Close < previous.Low;
         var evidence = new List<string>();
 
-        if (fast > slow) { bullish += 2; evidence.Add("EMA 5 is above EMA 13."); }
-        if (fast < slow) { bearish += 2; evidence.Add("EMA 5 is below EMA 13."); }
-        if (latest.Close > fast) { bullish++; evidence.Add("Price is above the fast EMA."); }
-        if (latest.Close < fast) { bearish++; evidence.Add("Price is below the fast EMA."); }
-        if (threeBarMove >= atr * .45m) { bullish++; evidence.Add("Three-candle momentum is bullish."); }
-        if (threeBarMove <= -atr * .45m) { bearish++; evidence.Add("Three-candle momentum is bearish."); }
-        if (latest.Close > priorHigh) { bullish += 2; evidence.Add("A six-candle high breakout closed."); }
-        if (latest.Close < priorLow) { bearish += 2; evidence.Add("A six-candle low breakdown closed."); }
-        if (latest.Close > latest.Open && previous.Close < previous.Open && latest.Close > previous.High)
-        { bullish++; evidence.Add("A bullish reversal engulfed the previous candle."); }
-        if (latest.Close < latest.Open && previous.Close > previous.Open && latest.Close < previous.Low)
-        { bearish++; evidence.Add("A bearish reversal engulfed the previous candle."); }
+        if (bullishTrend) evidence.Add("EMA 5 and EMA 13 are rising in bullish alignment.");
+        if (bearishTrend) evidence.Add("EMA 5 and EMA 13 are falling in bearish alignment.");
+        if (bullishBreakout) evidence.Add("An eight-bar high breakout closed strongly with volume confirmation.");
+        if (bearishBreakdown) evidence.Add("An eight-bar low breakdown closed strongly with volume confirmation.");
+        if (bullishPullback) evidence.Add("A bullish fast-EMA pullback reclaimed the previous candle high.");
+        if (bearishPullback) evidence.Add("A bearish fast-EMA pullback broke the previous candle low.");
 
         var extension = Math.Abs(latest.Close - slow) / atr;
-        // ScalpLab is intentionally more permissive than the champion engine, but it still
-        // refuses truly parabolic entries where the fast move is already likely exhausted.
-        if (extension > 5m)
+        if (extension > 3m)
             return new(null, 0m, "Extended", atr,
                 [.. evidence, $"Price is already extended {extension:F2} ATR from EMA 13."]);
 
-        var score = Math.Max(bullish, bearish);
-        var edge = Math.Abs(bullish - bearish);
-        if (score < 3 || edge < 2)
-            return new(null, Math.Min(.49m, score / 10m), "Mixed", atr,
-                [.. evidence, $"Bullish score {bullish}; bearish score {bearish}."]);
+        var bullishSetup = bullishBreakout || bullishPullback;
+        var bearishSetup = bearishBreakdown || bearishPullback;
+        if (bullishSetup == bearishSetup)
+            return new(null, 0m, "NoStructuredSetup", atr,
+                [.. evidence, "A confirmed breakout or EMA pullback-reclaim is required."]);
 
-        var direction = bullish > bearish ? Direction.Buy : Direction.Sell;
-        var confidence = Math.Min(.90m, .50m + score * .05m + edge * .025m);
-        return new(direction, confidence, fast > slow ? "FastBullish" : "FastBearish", atr,
-            [.. evidence, $"Bullish score {bullish}; bearish score {bearish}."]);
+        var direction = bullishSetup ? Direction.Buy : Direction.Sell;
+        var breakout = bullishBreakout || bearishBreakdown;
+        var confidence = breakout ? .76m : .71m;
+        if (volumeConfirmed && averageVolume > 0m) confidence += .03m;
+        return new(direction, Math.Min(.85m, confidence), breakout ? "StructuredBreakout" : "StructuredPullback", atr,
+            [.. evidence, $"Extension is {extension:F2} ATR from EMA 13."]);
     }
 
     public static decimal TrailingStop(decimal entry, decimal currentStop, decimal peak,
