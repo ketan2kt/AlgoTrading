@@ -32,25 +32,46 @@ app-root {
 
 app-root .market-tabs {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  min-height: 48px;
-  padding: 0.34rem 0.48rem;
+  position: sticky;
+  top: 2.15rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  height: calc(100vh - 2.65rem);
+  min-height: 0;
+  margin: 0;
+  padding: 0.55rem;
   background: rgba(8, 15, 12, 0.96);
   border-color: var(--desk-line);
   border-radius: 10px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
 }
 
+app-root .workspace-layout {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: start;
+}
+
+app-root .workspace-layout > .workspace-shell { min-width: 0; }
+
 app-root .workspace-brand,
 app-root .market-tab-group,
 app-root .workspace-nav-actions {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-direction: column;
 }
 
-app-root .workspace-brand { gap: 0.55rem; padding-left: 0.25rem; }
+app-root .workspace-brand {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.1rem 0.2rem 0.55rem;
+  border-bottom: 1px solid var(--desk-line);
+}
 app-root .workspace-brand__mark {
   display: grid;
   place-items: center;
@@ -64,10 +85,21 @@ app-root .workspace-brand__mark {
 app-root .workspace-brand > span:last-child { display: grid; line-height: 1.05; }
 app-root .workspace-brand strong { font-size: 0.78rem; letter-spacing: 0.02em; }
 app-root .workspace-brand small { margin-top: 0.18rem; color: var(--desk-muted); font-size: 0.58rem; letter-spacing: 0.09em; text-transform: uppercase; }
-app-root .workspace-brand { flex: 0 0 155px; }
-app-root .market-tab-group { flex: 1 1 auto; justify-content: center; gap: 0.28rem; }
-app-root .market-tab-group > button { min-width: 112px; }
-app-root .workspace-nav-actions { flex: 0 0 auto; justify-content: flex-end; gap: 0.24rem; }
+app-root .market-tab-group { flex: 0 0 auto; gap: 0.22rem; }
+app-root .market-tab-group > button,
+app-root .workspace-nav-actions > button {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+app-root .workspace-nav-actions {
+  flex: 0 0 auto;
+  gap: 0.22rem;
+  margin-top: auto;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--desk-line);
+}
 app-root .workspace-nav-actions button { min-height: 29px; padding-inline: 0.55rem; font-size: 0.68rem; }
 app-root .workspace-nav-actions__primary { color: #07110c !important; background: var(--desk-accent) !important; }
 app-root .mute-alerts-button { min-width:78px; border-color:#6b7c74; }
@@ -187,17 +219,43 @@ app-root .narrator-toast--critical { border-left-color:#ff5d68; background:rgba(
 @keyframes narrator-toast-life { from { transform:scaleX(1); } to { transform:scaleX(0); } }
 
 @media (max-width: 1250px) {
-  app-root .market-tabs { flex-wrap: wrap; gap: 0.35rem 0.75rem; }
-  app-root .workspace-brand { flex: 0 0 auto; }
-  app-root .market-tab-group { flex: 1 1 260px; justify-content: flex-end; }
-  app-root .workspace-nav-actions { flex: 1 0 100%; justify-content: flex-end; padding-top: 0.3rem; border-top: 1px solid var(--desk-line); }
+  app-root .workspace-layout { grid-template-columns: 132px minmax(0, 1fr); }
   app-root .chart-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 900px) {
-  app-root .market-tabs { gap: 0.35rem; }
+  app-root .workspace-layout { display: block; }
+  app-root .market-tabs {
+    top: 27px;
+    z-index: 9;
+    flex-direction: row;
+    gap: 0.35rem;
+    align-items: center;
+    height: auto;
+    min-height: 44px;
+    margin-bottom: 0.45rem;
+    padding: 0.28rem;
+  }
   app-root .workspace-brand { display: none; }
-  app-root .market-tab-group { justify-content: flex-start; min-width: 0; }
+  app-root .market-tab-group {
+    flex: 1 1 auto;
+    flex-direction: row;
+    gap: 0.2rem;
+    align-items: center;
+    min-width: 0;
+    overflow-x: auto;
+  }
+  app-root .market-tab-group > button { width: auto; min-width: 86px; justify-content: center; text-align: center; }
+  app-root .workspace-nav-actions {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 0.2rem;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  app-root .workspace-nav-actions > button { width: auto; justify-content: center; text-align: center; }
   app-root .workspace-nav-actions button:not(.workspace-nav-actions__primary):not(.mute-alerts-button) { display: none; }
   app-root .chart-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   app-root .workspace-heading > div > p:last-of-type { display: none; }
