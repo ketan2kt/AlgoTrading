@@ -61,6 +61,7 @@ jobs:
               MarketData__LiveNifty__Enabled=true \
               PaperTrading__Automation__Enabled=true \
               LiveExecution__BuildEnabled=true \
+              LiveExecution__RequirePaperPromotion=false \
               LiveExecution__MaximumLotsPerOrder=5 \
               LiveExecution__ControlledTestLotsPerOrder=5 \
               "ConnectionStrings__TradingDatabase=Host=${{ steps.infrastructure.outputs.postgres_host }};Port=5432;Database=${{ steps.infrastructure.outputs.postgres_database }};Username=${{ steps.infrastructure.outputs.postgres_login }};Password=${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }};SSL Mode=Require;Trust Server Certificate=false" \

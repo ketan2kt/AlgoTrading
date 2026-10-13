@@ -64,8 +64,10 @@ internal sealed partial class AutomaticLiveExecutionService(
             return;
         }
 
-        var niftyEligible = await IsPaperPromotionSatisfiedAsync(db, "nifty", cancellationToken);
-        var sensexEligible = await IsPaperPromotionSatisfiedAsync(db, "sensex", cancellationToken);
+        var niftyEligible = await IsPaperPromotionSatisfiedAsync(db, "nifty",
+            options.Value.RequirePaperPromotion, cancellationToken);
+        var sensexEligible = await IsPaperPromotionSatisfiedAsync(db, "sensex",
+            options.Value.RequirePaperPromotion, cancellationToken);
         var intent = (niftyEligible
                 ? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
                 : null)
@@ -78,9 +80,11 @@ internal sealed partial class AutomaticLiveExecutionService(
         await SubmitAndProtectAsync(db, intent, cancellationToken);
     }
 
-    private static async Task<bool> IsPaperPromotionSatisfiedAsync(TradingDbContext db,
-        string market, CancellationToken cancellationToken)
+    internal static async Task<bool> IsPaperPromotionSatisfiedAsync(TradingDbContext db,
+        string market, bool requirePaperPromotion, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!requirePaperPromotion) return true;
         var json = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
                 value.Market == market && value.Outcome == SelfImprovementResearchService.AuditOutcome)
             .OrderByDescending(value => value.CandleTimeUtc)

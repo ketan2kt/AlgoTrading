@@ -7,6 +7,22 @@ namespace TradingSystem.ContractTests;
 public sealed class LiveExecutionDiscoveryContractTests
 {
     [Fact]
+    public void PaperPromotionIsRequiredUnlessExplicitlyDisabled()
+    {
+        Assert.True(new LiveExecutionOptions().RequirePaperPromotion);
+    }
+
+    [Theory]
+    [InlineData("nifty")]
+    [InlineData("sensex")]
+    public async Task DisabledPromotionDoesNotRequireAResearchReport(string market)
+    {
+        // A null database proves the override does not read or require research data.
+        Assert.True(await AutomaticLiveExecutionService.IsPaperPromotionSatisfiedAsync(
+            null!, market, false, CancellationToken.None));
+    }
+
+    [Fact]
     public void ControlledValidationUsesFiveLots()
     {
         var options = new LiveExecutionOptions();
