@@ -116,7 +116,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         active = active.Where(value => value.Status == "Protected").ToList();
         var expected = active.Select(value => new ExpectedBrokerPosition(value.InstrumentId,
             value.Direction, value.FilledQuantity)).ToArray();
-        var result = await broker.ReconcileAsync(expected, cancellationToken);
+        var result = ReconcileManagedPositions(expected, actual, timeProvider.GetUtcNow());
         if (result.TradingPermitted) return true;
         LogReconciliationBlocked(logger, string.Join(" ", result.Mismatches));
         return false;
@@ -144,7 +144,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 join strategy in db.Strategies.AsNoTracking() on version.StrategyId equals strategy.Id
                 where version.Id == signal.StrategyVersionId
                 select strategy.Code).SingleOrDefaultAsync(cancellationToken);
-            if (!IsNiftyPaperSource(strategyCode)) continue;
+            if (!IsNiftyPaperSource(strategyCode, options.Value.AllowResearchSources)) continue;
             var risk = await db.RiskDecisions.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.SignalId == signalId && value.Approved, cancellationToken);
             if (risk is null || !TryReadOptionProposal(risk.SnapshotJson, out var proposal)) continue;
@@ -164,7 +164,8 @@ internal sealed partial class AutomaticLiveExecutionService(
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
             .Where(value => value.Market == TradingMarketCatalog.Sensex.Code && value.Status == "Active" &&
-                            !value.Strategy.StartsWith("Research|") &&
+                            (options.Value.AllowResearchSources ||
+                             !value.Strategy.StartsWith("Research|")) &&
                             value.OpenedAtUtc >= armedAtUtc && value.OpenedAtUtc >= cutoff)
             .OrderBy(value => value.OpenedAtUtc).ToListAsync(cancellationToken);
         foreach (var source in sources)
@@ -295,13 +296,35 @@ internal sealed partial class AutomaticLiveExecutionService(
                Guid.TryParseExact(clientReference[..^suffix.Length], "N", out signalId);
     }
 
-    internal static bool IsSensexPaperSource(string market, string status, string strategy = "") =>
+    internal static bool IsSensexPaperSource(string market, string status, string strategy = "",
+        bool allowResearchSources = false) =>
         market == TradingMarketCatalog.Sensex.Code && status == "Active" &&
-        !strategy.StartsWith("Research|", StringComparison.Ordinal);
+        (allowResearchSources || !strategy.StartsWith("Research|", StringComparison.Ordinal));
 
-    internal static bool IsNiftyPaperSource(string? strategy) =>
+    internal static bool IsNiftyPaperSource(string? strategy, bool allowResearchSources = false) =>
         !string.IsNullOrWhiteSpace(strategy) &&
-        !strategy.StartsWith("Research|", StringComparison.Ordinal);
+        (allowResearchSources || !strategy.StartsWith("Research|", StringComparison.Ordinal));
+
+    internal static BrokerReconciliationResult ReconcileManagedPositions(
+        IReadOnlyCollection<ExpectedBrokerPosition> expectedPositions,
+        IReadOnlyCollection<BrokerPositionSnapshot> actualPositions,
+        DateTimeOffset observedAtUtc)
+    {
+        var expectedMap = expectedPositions.GroupBy(value => (value.InstrumentId, value.Direction))
+            .ToDictionary(group => group.Key, group => group.Sum(value => value.Quantity));
+        var actualMap = actualPositions.GroupBy(value => (value.InstrumentId, value.Direction))
+            .ToDictionary(group => group.Key, group => group.Sum(value => value.Quantity));
+        var mismatches = new List<string>();
+        foreach (var key in expectedMap.Keys)
+        {
+            actualMap.TryGetValue(key, out var observed);
+            var expected = expectedMap[key];
+            if (expected != observed)
+                mismatches.Add($"{key.InstrumentId:N}/{key.Direction}: expected {expected}, actual {observed}.");
+        }
+        return new BrokerReconciliationResult(mismatches.Count == 0, mismatches.Count == 0,
+            mismatches, observedAtUtc);
+    }
 
     internal static bool TryReadOptionProposal(string json, out OptionProposal proposal)
     {

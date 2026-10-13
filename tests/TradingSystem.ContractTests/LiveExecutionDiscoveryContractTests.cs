@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TradingSystem.Application.Broker;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Execution;
 
@@ -75,6 +76,8 @@ public sealed class LiveExecutionDiscoveryContractTests
         Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "StopLossHit"));
         Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active",
             "Research|Index momentum breakout"));
+        Assert.True(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active",
+            "Research|Index momentum breakout", allowResearchSources: true));
     }
 
     [Fact]
@@ -83,7 +86,35 @@ public sealed class LiveExecutionDiscoveryContractTests
         Assert.True(AutomaticLiveExecutionService.IsNiftyPaperSource("ema-pullback"));
         Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(
             "Research|nifty-structure-retest"));
+        Assert.True(AutomaticLiveExecutionService.IsNiftyPaperSource(
+            "Research|nifty-structure-retest", allowResearchSources: true));
         Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(null));
+    }
+
+    [Fact]
+    public void ReconciliationIgnoresUnmanagedBrokerPositions()
+    {
+        var unmanagedInstrument = Guid.NewGuid();
+
+        var result = AutomaticLiveExecutionService.ReconcileManagedPositions([],
+            [new BrokerPositionSnapshot(unmanagedInstrument, Direction.Buy, 650, 100m)],
+            DateTimeOffset.UtcNow);
+
+        Assert.True(result.TradingPermitted);
+        Assert.Empty(result.Mismatches);
+    }
+
+    [Fact]
+    public void ReconciliationStillBlocksMismatchInManagedInstrument()
+    {
+        var managedInstrument = Guid.NewGuid();
+        var result = AutomaticLiveExecutionService.ReconcileManagedPositions(
+            [new ExpectedBrokerPosition(managedInstrument, Direction.Buy, 100)],
+            [new BrokerPositionSnapshot(managedInstrument, Direction.Buy, 150, 100m)],
+            DateTimeOffset.UtcNow);
+
+        Assert.False(result.TradingPermitted);
+        Assert.Single(result.Mismatches);
     }
 
     [Fact]

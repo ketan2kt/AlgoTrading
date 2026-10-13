@@ -62,6 +62,7 @@ jobs:
               PaperTrading__Automation__Enabled=true \
               LiveExecution__BuildEnabled=true \
               LiveExecution__RequirePaperPromotion=false \
+              LiveExecution__AllowResearchSources=true \
               LiveExecution__MaximumLotsPerOrder=5 \
               LiveExecution__ControlledTestLotsPerOrder=5 \
               "ConnectionStrings__TradingDatabase=Host=${{ steps.infrastructure.outputs.postgres_host }};Port=5432;Database=${{ steps.infrastructure.outputs.postgres_database }};Username=${{ steps.infrastructure.outputs.postgres_login }};Password=${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }};SSL Mode=Require;Trust Server Certificate=false" \
@@ -191,6 +192,11 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --query "[?name=='LiveExecution__BuildEnabled'].value | [0]" -o tsv)
           test "$live" = "true"
+          research_sources=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --query "[?name=='LiveExecution__AllowResearchSources'].value | [0]" -o tsv)
+          test "$research_sources" = "true"
 
       - name: Verify deployed commit identity
         run: |
