@@ -122,6 +122,9 @@ jobs:
             --settings DatabaseInitialization__ApplyMigrations=true \
               LiveExecution__BuildEnabled=true \
             --output none
+          # App-setting changes restart both the site and its SCM container. Give
+          # Kudu time to settle so ZipDeploy is not cancelled by that restart.
+          sleep 45
           az webapp deploy \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
