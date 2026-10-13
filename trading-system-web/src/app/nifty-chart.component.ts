@@ -92,13 +92,13 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       :host,
       .chart-shell {
         display: block;
-        min-height: clamp(420px, calc(100vh - 110px), 680px);
+        min-height: clamp(378px, calc(90vh - 99px), 612px);
       }
       .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#0d1512; }
-      .chart-stage { position:relative; min-width:0; min-height:clamp(420px,calc(100vh - 110px),680px); }
+      .chart-stage { position:relative; min-width:0; min-height:clamp(378px,calc(90vh - 99px),612px); }
       .chart {
         width: 100%;
-        height: clamp(420px, calc(100vh - 110px), 680px);
+        height: clamp(378px, calc(90vh - 99px), 612px);
       }
       .chart-empty {
         position: absolute;
