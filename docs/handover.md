@@ -5,8 +5,17 @@ Updated: 2026-10-15 (Asia/Calcutta).
 ## Professional trade framework implementation
 
 The user ended the observation freeze and authorized one combined release covering the
-ten-point framework plus the 8-15 October evidence. Implemented locally for Nifty and
-Sensex; deployment is pending the single commit/push/dispatch described below.
+ten-point framework plus the 8-15 October evidence. Implemented for Nifty and Sensex,
+committed as `3238836`, pushed to main and dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/38720820304
+Dispatch was accepted; completion is UNVERIFIED per the no-poll deployment procedure.
+
+Run `38720820304` later failed in ZipDeploy. The application build and tests were not
+the cause: Azure reported that an App Service management operation restarted the SCM
+container while OneDeploy was active. The workflow's 45-second delay did not prevent
+the delayed restart. The corrective workflow change deploys the package synchronously
+before enabling migration mode, so the settings-triggered restart can no longer race
+ZipDeploy. A single retry is pending after this workflow-only fix is committed and pushed.
 
 - Added a shared auditable professional plan: regime-aware participation, after-cost
   reward/risk, liquidity, expiry, Greek/IV availability, calibrated confidence tiers,
@@ -131,9 +140,9 @@ No commit/push/deployment performed. Use docs/routine-work.md and scripts/tasks.
 
 ## Next steps
 
-Commit only the professional-framework files plus this handover, push main, and dispatch
-exactly one authorized deployment. Return the workflow run link without polling; workflow
-completion remains unverified unless the user separately asks for status. Expose/read the
+The combined framework is already committed, pushed and dispatched once. Do not dispatch
+again unless the user explicitly authorizes another deployment. Workflow completion remains
+unverified unless the user separately asks for status. Expose/read the
 exact live eligibility and skip reason if deeper confirmation is needed. Do not replay a
 closed trade as part of diagnosis. The earlier observation freeze is cancelled. The 14
 October choppy-session evidence and 15 October directional-session evidence are recorded

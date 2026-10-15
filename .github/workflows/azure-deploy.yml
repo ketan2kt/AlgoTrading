@@ -116,24 +116,27 @@ jobs:
 
       - name: Deploy application package
         run: |
-          az webapp config appsettings set \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ steps.infrastructure.outputs.app }}" \
-            --settings DatabaseInitialization__ApplyMigrations=true \
-              LiveExecution__BuildEnabled=true \
-            --output none
-          # App-setting changes restart both the site and its SCM container. Give
-          # Kudu time to settle so ZipDeploy is not cancelled by that restart.
-          sleep 45
+          # Never mutate App Service settings immediately before ZipDeploy. Even an
+          # apparently completed settings call can restart the SCM container minutes
+          # later and cancel the active deployment.
           az webapp deploy \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
             --src-path trading-system.zip \
             --type zip \
             --clean true \
-            --restart true \
-            --async true \
-            --track-status false
+            --restart true
+
+      - name: Enable database initialization for the deployed package
+        run: |
+          # The package is present before this management operation. This restart now
+          # starts that package in controlled migration mode without racing ZipDeploy.
+          az webapp config appsettings set \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --settings DatabaseInitialization__ApplyMigrations=true \
+              LiveExecution__BuildEnabled=true \
+            --output none
 
       - name: Wait for database initialization
         run: |
