@@ -96,6 +96,10 @@ internal sealed partial class MultiMarketPaperTradingService(
         MarketStateAssessmentV2? marketStateV2 = null;
         DecisionFeatureSnapshotV2? decisionSnapshotV2 = null;
         var sensexConfirmationReady = market != TradingMarketCatalog.Sensex;
+        var sensexVwap = 0m;
+        var sensexFast = 0m;
+        var sensexSlow = 0m;
+        var sensexRelativeVolume = 0m;
         if (market == TradingMarketCatalog.Sensex)
         {
             var closes = candles.Select(value => value.Close).ToArray();
@@ -126,6 +130,10 @@ internal sealed partial class MultiMarketPaperTradingService(
             var vwapV2 = totalVolume <= 0m ? 0m : aligned.Sum(value =>
                 ((value.High + value.Low + value.Close) / 3m) * volumeByTime[value.OpenTimeUtc]) /
                 totalVolume;
+            sensexVwap = vwapV2;
+            sensexFast = fastV2;
+            sensexSlow = slowV2;
+            sensexRelativeVolume = relativeVolumeV2;
             sensexConfirmationReady = vwapV2 > 0m && relativeVolumeV2 > 0m;
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
@@ -208,6 +216,40 @@ internal sealed partial class MultiMarketPaperTradingService(
                 {
                     decision = new(range.Direction.Value, range.Confidence,
                         "Sensex range-edge rejection", range.Reasons);
+                    paperResearchEntry = true;
+                }
+            }
+            if (!paperResearchEntry && researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
+                !hasActivePosition && marketStateV2 is not null)
+            {
+                var directional = DirectionalParticipationPolicy.Evaluate(priceBars,
+                    marketStateV2, sensexVwap, sensexFast, sensexSlow);
+                if (directional.Direction is not null)
+                {
+                    decision = new(directional.Direction.Value, directional.Confidence,
+                        DirectionalParticipationPolicy.SensexStrategy, directional.Reasons);
+                    paperResearchEntry = true;
+                }
+            }
+        }
+        if (market == TradingMarketCatalog.Sensex && !paperResearchEntry &&
+            marketStateV2 is not null)
+        {
+            var directional = DirectionalParticipationPolicy.Evaluate(priceBars,
+                marketStateV2, sensexVwap, sensexFast, sensexSlow);
+            if (directional.Direction is not null &&
+                (decision.Direction is null || decision.Direction == directional.Direction))
+            {
+                var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                    value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
+                    value.Strategy.StartsWith("Research|"), cancellationToken);
+                var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                    value.Market == market.Code && value.Status == "Active", cancellationToken);
+                if (researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
+                    !hasActivePosition)
+                {
+                    decision = new(directional.Direction.Value, directional.Confidence,
+                        DirectionalParticipationPolicy.SensexStrategy, directional.Reasons);
                     paperResearchEntry = true;
                 }
             }
@@ -332,8 +374,11 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
         }
 
+        var preferredInTheMoneySteps = market == TradingMarketCatalog.Sensex && marketStateV2 is not null &&
+                                      ProfessionalTradeFramework.Map(marketStateV2) ==
+                                      ProfessionalTradeRegime.Directional ? 1 : 0;
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
-            latest.Close, today, cancellationToken);
+            latest.Close, today, preferredInTheMoneySteps, cancellationToken);
         if (execution is null)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "InstrumentUnavailable",
@@ -420,6 +465,40 @@ internal sealed partial class MultiMarketPaperTradingService(
                 Math.Max(Math.Abs(entry - stop) * execution.LotSize, 0.01m)));
             quantity = execution.LotSize * Math.Min(lotsByRisk, options.Value.MaximumOptionLots);
         }
+        ProfessionalTradePlan? professionalPlan = null;
+        if (market == TradingMarketCatalog.Sensex && marketStateV2 is not null)
+        {
+            var spreadPercent = quote.BidPrice is > 0m && quote.OfferPrice is > 0m
+                ? (quote.OfferPrice.Value - quote.BidPrice.Value) / quote.OfferPrice.Value * 100m
+                : (decimal?)null;
+            var chargesPerLot = PaperTradingCostModel.CalculateOptionCharges([
+                new(PaperOptionTransactionSide.Buy, entry, execution.LotSize),
+                new(PaperOptionTransactionSide.Sell, target, execution.LotSize)]).Total;
+            var grossRewardPerLot = Math.Max(0m, (target - entry) * execution.LotSize);
+            var riskPerLot = Math.Max(.01m, (entry - stop) * execution.LotSize);
+            var daysToExpiry = execution.ExpiryDate is { } planExpiry
+                ? Math.Max(0, planExpiry.DayNumber - today.DayNumber) : 10;
+            var correlatedNiftyExposure = await HasActiveNiftyExposureAsync(db,
+                decision.Direction.Value, sessionStartUtc, cancellationToken);
+            professionalPlan = ProfessionalTradeFramework.Assess(new(
+                market.Code, ProfessionalTradeFramework.Map(marketStateV2), decision.Confidence,
+                sensexRelativeVolume, adaptiveSetup?.RoomToOpposingLevelAtr, spreadPercent,
+                quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
+                quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
+                daysToExpiry, null, null,
+                Math.Max(0m, (grossRewardPerLot - chargesPerLot) / riskPerLot),
+                correlatedNiftyExposure, 0,
+                paperResearchEntry || adaptiveSetup?.Setup == "ContinuationOrRetest"));
+            if (!professionalPlan.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "ProfessionalPlanRejected", decision.Confidence,
+                    professionalPlan.Reasons, cancellationToken);
+                return;
+            }
+            quantity = ProfessionalTradeFramework.ScaleQuantity(quantity, execution.LotSize,
+                professionalPlan.QuantityFraction);
+        }
         SensexReasoningSnapshot? reasoning = null;
         if (market == TradingMarketCatalog.Sensex)
         {
@@ -454,7 +533,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 positionId = position.Id,
                 strategy = decision.Strategy,
-                reasoning,
+                reasoning, professionalPlan,
                 adaptiveSetup,
                 paperResearchEntry,
                 liveEligible = !paperResearchEntry,
@@ -548,6 +627,13 @@ internal sealed partial class MultiMarketPaperTradingService(
             var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas
                 ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
+            var positionRegime = position.Strategy.Contains("range", StringComparison.OrdinalIgnoreCase)
+                ? ProfessionalTradeRegime.Range
+                : position.Strategy.Contains("directional", StringComparison.OrdinalIgnoreCase) ||
+                  position.Strategy.Contains("continuation", StringComparison.OrdinalIgnoreCase)
+                    ? ProfessionalTradeRegime.Directional
+                    : ProfessionalTradeRegime.Transition;
+            var exitPlan = ProfessionalExitPolicy.For(positionRegime);
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var favourableExtreme = price;
             var trailing = position.StopLoss;
@@ -579,19 +665,19 @@ internal sealed partial class MultiMarketPaperTradingService(
                     : position.EntryPrice + initialRisk;
                 trailing = PaperProtectiveStopPolicy.Calculate(position.Direction,
                     position.EntryPrice, initialProtectiveStop, favourablePrice,
-                    options.Value.BreakEvenTriggerRiskMultiple,
-                    options.Value.TrailingStopRiskMultiple,
-                    options.Value.ProfitLockTriggerRiskMultiple,
-                    options.Value.ProfitLockRiskMultiple);
+                    exitPlan.BreakEvenTriggerR,
+                    exitPlan.TrailDistanceR,
+                    exitPlan.ProfitLockTriggerR,
+                    exitPlan.ProfitLockR);
                 if (PeakFavourableForProtection(position.Direction, position.EntryPrice,
-                        favourablePrice) >= initialRisk * options.Value.BreakEvenTriggerRiskMultiple)
+                        favourablePrice) >= initialRisk * exitPlan.BreakEvenTriggerR)
                 {
                     var protectionCosts = PaperTradingCostModel.CalculateOptionCharges([
-                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.Quantity),
+                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
                         new(PaperOptionTransactionSide.Sell, Math.Max(.05m, trailing),
-                            position.Quantity)]).Total;
+                            position.RemainingQuantity)]).Total;
                     trailing = PaperProtectiveStopPolicy.ProtectNetProfit(position.Direction,
-                        position.EntryPrice, trailing, position.Quantity, protectionCosts);
+                        position.EntryPrice, trailing, position.RemainingQuantity, protectionCosts);
                 }
                 trailing = position.Direction == Direction.Buy
                     ? Math.Max(position.StopLoss, trailing)
@@ -605,7 +691,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.Market == market.Code && value.Outcome == sampleOutcome, cancellationToken))
             {
                 var livePnl = (position.Direction == Direction.Buy
-                    ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
+                    ? price - position.EntryPrice : position.EntryPrice - price) *
+                    position.RemainingQuantity + position.RealisedPnl;
                 var peakFavourable = position.Direction == Direction.Buy
                     ? favourableExtreme - position.EntryPrice
                     : position.EntryPrice - favourableExtreme;
@@ -633,22 +720,78 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
                 : position.Direction;
             var continuationConfirmed = targetHit && options.Value.TargetExtensionEnabled &&
+                                        exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
+            if (market == TradingMarketCatalog.Sensex && continuationConfirmed &&
+                positionRegime == ProfessionalTradeRegime.Directional &&
+                !position.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal))
+            {
+                var addOnPrefix = $"PaperOnly|Pyramid|{position.Id:N}";
+                var addOnExists = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                    value.Market == market.Code && value.Strategy == addOnPrefix,
+                    cancellationToken);
+                var addOnStop = RoundToTick(Math.Max(position.EntryPrice + initialRisk * .20m,
+                    price - initialRisk * .50m), instrument.TickSize > 0
+                    ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(instrument.TickSize) : .05m);
+                var addOnRisk = Math.Max(0m, price - addOnStop) * instrument.LotSize;
+                var addOnDecision = WinnerAddOnPolicy.Evaluate(
+                    initialRisk <= 0m ? 0m : Math.Max(0m,
+                        (favourableExtreme - position.EntryPrice) / initialRisk),
+                    true, addOnExists, initialRisk * position.Quantity, addOnRisk);
+                if (addOnDecision.Permitted)
+                {
+                    var addOnTarget = RoundToTick(price + initialRisk * 1.50m,
+                        instrument.TickSize > 0
+                            ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(instrument.TickSize) : .05m);
+                    var addOn = new MarketPaperPosition(Guid.NewGuid(), market.Code,
+                        position.UnderlyingInstrumentId, position.ExecutionInstrumentId,
+                        addOnPrefix, Direction.Buy, instrument.LotSize, price, addOnStop,
+                        addOnTarget, now);
+                    db.MarketPaperPositions.Add(addOn);
+                    db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                        position.UnderlyingInstrumentId, now, $"WinnerAddOn:{position.Id:N}", 0m,
+                        JsonSerializer.Serialize(new { parentPositionId = position.Id,
+                            addOnPositionId = addOn.Id, price, addOnStop, addOnTarget,
+                            quantity = instrument.LotSize, addOnDecision.Reasons,
+                            liveEligible = false })));
+                }
+            }
             var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
+            var partialThreshold = position.Direction == Direction.Buy
+                ? position.EntryPrice + initialRisk * exitPlan.PartialProfitR
+                : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
+            var partialReached = position.Direction == Direction.Buy
+                ? price >= partialThreshold : price <= partialThreshold;
+            if (market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
+                position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
+            {
+                var totalLots = Math.Max(1, position.RemainingQuantity / instrument.LotSize);
+                var partialLots = Math.Clamp((int)Math.Floor(totalLots * exitPlan.PartialExitFraction),
+                    1, Math.Max(1, totalLots - 1));
+                var partialQuantity = partialLots * instrument.LotSize;
+                var partialCosts = PaperTradingCostModel.CalculateOptionCharges([
+                    new(PaperOptionTransactionSide.Buy, position.EntryPrice, partialQuantity),
+                    new(PaperOptionTransactionSide.Sell, price, partialQuantity)]).Total;
+                position.TakePartial(price, partialQuantity, partialCosts);
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, now, $"PartialProfit:{position.Id:N}", 0m,
+                    JsonSerializer.Serialize(new { positionId = position.Id, price, partialQuantity,
+                        remainingQuantity = position.RemainingQuantity, partialCosts,
+                        triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
+            }
             if (stopHit || (targetHit && !continuationConfirmed) || forced)
             {
                 var costs = market.ExecuteOptions
                     ? PaperTradingCostModel.CalculateOptionCharges([
-                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.Quantity),
-                        new(PaperOptionTransactionSide.Sell, price, position.Quantity)]).Total
-                    : decimal.Round((position.EntryPrice + price) * position.Quantity * 0.0005m, 2);
+                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
+                        new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
+                    : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
                 position.Close(price, costs, targetHit ? "TargetHit" : stopHit ? "StopLossHit" : "TimeExit", now);
                 favourablePriceByPosition.Remove(position.Id);
-                var grossPnl = (position.Direction == Direction.Buy
-                    ? price - position.EntryPrice : position.EntryPrice - price) * position.Quantity;
+                var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, now, $"PositionClosed:{position.Id:N}", 0m,
                     JsonSerializer.Serialize(new { positionId = position.Id, exitPrice = price,
@@ -771,21 +914,48 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     private static async Task<Instrument?> SelectExecutionInstrumentAsync(TradingDbContext db,
         TradingMarketDefinition market, Direction direction, decimal price, DateOnly today,
-        CancellationToken cancellationToken)
+        int preferredInTheMoneySteps, CancellationToken cancellationToken)
     {
         if (!market.ExecuteOptions)
             return await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
                     value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith(market.ExecutionUnderlying) &&
                     value.ExpiryDate >= today && value.IsActive)
                 .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
+        var strikeStep = market == TradingMarketCatalog.Sensex ? 100m : 50m;
+        var desiredStrike = direction == Direction.Buy
+            ? price - preferredInTheMoneySteps * strikeStep
+            : price + preferredInTheMoneySteps * strikeStep;
         var instruments = await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
                 value.Segment == InstrumentSegment.FuturesAndOptions && value.IsActive && value.ExpiryDate >= today &&
                 value.ExpiryDate <= today.AddDays(10) && value.StrikePrice != null &&
                 (direction == Direction.Buy ? value.Type == InstrumentType.CallOption : value.Type == InstrumentType.PutOption) &&
                 value.TradingSymbol.StartsWith(market.ExecutionUnderlying))
-            .OrderBy(value => value.ExpiryDate).ThenBy(value => Math.Abs(value.StrikePrice!.Value - price))
+            .OrderBy(value => value.ExpiryDate).ThenBy(value => Math.Abs(value.StrikePrice!.Value - desiredStrike))
             .FirstOrDefaultAsync(cancellationToken);
         return instruments;
+    }
+
+    private static async Task<bool> HasActiveNiftyExposureAsync(TradingDbContext db,
+        Direction direction, DateTimeOffset sessionStartUtc, CancellationToken cancellationToken)
+    {
+        var signalIds = await (from signal in db.Signals.AsNoTracking()
+            join instrument in db.Instruments.AsNoTracking() on signal.InstrumentId equals instrument.Id
+            where signal.MarketDataTimestampUtc >= sessionStartUtc && signal.Direction == direction &&
+                  instrument.Exchange == "NSE" && instrument.TradingSymbol == "NIFTY"
+            select signal.Id).ToListAsync(cancellationToken);
+        if (signalIds.Count == 0) return false;
+        var entryReferences = signalIds.Select(value => $"{value:N}-ENTRY").ToArray();
+        var exitReferences = signalIds.Select(value => $"{value:N}-EXIT").ToArray();
+        var filledEntries = await db.Orders.AsNoTracking().Where(value =>
+                entryReferences.Contains(value.ClientReference) && value.State == OrderState.Filled)
+            .Select(value => value.ClientReference).ToListAsync(cancellationToken);
+        if (filledEntries.Count == 0) return false;
+        var filledExits = await db.Orders.AsNoTracking().Where(value =>
+                exitReferences.Contains(value.ClientReference) && value.State == OrderState.Filled)
+            .Select(value => value.ClientReference).ToListAsync(cancellationToken);
+        var exitedIds = filledExits.Select(value => value[..^"-EXIT".Length])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return filledEntries.Any(value => !exitedIds.Contains(value[..^"-ENTRY".Length]));
     }
 
     private async Task AuditIfDueAsync(TradingDbContext db, TradingMarketDefinition market, Guid instrumentId,

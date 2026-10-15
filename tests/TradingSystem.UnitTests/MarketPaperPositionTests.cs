@@ -31,4 +31,21 @@ public sealed class MarketPaperPositionTests
 
         Assert.Equal(296m, position.StopLoss);
     }
+
+    [Fact]
+    public void PartialProfitAndRunnerAreAccountedNetOfSeparateCosts()
+    {
+        var opened = DateTimeOffset.UtcNow;
+        var position = new MarketPaperPosition(Guid.NewGuid(), "sensex", Guid.NewGuid(), Guid.NewGuid(),
+            "directional", Direction.Buy, 100, 100m, 90m, 120m, opened);
+
+        position.TakePartial(112m, 40, 20m);
+        position.Close(118m, 30m, "TrailingStopHit", opened.AddMinutes(20));
+
+        Assert.Equal(0, position.RemainingQuantity);
+        Assert.Equal(40, position.PartialExitQuantity);
+        Assert.Equal(112m, position.PartialExitPrice);
+        Assert.Equal(50m, position.CostsPaid);
+        Assert.Equal(1510m, position.RealisedPnl);
+    }
 }

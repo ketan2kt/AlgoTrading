@@ -11,7 +11,7 @@ public sealed class MarketPaperPosition : MutableEntity
     {
         Market = market; UnderlyingInstrumentId = underlyingInstrumentId;
         ExecutionInstrumentId = executionInstrumentId; Strategy = strategy; Direction = direction;
-        Quantity = quantity; EntryPrice = entryPrice; CurrentPrice = entryPrice;
+        Quantity = quantity; RemainingQuantity = quantity; EntryPrice = entryPrice; CurrentPrice = entryPrice;
         StopLoss = stopLoss; Target = target; OpenedAtUtc = openedAtUtc.ToUniversalTime();
     }
 
@@ -21,11 +21,15 @@ public sealed class MarketPaperPosition : MutableEntity
     public string Strategy { get; private init; }
     public Direction Direction { get; private init; }
     public int Quantity { get; private init; }
+    public int RemainingQuantity { get; private set; }
+    public int PartialExitQuantity { get; private set; }
+    public decimal? PartialExitPrice { get; private set; }
     public decimal EntryPrice { get; private init; }
     public decimal CurrentPrice { get; private set; }
     public decimal StopLoss { get; private set; }
     public decimal Target { get; private init; }
     public decimal RealisedPnl { get; private set; }
+    public decimal CostsPaid { get; private set; }
     public string Status { get; private set; } = "Active";
     public DateTimeOffset OpenedAtUtc { get; private init; }
     public DateTimeOffset? ClosedAtUtc { get; private set; }
@@ -41,9 +45,26 @@ public sealed class MarketPaperPosition : MutableEntity
     {
         if (Status != "Active") throw new InvalidOperationException("Position is already closed.");
         CurrentPrice = price;
-        RealisedPnl = (Direction == Direction.Buy ? price - EntryPrice : EntryPrice - price) * Quantity - costs;
+        RealisedPnl += (Direction == Direction.Buy ? price - EntryPrice : EntryPrice - price) *
+                       RemainingQuantity - costs;
+        CostsPaid += costs;
+        RemainingQuantity = 0;
         Status = status;
         ClosedAtUtc = closedAtUtc.ToUniversalTime();
+    }
+
+    public void TakePartial(decimal price, int quantity, decimal costs)
+    {
+        if (Status != "Active") throw new InvalidOperationException("Position is already closed.");
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(price);
+        if (quantity <= 0 || quantity >= RemainingQuantity)
+            throw new ArgumentOutOfRangeException(nameof(quantity));
+        RealisedPnl += (Direction == Direction.Buy ? price - EntryPrice : EntryPrice - price) *
+                       quantity - costs;
+        CostsPaid += costs;
+        RemainingQuantity -= quantity;
+        PartialExitQuantity += quantity;
+        PartialExitPrice = price;
     }
 }
 

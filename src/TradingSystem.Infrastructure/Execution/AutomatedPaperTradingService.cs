@@ -461,6 +461,25 @@ internal sealed partial class AutomatedPaperTradingService(
                     }
                 }
             }
+            if (signal is null && tradeState.OpenPositions.Count == 0)
+            {
+                var directional = DirectionalParticipationPolicy.Evaluate(
+                    strategyContext.RecentCandles, preEntryStateV2, vwap, fast, slow);
+                if (directional.Direction is not null)
+                {
+                    var risk = Math.Abs(latestCandle.Close - directional.StructuralStop);
+                    signal = new StrategySignal(Guid.NewGuid(),
+                        DirectionalParticipationPolicy.NiftyStrategy,
+                        DirectionalParticipationPolicy.Version, instrument.Id,
+                        directional.Direction.Value, SignalEntryType.Market, latestCandle.Close,
+                        directional.StructuralStop, directional.Target,
+                        risk <= 0m ? 0m : Math.Abs(directional.Target - latestCandle.Close) / risk,
+                        directional.Confidence, regime.Regime, directional.Reasons, [],
+                        candleDecisionTime, candleDecisionTime.AddSeconds(
+                            marketOptions.Value.CandleIntervalSeconds * 2));
+                    paperResearchEntry = true;
+                }
+            }
         }
         var marketStateV2 = preEntryStateV2;
         var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(
@@ -668,7 +687,13 @@ internal sealed partial class AutomatedPaperTradingService(
             candidates, signal.Direction, currentPrice, DateOnly.FromDateTime(indiaNow.Date),
             new NiftyOptionSelectionOptions(options.Value.MaximumOptionDaysToExpiry,
                 options.Value.ExpiryDayInTheMoneySteps, options.Value.NormalInTheMoneySteps,
-                options.Value.OptionStrikeStep));
+                options.Value.OptionStrikeStep) with
+            {
+                NormalInTheMoneySteps = ProfessionalTradeFramework.Map(marketStateV2) ==
+                    ProfessionalTradeRegime.Directional
+                    ? Math.Max(1, options.Value.NormalInTheMoneySteps)
+                    : options.Value.NormalInTheMoneySteps
+            });
         if (selectedOption is null)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
@@ -746,6 +771,45 @@ internal sealed partial class AutomatedPaperTradingService(
         var protective = OptionPaperTradePricing.ProtectivePrices(pricing.EntryPrice,
             stopLossPercent, options.Value.OptionRewardToRiskRatio,
             selectedOption.TickSize);
+        var spreadPercent = quote.BidPrice is > 0m && quote.OfferPrice is > 0m
+            ? (quote.OfferPrice.Value - quote.BidPrice.Value) / quote.OfferPrice.Value * 100m
+            : (decimal?)null;
+        var roundTripPerLot = PaperTradingCostModel.CalculateOptionCharges([
+            new(PaperOptionTransactionSide.Buy, pricing.EntryPrice, selectedOption.LotSize),
+            new(PaperOptionTransactionSide.Sell, protective.Target, selectedOption.LotSize)]).Total;
+        var grossRewardPerLot = Math.Max(0m,
+            (protective.Target - pricing.EntryPrice) * selectedOption.LotSize);
+        var riskPerLot = Math.Max(.01m,
+            (pricing.EntryPrice - protective.StopLoss) * selectedOption.LotSize);
+        var hasCorrelatedSensexExposure = await (from openPosition in db.MarketPaperPositions.AsNoTracking()
+            join openInstrument in db.Instruments.AsNoTracking()
+                on openPosition.ExecutionInstrumentId equals openInstrument.Id
+            where openPosition.Market == "sensex" && openPosition.Status == "Active" &&
+                  (signal.Direction == Direction.Buy
+                      ? openInstrument.Type == InstrumentType.CallOption
+                      : openInstrument.Type == InstrumentType.PutOption)
+            select openPosition.Id).AnyAsync(cancellationToken);
+        var professionalPlan = ProfessionalTradeFramework.Assess(new(
+            "nifty", ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
+            relativeVolume, shadowStructure.RoomToRiskRatio, spreadPercent,
+            quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
+            quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
+            Math.Max(0, selectedOption.ExpiryDate.DayNumber - tradingDate.DayNumber),
+            null, null, Math.Max(0m, (grossRewardPerLot - roundTripPerLot) / riskPerLot),
+            hasCorrelatedSensexExposure, tradeState.ConsecutiveLosses,
+            reentryDecision.NewStructureObserved || paperResearchEntry));
+        if (!professionalPlan.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "ProfessionalPlanRejected", professionalPlan.Reasons,
+                signal, selectedOption, pricing.EntryPrice, cancellationToken, shadowStructure);
+            state.Record("ProfessionalPlanRejected", true,
+                string.Join(" ", professionalPlan.Reasons), tradeState.TradesToday,
+                tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol);
+            return;
+        }
         var executionSignal = signal with
         {
             InstrumentId = selectedOption.InstrumentId,
@@ -783,6 +847,17 @@ internal sealed partial class AutomatedPaperTradingService(
                     tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
                     killSwitchActive, true, fresh, dailyLossLimitOverridden), selectedOption.LotSize,
                     Math.Min(maximumOptionQuantity, hardenedDecision.ApprovedQuantity));
+        if (decision.Approved)
+        {
+            var scaledQuantity = ProfessionalTradeFramework.ScaleQuantity(
+                decision.ApprovedQuantity, selectedOption.LotSize, professionalPlan.QuantityFraction);
+            decision = decision with
+            {
+                ApprovedQuantity = scaledQuantity,
+                RiskAmount = Math.Abs(decision.FinalStopLoss - pricing.EntryPrice) * scaledQuantity,
+                CapitalExposure = pricing.EntryPrice * scaledQuantity
+            };
+        }
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
             optionProposal);
         if (!decision.Approved)
@@ -848,7 +923,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 estimatedTargetRoundTripCharges = reasoningCharges,
                 exposure = new { existingCapitalExposure, openPositionsBeforeEntry = tradeState.OpenPositions.Count,
                     openUnrealisedPnl },
-                adaptiveDecision,
+                adaptiveDecision, professionalPlan,
                 limitations = "Target reward is a plan, not a forecast; unknown slippage is excluded. " +
                     "Unknown setup age is not inferred. No Sensex thresholds or verdicts are applied. " +
                     "Entry reasons must be compared with later net outcomes."
@@ -889,7 +964,8 @@ internal sealed partial class AutomatedPaperTradingService(
             optionInstrument.Id, price, cancellationToken);
 
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
-        var entryPrice = open.Entry.AverageFillPrice!.Value;
+        var entryPrice = open.AverageEntryPrice;
+        var exitPlan = ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(open.Signal.Regime));
         var persistedPrices = await researchDb.PaperTradePriceSamples.AsNoTracking()
             .Where(value => value.SignalId == open.Signal.SignalId)
             .Select(value => new { value.OptionPrice, value.ObservedAtUtc })
@@ -910,18 +986,18 @@ internal sealed partial class AutomatedPaperTradingService(
         if (options.Value.BreakEvenEnabled || options.Value.TrailingStopEnabled)
             effectiveStop = PaperProtectiveStopPolicy.Calculate(open.Entry.Direction, entryPrice,
                 open.StopLoss, favourable,
-                options.Value.BreakEvenEnabled ? options.Value.BreakEvenTriggerRiskMultiple : decimal.MaxValue,
-                options.Value.TrailingStopEnabled ? options.Value.TrailingStopRiskMultiple : decimal.MaxValue,
-                options.Value.ProfitLockTriggerRiskMultiple,
-                options.Value.ProfitLockRiskMultiple);
+                options.Value.BreakEvenEnabled ? exitPlan.BreakEvenTriggerR : decimal.MaxValue,
+                options.Value.TrailingStopEnabled ? exitPlan.TrailDistanceR : decimal.MaxValue,
+                exitPlan.ProfitLockTriggerR,
+                exitPlan.ProfitLockR);
         var initialRiskPerUnit = Math.Abs(entryPrice - open.StopLoss);
         var favourableMove = (favourable - entryPrice) * multiplier;
-        if (favourableMove >= initialRiskPerUnit * options.Value.BreakEvenTriggerRiskMultiple)
+        if (favourableMove >= initialRiskPerUnit * exitPlan.BreakEvenTriggerR)
         {
             var protectionCosts = PaperTradingCostModel.CalculateOptionCharges([
-                new(PaperOptionTransactionSide.Buy, entryPrice, open.Entry.FilledQuantity),
+                new(PaperOptionTransactionSide.Buy, entryPrice, open.TotalQuantity),
                 new(PaperOptionTransactionSide.Sell, Math.Max(.05m, effectiveStop),
-                    open.Entry.FilledQuantity)]).Total;
+                    open.TotalQuantity)]).Total;
             effectiveStop = PaperProtectiveStopPolicy.ProtectNetProfit(open.Entry.Direction,
                 entryPrice, effectiveStop, open.Entry.FilledQuantity, protectionCosts);
         }
@@ -961,9 +1037,43 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
+                                 exitPlan.ExtendTarget &&
                                  !invalidation.ShouldExit &&
                                  invalidation.Behaviour == SessionBehaviour.Trending &&
                                  open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence;
+        var targetReachedForAddOn = open.Entry.Direction == Direction.Buy
+            ? price >= open.Target : price <= open.Target;
+        if (extendBeyondTarget && targetReachedForAddOn && open.AddOn is null &&
+            open.PartialExit is null && open.Signal.Confidence >= .72m)
+        {
+            var addOnRiskPerUnit = Math.Max(0m, (price - effectiveStop) * multiplier);
+            var addOnDecision = WinnerAddOnPolicy.Evaluate(
+                initialRiskPerUnit <= 0m ? 0m : favourableMove / initialRiskPerUnit,
+                true, false, initialRiskPerUnit * open.Entry.FilledQuantity,
+                addOnRiskPerUnit * optionInstrument.LotSize);
+            if (addOnDecision.Permitted)
+            {
+                var addOnReference = $"{open.Signal.SignalId:N}-ADDON";
+                await broker.SubmitAsync(new(addOnReference, open.Entry.InstrumentId,
+                    open.Entry.Direction, optionInstrument.LotSize, price), cancellationToken);
+                var addOn = await paperControl.ProcessNextFillAsync(addOnReference, cancellationToken);
+                await services.GetRequiredService<IAuditWriter>().WriteAsync(new AuditEntry(
+                    "paper-automation", "WinnerAddOn", "Signal", open.Signal.SignalId.ToString("N"),
+                    "One paper-only winner add-on was filled after 1R and confirmed continuation.",
+                    "{}", JsonSerializer.Serialize(new { price, effectiveStop,
+                        quantity = optionInstrument.LotSize, addOnDecision.Reasons,
+                        liveEligible = false }), open.Signal.SignalId.ToString("N"),
+                    timeProvider.GetUtcNow()), cancellationToken);
+                state.Record("PositionOpen", false,
+                    $"Directional winner add-on filled: {addOn.FilledQuantity} units; no losing position was averaged down.",
+                    tradeState.TradesToday, tradeState.RealisedPnl, unrealised,
+                    open.Signal.SignalId, open.Entry.Direction.ToString(),
+                    open.RemainingQuantity + addOn.FilledQuantity, entryPrice,
+                    effectiveStop, open.Target, optionSymbol: optionInstrument.TradingSymbol,
+                    currentOptionPrice: price);
+                return false;
+            }
+        }
         var exitReason = PaperPositionExitPolicy.Evaluate(open.Entry.Direction, price,
             effectiveStop, open.Target,
             TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh,
@@ -985,11 +1095,11 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var riskPerUnit = Math.Abs(entryPrice - open.StopLoss);
         if (exitReason == PaperExitReason.None && options.Value.PartialProfitEnabled && open.PartialExit is null &&
-            ((open.Entry.Direction == Direction.Buy && price >= entryPrice + riskPerUnit * options.Value.PartialProfitRiskMultiple) ||
-             (open.Entry.Direction == Direction.Sell && price <= entryPrice - riskPerUnit * options.Value.PartialProfitRiskMultiple)))
+            ((open.Entry.Direction == Direction.Buy && price >= entryPrice + riskPerUnit * exitPlan.PartialProfitR) ||
+             (open.Entry.Direction == Direction.Sell && price <= entryPrice - riskPerUnit * exitPlan.PartialProfitR)))
         {
-            var partialQuantity = Math.Clamp((int)Math.Floor(open.Entry.FilledQuantity * options.Value.PartialExitFraction),
-                1, Math.Max(1, open.Entry.FilledQuantity - 1));
+            var partialQuantity = Math.Clamp((int)Math.Floor(open.TotalQuantity * exitPlan.PartialExitFraction),
+                1, Math.Max(1, open.TotalQuantity - 1));
             var partialReference = $"{open.Signal.SignalId:N}-PARTIAL";
             var partialDirection = open.Entry.Direction == Direction.Buy ? Direction.Sell : Direction.Buy;
             await broker.SubmitAsync(new(partialReference, open.Entry.InstrumentId, partialDirection,
@@ -1016,7 +1126,7 @@ internal sealed partial class AutomatedPaperTradingService(
                         : "Monitoring premium protection and confirmed Nifty trend invalidation." :
                     "Market data is stale; new entries are blocked and the paper position cannot be repriced.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
-                open.Entry.Direction.ToString(), open.RemainingQuantity, open.Entry.AverageFillPrice,
+                open.Entry.Direction.ToString(), open.RemainingQuantity, entryPrice,
                 effectiveStop, open.Target, optionSymbol: optionInstrument.TradingSymbol,
                 optionType: optionInstrument.Type.ToString(), optionExpiry: optionInstrument.ExpiryDate,
                 optionStrike: optionInstrument.StrikePrice, optionLotSize: optionInstrument.LotSize,
@@ -1029,17 +1139,20 @@ internal sealed partial class AutomatedPaperTradingService(
         await broker.SubmitAsync(new(exitReference, open.Entry.InstrumentId, exitDirection,
             open.RemainingQuantity, price), cancellationToken);
         var exit = await paperControl.ProcessNextFillAsync(exitReference, cancellationToken);
-        var grossPnl = (exit.AverageFillPrice!.Value - open.Entry.AverageFillPrice.Value) *
+        var grossPnl = (exit.AverageFillPrice!.Value - entryPrice) *
                        open.RemainingQuantity * multiplier;
         if (open.PartialExit?.AverageFillPrice is { } partialPrice)
-            grossPnl += (partialPrice - open.Entry.AverageFillPrice.Value) *
+            grossPnl += (partialPrice - entryPrice) *
                         open.PartialExit.FilledQuantity * multiplier;
         var transactions = new List<PaperOptionTransaction>
         {
             new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
-                PaperOptionTransactionSide.Sell, open.Entry.AverageFillPrice.Value,
+                PaperOptionTransactionSide.Sell, open.Entry.AverageFillPrice.GetValueOrDefault(),
                 open.Entry.FilledQuantity)
         };
+        if (open.AddOn?.AverageFillPrice is { } addOnEntryPrice)
+            transactions.Add(new(open.AddOn.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                PaperOptionTransactionSide.Sell, addOnEntryPrice, open.AddOn.FilledQuantity));
         if (open.PartialExit?.AverageFillPrice is { } bookedPartialPrice)
             transactions.Add(new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Sell :
                 PaperOptionTransactionSide.Buy, bookedPartialPrice, open.PartialExit.FilledQuantity));
@@ -1054,8 +1167,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 cancellationToken))
         {
             db.PaperTradeResults.Add(new PaperTradeResult(Guid.NewGuid(), open.Signal.SignalId,
-                optionInstrument.Id, optionInstrument.TradingSymbol, open.Entry.FilledQuantity,
-                open.Entry.AverageFillPrice.Value, exit.AverageFillPrice.Value, grossPnl,
+                optionInstrument.Id, optionInstrument.TradingSymbol, open.TotalQuantity,
+                entryPrice, exit.AverageFillPrice.Value, grossPnl,
                 estimatedCosts, JsonSerializer.Serialize(costs), pnl, reason, timeProvider.GetUtcNow()));
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -1063,9 +1176,11 @@ internal sealed partial class AutomatedPaperTradingService(
         await writer.WriteAsync(new AuditEntry("paper-automation", "PaperTradeClosed", "Signal",
             open.Signal.SignalId.ToString("N"), reason, "{}", JsonSerializer.Serialize(new
             {
-                entryPrice = open.Entry.AverageFillPrice,
+                entryPrice,
                 exitPrice = exit.AverageFillPrice,
-                quantity = open.Entry.FilledQuantity,
+                quantity = open.TotalQuantity,
+                addOn = open.AddOn is null ? null : new { open.AddOn.AverageFillPrice,
+                    open.AddOn.FilledQuantity },
                 grossPnl,
                 estimatedCosts,
                 costBreakdown = costs,
@@ -1172,19 +1287,19 @@ internal sealed partial class AutomatedPaperTradingService(
         if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
                 value.Market == "nifty" && value.Outcome == outcome, cancellationToken)) return;
 
-        var entry = open.Entry.AverageFillPrice!.Value;
+        var entry = open.AverageEntryPrice;
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
         var initialRisk = Math.Abs(entry - open.StopLoss);
-        var peakGrossPnl = (peakPrice - entry) * open.Entry.FilledQuantity * multiplier;
-        var worstGrossPnl = (worstPrice - entry) * open.Entry.FilledQuantity * multiplier;
-        var currentGrossPnl = (currentPrice - entry) * open.Entry.FilledQuantity * multiplier;
+        var peakGrossPnl = (peakPrice - entry) * open.TotalQuantity * multiplier;
+        var worstGrossPnl = (worstPrice - entry) * open.TotalQuantity * multiplier;
+        var currentGrossPnl = (currentPrice - entry) * open.TotalQuantity * multiplier;
         var remainingUnrealisedPnl = (currentPrice - entry) * open.RemainingQuantity * multiplier;
         var favourableR = initialRisk <= 0m ? 0m : Math.Max(0m,
             (peakPrice - entry) * multiplier / initialRisk);
+        var exitPlan = ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(open.Signal.Regime));
         var stage = effectiveStop == open.StopLoss ? "InitialRisk"
             : (effectiveStop - entry) * multiplier <= 0m ? "BreakEven"
-            : favourableR >= options.Value.BreakEvenTriggerRiskMultiple +
-                              options.Value.TrailingStopRiskMultiple ? "Trailing"
+            : favourableR >= exitPlan.BreakEvenTriggerR + exitPlan.TrailDistanceR ? "Trailing"
             : "ProfitLocked";
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", underlyingInstrumentId,
             minute, outcome, 0m, JsonSerializer.Serialize(new
@@ -1224,15 +1339,21 @@ internal sealed partial class AutomatedPaperTradingService(
             if (row.MarketDataTimestampUtc >= sessionStart && row.MarketDataTimestampUtc < sessionEnd)
                 count++;
             var signal = ToStrategySignal(row);
+            var addOn = await broker.GetOrderAsync($"{row.Id:N}-ADDON", cancellationToken);
+            if (addOn?.State != OrderState.Filled) addOn = null;
             var exit = await broker.GetOrderAsync($"{row.Id:N}-EXIT", cancellationToken);
             if (exit?.State == OrderState.Filled)
             {
                 var multiplier = entry.Direction == Direction.Buy ? 1m : -1m;
                 var partial = await broker.GetOrderAsync($"{row.Id:N}-PARTIAL", cancellationToken);
-                var grossPnl = (exit.AverageFillPrice!.Value - entry.AverageFillPrice!.Value) *
+                var totalQuantity = entry.FilledQuantity + (addOn?.FilledQuantity ?? 0);
+                var averageEntry = ((entry.AverageFillPrice!.Value * entry.FilledQuantity) +
+                    (addOn?.AverageFillPrice.GetValueOrDefault() ?? 0m) *
+                    (addOn?.FilledQuantity ?? 0)) / totalQuantity;
+                var grossPnl = (exit.AverageFillPrice!.Value - averageEntry) *
                                exit.FilledQuantity * multiplier;
                 if (partial?.State == OrderState.Filled && partial.AverageFillPrice is { } bookedPrice)
-                    grossPnl += (bookedPrice - entry.AverageFillPrice.Value) *
+                    grossPnl += (bookedPrice - averageEntry) *
                                 partial.FilledQuantity * multiplier;
                 if (row.MarketDataTimestampUtc >= sessionStart && row.MarketDataTimestampUtc < sessionEnd)
                 {
@@ -1242,6 +1363,10 @@ internal sealed partial class AutomatedPaperTradingService(
                             PaperOptionTransactionSide.Sell, entry.AverageFillPrice.Value,
                             entry.FilledQuantity)
                     };
+                    if (addOn?.AverageFillPrice is { } addOnPrice)
+                        transactions.Add(new(addOn.Direction == Direction.Buy ?
+                            PaperOptionTransactionSide.Buy : PaperOptionTransactionSide.Sell,
+                            addOnPrice, addOn.FilledQuantity));
                     if (partial?.State == OrderState.Filled && partial.AverageFillPrice is { } partialPrice)
                         transactions.Add(new(partial.Direction == Direction.Buy ?
                             PaperOptionTransactionSide.Buy : PaperOptionTransactionSide.Sell,
@@ -1261,10 +1386,11 @@ internal sealed partial class AutomatedPaperTradingService(
                 var protective = ParseProtectivePrices(risk?.SnapshotJson,
                     signal.ProposedStopLoss, signal.ProposedTarget);
                 var partial = await broker.GetOrderAsync($"{row.Id:N}-PARTIAL", cancellationToken);
-                var remaining = entry.FilledQuantity - (partial?.State == OrderState.Filled ? partial.FilledQuantity : 0);
+                var remaining = entry.FilledQuantity + (addOn?.FilledQuantity ?? 0) -
+                    (partial?.State == OrderState.Filled ? partial.FilledQuantity : 0);
                 if (remaining > 0)
                     open.Add(new OpenTrade(signal, entry, protective.StopLoss, protective.Target,
-                        remaining, partial?.State == OrderState.Filled ? partial : null));
+                        remaining, partial?.State == OrderState.Filled ? partial : null, addOn));
             }
         }
         var orderedClosed = closedToday.OrderBy(value => value.ExitAtUtc).ToArray();
@@ -1401,9 +1527,9 @@ internal sealed partial class AutomatedPaperTradingService(
         automationState.RecordPortfolioRisk(
             tradeState.OpenPositions.Count,
             tradeState.OpenPositions.Sum(open =>
-                open.Entry.AverageFillPrice.GetValueOrDefault() * open.RemainingQuantity),
+                open.AverageEntryPrice * open.RemainingQuantity),
             tradeState.OpenPositions.Sum(open =>
-                Math.Abs(open.Entry.AverageFillPrice.GetValueOrDefault() - open.StopLoss) *
+                Math.Abs(open.AverageEntryPrice - open.StopLoss) *
                 open.RemainingQuantity),
             Math.Max(0m, -(tradeState.RealisedPnl + Math.Min(0m, unrealised))),
             maximumDailyLoss,
@@ -1449,7 +1575,21 @@ internal sealed partial class AutomatedPaperTradingService(
     }
 
     private sealed record OpenTrade(StrategySignal Signal, BrokerOrderSnapshot Entry,
-        decimal StopLoss, decimal Target, int RemainingQuantity, BrokerOrderSnapshot? PartialExit);
+        decimal StopLoss, decimal Target, int RemainingQuantity, BrokerOrderSnapshot? PartialExit,
+        BrokerOrderSnapshot? AddOn)
+    {
+        public int TotalQuantity => Entry.FilledQuantity + (AddOn?.FilledQuantity ?? 0);
+        public decimal AverageEntryPrice
+        {
+            get
+            {
+                var addOnValue = AddOn?.AverageFillPrice is { } price
+                    ? price * AddOn.FilledQuantity : 0m;
+                return (Entry.AverageFillPrice!.Value * Entry.FilledQuantity + addOnValue) /
+                       TotalQuantity;
+            }
+        }
+    }
     private sealed record RebuiltTradeState(int TradesToday, decimal RealisedPnl,
         int ConsecutiveLosses, DateTimeOffset? LastLossAtUtc, IReadOnlyList<OpenTrade> OpenPositions);
 

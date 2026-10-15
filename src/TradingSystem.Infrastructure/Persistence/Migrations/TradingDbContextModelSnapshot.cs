@@ -660,6 +660,10 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
+                    b.Property<decimal>("CostsPaid")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
                     b.Property<int>("Direction")
                         .HasColumnType("integer");
 
@@ -681,9 +685,19 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
 
+                    b.Property<int>("PartialExitQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("PartialExitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
                     b.Property<decimal>("RealisedPnl")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
+
+                    b.Property<int>("RemainingQuantity")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Status")
                         .IsRequired()

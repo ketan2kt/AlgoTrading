@@ -162,6 +162,8 @@ public sealed class TradingDbContext(
             entity.Property(value => value.StopLoss).HasPrecision(18, 4);
             entity.Property(value => value.Target).HasPrecision(18, 4);
             entity.Property(value => value.RealisedPnl).HasPrecision(18, 4);
+            entity.Property(value => value.PartialExitPrice).HasPrecision(18, 4);
+            entity.Property(value => value.CostsPaid).HasPrecision(18, 4);
             entity.HasIndex(value => new { value.Market, value.Status, value.OpenedAtUtc });
         });
         builder.Entity<MarketStrategyAudit>(entity =>
