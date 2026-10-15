@@ -13,9 +13,11 @@ Dispatch was accepted; completion is UNVERIFIED per the no-poll deployment proce
 Run `38720820304` later failed in ZipDeploy. The application build and tests were not
 the cause: Azure reported that an App Service management operation restarted the SCM
 container while OneDeploy was active. The workflow's 45-second delay did not prevent
-the delayed restart. The corrective workflow change deploys the package synchronously
-before enabling migration mode, so the settings-triggered restart can no longer race
-ZipDeploy. A single retry is pending after this workflow-only fix is committed and pushed.
+the delayed restart. Commit `9bd68e9` changes the workflow to deploy the package
+synchronously before enabling migration mode, so the settings-triggered restart can no
+longer race ZipDeploy. One corrected retry was dispatched:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/38726518202
+Dispatch was accepted; completion is UNVERIFIED.
 
 - Added a shared auditable professional plan: regime-aware participation, after-cost
   reward/risk, liquidity, expiry, Greek/IV availability, calibrated confidence tiers,
@@ -140,9 +142,20 @@ No commit/push/deployment performed. Use docs/routine-work.md and scripts/tasks.
 
 ## Next steps
 
-The combined framework is already committed, pushed and dispatched once. Do not dispatch
-again unless the user explicitly authorizes another deployment. Workflow completion remains
-unverified unless the user separately asks for status. Expose/read the
+The combined framework is committed and pushed. Initial deployment run 38720820304
+failed because an App Service settings mutation restarted Kudu during ZipDeploy. The
+workflow fix in commit 9bd68e9 moved that mutation after synchronous package deployment;
+retry 38726518202 completed successfully. User-requested production verification then
+found that neither Nifty nor Sensex renders its chart/workspace data. Public readiness is
+HTTP 200, but App Service runtime logs show PostgreSQL 42703 failures because
+`trading.market_paper_positions.CostsPaid` does not exist. Migration
+20261015163000_AddProfessionalPositionManagement is in the deployed package but did not
+run. The workflow's migration wait can falsely accept the already-running new build before
+the `ApplyMigrations=true` settings restart occurs, then immediately set it false again.
+The readiness health check now reports unhealthy while EF migrations are pending, so the
+existing deployment workflow cannot complete its migration wait until the new schema is
+actually applied. The focused change compiles locally; the user authorized immediate
+deployment without further local PostgreSQL setup. Expose/read the
 exact live eligibility and skip reason if deeper confirmation is needed. Do not replay a
 closed trade as part of diagnosis. The earlier observation freeze is cancelled. The 14
 October choppy-session evidence and 15 October directional-session evidence are recorded
