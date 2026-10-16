@@ -92,6 +92,17 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
+    public void PersistentDirectionalPaperSourcesAreNeverLiveEligible()
+    {
+        const string source = "PaperOnly|persistent-directional-thesis-v1|nifty";
+
+        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(
+            source, allowResearchSources: true));
+        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource(
+            "sensex", "Active", source, allowResearchSources: true));
+    }
+
+    [Fact]
     public void ReconciliationIgnoresUnmanagedBrokerPositions()
     {
         var unmanagedInstrument = Guid.NewGuid();

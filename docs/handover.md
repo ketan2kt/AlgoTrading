@@ -1,6 +1,27 @@
 # Current handover
 
-Updated: 2026-10-15 (Asia/Calcutta).
+Updated: 2026-10-16 (Asia/Calcutta).
+
+## Persistent directional paper-entry integration
+
+Midday production review on 16 October showed healthy/fresh Nifty and Sensex feeds but
+zero trades. Nifty repeatedly recognised the directional move only after legacy timing,
+location and `MatureTrend` gates considered it extended. Sensex's persistent directional
+challenger recorded multiple `WouldEnter=true` pullback windows but was hard-coded
+`ShadowOnly` until 22 October.
+
+The missing integration is now implemented locally for both markets. A completed
+persistent-thesis pullback window can create a bounded structural paper entry even when
+the older raw-breakout timing/location gates would reject it. These positions use a
+`PaperOnly|persistent-directional-thesis-v1|...` source, remain subject to fresh data,
+one-active-position/capacity, structural re-entry, option routing, risk, cost and
+professional-plan checks, and are explicitly excluded from automatic live discovery even
+when general research sources are enabled. Sensex retains its daily research-entry cap.
+
+Checks: focused directional tests 6/6, live-discovery contracts 13/13, full unit suite
+269/269, full contracts 67/67, architecture 2/2, integration 16 passed with 3 external
+PostgreSQL tests skipped. Infrastructure Release build and focused `git diff --check`
+passed. Deployment is authorized but not yet dispatched at this handover update.
 
 ## Professional trade framework implementation
 

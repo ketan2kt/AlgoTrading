@@ -100,6 +100,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var sensexFast = 0m;
         var sensexSlow = 0m;
         var sensexRelativeVolume = 0m;
+        PersistentDirectionalThesisV1? persistentThesis = null;
         if (market == TradingMarketCatalog.Sensex)
         {
             var closes = candles.Select(value => value.Close).ToArray();
@@ -138,9 +139,8 @@ internal sealed partial class MultiMarketPaperTradingService(
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
-            // This challenger is deliberately observation-only. It persists a multi-candle
-            // directional thesis for replay without changing the Sensex champion decision.
-            await DirectionalThesisShadowAudit.RecordAsync(db, market.Code, underlying.Id,
+            // Persist the multi-candle thesis before evaluating its strictly paper-only entry policy.
+            persistentThesis = await DirectionalThesisShadowAudit.RecordAsync(db, market.Code, underlying.Id,
                 latest.OpenTimeUtc, priceBars, vwapV2,
                 openingV2.Max(value => value.High), openingV2.Min(value => value.Low),
                 cancellationToken);
@@ -169,9 +169,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                 JsonSerializer.Serialize(snapshotV2)));
             await db.SaveChangesAsync(cancellationToken);
         }
-        // Only explicitly qualified Sensex challengers may become paper-only research positions.
-        // AutomaticLiveExecutionService excludes the Research| prefix from live discovery.
+        // Only explicitly qualified Sensex challengers may become paper-only positions.
         var paperResearchEntry = false;
+        var persistentDirectionalEntry = false;
         if (market == TradingMarketCatalog.Sensex && !sensexConfirmationReady)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
@@ -179,6 +179,28 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ["Fresh Sensex futures volume/VWAP confirmation is unavailable; entries fail closed."],
                 cancellationToken);
             return;
+        }
+        if (market == TradingMarketCatalog.Sensex && persistentThesis is not null)
+        {
+            var persistentEntry = PersistentDirectionalPaperEntryPolicyV1.Evaluate(
+                priceBars, persistentThesis);
+            var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                value.Market == market.Code && value.Status == "Active", cancellationToken);
+            var persistentEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
+                value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
+                value.Strategy.StartsWith(PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix),
+                cancellationToken);
+            if (!hasActivePosition &&
+                persistentEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
+                persistentEntry.Direction is not null &&
+                (decision.Direction is null || decision.Direction == persistentEntry.Direction))
+            {
+                decision = new(persistentEntry.Direction.Value, persistentEntry.Confidence,
+                    PersistentDirectionalPaperEntryPolicyV1.StrategyCode(market.Code),
+                    persistentEntry.Reasons);
+                paperResearchEntry = true;
+                persistentDirectionalEntry = true;
+            }
         }
         if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
         {
@@ -196,13 +218,13 @@ internal sealed partial class MultiMarketPaperTradingService(
                 value.Market == market.Code && value.Status == "Active", cancellationToken);
             var researchDecision = SensexPaperResearchEntryPolicy.Evaluate(early.Direction,
                 early.Confidence, lifecycle!, researchEntries, hasActivePosition);
-            if (researchDecision.Permitted)
+            if (!paperResearchEntry && researchDecision.Permitted)
             {
                 decision = new(early.Direction!.Value, early.Confidence,
                     "Sensex controlled early pullback research", early.Reasons);
                 paperResearchEntry = true;
             }
-            else if (early.Direction is not null)
+            else if (!paperResearchEntry && early.Direction is not null)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "PaperResearchCandidateRejected", early.Confidence,
@@ -481,7 +503,8 @@ internal sealed partial class MultiMarketPaperTradingService(
             var correlatedNiftyExposure = await HasActiveNiftyExposureAsync(db,
                 decision.Direction.Value, sessionStartUtc, cancellationToken);
             professionalPlan = ProfessionalTradeFramework.Assess(new(
-                market.Code, ProfessionalTradeFramework.Map(marketStateV2), decision.Confidence,
+                market.Code, persistentDirectionalEntry ? ProfessionalTradeRegime.Directional :
+                    ProfessionalTradeFramework.Map(marketStateV2), decision.Confidence,
                 sensexRelativeVolume, adaptiveSetup?.RoomToOpposingLevelAtr, spreadPercent,
                 quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
                 quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
@@ -521,7 +544,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                 sameSide.Count(x => x.Status == "Active"),
                 sameSide.Count(x => x.Status != "Active" && x.RealisedPnl < 0));
         }
-        var recordedStrategy = paperResearchEntry ? $"Research|{decision.Strategy}" : decision.Strategy;
+        var recordedStrategy = persistentDirectionalEntry
+            ? decision.Strategy
+            : paperResearchEntry ? $"Research|{decision.Strategy}" : decision.Strategy;
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
             execution.Id, market == TradingMarketCatalog.NaturalGas
                 ? $"Manual execution alert · {decision.Strategy}" : recordedStrategy,

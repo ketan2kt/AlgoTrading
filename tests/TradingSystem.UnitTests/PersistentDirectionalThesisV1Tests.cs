@@ -31,8 +31,8 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.True(result.OpeningRangeBreakHeld);
         Assert.True(result.WouldEnter);
         Assert.Equal(DirectionalThesisPhaseV1.EntryWindow, result.Phase);
-        Assert.Equal("ShadowOnly", result.Status);
-        Assert.Equal(new DateOnly(2026, 10, 22), result.ObservationOnlyUntil);
+        Assert.Equal("PaperEligible", result.Status);
+        Assert.Equal(new DateOnly(2026, 10, 16), result.PaperEligibleFrom);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class PersistentDirectionalThesisV1Tests
                 104.3m - index * .4m, 104.6m - index * .4m)).ToList();
         bars[^1] = Bar(14, 99.0m, 99.8m, 98.9m, 99.6m);
         var previous = new PersistentDirectionalThesisV1(
-            PersistentDirectionalThesisAnalyzerV1.Version, "ShadowOnly",
+            PersistentDirectionalThesisAnalyzerV1.Version, "PaperEligible",
             new DateOnly(2026, 10, 22), Direction.Sell, .75m,
             DirectionalThesisPhaseV1.Maintained, 9, 2, true, false, false, []);
 
@@ -65,7 +65,7 @@ public sealed class PersistentDirectionalThesisV1Tests
         bars.Add(Bar(13, 100.8m, 102m, 100.6m, 101.8m));
         bars.Add(Bar(14, 101.8m, 104m, 101.7m, 103.8m));
         var previous = new PersistentDirectionalThesisV1(
-            PersistentDirectionalThesisAnalyzerV1.Version, "ShadowOnly",
+            PersistentDirectionalThesisAnalyzerV1.Version, "PaperEligible",
             new DateOnly(2026, 10, 22), Direction.Sell, .80m,
             DirectionalThesisPhaseV1.Maintained, 10, 3, true, false, false, []);
 
@@ -91,6 +91,46 @@ public sealed class PersistentDirectionalThesisV1Tests
 
         Assert.Null(result.Direction);
         Assert.False(result.WouldEnter);
+    }
+
+    [Fact]
+    public void CompletedPersistentPullbackCreatesBoundedPaperOnlyEntry()
+    {
+        var bars = Enumerable.Range(0, 15).Select(index =>
+        {
+            var open = 101m - index * .05m;
+            var close = open - .03m;
+            return Bar(index, open, open + .10m, close - .10m, close);
+        }).ToArray();
+        var thesis = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version,
+            PersistentDirectionalThesisAnalyzerV1.Status,
+            PersistentDirectionalThesisAnalyzerV1.PaperEligibleFrom,
+            Direction.Sell, .71m, DirectionalThesisPhaseV1.EntryWindow,
+            10, 2, false, false, true, ["Persistent bearish thesis."]);
+
+        var result = PersistentDirectionalPaperEntryPolicyV1.Evaluate(bars, thesis);
+
+        Assert.Equal(Direction.Sell, result.Direction);
+        Assert.Equal(.71m, result.Confidence);
+        Assert.True(result.StructuralStop > bars[^1].Close);
+        Assert.True(result.Target < bars[^1].Close);
+        Assert.StartsWith("PaperOnly|", PersistentDirectionalPaperEntryPolicyV1.StrategyCode("nifty"));
+    }
+
+    [Fact]
+    public void ThesisWithoutCompletedWindowCannotCreatePaperEntry()
+    {
+        var bars = Enumerable.Range(0, 15).Select(index =>
+            Bar(index, 100m, 100.4m, 99.6m, 99.9m)).ToArray();
+        var thesis = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version,
+            PersistentDirectionalThesisAnalyzerV1.Status,
+            PersistentDirectionalThesisAnalyzerV1.PaperEligibleFrom,
+            Direction.Sell, .70m, DirectionalThesisPhaseV1.Maintained,
+            9, 1, false, false, false, []);
+
+        Assert.Null(PersistentDirectionalPaperEntryPolicyV1.Evaluate(bars, thesis).Direction);
     }
 
     private static StrategyPriceBar Bar(int minute, decimal open, decimal high,

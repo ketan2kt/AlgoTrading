@@ -164,6 +164,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
             .Where(value => value.Market == TradingMarketCatalog.Sensex.Code && value.Status == "Active" &&
+                            !value.Strategy.StartsWith("PaperOnly|") &&
                             (options.Value.AllowResearchSources ||
                              !value.Strategy.StartsWith("Research|")) &&
                             value.OpenedAtUtc >= armedAtUtc && value.OpenedAtUtc >= cutoff)
@@ -299,10 +300,12 @@ internal sealed partial class AutomaticLiveExecutionService(
     internal static bool IsSensexPaperSource(string market, string status, string strategy = "",
         bool allowResearchSources = false) =>
         market == TradingMarketCatalog.Sensex.Code && status == "Active" &&
+        !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) &&
         (allowResearchSources || !strategy.StartsWith("Research|", StringComparison.Ordinal));
 
     internal static bool IsNiftyPaperSource(string? strategy, bool allowResearchSources = false) =>
         !string.IsNullOrWhiteSpace(strategy) &&
+        !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) &&
         (allowResearchSources || !strategy.StartsWith("Research|", StringComparison.Ordinal));
 
     internal static BrokerReconciliationResult ReconcileManagedPositions(

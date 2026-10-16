@@ -15,7 +15,7 @@ public enum DirectionalThesisPhaseV1
 public sealed record PersistentDirectionalThesisV1(
     string Version,
     string Status,
-    DateOnly ObservationOnlyUntil,
+    DateOnly PaperEligibleFrom,
     Direction? Direction,
     decimal Confidence,
     DirectionalThesisPhaseV1 Phase,
@@ -26,16 +26,76 @@ public sealed record PersistentDirectionalThesisV1(
     bool WouldEnter,
     IReadOnlyList<string> Evidence);
 
+public sealed record PersistentDirectionalPaperEntryV1(
+    Direction? Direction,
+    decimal Confidence,
+    decimal StructuralStop,
+    decimal Target,
+    IReadOnlyList<string> Reasons);
+
 /// <summary>
-/// Observation-only challenger that carries a directional thesis across completed candles.
-/// It never emits an executable StrategySignal and therefore cannot place paper or live orders.
+/// Converts a completed persistent-thesis pullback window into a paper-only candidate.
+/// The thesis already supplies multi-candle persistence and anti-chase checks; this policy
+/// adds a bounded structural stop and never produces a live-eligible strategy source.
+/// </summary>
+public static class PersistentDirectionalPaperEntryPolicyV1
+{
+    public const string StrategyPrefix = "PaperOnly|persistent-directional-thesis-v1|";
+
+    public static string StrategyCode(string market) => StrategyPrefix + market;
+
+    public static PersistentDirectionalPaperEntryV1 Evaluate(
+        IReadOnlyList<StrategyPriceBar> source, PersistentDirectionalThesisV1 thesis)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(thesis);
+        if (thesis.Status != PersistentDirectionalThesisAnalyzerV1.Status ||
+            !thesis.WouldEnter || thesis.Direction is null ||
+            thesis.Phase != DirectionalThesisPhaseV1.EntryWindow)
+            return Reject("The persistent directional thesis has no completed entry window.");
+        if (source.Count < 15)
+            return Reject("At least 15 completed candles are required.");
+
+        var bars = source.TakeLast(15).ToArray();
+        var recent = bars.TakeLast(5).ToArray();
+        var latest = recent[^1];
+        var atr = Atr(bars);
+        if (atr <= 0m) return Reject("ATR is unavailable.");
+
+        var stop = thesis.Direction == Direction.Buy
+            ? Math.Min(recent.Min(value => value.Low), latest.Close - atr * .70m)
+            : Math.Max(recent.Max(value => value.High), latest.Close + atr * .70m);
+        var risk = Math.Abs(latest.Close - stop);
+        if (risk < atr * .35m || risk > atr * 1.50m)
+            return Reject($"Structural risk {risk / atr:F2} ATR is outside the 0.35-1.50 ATR paper-entry band.");
+
+        var target = thesis.Direction == Direction.Buy
+            ? latest.Close + risk * 1.80m
+            : latest.Close - risk * 1.80m;
+        return new(thesis.Direction, thesis.Confidence, stop, target,
+            [.. thesis.Evidence,
+             "Persistent thesis completed a failed-countertrend pullback entry window.",
+             "Paper-only source: live execution is explicitly prohibited."]);
+    }
+
+    private static PersistentDirectionalPaperEntryV1 Reject(string reason) =>
+        new(null, 0m, 0m, 0m, [reason]);
+
+    private static decimal Atr(StrategyPriceBar[] bars) => bars.Skip(1)
+        .Select((bar, index) => Math.Max(bar.High - bar.Low,
+            Math.Max(Math.Abs(bar.High - bars[index].Close), Math.Abs(bar.Low - bars[index].Close))))
+        .DefaultIfEmpty(0m).Average();
+}
+
+/// <summary>
+/// Persistent multi-candle thesis used by the explicitly paper-only entry policy.
 /// </summary>
 public static class PersistentDirectionalThesisAnalyzerV1
 {
     public const string Version = "persistent-directional-thesis-v1";
     public const string AuditOutcome = "DirectionalThesisChallenger:v1";
-    public const string Status = "ShadowOnly";
-    public static readonly DateOnly ObservationOnlyUntil = new(2026, 10, 22);
+    public const string Status = "PaperEligible";
+    public static readonly DateOnly PaperEligibleFrom = new(2026, 10, 16);
 
     public static PersistentDirectionalThesisV1 Analyze(
         IReadOnlyList<StrategyPriceBar> source,
@@ -234,7 +294,7 @@ public static class PersistentDirectionalThesisAnalyzerV1
     private static PersistentDirectionalThesisV1 Result(Direction? direction,
         decimal confidence, DirectionalThesisPhaseV1 phase, int alignedBars,
         int failedPullbacks, bool rangeBreak, bool changeOfCharacter, bool wouldEnter,
-        IReadOnlyList<string> evidence) => new(Version, Status, ObservationOnlyUntil,
+        IReadOnlyList<string> evidence) => new(Version, Status, PaperEligibleFrom,
         direction, decimal.Round(Math.Clamp(confidence, 0m, .95m), 4), phase,
         alignedBars, failedPullbacks, rangeBreak, changeOfCharacter, wouldEnter, evidence);
 }

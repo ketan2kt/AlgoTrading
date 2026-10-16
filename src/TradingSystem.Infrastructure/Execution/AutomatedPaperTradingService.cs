@@ -404,7 +404,7 @@ internal sealed partial class AutomatedPaperTradingService(
             vwap, fast, slow);
         // Observation-only challenger. It records a persistent multi-candle thesis but
         // cannot create or modify a StrategySignal, paper position, risk decision or order.
-        await DirectionalThesisShadowAudit.RecordAsync(db, "nifty", instrument.Id,
+        var persistentThesis = await DirectionalThesisShadowAudit.RecordAsync(db, "nifty", instrument.Id,
             candleDecisionTime, strategyContext.RecentCandles, vwap,
             openingRangeHigh, openingRangeLow, cancellationToken);
         if (signal is null)
@@ -481,6 +481,23 @@ internal sealed partial class AutomatedPaperTradingService(
                 }
             }
         }
+        var persistentEntry = PersistentDirectionalPaperEntryPolicyV1.Evaluate(
+            strategyContext.RecentCandles, persistentThesis);
+        if (tradeState.OpenPositions.Count == 0 && persistentEntry.Direction is not null &&
+            (signal is null || signal.Direction == persistentEntry.Direction))
+        {
+            var risk = Math.Abs(latestCandle.Close - persistentEntry.StructuralStop);
+            signal = new StrategySignal(Guid.NewGuid(),
+                PersistentDirectionalPaperEntryPolicyV1.StrategyCode("nifty"),
+                PersistentDirectionalThesisAnalyzerV1.Version, instrument.Id,
+                persistentEntry.Direction.Value, SignalEntryType.Market, latestCandle.Close,
+                persistentEntry.StructuralStop, persistentEntry.Target,
+                risk <= 0m ? 0m : Math.Abs(persistentEntry.Target - latestCandle.Close) / risk,
+                persistentEntry.Confidence, regime.Regime, persistentEntry.Reasons, [],
+                candleDecisionTime, candleDecisionTime.AddSeconds(
+                    marketOptions.Value.CandleIntervalSeconds * 2));
+            paperResearchEntry = true;
+        }
         var marketStateV2 = preEntryStateV2;
         var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(
             candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
@@ -533,9 +550,11 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var persistentDirectionalEntry = signal.StrategyId.StartsWith(
+            PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix, StringComparison.Ordinal);
         var firstEntryTiming = FirstEntryTimingPolicy.Evaluate(strategyContext.RecentCandles,
             signal.Direction);
-        if (!firstEntryTiming.Permitted)
+        if (!firstEntryTiming.Permitted && !persistentDirectionalEntry)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -582,7 +601,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
             strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
-        if (!location.Permitted)
+        if (!location.Permitted && !persistentDirectionalEntry)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -790,7 +809,8 @@ internal sealed partial class AutomatedPaperTradingService(
                       : openInstrument.Type == InstrumentType.PutOption)
             select openPosition.Id).AnyAsync(cancellationToken);
         var professionalPlan = ProfessionalTradeFramework.Assess(new(
-            "nifty", ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
+            "nifty", persistentDirectionalEntry ? ProfessionalTradeRegime.Directional :
+                ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
             relativeVolume, shadowStructure.RoomToRiskRatio, spreadPercent,
             quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
             quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
