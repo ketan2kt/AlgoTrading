@@ -62,12 +62,15 @@ public static class PersistentDirectionalPaperEntryPolicyV1
         var atr = Atr(bars);
         if (atr <= 0m) return Reject("ATR is unavailable.");
 
-        var stop = thesis.Direction == Direction.Buy
+        var structuralStop = thesis.Direction == Direction.Buy
             ? Math.Min(recent.Min(value => value.Low), latest.Close - atr * .70m)
             : Math.Max(recent.Max(value => value.High), latest.Close + atr * .70m);
+        var structuralRisk = Math.Abs(latest.Close - structuralStop);
+        var boundedRisk = Math.Clamp(structuralRisk, atr * .35m, atr * 1.50m);
+        var stop = thesis.Direction == Direction.Buy
+            ? latest.Close - boundedRisk
+            : latest.Close + boundedRisk;
         var risk = Math.Abs(latest.Close - stop);
-        if (risk < atr * .35m || risk > atr * 1.50m)
-            return Reject($"Structural risk {risk / atr:F2} ATR is outside the 0.35-1.50 ATR paper-entry band.");
 
         var target = thesis.Direction == Direction.Buy
             ? latest.Close + risk * 1.80m
@@ -75,6 +78,9 @@ public static class PersistentDirectionalPaperEntryPolicyV1
         return new(thesis.Direction, thesis.Confidence, stop, target,
             [.. thesis.Evidence,
              "Persistent thesis completed a failed-countertrend pullback entry window.",
+             structuralRisk == boundedRisk
+                 ? $"Structural stop risk is {risk / atr:F2} ATR."
+                 : $"Paper stop risk was bounded from {structuralRisk / atr:F2} to {risk / atr:F2} ATR instead of rejecting the entry.",
              "Paper-only source: live execution is explicitly prohibited."]);
     }
 

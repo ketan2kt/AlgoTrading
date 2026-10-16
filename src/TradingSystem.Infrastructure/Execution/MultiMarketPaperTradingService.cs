@@ -367,7 +367,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                 select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
             var reentry = StructuralReentryPolicy.Evaluate(priceBars,
                 decision.Direction.Value, priorSameDirectionExit);
-            if (!reentry.Permitted)
+            // The persistent paper thesis already proves a completed failed-countertrend
+            // pullback, so do not require the same reset twice.
+            if (!reentry.Permitted && !persistentDirectionalEntry)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);

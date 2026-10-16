@@ -133,6 +133,25 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.Null(PersistentDirectionalPaperEntryPolicyV1.Evaluate(bars, thesis).Direction);
     }
 
+    [Fact]
+    public void BoundsWideStructuralRiskInsteadOfRejectingPaperEntry()
+    {
+        var bars = Enumerable.Range(0, 15).Select(index =>
+            Bar(index, 100m, 101m, 99m, 100m)).ToArray();
+        bars[^5] = bars[^5] with { High = 120m };
+        var thesis = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version,
+            PersistentDirectionalThesisAnalyzerV1.Status,
+            PersistentDirectionalThesisAnalyzerV1.PaperEligibleFrom,
+            Direction.Sell, .70m, DirectionalThesisPhaseV1.EntryWindow,
+            8, 1, true, false, true, ["test"]);
+
+        var result = PersistentDirectionalPaperEntryPolicyV1.Evaluate(bars, thesis);
+
+        Assert.Equal(Direction.Sell, result.Direction);
+        Assert.Contains(result.Reasons, value => value.Contains("bounded"));
+    }
+
     private static StrategyPriceBar Bar(int minute, decimal open, decimal high,
         decimal low, decimal close) => new(
         new DateTimeOffset(2026, 10, 8, 3, 45, 0, TimeSpan.Zero).AddMinutes(minute),

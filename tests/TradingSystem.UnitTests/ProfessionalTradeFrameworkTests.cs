@@ -55,6 +55,19 @@ public sealed class ProfessionalTradeFrameworkTests
     }
 
     [Fact]
+    public void LowAfterCostRewardRiskIsAuditedWithoutBlockingPaperParticipation()
+    {
+        var plan = ProfessionalTradeFramework.Assess(Input(
+            ProfessionalTradeRegime.Directional, .70m, 1m, 1.5m, true) with
+        {
+            AfterCostRewardToRisk = .88m
+        });
+
+        Assert.True(plan.Permitted);
+        Assert.Contains(plan.Reasons, value => value.Contains("Advisory") && value.Contains("0.88"));
+    }
+
+    [Fact]
     public void QuantityScalingPreservesWholeLots()
     {
         Assert.Equal(150, ProfessionalTradeFramework.ScaleQuantity(250, 50, .65m));

@@ -10,18 +10,26 @@ location and `MatureTrend` gates considered it extended. Sensex's persistent dir
 challenger recorded multiple `WouldEnter=true` pullback windows but was hard-coded
 `ShadowOnly` until 22 October.
 
-The missing integration is now implemented locally for both markets. A completed
-persistent-thesis pullback window can create a bounded structural paper entry even when
-the older raw-breakout timing/location gates would reject it. These positions use a
-`PaperOnly|persistent-directional-thesis-v1|...` source, remain subject to fresh data,
-one-active-position/capacity, structural re-entry, option routing, risk, cost and
-professional-plan checks, and are explicitly excluded from automatic live discovery even
-when general research sources are enabled. Sensex retains its daily research-entry cap.
+The integration was deployed in commit `0827332`:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/38858953616
+The run completed successfully and production showed the new `PaperEligible` thesis,
+including `WouldEnter=true` windows. No trades were created because the later professional
+plan required at least 1.15 after-cost reward/risk while the configured option geometry
+produced about 0.88-0.93 after costs. This was a deterministic contradiction.
 
-Checks: focused directional tests 6/6, live-discovery contracts 13/13, full unit suite
-269/269, full contracts 67/67, architecture 2/2, integration 16 passed with 3 external
-PostgreSQL tests skipped. Infrastructure Release build and focused `git diff --check`
-passed. Deployment is authorized but not yet dispatched at this handover update.
+A local correction now keeps sub-1.15 after-cost reward/risk as audit telemetry rather
+than a hard paper-entry veto. The persistent paper source also bounds an outlying
+structural stop to its 0.35-1.50 ATR research band instead of rejecting the entry, and
+does not require the same pullback proof again through the legacy structural-reentry
+gate. Fresh data, option availability/quote validity, valid price geometry, portfolio
+risk, capacity, daily caps and kill-switch controls remain. `PaperOnly|...` remains
+excluded from automatic live discovery.
+
+Checks: changed unit-test project builds in Release with zero warnings/errors, including
+the new regression tests. Local VSTest execution is currently blocked by a machine-level
+testhost connection timeout (testhost failed to connect after both 90 and 180 seconds),
+so the tests have compiled but not executed in this correction. No commit, push or
+deployment has been performed for the correction yet.
 
 ## Professional trade framework implementation
 

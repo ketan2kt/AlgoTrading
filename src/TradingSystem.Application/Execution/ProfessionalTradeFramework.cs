@@ -53,8 +53,13 @@ public static class ProfessionalTradeFramework
             reasons.Add("No trade: the regime is unavailable or noisy chop.");
         if (input.Regime == ProfessionalTradeRegime.Exhausted)
             reasons.Add("No trade: the directional move is already mature or exhausted.");
+        // Entry services already enforce valid stop/target geometry and portfolio risk.
+        // Keep this estimate as research telemetry instead of a second hard veto: the
+        // current option plans are close to 1R before costs, so requiring 1.15R after
+        // costs would make every otherwise-valid paper entry unreachable.
         if (input.AfterCostRewardToRisk < 1.15m)
-            reasons.Add($"No trade: after-cost reward/risk {input.AfterCostRewardToRisk:F2} is below 1.15.");
+            reasons.Add($"Advisory: after-cost reward/risk {input.AfterCostRewardToRisk:F2} is below 1.15; " +
+                        "paper eligibility is retained for observation.");
         if (input.SpreadPercent is > 1.50m)
             reasons.Add($"No trade: option spread {input.SpreadPercent:F2}% exceeds 1.50%.");
         if (input.Volume is > 0 and < 100)

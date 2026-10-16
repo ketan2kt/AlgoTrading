@@ -578,7 +578,9 @@ internal sealed partial class AutomatedPaperTradingService(
             select (DateTimeOffset?)result.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
         var reentryDecision = StructuralReentryPolicy.Evaluate(strategyContext.RecentCandles,
             signal.Direction, priorSameDirectionExit);
-        if (!reentryDecision.Permitted)
+        // The persistent paper thesis already requires a completed failed-countertrend
+        // pullback. Applying the legacy reset again duplicates the same proof.
+        if (!reentryDecision.Permitted && !persistentDirectionalEntry)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
