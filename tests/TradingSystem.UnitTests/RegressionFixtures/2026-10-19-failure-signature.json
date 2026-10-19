@@ -1,0 +1,37 @@
+{
+  "sessionDate": "2026-10-19",
+  "provenance": "Production failure signature reconstructed from the 19 October report. Durations and policy states are regression inputs; this is not a tick-complete market replay.",
+  "nifty": {
+    "entriesToday": 4,
+    "consecutiveLosses": 3,
+    "maximumEntries": 4,
+    "directionalReserve": 2,
+    "maximumConsecutiveLosses": 2,
+    "lossCooldownMinutes": 30,
+    "lastLossMinutesAgo": 31,
+    "earlyStopEvents": [
+      { "secondsAfterEntry": 27, "adverseRiskMultiple": 1.05 },
+      { "secondsAfterEntry": 46, "adverseRiskMultiple": 1.10 },
+      { "secondsAfterEntry": 68, "adverseRiskMultiple": 1.15 }
+    ]
+  },
+  "sensex": {
+    "rapidOppositeExitMinutesAgo": 25,
+    "completedResetMinutesAgo": 30
+  },
+  "heroZero": {
+    "baselineBars": [
+      { "open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0 },
+      { "open": 100.2, "high": 105.2, "low": 99.2, "close": 103.2 },
+      { "open": 100.4, "high": 105.4, "low": 99.4, "close": 103.4 },
+      { "open": 100.6, "high": 105.6, "low": 99.6, "close": 103.6 },
+      { "open": 100.8, "high": 105.8, "low": 99.8, "close": 103.8 },
+      { "open": 101.0, "high": 106.0, "low": 100.0, "close": 104.0 },
+      { "open": 101.2, "high": 106.2, "low": 100.2, "close": 104.2 },
+      { "open": 101.4, "high": 106.4, "low": 100.4, "close": 104.4 },
+      { "open": 101.6, "high": 106.6, "low": 100.6, "close": 104.6 }
+    ],
+    "weakExpansion": { "open": 102.0, "high": 107.0, "low": 101.0, "close": 106.0 },
+    "decisiveExpansion": { "open": 103.0, "high": 112.0, "low": 102.0, "close": 111.0 }
+  }
+}

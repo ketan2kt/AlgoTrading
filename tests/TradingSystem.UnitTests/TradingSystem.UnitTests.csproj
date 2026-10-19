@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\TradingSystem.Infrastructure\TradingSystem.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="RegressionFixtures\*.json" />
+  </ItemGroup>
+
 </Project>

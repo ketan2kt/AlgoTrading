@@ -16,8 +16,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  quality-gate:
+    if: inputs.deploy == 'DEPLOY-LIVE'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore backend dependencies
+        run: dotnet restore TradingSystem.slnx
+
+      - name: Run protected-session regression gate
+        run: >-
+          dotnet test tests/TradingSystem.UnitTests/TradingSystem.UnitTests.csproj
+          --configuration Release --no-restore
+          --filter Category=DeploymentRegression
+
+      - name: Run complete backend test suite
+        run: dotnet test TradingSystem.slnx --configuration Release --no-restore
+
   deploy:
     if: inputs.deploy == 'DEPLOY-LIVE'
+    needs: quality-gate
     runs-on: ubuntu-latest
     environment: azure-paper
     steps:
