@@ -636,7 +636,8 @@ internal sealed partial class AutomatedPaperTradingService(
         var adaptiveDecision = AdaptivePaperTradePolicy.Evaluate(tradeState.TradesToday,
             options.Value.MaximumResearchEntriesPerDay, tradeState.ConsecutiveLosses,
             options.Value.MaximumConsecutiveLosses, tradeState.LastLossAtUtc, now,
-            options.Value.LossCooldownMinutes);
+            options.Value.LossCooldownMinutes, persistentDirectionalEntry,
+            options.Value.MaximumDirectionalRecoveryEntriesPerDay);
         if (!adaptiveDecision.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
@@ -1103,6 +1104,26 @@ internal sealed partial class AutomatedPaperTradingService(
         if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
+        if (exitReason == PaperExitReason.StopLoss &&
+            TimeOnly.FromTimeSpan(indiaTime) < ParseTime(options.Value.ForcedExit))
+        {
+            var persistentDirectionalPaperTrade = open.Signal.StrategyId.StartsWith(
+                PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix, StringComparison.Ordinal);
+            var stopProtectsProfit = (effectiveStop - entryPrice) * multiplier > 0m;
+            var adverseRiskMultiple = initialRiskPerUnit <= 0m ? decimal.MaxValue :
+                Math.Max(0m, (entryPrice - price) * multiplier / initialRiskPerUnit);
+            var stopDecision = PersistentDirectionalStopPolicy.Evaluate(
+                persistentDirectionalPaperTrade, !stopProtectsProfit,
+                timeProvider.GetUtcNow() - open.Entry.UpdatedAtUtc,
+                adverseRiskMultiple, invalidation.ShouldExit);
+            if (stopDecision.Deferred)
+            {
+                exitReason = PaperExitReason.None;
+                await PersistDeferredDirectionalStopAsync(researchDb, open,
+                    underlyingInstrumentId, price, effectiveStop, adverseRiskMultiple,
+                    stopDecision.Reasons, cancellationToken);
+            }
+        }
         if (exitReason == PaperExitReason.ForcedIntradayExit && options.Value.WeeklyCarryForwardEnabled)
         {
             var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
@@ -1341,6 +1362,32 @@ internal sealed partial class AutomatedPaperTradingService(
                 worstGrossPnl,
                 worstAtUtc,
                 grossProfitGiveback = Math.Max(0m, peakGrossPnl - currentGrossPnl),
+                observedAtUtc = now
+            })));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task PersistDeferredDirectionalStopAsync(TradingDbContext db, OpenTrade open,
+        Guid underlyingInstrumentId, decimal currentPrice, decimal effectiveStop,
+        decimal adverseRiskMultiple, IReadOnlyList<string> reasons,
+        CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var minute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0,
+            TimeSpan.Zero);
+        var outcome = $"DirectionalStopDeferred:{open.Signal.SignalId:N}:{minute:yyyyMMddHHmm}";
+        if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                value.Market == "nifty" && value.Outcome == outcome, cancellationToken)) return;
+        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", underlyingInstrumentId,
+            minute, outcome, open.Signal.Confidence, JsonSerializer.Serialize(new
+            {
+                signalId = open.Signal.SignalId,
+                currentPrice,
+                initialStop = open.StopLoss,
+                effectiveStop,
+                adverseRiskMultiple,
+                reasons,
+                paperOnly = true,
                 observedAtUtc = now
             })));
         await db.SaveChangesAsync(cancellationToken);

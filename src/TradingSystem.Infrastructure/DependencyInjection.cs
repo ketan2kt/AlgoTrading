@@ -315,6 +315,7 @@ public static class DependencyInjection
                                    options.MinimumSignalCandles is >= 4 and <= 21 &&
                                    options.MinimumFuturesConfirmationCandles is >= 2 and <= 21 &&
                                    options.MaximumResearchEntriesPerDay is >= 1 and <= 20 &&
+                                   options.MaximumDirectionalRecoveryEntriesPerDay is >= 0 and <= 5 &&
                                    options.MaximumConsecutiveLosses is >= 1 and <= 10 &&
                                    options.LossCooldownMinutes is >= 5 and <= 120 &&
                                    options.MaximumResearchEntriesPerDay is >= 1 and <= 20 &&

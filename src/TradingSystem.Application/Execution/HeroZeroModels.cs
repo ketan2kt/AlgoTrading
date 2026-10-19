@@ -1,3 +1,6 @@
+using TradingSystem.Application.Strategies;
+using TradingSystem.Domain.Trading;
+
 namespace TradingSystem.Application.Execution;
 
 public sealed record HeroZeroCandidate(
@@ -64,4 +67,38 @@ public static class HeroZeroCandidatePolicy
         }).OrderByDescending(value => value.Score).ThenBy(value => Math.Abs(value.Premium - targetPremium))
           .First();
     }
+}
+
+public sealed record HeroZeroExpansionDecision(bool Permitted, Direction? Direction,
+    IReadOnlyList<string> Reasons);
+
+public static class HeroZeroExpansionPolicy
+{
+    public static HeroZeroExpansionDecision Evaluate(IReadOnlyList<StrategyPriceBar> source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Count < 10)
+            return Reject("At least ten completed five-minute candles are required.");
+        var prior = source.SkipLast(1).TakeLast(9).ToArray();
+        var latest = source[^1];
+        var baselineRange = prior.Average(value => value.High - value.Low);
+        var latestRange = latest.High - latest.Low;
+        var body = Math.Abs(latest.Close - latest.Open);
+        if (baselineRange <= 0m || latestRange < baselineRange * 1.20m)
+            return Reject("The latest candle is not a genuine 1.20x range expansion.");
+        if (body < baselineRange * .60m)
+            return Reject("The expansion body is below 0.60x the recent average range.");
+
+        var closeLocation = latestRange <= 0m ? .5m : (latest.Close - latest.Low) / latestRange;
+        var bullish = latest.Close > prior.Max(value => value.High) && closeLocation >= .75m;
+        var bearish = latest.Close < prior.Min(value => value.Low) && closeLocation <= .25m;
+        if (!bullish && !bearish)
+            return Reject("The expansion did not close decisively beyond prior nine-candle structure.");
+        var direction = bullish ? Direction.Buy : Direction.Sell;
+        return new(true, direction,
+            [$"Confirmed {direction} expiry expansion: range {latestRange / baselineRange:F2}x baseline.",
+             $"Close location is {closeLocation:P0} of the candle range."]);
+    }
+
+    private static HeroZeroExpansionDecision Reject(string reason) => new(false, null, [reason]);
 }

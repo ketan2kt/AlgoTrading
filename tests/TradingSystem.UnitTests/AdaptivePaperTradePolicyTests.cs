@@ -41,4 +41,23 @@ public sealed class AdaptivePaperTradePolicyTests
 
         Assert.True(result.Permitted);
     }
+
+    [Fact]
+    public void RenewsDirectionalParticipationAfterLossPauseWithinBoundedReserve()
+    {
+        var result = AdaptivePaperTradePolicy.Evaluate(4, 4, 3, 2,
+            Now.AddMinutes(-31), Now, 30, true, 2);
+
+        Assert.True(result.Permitted);
+    }
+
+    [Fact]
+    public void DirectionalReserveRemainsBounded()
+    {
+        var result = AdaptivePaperTradePolicy.Evaluate(6, 4, 3, 2,
+            Now.AddMinutes(-31), Now, 30, true, 2);
+
+        Assert.False(result.Permitted);
+        Assert.Contains(result.Reasons, reason => reason.Contains("Directional recovery allocation"));
+    }
 }

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.MarketData;
+using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
@@ -246,13 +247,8 @@ internal sealed partial class HeroZeroPaperTradingService(
                 value.IntervalSeconds == marketData.Value.CandleIntervalSeconds && value.Source == "Groww")
             .OrderByDescending(value => value.OpenTimeUtc).Take(15).OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
-        if (candles.Count < 10) return false;
-        var ranges = candles.SkipLast(1).TakeLast(9).Select(value => value.High - value.Low).ToArray();
-        var baseline = ranges.Average();
-        var latest = candles[^1];
-        var latestRange = latest.High - latest.Low;
-        var latestBody = Math.Abs(latest.Close - latest.Open);
-        return latestRange >= baseline * 0.80m && latestBody >= baseline * 0.45m;
+        return HeroZeroExpansionPolicy.Evaluate(candles.Select(value => new StrategyPriceBar(
+            value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray()).Permitted;
     }
 
     private static async Task AuditAsync(TradingDbContext db, string market, Guid instrumentId,

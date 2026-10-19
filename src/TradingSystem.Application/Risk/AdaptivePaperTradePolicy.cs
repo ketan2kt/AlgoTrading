@@ -6,12 +6,18 @@ public static class AdaptivePaperTradePolicy
 {
     public static AdaptivePaperTradeDecision Evaluate(int entriesToday, int maximumEntries,
         int consecutiveLosses, int maximumConsecutiveLosses, DateTimeOffset? lastLossAtUtc,
-        DateTimeOffset nowUtc, int lossCooldownMinutes)
+        DateTimeOffset nowUtc, int lossCooldownMinutes,
+        bool renewedDirectionalOpportunity = false,
+        int maximumDirectionalRecoveryEntries = 0)
     {
         var reasons = new List<string>();
-        if (entriesToday >= maximumEntries)
-            reasons.Add($"Evidence-based daily research allocation of {maximumEntries} entries is exhausted.");
-        if (consecutiveLosses >= maximumConsecutiveLosses)
+        var effectiveMaximum = maximumEntries +
+                               (renewedDirectionalOpportunity ? maximumDirectionalRecoveryEntries : 0);
+        if (entriesToday >= effectiveMaximum)
+            reasons.Add(renewedDirectionalOpportunity
+                ? $"Directional recovery allocation of {effectiveMaximum} total entries is exhausted."
+                : $"Evidence-based daily research allocation of {maximumEntries} entries is exhausted.");
+        if (consecutiveLosses >= maximumConsecutiveLosses && !renewedDirectionalOpportunity)
             reasons.Add($"Trading is paused after {consecutiveLosses} consecutive net losses.");
         if (lastLossAtUtc is not null && nowUtc - lastLossAtUtc < TimeSpan.FromMinutes(lossCooldownMinutes))
         {

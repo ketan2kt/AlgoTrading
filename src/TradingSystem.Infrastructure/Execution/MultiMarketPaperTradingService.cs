@@ -375,6 +375,25 @@ internal sealed partial class MultiMarketPaperTradingService(
                     "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
                 return;
             }
+
+            var lastOppositeExit = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
+                join executionInstrument in db.Instruments.AsNoTracking()
+                    on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
+                where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
+                      priorPosition.ClosedAtUtc != null && priorPosition.ClosedAtUtc >= sessionStartUtc &&
+                      (decision.Direction == Direction.Buy
+                          ? executionInstrument.Type == InstrumentType.PutOption
+                          : executionInstrument.Type == InstrumentType.CallOption)
+                orderby priorPosition.ClosedAtUtc descending
+                select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            var flipDecision = DirectionFlipCooldownPolicy.Evaluate(lastOppositeExit, now);
+            if (!flipDecision.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "DirectionFlipCooldown", decision.Confidence, flipDecision.Reasons,
+                    cancellationToken);
+                return;
+            }
         }
         else if (market == TradingMarketCatalog.NaturalGas)
         {
@@ -746,6 +765,46 @@ internal sealed partial class MultiMarketPaperTradingService(
             var expectedUnderlyingDirection = market.ExecuteOptions
                 ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
                 : position.Direction;
+            if (stopHit && market == TradingMarketCatalog.Sensex &&
+                position.Strategy.StartsWith(PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix,
+                    StringComparison.Ordinal))
+            {
+                var multiplier = position.Direction == Direction.Buy ? 1m : -1m;
+                var stopProtectsProfit = (position.StopLoss - position.EntryPrice) * multiplier > 0m;
+                var adverseRiskMultiple = initialRisk <= 0m ? decimal.MaxValue :
+                    Math.Max(0m, (position.EntryPrice - price) * multiplier / initialRisk);
+                var underlyingInvalidated = !stopProtectsProfit &&
+                    await HasConfirmedDirectionalInvalidationAsync(db,
+                        position.UnderlyingInstrumentId, expectedUnderlyingDirection,
+                        position.OpenedAtUtc, cancellationToken);
+                var stopDecision = PersistentDirectionalStopPolicy.Evaluate(true,
+                    !stopProtectsProfit, now - position.OpenedAtUtc,
+                    adverseRiskMultiple, underlyingInvalidated);
+                if (stopDecision.Deferred)
+                {
+                    stopHit = false;
+                    var deferredOutcome =
+                        $"DirectionalStopDeferred:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}";
+                    if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                            value.Market == market.Code && value.Outcome == deferredOutcome,
+                            cancellationToken))
+                    {
+                        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                            position.UnderlyingInstrumentId, sampleMinute, deferredOutcome, 0m,
+                            JsonSerializer.Serialize(new
+                            {
+                                positionId = position.Id,
+                                price,
+                                position.EntryPrice,
+                                position.StopLoss,
+                                adverseRiskMultiple,
+                                stopDecision.Reasons,
+                                paperOnly = true,
+                                observedAtUtc = now
+                            })));
+                    }
+                }
+            }
             var continuationConfirmed = targetHit && options.Value.TargetExtensionEnabled &&
                                         exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
@@ -893,6 +952,31 @@ internal sealed partial class MultiMarketPaperTradingService(
         return direction == Direction.Buy
             ? fast > slow && latest.Close >= fast
             : fast < slow && latest.Close <= fast;
+    }
+
+    private async Task<bool> HasConfirmedDirectionalInvalidationAsync(TradingDbContext db,
+        Guid underlyingInstrumentId, Direction originalDirection, DateTimeOffset openedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var candles = await db.Candles.AsNoTracking()
+            .Where(value => value.InstrumentId == underlyingInstrumentId &&
+                            value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
+                            value.Source == "Groww")
+            .OrderByDescending(value => value.OpenTimeUtc)
+            .Take(30)
+            .OrderBy(value => value.OpenTimeUtc)
+            .ToListAsync(cancellationToken);
+        if (candles.Count < 8 || candles.Count(value =>
+                value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) > openedAtUtc) < 2)
+            return false;
+        var closes = candles.Select(value => value.Close).ToArray();
+        var bars = candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+            value.Open, value.High, value.Low, value.Close)).ToArray();
+        return UnderlyingTrendInvalidationPolicy.Evaluate(originalDirection, bars,
+            TechnicalIndicators.ExponentialMovingAverage(closes, 9),
+            TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length)),
+            options.Value.MinimumReversalStructureStrength,
+            options.Value.RequiredReversalEvidenceCount).ShouldExit;
     }
 
     private static MarketDecision Evaluate(IReadOnlyList<Candle> candles)
