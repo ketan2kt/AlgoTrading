@@ -103,6 +103,15 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
+    public void ExpansionPairSourcesAreNeverDiscoveredAsSingleLegLiveOrders()
+    {
+        const string source = "Expansion Pair|pair-id|CE";
+
+        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource(
+            "sensex", "Active", source, allowResearchSources: true));
+    }
+
+    [Fact]
     public void ReconciliationIgnoresUnmanagedBrokerPositions()
     {
         var unmanagedInstrument = Guid.NewGuid();

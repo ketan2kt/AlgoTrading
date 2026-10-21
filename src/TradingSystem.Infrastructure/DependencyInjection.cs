@@ -232,6 +232,24 @@ public static class DependencyInjection
                 "Hero Zero paper strategy settings are invalid.")
             .ValidateOnStart();
         services.AddHostedService<HeroZeroPaperTradingService>();
+        services.AddOptions<IntradayExpansionPairOptions>()
+            .Bind(configuration.GetSection(IntradayExpansionPairOptions.SectionName))
+            .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&
+                               value.TargetPremium > 0m && value.MinimumPremium > 0m &&
+                               value.MaximumPremium > value.MinimumPremium &&
+                               value.MaximumCombinedPremium > value.MaximumPremium &&
+                               value.MaximumPremiumImbalance is >= 1m and <= 2m &&
+                               value.MaximumSpreadPercent is > 0m and <= 15m &&
+                               value.BasketStopPercent is >= .25m and <= .30m &&
+                               value.MaximumBasketRisk > 0m &&
+                               value.MinimumExpansionPercent is > 0m and <= .25m &&
+                               value.RunnerTrailFraction is > 0m and < .5m &&
+                               value.MaximumLots is >= 1 and <= 5 &&
+                               value.MaximumPairsPerDay is >= 1 and <= 3 &&
+                               value.CooldownMinutes is >= 30 and <= 180,
+                "Intraday expansion-pair settings are invalid.")
+            .ValidateOnStart();
+        services.AddHostedService<IntradayExpansionPairService>();
         services.AddOptions<MarketRegimeOptions>()
             .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
             .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&

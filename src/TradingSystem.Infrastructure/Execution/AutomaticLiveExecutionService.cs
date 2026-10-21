@@ -301,6 +301,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         bool allowResearchSources = false) =>
         market == TradingMarketCatalog.Sensex.Code && status == "Active" &&
         !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) &&
+        !strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix, StringComparison.Ordinal) &&
         (allowResearchSources || !strategy.StartsWith("Research|", StringComparison.Ordinal));
 
     internal static bool IsNiftyPaperSource(string? strategy, bool allowResearchSources = false) =>
