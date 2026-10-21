@@ -355,6 +355,19 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
 
+            var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db,
+                underlying.Id, decision.Direction.Value, latest.Close,
+                AverageTrueRange(candles.TakeLast(15).ToArray()), now, cancellationToken);
+            var optionInterestOutcome = !optionInterest.Available
+                ? "OptionOpenInterestUnavailable"
+                : optionInterest.Permitted
+                    ? "OptionOpenInterestAccepted"
+                    : "OptionOpenInterestBarrierRejected";
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                optionInterestOutcome, decision.Confidence, optionInterest.Reasons,
+                cancellationToken);
+            if (!optionInterest.Permitted) return;
+
             var priorSameDirectionExit = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
                 join executionInstrument in db.Instruments.AsNoTracking()
                     on priorPosition.ExecutionInstrumentId equals executionInstrument.Id

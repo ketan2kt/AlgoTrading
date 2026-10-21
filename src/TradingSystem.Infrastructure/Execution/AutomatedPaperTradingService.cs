@@ -616,6 +616,30 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var underlyingRiskDistance = Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss);
+        if (underlyingRiskDistance <= 0m)
+            underlyingRiskDistance = strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m;
+        var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db, instrument.Id,
+            signal.Direction, strategyContext.CurrentPrice, underlyingRiskDistance, now,
+            cancellationToken);
+        var optionInterestOutcome = !optionInterest.Available
+            ? "OptionOpenInterestUnavailable"
+            : optionInterest.Permitted
+                ? "OptionOpenInterestAccepted"
+                : "OptionOpenInterestBarrierRejected";
+        await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+            latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+            relativeVolume, regime, optionInterestOutcome, optionInterest.Reasons,
+            signal, null, null, cancellationToken, shadowStructure);
+        if (!optionInterest.Permitted)
+        {
+            state.Record("OptionOpenInterestBarrierRejected", true,
+                string.Join(" ", optionInterest.Reasons), tradeState.TradesToday,
+                tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
         var strongRegimeAligned = regime.DirectionalBias == signal.Direction &&
             regime.Regime is MarketRegime.GapDownContinuation or MarketRegime.GapUpContinuation or
                 MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
