@@ -159,6 +159,8 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --settings DatabaseInitialization__ApplyMigrations=true \
               LiveExecution__BuildEnabled=true \
+              PaperTradeReset__Enabled=true \
+              PaperTradeReset__RequestId=clean-slate-2026-10-21 \
             --output none
 
       - name: Wait for database initialization
