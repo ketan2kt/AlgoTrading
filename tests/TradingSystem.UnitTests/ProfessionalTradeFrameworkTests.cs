@@ -86,7 +86,7 @@ public sealed class ProfessionalTradeFrameworkTests
             Direction.Sell, .76m, .62m, .20m, .10m, .10m, .50m, 2.5m, []);
 
         var decision = DirectionalParticipationPolicy.Evaluate(bars, state,
-            93m, 88m, 91m);
+            93m, 86.8m, 88m);
 
         Assert.Equal(Direction.Sell, decision.Direction);
         Assert.True(decision.StructuralStop > bars[^1].Close);

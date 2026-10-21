@@ -16,6 +16,7 @@ import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.serv
 import { PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
+import { TradingLotConfiguration, TradingLotsService } from './trading-lots.service';
 import {
   buildMarketNarratorEvents,
   MarketNarratorEvent,
@@ -42,6 +43,7 @@ export class App implements OnInit, OnDestroy {
   private readonly paperReportService = inject(PaperReportService);
   private readonly heroZeroService = inject(HeroZeroService);
   private readonly liveExecutionService = inject(LiveExecutionService);
+  private readonly tradingLotsService = inject(TradingLotsService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -101,6 +103,9 @@ export class App implements OnInit, OnDestroy {
   protected liveExecutionPassword = '';
   protected liveExecutionReason = 'Daily automatic Nifty and Sensex live trading activation.';
   protected liveExecutionMessage = '';
+  protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10, updatedAtUtc: null };
+  protected tradingLotsBusy = false;
+  protected tradingLotsMessage = '';
   private tradeStates = new Map<string, string>();
   private initializedTradeMarkets = new Set<TradingMarketCode>();
   protected marketTabAlerts = new Map<TradingMarketCode, TradeAlertKind>();
@@ -236,7 +241,11 @@ export class App implements OnInit, OnDestroy {
     this.refreshView();
   }
 
-  protected openControls(): void { this.controlsOpen = true; this.loadLiveExecution(); }
+  protected openControls(): void {
+    this.controlsOpen = true;
+    this.loadLiveExecution();
+    this.loadTradingLots();
+  }
   protected closeControls(): void { this.controlsOpen = false; }
   protected openNarrator(): void { this.narratorOpen = true; this.ensureTradeAlertsReady(); }
   protected closeNarrator(): void { this.narratorOpen = false; }
@@ -281,6 +290,38 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.add(this.liveExecutionService.getStatus().subscribe({
       next: status => { this.liveExecution = status; this.refreshView(); },
       error: () => { this.liveExecutionMessage = 'Live execution status is unavailable.'; this.refreshView(); },
+    }));
+  }
+
+  protected loadTradingLots(): void {
+    this.subscriptions.add(this.tradingLotsService.get().subscribe({
+      next: value => { this.tradingLots = value; this.refreshView(); },
+      error: () => { this.tradingLotsMessage = 'Unable to load saved lot sizes.'; this.refreshView(); },
+    }));
+  }
+
+  protected saveTradingLots(): void {
+    const nifty = Number(this.tradingLots.niftyLots);
+    const sensex = Number(this.tradingLots.sensexLots);
+    if (!Number.isInteger(nifty) || !Number.isInteger(sensex) ||
+        nifty < 1 || nifty > 50 || sensex < 1 || sensex > 50) {
+      this.tradingLotsMessage = 'Enter whole lot values between 1 and 50.';
+      return;
+    }
+    this.tradingLotsBusy = true;
+    this.tradingLotsMessage = '';
+    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex).subscribe({
+      next: value => {
+        this.tradingLots = value;
+        this.tradingLotsBusy = false;
+        this.tradingLotsMessage = 'Saved. New Nifty and Sensex entries will use these lot sizes.';
+        this.refreshView();
+      },
+      error: () => {
+        this.tradingLotsBusy = false;
+        this.tradingLotsMessage = 'Unable to save lot sizes.';
+        this.refreshView();
+      },
     }));
   }
 

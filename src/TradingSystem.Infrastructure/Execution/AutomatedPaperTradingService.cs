@@ -67,6 +67,9 @@ internal sealed partial class AutomatedPaperTradingService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        var configuredLots = (await scope.ServiceProvider
+            .GetRequiredService<ITradingLotConfigurationService>()
+            .GetAsync(cancellationToken)).NiftyLots;
         var live = scope.ServiceProvider.GetRequiredService<IOptions<LiveNiftyOptions>>().Value;
         var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
             value.Exchange == live.Exchange && value.TradingSymbol == live.TradingSymbol &&
@@ -793,7 +796,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 selectedOption.InstrumentId, selectedOption.TradingSymbol,
                 selectedOption.Type.ToString(), selectedOption.ExpiryDate,
                 selectedOption.StrikePrice, selectedOption.LotSize,
-                options.Value.MaximumOptionLots, quote.OfferPrice ?? quote.LastPrice,
+                configuredLots, quote.OfferPrice ?? quote.LastPrice,
                 0m, 0m);
             await audit.PersistRiskDecisionAsync(signal.SignalId, rejected, cancellationToken,
                 rejectedProposal);
@@ -814,8 +817,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var tradingDate = DateOnly.FromDateTime(indiaNow.Date);
         var stopLossPercent = ExpiryAwareOptionPolicy.StopLossPercent(tradingDate,
             selectedOption.ExpiryDate, options.Value.OptionStopLossPercent);
-        var maximumLots = ExpiryAwareOptionPolicy.MaximumLots(tradingDate,
-            selectedOption.ExpiryDate, options.Value.MaximumOptionLots);
+        var maximumLots = configuredLots;
         var protective = OptionPaperTradePricing.ProtectivePrices(pricing.EntryPrice,
             stopLossPercent, options.Value.OptionRewardToRiskRatio,
             selectedOption.TickSize);
@@ -898,13 +900,28 @@ internal sealed partial class AutomatedPaperTradingService(
                     Math.Min(maximumOptionQuantity, hardenedDecision.ApprovedQuantity));
         if (decision.Approved)
         {
-            var scaledQuantity = ProfessionalTradeFramework.ScaleQuantity(
-                decision.ApprovedQuantity, selectedOption.LotSize, professionalPlan.QuantityFraction);
+            var configuredQuantity = checked(selectedOption.LotSize * configuredLots);
+            if (decision.ApprovedQuantity < configuredQuantity)
+            {
+                var reasons = new[]
+                {
+                    $"Configured Nifty size is {configuredLots} lots, but current risk/capital limits approve only {decision.ApprovedQuantity / selectedOption.LotSize} complete lots.",
+                    "The system rejects the entry instead of silently changing the saved lot size."
+                };
+                await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                    latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                    relativeVolume, regime, "ConfiguredLotSizeRejected", reasons,
+                    signal, selectedOption, pricing.EntryPrice, cancellationToken, shadowStructure);
+                state.Record("ConfiguredLotSizeRejected", true, string.Join(" ", reasons),
+                    tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                    direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol);
+                return;
+            }
             decision = decision with
             {
-                ApprovedQuantity = scaledQuantity,
-                RiskAmount = Math.Abs(decision.FinalStopLoss - pricing.EntryPrice) * scaledQuantity,
-                CapitalExposure = pricing.EntryPrice * scaledQuantity
+                ApprovedQuantity = configuredQuantity,
+                RiskAmount = Math.Abs(decision.FinalStopLoss - pricing.EntryPrice) * configuredQuantity,
+                CapitalExposure = pricing.EntryPrice * configuredQuantity
             };
         }
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,

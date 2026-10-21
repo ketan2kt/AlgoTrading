@@ -46,6 +46,9 @@ internal sealed partial class IntradayExpansionPairService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        var configuredLots = (await scope.ServiceProvider
+            .GetRequiredService<ITradingLotConfigurationService>()
+            .GetAsync(cancellationToken)).ForMarket(market.Code);
         var now = timeProvider.GetUtcNow();
         var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         var localTime = TimeOnly.FromDateTime(india.DateTime);
@@ -145,12 +148,17 @@ internal sealed partial class IntradayExpansionPairService(
         var candidateDecision = ExpansionPairCandidatePolicy.Evaluate(call, put,
             options.Value.MaximumCombinedPremium, options.Value.MaximumPremiumImbalance,
             options.Value.MaximumBasketRisk, options.Value.BasketStopPercent,
-            options.Value.MaximumLots);
-        if (!candidateDecision.Permitted)
+            configuredLots);
+        if (!candidateDecision.Permitted || candidateDecision.Lots != configuredLots)
         {
             await AuditAsync(db, market.Code, underlying.Id, decisionTime, "ExpansionPair:Rejected",
                 decision.Confidence, new { entryReasons = decision.Reasons,
-                    candidateReasons = candidateDecision.Reasons, call, put }, cancellationToken);
+                    candidateReasons = candidateDecision.Reasons,
+                    configuredLots,
+                    detail = candidateDecision.Permitted
+                        ? "The configured size exceeds the current basket-risk approval; no smaller pair was opened."
+                        : "The configured pair did not pass basket-risk approval.",
+                    call, put }, cancellationToken);
             return;
         }
 

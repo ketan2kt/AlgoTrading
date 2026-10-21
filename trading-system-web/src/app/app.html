@@ -270,12 +270,21 @@
               <button type="button" (click)="openLogs()">Research logs</button>
             </div>
             @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
+              <section class="control-center-card trading-lots-card">
+                <div><span>TRADE SIZE</span><strong>Market lot controls</strong><p>Normal, Hero Zero, hedge/pair, paper and subsequent live entries use the saved market value exactly. A trade is rejected rather than silently reduced when risk approval cannot support it.</p></div>
+                <div class="trading-lots-grid">
+                  <label>Nifty lots<input name="niftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.niftyLots" /></label>
+                  <label>Sensex lots<input name="sensexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.sensexLots" /></label>
+                  <button type="button" [disabled]="tradingLotsBusy" (click)="saveTradingLots()">{{ tradingLotsBusy ? 'Saving…' : 'Save lot sizes' }}</button>
+                </div>
+                @if (tradingLotsMessage) { <p>{{ tradingLotsMessage }}</p> }
+              </section>
               <section class="safety-panel control-center-card live-execution-card">
                 <span>LIVE EXECUTION</span>
                 <strong [class.good]="liveExecution?.armed" [class.bad]="!liveExecution?.armed">
                   {{ liveExecution?.armed ? 'ARMED · automatic Groww orders enabled' : 'DISARMED · no live orders' }}
                 </strong>
-                <p>{{ liveExecution?.buildEnabled ? (liveExecution?.controlledBrokerTestCompleted ? ('Broker validation complete · automatic orders use ' + liveExecution?.maximumLotsPerOrder + ' lots') : ('First eligible five-lot order will run broker validation; subsequent orders also use ' + liveExecution?.maximumLotsPerOrder + ' lots.')) : 'Live execution is disabled by server configuration.' }}</p>
+                <p>{{ liveExecution?.buildEnabled ? ('Automatic orders use the saved Nifty or Sensex lot value shown above.') : 'Live execution is disabled by server configuration.' }}</p>
                 @if (liveExecution?.latestIntentStatus) {
                   <p><strong>Latest live attempt:</strong> {{ liveExecution?.latestIntentMarket }} · {{ liveExecution?.latestIntentStatus }} · {{ liveExecution?.latestIntentAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata' }} IST</p>
                   @if (liveExecution?.latestIntentError) { <p class="bad">{{ liveExecution?.latestIntentError }}</p> }

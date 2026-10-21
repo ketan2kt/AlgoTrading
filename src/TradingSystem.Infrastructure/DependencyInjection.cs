@@ -302,6 +302,10 @@ public static class DependencyInjection
         services.AddScoped<IPaperLifecycleAuditStore, EfPaperLifecycleAuditStore>();
         services.AddScoped<IPaperKillSwitchService, EfPaperKillSwitchService>();
         services.AddScoped<IPaperDailyLossOverrideService, EfPaperDailyLossOverrideService>();
+        services.AddScoped<ITradingLotConfigurationService, EfTradingLotConfigurationService>();
+        services.AddOptions<PaperTradeResetOptions>()
+            .Bind(configuration.GetSection(PaperTradeResetOptions.SectionName));
+        services.AddHostedService<PaperTradeResetService>();
         services.AddOptions<AutomatedPaperTradingOptions>()
             .Bind(configuration.GetSection(AutomatedPaperTradingOptions.SectionName))
             .Validate(options => options.EvaluationIntervalSeconds is >= 2 and <= 60 &&

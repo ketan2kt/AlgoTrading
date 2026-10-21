@@ -43,6 +43,8 @@ internal sealed partial class AutomaticLiveExecutionService(
             .GetAsync(cancellationToken);
         if (!arm.Armed || arm.ChangedAtUtc is null) return;
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        var lotConfiguration = await scope.ServiceProvider
+            .GetRequiredService<ITradingLotConfigurationService>().GetAsync(cancellationToken);
 
         var blockers = await db.LiveExecutionIntents.Where(value =>
                 value.Status == "ReconciliationRequired" || value.Status == "ProtectionSubmitting")
@@ -69,10 +71,12 @@ internal sealed partial class AutomaticLiveExecutionService(
         var sensexEligible = await IsPaperPromotionSatisfiedAsync(db, "sensex",
             options.Value.RequirePaperPromotion, cancellationToken);
         var intent = (niftyEligible
-                ? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
+                ? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value,
+                    lotConfiguration.NiftyLots, cancellationToken)
                 : null)
             ?? (sensexEligible
-                ? await DiscoverSensexAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
+                ? await DiscoverSensexAsync(db, arm.ChangedAtUtc.Value,
+                    lotConfiguration.SensexLots, cancellationToken)
                 : null);
         if (intent is null) return;
         db.LiveExecutionIntents.Add(intent);
@@ -123,7 +127,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     }
 
     private async Task<LiveExecutionIntent?> DiscoverNiftyAsync(TradingDbContext db,
-        DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
+        DateTimeOffset armedAtUtc, int configuredLots, CancellationToken cancellationToken)
     {
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var filledEntries = await db.PaperBrokerEvents.AsNoTracking()
@@ -151,7 +155,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.Id == proposal.InstrumentId && value.IsActive, cancellationToken);
             if (instrument is null || instrument.Exchange != "NSE") continue;
-            var quantity = await QuantityAsync(db, instrument.LotSize, cancellationToken);
+            var quantity = Quantity(instrument.LotSize, configuredLots);
             return NewIntent("NIFTY", signal.Id, instrument, quantity, proposal.EntryPrice,
                 proposal.StopLoss, proposal.Target);
         }
@@ -159,7 +163,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     }
 
     private async Task<LiveExecutionIntent?> DiscoverSensexAsync(TradingDbContext db,
-        DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
+        DateTimeOffset armedAtUtc, int configuredLots, CancellationToken cancellationToken)
     {
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
@@ -176,7 +180,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.Id == source.ExecutionInstrumentId && value.IsActive, cancellationToken);
             if (instrument is null || instrument.Exchange != "BSE") continue;
-            var quantity = await QuantityAsync(db, instrument.LotSize, cancellationToken);
+            var quantity = Quantity(instrument.LotSize, configuredLots);
             return NewIntent("SENSEX", source.Id, instrument, quantity, source.EntryPrice,
                 source.StopLoss, source.Target);
         }
@@ -201,14 +205,12 @@ internal sealed partial class AutomaticLiveExecutionService(
          error.Contains("returned 403", StringComparison.Ordinal) ||
          error.Contains("returned 422", StringComparison.Ordinal));
 
-    private async Task<int> QuantityAsync(TradingDbContext db, int lotSize,
-        CancellationToken cancellationToken)
+    internal static int Quantity(int lotSize, int configuredLots)
     {
-        var completed = await db.ApplicationSettings.AsNoTracking().AnyAsync(value =>
-            value.Mode == TradingMode.Live && value.Key == ControlledTestKey &&
-            value.ValueJson == "true", cancellationToken);
-        var lots = completed ? options.Value.MaximumLotsPerOrder : options.Value.ControlledTestLotsPerOrder;
-        return checked(lotSize * lots);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lotSize);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuredLots, TradingLotConfiguration.MinimumLots);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(configuredLots, TradingLotConfiguration.MaximumLots);
+        return checked(lotSize * configuredLots);
     }
 
     private async Task SubmitAndProtectAsync(TradingDbContext db, LiveExecutionIntent intent,

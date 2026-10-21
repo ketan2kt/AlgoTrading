@@ -48,6 +48,8 @@ internal sealed partial class MultiMarketPaperTradingService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        var lotConfiguration = await scope.ServiceProvider
+            .GetRequiredService<ITradingLotConfigurationService>().GetAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
         var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         if (india.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return;
@@ -506,9 +508,18 @@ internal sealed partial class MultiMarketPaperTradingService(
             var riskDistance = entry * options.Value.OptionStopLossPercent / 100m;
             stop = RoundToTick(entry - riskDistance, tick);
             target = RoundToTick(entry + riskDistance, tick);
-            var lotsByRisk = Math.Max(1, (int)Math.Floor(5000m /
-                Math.Max(Math.Abs(entry - stop) * execution.LotSize, 0.01m)));
-            quantity = execution.LotSize * Math.Min(lotsByRisk, options.Value.MaximumOptionLots);
+            var configuredLots = lotConfiguration.SensexLots;
+            var configuredRisk = Math.Abs(entry - stop) * execution.LotSize * configuredLots;
+            if (configuredRisk > 5000m)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "ConfiguredLotSizeRejected", decision.Confidence,
+                    [$"Configured Sensex size is {configuredLots} lots, requiring approximately {configuredRisk:F2} risk against the 5000.00 per-trade boundary.",
+                     "The system rejected the entry instead of silently reducing the saved lot size."],
+                    cancellationToken);
+                return;
+            }
+            quantity = checked(execution.LotSize * configuredLots);
         }
         ProfessionalTradePlan? professionalPlan = null;
         if (market == TradingMarketCatalog.Sensex && marketStateV2 is not null)
@@ -542,8 +553,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                     professionalPlan.Reasons, cancellationToken);
                 return;
             }
-            quantity = ProfessionalTradeFramework.ScaleQuantity(quantity, execution.LotSize,
-                professionalPlan.QuantityFraction);
+            // Confidence and correlation remain eligibility/risk evidence. Once approved,
+            // the administrator's persisted market lot size is used exactly.
         }
         SensexReasoningSnapshot? reasoning = null;
         if (market == TradingMarketCatalog.Sensex)

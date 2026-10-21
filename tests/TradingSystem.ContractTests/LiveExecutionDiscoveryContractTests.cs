@@ -24,12 +24,14 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
-    public void ControlledValidationUsesFiveLots()
+    public void ConfiguredMarketLotsDetermineLiveQuantity()
     {
-        var options = new LiveExecutionOptions();
-
-        Assert.Equal(5, options.MaximumLotsPerOrder);
-        Assert.Equal(options.MaximumLotsPerOrder, options.ControlledTestLotsPerOrder);
+        Assert.Equal(750, AutomaticLiveExecutionService.Quantity(75, 10));
+        Assert.Equal(300, AutomaticLiveExecutionService.Quantity(20, 15));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            AutomaticLiveExecutionService.Quantity(75, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            AutomaticLiveExecutionService.Quantity(75, 51));
     }
 
     [Fact]

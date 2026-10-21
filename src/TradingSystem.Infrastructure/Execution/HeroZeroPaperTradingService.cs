@@ -50,6 +50,9 @@ internal sealed partial class HeroZeroPaperTradingService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        var configuredLots = (await scope.ServiceProvider
+            .GetRequiredService<ITradingLotConfigurationService>()
+            .GetAsync(cancellationToken)).ForMarket(market.Code);
         var now = timeProvider.GetUtcNow();
         var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         var today = DateOnly.FromDateTime(india.Date);
@@ -116,7 +119,8 @@ internal sealed partial class HeroZeroPaperTradingService(
             value.OpenedAtUtc >= StartOfIndiaDay(now), cancellationToken);
         if (canEnter && !openedToday)
         {
-            await OpenPairAsync(db, market, underlying.Id, call!, put!, now, cancellationToken);
+            await OpenPairAsync(db, market, underlying.Id, call!, put!, configuredLots, now,
+                cancellationToken);
             status = "Pair opened";
             explanation = "Liquidity-qualified CE and PE opened after confirmed expiry expansion.";
         }
@@ -173,7 +177,8 @@ internal sealed partial class HeroZeroPaperTradingService(
     }
 
     private static async Task OpenPairAsync(TradingDbContext db, TradingMarketDefinition market, Guid underlyingId,
-        HeroZeroCandidate call, HeroZeroCandidate put, DateTimeOffset now, CancellationToken cancellationToken)
+        HeroZeroCandidate call, HeroZeroCandidate put, int lots, DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         var pairId = Guid.NewGuid().ToString("N");
         foreach (var candidate in new[] { call, put })
@@ -183,7 +188,7 @@ internal sealed partial class HeroZeroPaperTradingService(
             var target = decimal.Round(candidate.Premium * 5m / tick) * tick;
             db.MarketPaperPositions.Add(new(Guid.NewGuid(), market.Code, underlyingId,
                 candidate.InstrumentId, $"Hero Zero|{pairId}|{candidate.OptionType}", Direction.Buy,
-                candidate.LotSize, candidate.Premium, stop, target, now));
+                checked(candidate.LotSize * lots), candidate.Premium, stop, target, now));
         }
         await db.SaveChangesAsync(cancellationToken);
     }
