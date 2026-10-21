@@ -179,8 +179,12 @@ public static class PersistentDirectionalThesisAnalyzerV1
         var latest = recent[^1];
         var extensionFromFast = Math.Abs(latest.Close - fast) / atr;
         var recentFailure = HasRecentFailedCounterTrendAttempt(recent, direction);
-        var wouldEnter = direction is not null && !changeOfCharacter && recentFailure &&
-                         alignedBars >= 7 && extensionFromFast <= 1.85m;
+        var continuationResumption = direction is not null && rangeBreak &&
+            confidence >= .68m && alignedBars >= 8 && extensionFromFast <= 1.75m &&
+            HasControlledContinuationResumption(recent, direction.Value, atr);
+        var pullbackWindow = recentFailure && alignedBars >= 7 && extensionFromFast <= 1.85m;
+        var wouldEnter = direction is not null && !changeOfCharacter &&
+                         (pullbackWindow || continuationResumption);
         if (wouldEnter) phase = DirectionalThesisPhaseV1.EntryWindow;
 
         var evidence = new List<string>
@@ -190,8 +194,10 @@ public static class PersistentDirectionalThesisAnalyzerV1
             $"Opening-range break held: {rangeBreak}.",
             $"EMA 9/21: {fast:F2}/{slow:F2}; extension from EMA 9 is {extensionFromFast:F2} ATR.",
             wouldEnter
-                ? "A failed countertrend pullback completed without an extended entry."
-                : "No shadow entry window is recorded until a failed countertrend pullback completes at acceptable extension."
+                ? continuationResumption && !pullbackWindow
+                    ? "A compact continuation base completed and resumed in the persistent direction."
+                    : "A failed countertrend pullback completed without an extended entry."
+                : "No entry window exists until either a failed countertrend pullback or a compact continuation base completes at acceptable extension."
         };
         if (previousDirection is not null)
             evidence.Add(changeOfCharacter
@@ -263,6 +269,22 @@ public static class PersistentDirectionalThesisAnalyzerV1
     {
         if (direction is null || bars.Length < 3) return false;
         return FailedCounterTrendAttempts(bars.TakeLast(3).ToArray(), direction.Value) > 0;
+    }
+
+    private static bool HasControlledContinuationResumption(StrategyPriceBar[] bars,
+        Direction direction, decimal atr)
+    {
+        if (bars.Length < 4 || atr <= 0m) return false;
+        var latest = bars[^1];
+        var pause = bars.SkipLast(1).TakeLast(3).ToArray();
+        var pauseRange = pause.Max(value => value.High) - pause.Min(value => value.Low);
+        var body = Math.Abs(latest.Close - latest.Open);
+        var directionCandle = direction == Direction.Buy
+            ? latest.Close > latest.Open && latest.Close > pause.Max(value => value.High)
+            : latest.Close < latest.Open && latest.Close < pause.Min(value => value.Low);
+        var paused = pauseRange <= atr * 1.60m && pause.Any(value => direction == Direction.Buy
+            ? value.Close <= value.Open : value.Close >= value.Open);
+        return directionCandle && paused && body >= atr * .18m && body <= atr * 1.50m;
     }
 
     private static bool HasChangeOfCharacter(StrategyPriceBar[] bars, Direction previous,

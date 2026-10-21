@@ -95,8 +95,20 @@ public static class MarketStateRouterV2
         var earlierAtr = Atr(bars.SkipLast(6).TakeLast(9).ToArray());
         var compression = earlierAtr > 0m && recentAtr / earlierAtr < .68m;
         var expansion = earlierAtr > 0m && recentAtr / earlierAtr > 1.45m;
+        var recentTen = bars.TakeLast(Math.Min(10, bars.Length)).ToArray();
+        var bullishVwapPersistence = recentTen.Count(value => value.Close > vwap);
+        var bearishVwapPersistence = recentTen.Count(value => value.Close < vwap);
+        var recentProgress = Math.Abs(recentTen[^1].Close - recentTen[0].Open) / atr;
+        var persistentBullTrend = bullishVwapPersistence >= 8 && fastEma > slowEma &&
+                                  net > 0m && emaSeparation >= .20m && recentProgress >= .80m;
+        var persistentBearTrend = bearishVwapPersistence >= 8 && fastEma < slowEma &&
+                                  net < 0m && emaSeparation >= .20m && recentProgress >= .80m;
 
-        var state = maturity >= 3.2m && efficiency >= .42m
+        var state = persistentBullTrend
+            ? IntradayMarketStateV2.BullTrend
+            : persistentBearTrend
+                ? IntradayMarketStateV2.BearTrend
+                : maturity >= 3.2m && efficiency >= .42m
             ? IntradayMarketStateV2.MatureOrExhausted
             : flipRate >= .58m && efficiency <= .30m
                 ? IntradayMarketStateV2.NoisyChop
@@ -125,7 +137,10 @@ public static class MarketStateRouterV2
             emaSeparation, maturity,
             [$"Efficiency {efficiency:P0}; direction flips {flipRate:P0}; VWAP crosses {crossRate:P0}.",
              $"EMA separation {emaSeparation:F2} ATR; move maturity {maturity:F2} ATR.",
-             $"Price occupies {rangePosition:P0} of the observed range."]);
+             $"Price occupies {rangePosition:P0} of the observed range.",
+             persistentBullTrend || persistentBearTrend
+                 ? $"Persistent-session override: {Math.Max(bullishVwapPersistence, bearishVwapPersistence)} of {recentTen.Length} recent closes remain on the trend side of VWAP."
+                 : "No persistent-session trend override is active."]);
     }
 
     private static decimal Atr(StrategyPriceBar[] bars)

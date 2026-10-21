@@ -213,11 +213,14 @@ public static class DirectionalParticipationPolicy
                 IntradayMarketStateV2.BearTrend or IntradayMarketStateV2.Expansion) ||
             state.Bias is null)
             return Reject("A confirmed directional regime is required.");
-        if (state.MoveMaturityAtr > 4.25m)
-            return Reject("The move is beyond the 4.25 ATR maturity budget.");
         var bars = source.TakeLast(15).ToArray();
         var latest = bars[^1];
         var direction = state.Bias.Value;
+        var recentTen = bars.TakeLast(Math.Min(10, bars.Length)).ToArray();
+        var persistentSession = recentTen.Count(value => direction == Direction.Buy
+            ? value.Close > vwap : value.Close < vwap) >= 8;
+        if (state.MoveMaturityAtr > 4.25m && !persistentSession)
+            return Reject("The move is beyond the 4.25 ATR maturity budget without persistent VWAP-side control.");
         var aligned = direction == Direction.Buy
             ? latest.Close > vwap && fastEma > slowEma
             : latest.Close < vwap && fastEma < slowEma;
@@ -232,8 +235,18 @@ public static class DirectionalParticipationPolicy
         var resumed = direction == Direction.Buy
             ? latest.Close > latest.Open && latest.Close > recent[^2].Close
             : latest.Close < latest.Open && latest.Close < recent[^2].Close;
-        if (!pullbackSeen || !resumed)
-            return Reject("Waiting for a completed pullback and direction-aligned resumption candle.");
+        var pause = recent.SkipLast(1).TakeLast(3).ToArray();
+        var pauseRange = pause.Max(value => value.High) - pause.Min(value => value.Low);
+        var continuationBase = pauseRange <= atr * 1.60m && resumed &&
+            (direction == Direction.Buy
+                ? latest.Close > pause.Max(value => value.High)
+                : latest.Close < pause.Min(value => value.Low));
+        var extensionFromFast = Math.Abs(latest.Close - fastEma) / atr;
+        if ((!pullbackSeen || !resumed) && !continuationBase)
+            return Reject("Waiting for either a completed pullback resumption or a compact continuation-base break.");
+        var maximumExtension = continuationBase ? 1.75m : 1.25m;
+        if (extensionFromFast > maximumExtension)
+            return Reject($"Continuation is {extensionFromFast:F2} ATR from EMA 9 and would be a chase.");
 
         var swing = direction == Direction.Buy
             ? recent.Min(value => value.Low) : recent.Max(value => value.High);
@@ -247,7 +260,9 @@ public static class DirectionalParticipationPolicy
                                     Math.Min(.12m, state.EmaSeparationAtr * .10m), .55m, .82m);
         return new(direction, confidence, stop, target,
             ["Directional regime is aligned with VWAP and EMA 9/21.",
-             "A completed pullback/retest was followed by a resumption candle.",
+             continuationBase
+                 ? "A compact continuation base broke in the persistent direction."
+                 : "A completed pullback/retest was followed by a resumption candle.",
              $"Move maturity is {state.MoveMaturityAtr:F2} ATR; entry is not a raw breakout chase."]);
     }
 

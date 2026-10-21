@@ -10,14 +10,16 @@ public sealed record StructuralReentryDecision(bool Permitted, bool NewStructure
 public static class StructuralReentryPolicy
 {
     public static StructuralReentryDecision Evaluate(IReadOnlyList<StrategyPriceBar> source,
-        Direction direction, DateTimeOffset? previousExitUtc)
+        Direction direction, DateTimeOffset? previousExitUtc,
+        bool persistentDirectionalContext = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (previousExitUtc is null)
             return new(true, true, 0, ["No prior same-direction exit exists in this session."]);
 
         var afterExit = source.Where(x => x.OpenTimeUtc > previousExitUtc.Value).ToArray();
-        if (afterExit.Length < 5)
+        var minimumBars = persistentDirectionalContext ? 3 : 5;
+        if (afterExit.Length < minimumBars)
             return new(false, false, afterExit.Length,
                 [$"Only {afterExit.Length} completed candle(s) exist after the previous same-direction exit; a fresh structure has not formed."]);
 
@@ -32,9 +34,24 @@ public static class StructuralReentryPolicy
               latest.Close > latest.Open && latest.Close > prior.Close
             : afterExit.Any(x => x.High >= fast + atr * .15m) && meaningfulRange && latest.Close < fast &&
               latest.Close < latest.Open && latest.Close < prior.Close;
-        return reset
+        var continuationBase = false;
+        if (persistentDirectionalContext && afterExit.Length >= 3 && atr > 0m)
+        {
+            var baseBars = afterExit.TakeLast(3).ToArray();
+            var baseRange = baseBars.SkipLast(1).Max(x => x.High) -
+                            baseBars.SkipLast(1).Min(x => x.Low);
+            continuationBase = baseRange <= atr * 1.50m && meaningfulRange &&
+                (direction == Direction.Buy
+                    ? latest.Close > baseBars.SkipLast(1).Max(x => x.High) &&
+                      latest.Close > latest.Open && latest.Close > fast
+                    : latest.Close < baseBars.SkipLast(1).Min(x => x.Low) &&
+                      latest.Close < latest.Open && latest.Close < fast);
+        }
+        return reset || continuationBase
             ? new(true, true, afterExit.Length,
-                ["A completed pullback and rejection formed after the previous same-direction exit."])
+                [continuationBase
+                    ? "A compact continuation base and direction-aligned break formed after the previous exit."
+                    : "A completed pullback and rejection formed after the previous same-direction exit."])
             : new(false, false, afterExit.Length,
                 ["Time alone is insufficient: no completed EMA pullback-and-rejection reset exists after the previous same-direction exit."]);
     }

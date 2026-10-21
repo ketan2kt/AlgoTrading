@@ -94,6 +94,33 @@ public sealed class PersistentDirectionalThesisV1Tests
     }
 
     [Fact]
+    public void PersistentTrendCanEnterFromCompactContinuationBaseWithoutCountertrendPattern()
+    {
+        var bars = new List<StrategyPriceBar>();
+        var price = 110m;
+        for (var index = 0; index < 12; index++)
+        {
+            var next = price - .25m;
+            bars.Add(Bar(index, price, price + .12m, next - .12m, next));
+            price = next;
+        }
+        for (var index = 12; index < 18; index++)
+        {
+            var close = price + (index % 2 == 0 ? .04m : -.02m);
+            bars.Add(Bar(index, price, price + .12m, price - .12m, close));
+            price = close;
+        }
+        bars.Add(Bar(18, price, price + .10m, price - .55m, price - .48m));
+
+        var result = PersistentDirectionalThesisAnalyzerV1.Analyze(
+            bars, 108m, 110.5m, 108.5m);
+
+        Assert.Equal(Direction.Sell, result.Direction);
+        Assert.True(result.WouldEnter);
+        Assert.Contains(result.Evidence, value => value.Contains("continuation base"));
+    }
+
+    [Fact]
     public void CompletedPersistentPullbackCreatesBoundedPaperOnlyEntry()
     {
         var bars = Enumerable.Range(0, 15).Select(index =>

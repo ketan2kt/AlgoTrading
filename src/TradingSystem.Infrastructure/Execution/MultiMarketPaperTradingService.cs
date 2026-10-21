@@ -186,12 +186,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 priceBars, persistentThesis);
             var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
                 value.Market == market.Code && value.Status == "Active", cancellationToken);
-            var persistentEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
-                value.Strategy.StartsWith(PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix),
-                cancellationToken);
             if (!hasActivePosition &&
-                persistentEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
                 persistentEntry.Direction is not null &&
                 (decision.Direction is null || decision.Direction == persistentEntry.Direction))
             {
@@ -211,17 +206,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
                 JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
             await db.SaveChangesAsync(cancellationToken);
-            var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
-                value.Strategy.StartsWith("Research|"), cancellationToken);
             var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
                 value.Market == market.Code && value.Status == "Active", cancellationToken);
             var researchDecision = SensexPaperResearchEntryPolicy.Evaluate(early.Direction,
-                early.Confidence, lifecycle!, researchEntries, hasActivePosition);
+                early.Confidence, lifecycle!, hasActivePosition, persistentThesis);
             if (!paperResearchEntry && researchDecision.Permitted)
             {
-                decision = new(early.Direction!.Value, early.Confidence,
-                    "Sensex controlled early pullback research", early.Reasons);
+                decision = new(early.Direction!.Value, researchDecision.EffectiveConfidence,
+                    "Sensex controlled early pullback research",
+                    [.. early.Reasons, .. researchDecision.Reasons]);
                 paperResearchEntry = true;
             }
             else if (!paperResearchEntry && early.Direction is not null)
@@ -230,8 +223,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     "PaperResearchCandidateRejected", early.Confidence,
                     researchDecision.Reasons, cancellationToken);
             }
-            if (!paperResearchEntry && researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
-                !hasActivePosition && marketStateV2 is not null)
+            if (!paperResearchEntry && !hasActivePosition && marketStateV2 is not null)
             {
                 var range = RangePlaybookV2.Evaluate(priceBars, marketStateV2);
                 if (range.Direction is not null)
@@ -241,8 +233,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     paperResearchEntry = true;
                 }
             }
-            if (!paperResearchEntry && researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
-                !hasActivePosition && marketStateV2 is not null)
+            if (!paperResearchEntry && !hasActivePosition && marketStateV2 is not null)
             {
                 var directional = DirectionalParticipationPolicy.Evaluate(priceBars,
                     marketStateV2, sensexVwap, sensexFast, sensexSlow);
@@ -262,13 +253,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             if (directional.Direction is not null &&
                 (decision.Direction is null || decision.Direction == directional.Direction))
             {
-                var researchEntries = await db.MarketPaperPositions.AsNoTracking().CountAsync(value =>
-                    value.Market == market.Code && value.OpenedAtUtc >= sessionStartUtc &&
-                    value.Strategy.StartsWith("Research|"), cancellationToken);
                 var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
                     value.Market == market.Code && value.Status == "Active", cancellationToken);
-                if (researchEntries < SensexPaperResearchEntryPolicy.MaximumEntriesPerDay &&
-                    !hasActivePosition)
+                if (!hasActivePosition)
                 {
                     decision = new(directional.Direction.Value, directional.Confidence,
                         DirectionalParticipationPolicy.SensexStrategy, directional.Reasons);
@@ -378,8 +365,10 @@ internal sealed partial class MultiMarketPaperTradingService(
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
                 select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            var persistentDirectionalContext = marketStateV2 is not null &&
+                ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional;
             var reentry = StructuralReentryPolicy.Evaluate(priceBars,
-                decision.Direction.Value, priorSameDirectionExit);
+                decision.Direction.Value, priorSameDirectionExit, persistentDirectionalContext);
             // The persistent paper thesis already proves a completed failed-countertrend
             // pullback, so do not require the same reset twice.
             if (!reentry.Permitted && !persistentDirectionalEntry)

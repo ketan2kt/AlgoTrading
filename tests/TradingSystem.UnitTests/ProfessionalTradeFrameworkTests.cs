@@ -94,6 +94,64 @@ public sealed class ProfessionalTradeFrameworkTests
     }
 
     [Fact]
+    public void DirectionalParticipationAcceptsCompactContinuationBase()
+    {
+        var bars = Enumerable.Range(0, 12).Select(index => new StrategyPriceBar(
+            DateTimeOffset.UtcNow.AddMinutes(index * 5), 110m - index * .5m,
+            110.15m - index * .5m, 109.35m - index * .5m,
+            109.55m - index * .5m)).ToList();
+        bars.Add(new(bars[^1].OpenTimeUtc.AddMinutes(5), 104.10m, 104.25m, 103.90m, 104.08m));
+        bars.Add(new(bars[^1].OpenTimeUtc.AddMinutes(5), 104.08m, 104.20m, 103.88m, 104.02m));
+        bars.Add(new(bars[^1].OpenTimeUtc.AddMinutes(5), 104.02m, 104.10m, 103.35m, 103.42m));
+        var state = new MarketStateAssessmentV2(IntradayMarketStateV2.BearTrend,
+            Direction.Sell, .78m, .58m, .25m, .05m, .10m, .55m, 3.1m, []);
+
+        var decision = DirectionalParticipationPolicy.Evaluate(bars, state,
+            107m, 104.25m, 105.1m);
+
+        Assert.Equal(Direction.Sell, decision.Direction);
+        Assert.Contains(decision.Reasons, value => value.Contains("continuation base"));
+    }
+
+    [Fact]
+    public void PersistentVwapSessionOverridesLocalDirectionFlips()
+    {
+        var bars = new List<StrategyPriceBar>();
+        var price = 110m;
+        for (var index = 0; index < 20; index++)
+        {
+            var pullback = index % 3 == 1;
+            var close = pullback ? price + .18m : price - .48m;
+            bars.Add(new(DateTimeOffset.UtcNow.AddMinutes(index * 5), price,
+                Math.Max(price, close) + .12m, Math.Min(price, close) - .12m, close));
+            price = close;
+        }
+
+        var state = MarketStateRouterV2.Analyze(bars, 108m, 104m, 106m);
+
+        Assert.Equal(IntradayMarketStateV2.BearTrend, state.State);
+        Assert.Equal(Direction.Sell, state.Bias);
+        Assert.Contains(state.Evidence, value => value.Contains("Persistent-session override"));
+    }
+
+    [Fact]
+    public void AlternatingChopDoesNotReceivePersistentSessionOverride()
+    {
+        var bars = Enumerable.Range(0, 20).Select(index =>
+        {
+            var open = index % 2 == 0 ? 99.5m : 100.5m;
+            var close = index % 2 == 0 ? 100.5m : 99.5m;
+            return new StrategyPriceBar(DateTimeOffset.UtcNow.AddMinutes(index * 5), open,
+                100.7m, 99.3m, close);
+        }).ToArray();
+
+        var state = MarketStateRouterV2.Analyze(bars, 100m, 100.05m, 100m);
+
+        Assert.NotEqual(IntradayMarketStateV2.BullTrend, state.State);
+        Assert.NotEqual(IntradayMarketStateV2.BearTrend, state.State);
+    }
+
+    [Fact]
     public void DirectionalExitPlanProtectsProfitWithoutTightOneRChoking()
     {
         var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);

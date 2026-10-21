@@ -31,6 +31,19 @@ public sealed class StructuralReentryPolicyTests
         Assert.True(result.NewStructureObserved);
     }
 
+    [Fact]
+    public void AllowsPersistentTrendReentryAfterCompactContinuationBase()
+    {
+        var bars = Bars([100m, 101m, 102m, 103m, 104m, 105m, 106m, 107m,
+            107.2m, 107.1m, 108.5m]);
+        var exit = bars[7].OpenTimeUtc;
+
+        var result = StructuralReentryPolicy.Evaluate(bars, Direction.Buy, exit, true);
+
+        Assert.True(result.Permitted);
+        Assert.Contains(result.Reasons, value => value.Contains("continuation base"));
+    }
+
     private static StrategyPriceBar[] Bars(decimal[] closes)
     {
         var start = new DateTimeOffset(2026, 9, 23, 4, 0, 0, TimeSpan.Zero);

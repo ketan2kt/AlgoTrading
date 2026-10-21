@@ -576,8 +576,10 @@ internal sealed partial class AutomatedPaperTradingService(
                   result.ClosedAtUtc >= sessionStart && result.ClosedAtUtc < sessionEnd
             orderby result.ClosedAtUtc descending
             select (DateTimeOffset?)result.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var persistentDirectionalContext = ProfessionalTradeFramework.Map(marketStateV2) ==
+                                           ProfessionalTradeRegime.Directional;
         var reentryDecision = StructuralReentryPolicy.Evaluate(strategyContext.RecentCandles,
-            signal.Direction, priorSameDirectionExit);
+            signal.Direction, priorSameDirectionExit, persistentDirectionalContext);
         // The persistent paper thesis already requires a completed failed-countertrend
         // pullback. Applying the legacy reset again duplicates the same proof.
         if (!reentryDecision.Permitted && !persistentDirectionalEntry)

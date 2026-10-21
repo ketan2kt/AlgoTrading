@@ -22,22 +22,20 @@ public sealed class SensexPaperResearchEntryPolicyTests
         var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Buy, -.28m, .8m);
 
         var result = SensexPaperResearchEntryPolicy.Evaluate(Direction.Buy, .72m,
-            lifecycle, 0, false);
+            lifecycle, false);
 
         Assert.True(result.Permitted);
     }
 
     [Theory]
-    [InlineData(.69, 0, false)]
-    [InlineData(.72, 2, false)]
-    [InlineData(.72, 0, true)]
-    public void RejectsWeakCappedOrOverlappingResearch(decimal confidence,
-        int entriesToday, bool active)
+    [InlineData(.69, false)]
+    [InlineData(.72, true)]
+    public void RejectsWeakOrOverlappingResearch(decimal confidence, bool active)
     {
         var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Buy, 0m, .8m);
 
         var result = SensexPaperResearchEntryPolicy.Evaluate(Direction.Buy, confidence,
-            lifecycle, entriesToday, active);
+            lifecycle, active);
 
         Assert.False(result.Permitted);
     }
@@ -45,12 +43,30 @@ public sealed class SensexPaperResearchEntryPolicyTests
     [Fact]
     public void RejectsExtendedCandidate()
     {
-        var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Sell, .50m, .8m);
+        var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Sell, .70m, .8m);
 
         var result = SensexPaperResearchEntryPolicy.Evaluate(Direction.Sell, .75m,
-            lifecycle, 0, false);
+            lifecycle, false);
 
         Assert.False(result.Permitted);
+    }
+
+    [Fact]
+    public void StrongPersistentThesisCanLiftAlignedPullbackCandidate()
+    {
+        var lifecycle = Lifecycle(SensexSetupPhase.EntryWindow, Direction.Sell, -1.05m, .35m);
+        var thesis = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version,
+            PersistentDirectionalThesisAnalyzerV1.Status,
+            PersistentDirectionalThesisAnalyzerV1.PaperEligibleFrom,
+            Direction.Sell, .90m, DirectionalThesisPhaseV1.Maintained,
+            9, 1, true, false, false, []);
+
+        var result = SensexPaperResearchEntryPolicy.Evaluate(Direction.Sell, .60m,
+            lifecycle, false, thesis);
+
+        Assert.True(result.Permitted);
+        Assert.True(result.EffectiveConfidence >= .70m);
     }
 
     private static SensexSetupLifecycle Lifecycle(SensexSetupPhase phase, Direction direction,
