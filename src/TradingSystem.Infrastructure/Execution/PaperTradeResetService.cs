@@ -52,23 +52,38 @@ internal sealed partial class PaperTradeResetService(
             await JsonSerializer.SerializeAsync(gzip, new PaperTradeBackup(now, results, positions),
                 cancellationToken: cancellationToken);
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var deletedResults = await db.PaperTradeResults.ExecuteDeleteAsync(cancellationToken);
-        var deletedPositions = await db.MarketPaperPositions.ExecuteDeleteAsync(cancellationToken);
-        var summary = JsonSerializer.Serialize(new
+        var deletedResults = 0;
+        var deletedPositions = 0;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            configuration.RequestId,
-            DeletedNiftyResults = deletedResults,
-            DeletedMarketPositions = deletedPositions,
-            BackupPath = backupPath
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            if (await db.ApplicationSettings.AsNoTracking().AnyAsync(value =>
+                    value.Mode == TradingMode.Paper && value.Key == markerKey, cancellationToken))
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return;
+            }
+
+            deletedResults = await db.PaperTradeResults.ExecuteDeleteAsync(cancellationToken);
+            deletedPositions = await db.MarketPaperPositions.ExecuteDeleteAsync(cancellationToken);
+            var summary = JsonSerializer.Serialize(new
+            {
+                configuration.RequestId,
+                DeletedNiftyResults = deletedResults,
+                DeletedMarketPositions = deletedPositions,
+                BackupPath = backupPath
+            });
+            db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Paper,
+                markerKey, summary, now));
+            db.AuditLogs.Add(new AuditLog(Guid.NewGuid(), "system", "PaperTradeHistoryReset",
+                nameof(PaperTradeResult), configuration.RequestId,
+                "User-authorized clean slate; analytical logs retained.", summary, summary,
+                Guid.NewGuid().ToString("N"), now));
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         });
-        db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Paper,
-            markerKey, summary, now));
-        db.AuditLogs.Add(new AuditLog(Guid.NewGuid(), "system", "PaperTradeHistoryReset",
-            nameof(PaperTradeResult), configuration.RequestId, "User-authorized clean slate; analytical logs retained.",
-            summary, summary, Guid.NewGuid().ToString("N"), now));
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         ResetCompleted(logger, configuration.RequestId, deletedResults, deletedPositions);
     }
 
