@@ -27,8 +27,10 @@ Checks: full Release solution build passed with zero warnings/errors; focused op
 automation contracts passed 4/4; frontend production build passed; frontend tests passed
 39/39; PowerShell parsing, compact-context execution, JSON parsing and `git diff --check`
 passed. The first sandboxed frontend/testhost attempts failed on Windows sandbox temporary
-file and IPC restrictions; the same tests passed outside that restriction. No deployment
-was requested or dispatched for this package.
+file and IPC restrictions; the same tests passed outside that restriction. Commit `dec4782`
+was pushed to `main` and deployment run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39796457905 was dispatched once.
+Completion remains unverified under the repository's no-poll deployment procedure.
 
 ## Permanent production analysis access
 
