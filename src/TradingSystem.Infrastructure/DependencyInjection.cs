@@ -20,6 +20,8 @@ using TradingSystem.Application.Strategies;
 using TradingSystem.Application.Risk;
 using TradingSystem.Application.Execution;
 using TradingSystem.Infrastructure.Execution;
+using TradingSystem.Application.Diagnostics;
+using TradingSystem.Infrastructure.Diagnostics;
 
 namespace TradingSystem.Infrastructure;
 
@@ -203,6 +205,7 @@ public static class DependencyInjection
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
+        services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddHostedService<GrowwAdditionalMarketDataService>();
@@ -228,7 +231,13 @@ public static class DependencyInjection
                                value.MaximumCombinedPremium > 0 &&
                                value.CombinedStopLossPercent is > 0 and <= 50 &&
                                value.WinnerActivationMultiple is >= 1.25m and <= 5m &&
-                               value.WinnerTrailingFraction is > 0 and < 0.5m,
+                               value.WinnerTrailingFraction is > 0 and < 0.5m &&
+                               value.NiftyMaximumStrikeDistance is >= 50m and <= 200m &&
+                               value.SensexMaximumStrikeDistance is >= 100m and <= 500m &&
+                               TimeOnly.TryParseExact(value.EntryWindowStart, "HH:mm", out var start) &&
+                               TimeOnly.TryParseExact(value.EntryCutoff, "HH:mm", out var cutoff) &&
+                               TimeOnly.TryParseExact(value.ForcedExit, "HH:mm", out var forcedExit) &&
+                               start < cutoff && cutoff < forcedExit,
                 "Hero Zero paper strategy settings are invalid.")
             .ValidateOnStart();
         services.AddHostedService<HeroZeroPaperTradingService>();

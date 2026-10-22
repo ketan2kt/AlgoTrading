@@ -109,6 +109,23 @@ jobs:
             fi
           done
 
+      - name: Ensure read-only diagnostics key exists
+        run: |
+          app="${{ steps.infrastructure.outputs.app }}"
+          diagnostics_key=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "$app" \
+            --query "[?name=='Diagnostics__ReadOnlyApiKey'].value | [0]" -o tsv)
+          if [[ -z "$diagnostics_key" ]]; then
+            diagnostics_key=$(openssl rand -hex 32)
+            az webapp config appsettings set \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "$app" \
+              --settings "Diagnostics__ReadOnlyApiKey=$diagnostics_key" \
+              --output none
+          fi
+          unset diagnostics_key
+
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json

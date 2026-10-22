@@ -1,6 +1,248 @@
 # Current handover
 
-Updated: 2026-10-16 (Asia/Calcutta).
+Updated: 2026-10-22 (Asia/Calcutta).
+
+## Permanent production analysis access
+
+Implemented a bounded, read-only production diagnostics surface so daily trade/no-trade
+analysis no longer depends on browser UI access or direct PostgreSQL networking. The
+endpoint `/api/internal/diagnostics/daily` accepts only `nifty`, `sensex` or `all` plus a
+date; it returns provider health, candle/decision freshness, exact outcome counts,
+bounded decision evidence, trades/P&L, available Nifty MFE/MAE samples, operational
+events and explicit telemetry warnings. It cannot execute arbitrary SQL or mutate data.
+
+Access is protected by a dedicated 256-bit App Service key, constant-time validation,
+no-store responses and a 12-request/minute limiter. The deployment workflow creates the
+key only when missing and never prints it. `./scripts/tasks.ps1 analysis -Date YYYY-MM-DD
+-Market all|nifty|sensex` retrieves that key through the authenticated Azure CLI without
+displaying it and emits the production JSON in one command. Usage is documented in
+`docs/routine-work.md`.
+
+Checks: the complete Release solution and focused API project build with zero warnings
+or errors; PowerShell parser validation passed. The two focused authorization tests
+compiled but local VSTest hit the existing 90-second testhost connection timeout, so
+execution remains a CI responsibility. No deployment was requested or dispatched; the
+endpoint and command will become usable only after an authorized commit/push/deployment.
+
+## Hero Zero late-session and near-ATM correction
+
+Hero Zero is now isolated to a 14:25–15:00 IST entry window for both Nifty and
+Sensex. Time alone cannot open a pair: the existing five-minute range/body/structure
+expansion, liquidity, OI, volume, spread, candidate-score and combined-debit gates still
+apply. This removes the previous 13:30 eligibility that could buy both legs well before
+the intended late expiry move.
+
+Contract discovery no longer allows cheap-premium scoring to select distant strikes.
+Nifty CE/PE candidates must be on their correct OTM side and within 100 underlying
+points of spot; Sensex candidates must be on their correct OTM side and within 250
+points. ATM remains eligible when it is the strongest liquid candidate, avoiding a new
+blanket no-trade condition. Monitor/audit explanations identify the late window and
+near-ATM cap when an entry cannot proceed. Configuration validation fails startup for
+invalid time ordering or implausible distance limits.
+
+Checks: the complete Release solution builds with zero warnings/errors. Focused tests
+compile and cover the 14:25 boundary, per-market defaults, correct OTM side and maximum
+distance; local VSTest again failed to connect to testhost after 90 seconds, so test
+execution remains pending the mandatory CI gate. No deployment was requested or
+dispatched for this change.
+
+## 22 October no-trade production failure
+
+Production logs for 22 October showed that the current index/chart feed was healthy, but
+both Groww futures-confirmation feeds were repeatedly failing with `Groww cumulative volume
+regressed; session reconciliation is required`. Since confirmation is mandatory, this
+blocked both paper engines even though the charts continued to update. Nifty also aborted
+some automation cycles on the unique strategy-evaluation index, and concurrent provider
+health writes occasionally aborted Sensex polling.
+
+The correction rebases a same-session Groww cumulative-volume reset at zero delta and then
+continues from the new baseline; an older-session quote remains rejected. Strategy-evaluation
+deduplication now uses the actual recorded strategy ID and treats a database-confirmed
+concurrent duplicate as idempotent. Provider-health writes retry once after their existing
+optimistic-concurrency or unique-insert boundary. The complete Release solution builds with
+zero warnings/errors. The focused VSTest run compiled and started but hit the documented
+local testhost connection timeout after 90 seconds; the deployment workflow's mandatory
+test suite remains the execution gate. Commit `1f8b76d` deployed successfully in run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39726816716.
+
+Post-deployment evidence at 11:56-11:57 IST showed the cumulative-volume failure was gone,
+but the one-retry provider-health correction was insufficient: concurrent Groww services
+still collided on the shared `ProviderHealth` row and Nifty live polling failed on the
+second optimistic-concurrency attempt. Groww also returned sustained HTTP 429 responses.
+The durable follow-up replaces tracked provider-health writes with a PostgreSQL atomic
+upsert, so health telemetry can no longer throw an optimistic-concurrency exception into a
+market-feed cycle. The singleton Groww read gateway now serializes request starts at 150 ms
+intervals and shares identical quotes for 750 ms, eliminating the observed same-second
+request bursts without making chart data seconds old. Concurrent identical-quote coverage
+was added. The complete Release solution builds with zero warnings/errors; local VSTest
+again failed to connect to testhost, so the mandatory deployment suite remains the test gate.
+Direct workstation DB access is intentionally unavailable because the Azure PostgreSQL
+server has public networking disabled. Future database-first analysis needs a secured,
+read-only in-app diagnostic query surface rather than UI inspection or public DB exposure.
+
+## Configurable index lots and clean-slate reset
+
+Implemented persisted administrator controls for independent Nifty and Sensex lot counts,
+defaulting to 10. Normal, Hero Zero, expansion-pair/hedge and controlled-live discovery now
+use the saved market count exactly; a trade is rejected with an audit reason rather than
+silently reduced when existing capital/risk approval cannot support that size. The Controls
+screen loads and saves both values through an antiforgery-protected administrator API.
+
+Added a guarded, request-idempotent production reset that gzip-archives Nifty paper results
+and all multi-market paper positions before removing those performance rows. Candles,
+signals, strategy evaluations, market audits, price samples, exit follow-ups, system events
+and audit logs remain in the database for analysis. It is disabled by default and must be
+enabled with a unique production request ID; an application-setting marker prevents a repeat.
+
+Checks: Release solution build passed with zero warnings/errors. Frontend production build
+passed and 39/39 frontend tests passed. Local VSTest could not connect to testhost, but the
+previous deployment failure was isolated to an incorrect directional-policy test fixture;
+the fixture now exercises a non-extended EMA-aligned pullback. Commit `9023570` was pushed
+to `main`; deployment run https://github.com/ketan2kt/AlgoTrading/actions/runs/39584813366
+was dispatched once. Completion and the production reset remain unverified.
+
+Run `39584813366` failed because `PaperTradeResetService` began a user transaction
+directly under Npgsql's retrying execution strategy, which aborted application startup.
+The cleanup switch was immediately disabled to let the deployed site start. The service
+now executes the complete marker check, deletes and audit write through
+`Database.CreateExecutionStrategy()` with an inner transaction, preserving atomicity and
+retry compatibility. The complete Release solution builds with zero warnings/errors.
+The workflow now leaves the reset disabled during ZipDeploy and enables the fixed,
+idempotent reset together with post-package migration startup. Commits `0822106` and
+`3849d8b` were pushed; one corrected deployment was dispatched:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39587324765
+Completion remains unverified under the no-poll deployment procedure.
+
+## 21 October directional participation correction
+
+Implemented the user-authorized Nifty/Sensex correction after the 21 October review.
+Sensex no longer becomes permanently ineligible after its first two morning entries;
+active-position, structural-reset, direction-flip, OI/location and portfolio-risk gates
+remain. A strong persistent session thesis can now contribute to composite Sensex
+confidence instead of being contradicted by an isolated early-pullback score.
+
+Both engines now distinguish local pullback noise from session direction using sustained
+VWAP-side control, EMA alignment and progress. They may enter either a completed pullback
+resumption or a compact continuation-base break, with separate EMA-extension anti-chase
+budgets. A mature session is not rejected solely because the total move is large when
+VWAP-side control persists and a fresh compact base forms. Same-direction re-entry accepts
+that continuation structure, while ordinary time-only re-entry remains rejected. Existing
+directional partial-profit, runner, correlation and risk controls were retained.
+
+Regression coverage now includes persistent continuation entry, composite Sensex
+confidence, continuation re-entry, persistent-session regime override and a choppy-session
+negative case. The reconstructed 21 October failure signature passed locally: bearish
+directional participation was produced and alternating chop remained blocked. The complete
+Release solution built with zero warnings/errors. Local VSTest again could not connect to
+testhost after 90 seconds; the deployment workflow's mandatory backend suite remains the
+execution gate. Commit `0374113` was pushed to `main` and dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39580130614
+Dispatch was accepted; completion is unverified per the no-poll deployment procedure.
+
+## Normal-session expansion pair
+
+Implemented a separate Nifty/Sensex intraday CE+PE expansion-pair engine for the
+user-authorized normal-session hedge experiment. It waits for a measured four-candle
+compression followed by a genuine five-minute release, rejects a mature preceding
+impulse, checks the official option-chain OI barrier in the release direction, and
+selects same-expiry liquid CE/PE contracts with comparable premium sensitivity. The
+combined debit, spread, OI/volume quality and estimated 28% basket-stop risk determine
+eligibility and whole-lot size; the strategy is capped at two pairs per market/day with
+a 60-minute cooldown and never averages a losing basket.
+
+Management is isolated from the ordinary position manager: no-expansion baskets exit
+after three completed candles, the defined-risk basket stops at 28%, a winner may fund
+the original combined debit while retaining a whole-lot runner, and that runner uses a
+25% peak-value trail. Remaining exposure closes by 15:10 IST. Every rejection, OI
+assessment, entry, recovery and exit is persisted. Sensex live discovery explicitly
+excludes the paired legs so they cannot be promoted as unrelated single-leg orders.
+
+Checks: full Release backend suite passed (381 passed: 2 architecture, 68 contract,
+16 integration and 295 unit; 3 opt-in PostgreSQL tests skipped). The focused new policy
+and lifecycle suite passed 8/8 and the live-isolation contract passed 1/1. Deployment
+was committed and pushed as `6db558b`, then dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39570776791
+Dispatch was accepted; completion is unverified per the no-poll deployment procedure.
+
+## Option-chain OI barrier entry gate
+
+Production evidence on 21 October showed four completed Nifty/Sensex CE trades at the
+time of review: two wins, two losses and combined net P&L of -₹6,329.45. The 09:40 Nifty
+CE and approximately 09:40 Sensex CE both recorded zero favourable excursion and lost
+about ₹9,758 combined. This proves poor entry location/room on those trades, but does
+not by itself prove that OI resistance caused them because the old entry audit did not
+link option-chain walls to each decision.
+
+The missing decision layer is now implemented locally for both index engines:
+
+- Reads the latest official Groww option-chain snapshot, no more than three minutes old,
+  plus the preceding matching-expiry snapshot.
+- Treats concentrated call OI above spot as resistance for CE/bullish entries and
+  concentrated put OI below spot as support for PE/bearish entries.
+- Detects both established walls (relative-to-median OI plus visible-chain
+  concentration) and material OI buildup between snapshots.
+- Rejects only a proven wall leaving less than 1.25R of underlying room. A wall with
+  sufficient room remains eligible, preventing the feature from becoming another
+  blanket no-trade rule.
+- Missing or stale chain data is explicitly audited as unavailable and never replaced
+  by invented OI; it does not silently stop paper research.
+- Every accepted, rejected or unavailable assessment is persisted with snapshot age,
+  wall strike, OI strength/concentration, OI change and room-to-risk evidence.
+- The policy tests are tagged `DeploymentRegression`, so the existing pre-Azure quality
+  gate must pass them before any future deployment begins.
+
+Checks: the Release unit-test project and all referenced production projects build with
+zero warnings/errors. Direct execution against the compiled policy passed nearby call
+wall rejection, growing put-wall rejection, sufficient-room acceptance and missing-data
+behaviour. Local VSTest remains subject to the previously documented testhost startup
+failure. Commit `98394ad` was pushed to `main` and dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39546871549
+Dispatch was accepted; completion is unverified per the no-poll deployment procedure.
+
+## 19 October directional participation correction
+
+The 19 October paper session exposed three deterministic contradictions: Nifty's
+four-entry/two-loss lockout prevented later participation after valid fresh pullbacks,
+persistent-directional positions could be stopped by option-premium noise in under a
+minute before the underlying thesis could confirm or invalidate, and Sensex could flip
+CE/PE direction inside the same opening whipsaw.
+
+The local correction is deliberately limited to the explicitly paper-only persistent
+directional source (which automatic live discovery already excludes):
+
+- Nifty retains the standard four-entry allocation and 30-minute post-loss cooldown,
+  but a fresh persistent-directional pullback may use at most two bounded recovery
+  entries. The consecutive-loss pause no longer becomes an all-day lockout for that
+  qualified source.
+- Initial premium stops on persistent-directional paper positions are deferred until
+  the underlying thesis confirms a change of character. A 2R catastrophic boundary,
+  all profit-protection stops, forced exits and kill-switch exits remain immediate.
+- Sensex blocks an opposite-side re-entry for 30 minutes after an exit, while same-side
+  pullbacks remain available. Persistent Sensex paper positions use the same
+  thesis-aware initial-stop confirmation.
+- Hero Zero no longer treats a below-average candle as an expansion. A pair requires
+  at least 1.20x recent range, a 0.60x body and a decisive close beyond the prior
+  nine-candle structure before it may open.
+- Every deferred stop and every direction-flip rejection is persisted for later review.
+- The 19 October failure signature is now an embedded deployment-regression fixture.
+  It covers the observed early premium-stop sequence, bounded Nifty recovery after the
+  normal allocation, the Sensex opposite-side reset, Hero Zero expansion quality and
+  the retained immediate safety boundaries. It is explicitly a reconstructed failure
+  signature, not a tick-complete market replay.
+- The Azure workflow now runs that protected-session regression plus the complete
+  backend test suite before Azure login, settings changes or package deployment. A
+  failure prevents deployment from starting.
+
+Checks: the entire Release solution builds with zero warnings/errors using single-node
+MSBuild; the deployment-regression test project builds with zero warnings/errors; direct
+fixture-driven runtime checks passed for bounded recovery, stop deferral, reserve
+exhaustion, direction-flip reset and weak/decisive Hero Zero expansion. Focused unit
+tests compile, but VSTest on this machine again failed to connect to testhost after 180
+seconds, so execution is delegated to the new mandatory GitHub quality gate. The
+strategy correction is committed as `39a615c`; the regression gate is committed as
+`fa736ee`. Both were pushed to `main` and dispatched once for deployment:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39241134597
+Dispatch was accepted; completion is unverified per the no-poll deployment procedure.
 
 ## Persistent directional paper-entry integration
 
@@ -28,8 +270,10 @@ excluded from automatic live discovery.
 Checks: changed unit-test project builds in Release with zero warnings/errors, including
 the new regression tests. Local VSTest execution is currently blocked by a machine-level
 testhost connection timeout (testhost failed to connect after both 90 and 180 seconds),
-so the tests have compiled but not executed in this correction. No commit, push or
-deployment has been performed for the correction yet.
+so the tests have compiled but not executed in this correction. The correction was
+committed and pushed as `c1ab746`, then dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/38879942476
+Dispatch was accepted; completion is unverified per the no-poll deployment procedure.
 
 ## Professional trade framework implementation
 

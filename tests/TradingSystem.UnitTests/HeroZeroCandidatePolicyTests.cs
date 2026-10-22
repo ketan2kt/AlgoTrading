@@ -1,10 +1,26 @@
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.Strategies;
+using TradingSystem.Infrastructure.Execution;
 
 namespace TradingSystem.UnitTests;
 
 public sealed class HeroZeroCandidatePolicyTests
 {
+    [Fact]
+    public void DefaultsUseLateExpansionWindowAndMarketSpecificAtmCaps()
+    {
+        var options = new HeroZeroOptions();
+
+        Assert.Equal("14:25", options.EntryWindowStart);
+        Assert.Equal("15:00", options.EntryCutoff);
+        Assert.Equal(100m, options.NiftyMaximumStrikeDistance);
+        Assert.Equal(250m, options.SensexMaximumStrikeDistance);
+        Assert.False(IndexEntryWindowPolicy.AllowsEntry(
+            new TimeOnly(14, 24, 59), new TimeOnly(14, 25), new TimeOnly(15, 0)));
+        Assert.True(IndexEntryWindowPolicy.AllowsEntry(
+            new TimeOnly(14, 25), new TimeOnly(14, 25), new TimeOnly(15, 0)));
+    }
+
     [Fact]
     public void SelectBalancesPremiumLiquidityOiAndVolume()
     {
@@ -43,6 +59,26 @@ public sealed class HeroZeroCandidatePolicyTests
         Assert.Null(selected);
     }
 
+    [Theory]
+    [InlineData("CE", 25100, "NEAR-CE")]
+    [InlineData("PE", 24900, "NEAR-PE")]
+    public void SelectKeepsHeroZeroOnTheOtmSideAndWithinTheAtmDistance(
+        string optionType, decimal nearStrike, string expectedSymbol)
+    {
+        var expiry = new DateOnly(2026, 8, 26);
+        var selected = HeroZeroCandidatePolicy.Select([
+            Candidate(expectedSymbol, optionType, 20m, 19.8m, 20.2m, 5000m, 3000m, 200m,
+                expiry, nearStrike),
+            Candidate("TOO-FAR", optionType, 20m, 19.8m, 20.2m, 50000m, 30000m, 2000m,
+                expiry, optionType == "CE" ? 25150m : 24850m),
+            Candidate("WRONG-SIDE", optionType, 20m, 19.8m, 20.2m, 50000m, 30000m, 2000m,
+                expiry, optionType == "CE" ? 24950m : 25050m)
+        ], optionType, 20m, 15m, 25000m, 100m);
+
+        Assert.NotNull(selected);
+        Assert.Equal(expectedSymbol, selected.Symbol);
+    }
+
     [Fact]
     public void ExpansionRejectsAnAverageSizedCandle()
     {
@@ -66,8 +102,9 @@ public sealed class HeroZeroCandidatePolicyTests
     }
 
     private static HeroZeroCandidateInput Candidate(string symbol, string type, decimal premium,
-        decimal bid, decimal ask, decimal volume, decimal oi, decimal oiChange, DateOnly expiry) =>
-        new(Guid.NewGuid(), symbol, type, 25000m, expiry, 65, premium, bid, ask, volume, oi, oiChange);
+        decimal bid, decimal ask, decimal volume, decimal oi, decimal oiChange, DateOnly expiry,
+        decimal strike = 25000m) =>
+        new(Guid.NewGuid(), symbol, type, strike, expiry, 65, premium, bid, ask, volume, oi, oiChange);
 
     private static IEnumerable<StrategyPriceBar> Bars() => Enumerable.Range(0, 9).Select(index =>
         new StrategyPriceBar(DateTimeOffset.UtcNow.AddMinutes(index - 10),

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Serilog;
 using TradingSystem.Api.Hubs;
+using TradingSystem.Api.Controllers;
 using TradingSystem.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +25,8 @@ builder.Services
         "postgresql",
         tags: ["ready", "trading-ready"]);
 builder.Services.AddProblemDetails();
+builder.Services.AddOptions<ReadOnlyDiagnosticsOptions>()
+    .Bind(builder.Configuration.GetSection(ReadOnlyDiagnosticsOptions.SectionName));
 var dataProtectionPath = builder.Configuration["DataProtection:KeysPath"];
 var keyDirectory = string.IsNullOrWhiteSpace(dataProtectionPath)
     ? Path.Combine(builder.Environment.ContentRootPath, ".data-protection-keys")
@@ -67,12 +70,20 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
 });
 builder.Services.AddRateLimiter(options =>
+{
     options.AddFixedWindowLimiter("authentication", limiter =>
     {
         limiter.PermitLimit = 5;
         limiter.Window = TimeSpan.FromMinutes(1);
         limiter.QueueLimit = 0;
-    }));
+    });
+    options.AddFixedWindowLimiter("diagnostics", limiter =>
+    {
+        limiter.PermitLimit = 12;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
 builder.Services
     .AddHttpClient("resilient-external")
     .AddStandardResilienceHandler();

@@ -9,6 +9,24 @@ namespace TradingSystem.IntegrationTests;
 public sealed class ApiRequestValidationTests
 {
     [Fact]
+    public void ReadOnlyDiagnosticsRequiresAStrongConfiguredKey()
+    {
+        Assert.False(ReadOnlyDiagnosticsKeyValidator.IsConfigured(null));
+        Assert.False(ReadOnlyDiagnosticsKeyValidator.IsConfigured("too-short"));
+        Assert.True(ReadOnlyDiagnosticsKeyValidator.IsConfigured(new string('a', 32)));
+    }
+
+    [Fact]
+    public void ReadOnlyDiagnosticsAcceptsOnlyTheExactKey()
+    {
+        var configured = "c4bb99738f6a4f93a3909548eed335e937104cb4b0f44828be053fcc5f3cd0a7";
+
+        Assert.True(ReadOnlyDiagnosticsKeyValidator.IsAuthorized(configured, configured));
+        Assert.False(ReadOnlyDiagnosticsKeyValidator.IsAuthorized(configured, configured + "x"));
+        Assert.False(ReadOnlyDiagnosticsKeyValidator.IsAuthorized(configured, null));
+    }
+
+    [Fact]
     public void GrowwTokenRequestUsesPropertyValidationCompatibleWithAspNetCore()
     {
         var request = new StoreGrowwTokenRequest { AccessToken = "short" };

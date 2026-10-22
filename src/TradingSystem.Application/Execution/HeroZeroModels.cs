@@ -32,10 +32,12 @@ public sealed record HeroZeroCandidateInput(
 public static class HeroZeroCandidatePolicy
 {
     public static HeroZeroCandidate? Select(IReadOnlyCollection<HeroZeroCandidateInput> candidates,
-        string optionType, decimal targetPremium, decimal maximumSpreadPercent)
+        string optionType, decimal targetPremium, decimal maximumSpreadPercent,
+        decimal? spot = null, decimal? maximumStrikeDistance = null)
     {
         var eligible = candidates.Where(value => value.OptionType == optionType && value.Premium > 0 &&
             value.OpenInterest > 0 && value.Volume > 0 &&
+            IsNearAtTheMoney(value, spot, maximumStrikeDistance) &&
             ((value.Bid <= 0 && value.Ask <= 0) || (value.Bid > 0 && value.Ask >= value.Bid)))
             .Select(value => new
             {
@@ -66,6 +68,20 @@ public static class HeroZeroCandidatePolicy
                 value.Value.Volume, value.Value.OpenInterest, value.Value.OpenInterestChange, score);
         }).OrderByDescending(value => value.Score).ThenBy(value => Math.Abs(value.Premium - targetPremium))
           .First();
+    }
+
+    private static bool IsNearAtTheMoney(HeroZeroCandidateInput candidate, decimal? spot,
+        decimal? maximumStrikeDistance)
+    {
+        if (spot is null || maximumStrikeDistance is null) return true;
+        if (maximumStrikeDistance <= 0m) return false;
+        var distance = candidate.Strike - spot.Value;
+        return candidate.OptionType switch
+        {
+            "CE" => distance >= 0m && distance <= maximumStrikeDistance.Value,
+            "PE" => distance <= 0m && -distance <= maximumStrikeDistance.Value,
+            _ => false
+        };
     }
 }
 

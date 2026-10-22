@@ -101,10 +101,13 @@ internal sealed partial class HeroZeroPaperTradingService(
 
         var candidates = await LoadCandidatesAsync(db, market, expiry.Value, spotQuote.LastPrice,
             cancellationToken);
+        var maximumStrikeDistance = market == TradingMarketCatalog.Sensex
+            ? options.Value.SensexMaximumStrikeDistance
+            : options.Value.NiftyMaximumStrikeDistance;
         var call = HeroZeroCandidatePolicy.Select(candidates, "CE", options.Value.TargetPremium,
-            options.Value.MaximumSpreadPercent);
+            options.Value.MaximumSpreadPercent, spotQuote.LastPrice, maximumStrikeDistance);
         var put = HeroZeroCandidatePolicy.Select(candidates, "PE", options.Value.TargetPremium,
-            options.Value.MaximumSpreadPercent);
+            options.Value.MaximumSpreadPercent, spotQuote.LastPrice, maximumStrikeDistance);
         var status = "Candidates ready";
         var explanation = "Monitoring expiry expansion; the HZ button is view-only.";
         var canEnter = call is not null && put is not null &&
@@ -131,8 +134,10 @@ internal sealed partial class HeroZeroPaperTradingService(
         }
         else if (localTime < ParseTime(options.Value.EntryWindowStart))
             explanation = $"Candidates update automatically; entries begin after {options.Value.EntryWindowStart} IST.";
+        else if (localTime >= ParseTime(options.Value.EntryCutoff))
+            explanation = $"The {options.Value.EntryWindowStart}–{options.Value.EntryCutoff} IST Hero Zero entry window has closed.";
         else if (call is null || put is null)
-            explanation = "Both liquid CE and PE candidates are not currently available.";
+            explanation = $"Both liquid near-ATM CE and PE candidates are not available within {maximumStrikeDistance:0} index points.";
         else if (call.Score < options.Value.MinimumCandidateScore || put.Score < options.Value.MinimumCandidateScore)
             explanation = "Candidate liquidity/OI/volume quality is below the entry threshold.";
         else if (call.Premium + put.Premium > options.Value.MaximumCombinedPremium)
