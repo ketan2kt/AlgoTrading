@@ -56,6 +56,28 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task DuplicateQuoteRequestsShareFreshBrokerResponse()
+    {
+        var requests = 0;
+        var gateway = CreateGateway(_ =>
+        {
+            Interlocked.Increment(ref requests);
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"last_price":24500.25,"last_trade_time":1746174479582,"bid_price":24500.2,"bid_quantity":50,"offer_price":24500.3,"offer_quantity":25,"volume":1000,"open_interest":2000,"oi_day_change":100}}
+                """);
+        });
+        var request = new GrowwQuoteRequest("NSE", "FNO", "NIFTY25AUGFUT");
+
+        var quotes = await Task.WhenAll(
+            gateway.GetQuoteAsync(request, CancellationToken.None),
+            gateway.GetQuoteAsync(request, CancellationToken.None),
+            gateway.GetQuoteAsync(request, CancellationToken.None));
+
+        Assert.All(quotes, quote => Assert.Equal(24500.25m, quote.LastPrice));
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
     public async Task OptionChainUsesOfficialEndpointAndMapsOiVolumeAndGreeks()
     {
         HttpRequestMessage? captured = null;

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -11,11 +12,19 @@ namespace TradingSystem.Infrastructure.Broker.Groww;
 public sealed class GrowwReadOnlyGateway(
     IHttpClientFactory httpClientFactory,
     IGrowwAccessTokenProvider accessTokenProvider,
-    IOptions<GrowwOptions> options) : IGrowwReadOnlyGateway
+    IOptions<GrowwOptions> options,
+    TimeProvider? timeProvider = null) : IGrowwReadOnlyGateway, IDisposable
 {
     internal const string ApiClientName = "GrowwReadOnlyApi";
     internal const string InstrumentClientName = "GrowwInstrumentMaster";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan MinimumApiRequestSpacing = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan QuoteCacheLifetime = TimeSpan.FromMilliseconds(750);
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private readonly SemaphoreSlim apiRequestGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> quoteGates = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CachedQuote> quoteCache = new(StringComparer.Ordinal);
+    private DateTimeOffset nextApiRequestAtUtc = DateTimeOffset.MinValue;
 
     public async Task<GrowwUserProfile> GetUserProfileAsync(CancellationToken cancellationToken)
     {
@@ -44,6 +53,28 @@ public sealed class GrowwReadOnlyGateway(
         ValidateIdentifier(request.Exchange, nameof(request.Exchange));
         ValidateIdentifier(request.Segment, nameof(request.Segment));
         ValidateIdentifier(request.TradingSymbol, nameof(request.TradingSymbol));
+        var cacheKey = $"{request.Exchange}|{request.Segment}|{request.TradingSymbol}";
+        if (TryGetCachedQuote(cacheKey, out var cached)) return cached;
+
+        var quoteGate = quoteGates.GetOrAdd(cacheKey, static _ => new SemaphoreSlim(1, 1));
+        await quoteGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (TryGetCachedQuote(cacheKey, out cached)) return cached;
+            var quote = await GetQuoteCoreAsync(request, cancellationToken);
+            quoteCache[cacheKey] = new CachedQuote(quote, clock.GetUtcNow());
+            return quote;
+        }
+        finally
+        {
+            quoteGate.Release();
+        }
+    }
+
+    private async Task<GrowwQuote> GetQuoteCoreAsync(
+        GrowwQuoteRequest request,
+        CancellationToken cancellationToken)
+    {
         // Groww's full quote endpoint does not consistently accept MCX commodity
         // trading symbols. The documented multi-LTP endpoint does, so commodity
         // polling must not depend on a particular quote error message to reach it.
@@ -70,6 +101,19 @@ public sealed class GrowwReadOnlyGateway(
             payload.Volume,
             payload.OpenInterest,
             payload.OpenInterestDayChange);
+    }
+
+    private bool TryGetCachedQuote(string cacheKey, out GrowwQuote quote)
+    {
+        if (quoteCache.TryGetValue(cacheKey, out var cached) &&
+            clock.GetUtcNow() - cached.ReceivedAtUtc <= QuoteCacheLifetime)
+        {
+            quote = cached.Quote;
+            return true;
+        }
+
+        quote = default!;
+        return false;
     }
 
     private async Task<GrowwQuote> GetCommodityLtpFallbackAsync(
@@ -212,8 +256,7 @@ public sealed class GrowwReadOnlyGateway(
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("X-API-VERSION", "1.0");
 
-        using var response = await httpClientFactory.CreateClient(ApiClientName)
-            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await SendRateLimitedAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
         try
         {
@@ -234,6 +277,28 @@ public sealed class GrowwReadOnlyGateway(
         catch (JsonException exception)
         {
             throw Malformed("Groww returned malformed JSON.", exception);
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendRateLimitedAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        await apiRequestGate.WaitAsync(cancellationToken);
+        try
+        {
+            var delay = nextApiRequestAtUtc - clock.GetUtcNow();
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, clock, cancellationToken);
+
+            var response = await httpClientFactory.CreateClient(ApiClientName)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            nextApiRequestAtUtc = clock.GetUtcNow() + MinimumApiRequestSpacing;
+            return response;
+        }
+        finally
+        {
+            apiRequestGate.Release();
         }
     }
 
@@ -340,6 +405,13 @@ public sealed class GrowwReadOnlyGateway(
     private static GrowwApiException Malformed(string message, Exception? inner = null) =>
         new(message, "MALFORMED_RESPONSE", null, inner);
 
+    public void Dispose()
+    {
+        apiRequestGate.Dispose();
+        foreach (var gate in quoteGates.Values) gate.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     private sealed record Envelope<TPayload>(
         string? Status,
         TPayload? Payload,
@@ -411,4 +483,6 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("net_carry_forward_quantity")] int NetCarryForwardQuantity,
         [property: JsonPropertyName("net_carry_forward_price")] decimal NetCarryForwardPrice,
         [property: JsonPropertyName("realised_pnl")] decimal RealisedPnl);
+
+    private sealed record CachedQuote(GrowwQuote Quote, DateTimeOffset ReceivedAtUtc);
 }

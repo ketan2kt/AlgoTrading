@@ -40,43 +40,38 @@ internal sealed class EfMarketDataPersistence(TradingDbContext dbContext, TimePr
     public async Task RecordProviderHealthAsync(string provider, MarketDataValidationResult result,
         DateTimeOffset observedAtUtc, CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 2; attempt++)
+        var id = Guid.NewGuid();
+        var now = timeProvider.GetUtcNow();
+        var concurrencyToken = Guid.NewGuid();
+        if (result.Accepted)
         {
-            var health = await dbContext.ProviderHealth.SingleOrDefaultAsync(
-                value => value.Provider == provider, cancellationToken);
-            if (health is null)
-            {
-                health = new ProviderHealth(Guid.NewGuid(), provider, timeProvider.GetUtcNow());
-                dbContext.ProviderHealth.Add(health);
-            }
-
-            if (result.Accepted) health.RecordSuccess(observedAtUtc);
-            else health.RecordFailure(result.Reason.ToString(), observedAtUtc);
-
-            try
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-                return;
-            }
-            catch (DbUpdateConcurrencyException) when (attempt == 0)
-            {
-                DetachProviderHealthEntries();
-            }
-            catch (DbUpdateException exception) when (attempt == 0 &&
-                exception.InnerException is PostgresException
-                {
-                    SqlState: PostgresErrorCodes.UniqueViolation,
-                    ConstraintName: "IX_provider_health_Provider"
-                })
-            {
-                DetachProviderHealthEntries();
-            }
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO trading.provider_health
+                    ("Id", "Provider", "IsAvailable", "LastSuccessAtUtc", "LastFailureAtUtc",
+                     "ErrorCode", "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyToken")
+                VALUES ({id}, {provider}, TRUE, {observedAtUtc}, NULL, NULL, {now}, {now}, {concurrencyToken})
+                ON CONFLICT ("Provider") DO UPDATE SET
+                    "IsAvailable" = TRUE,
+                    "LastSuccessAtUtc" = EXCLUDED."LastSuccessAtUtc",
+                    "ErrorCode" = NULL,
+                    "UpdatedAtUtc" = EXCLUDED."UpdatedAtUtc",
+                    "ConcurrencyToken" = EXCLUDED."ConcurrencyToken";
+                """, cancellationToken);
+            return;
         }
 
-        void DetachProviderHealthEntries()
-        {
-            foreach (var entry in dbContext.ChangeTracker.Entries<ProviderHealth>())
-                entry.State = EntityState.Detached;
-        }
+        var errorCode = result.Reason.ToString();
+        await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO trading.provider_health
+                ("Id", "Provider", "IsAvailable", "LastSuccessAtUtc", "LastFailureAtUtc",
+                 "ErrorCode", "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyToken")
+            VALUES ({id}, {provider}, FALSE, NULL, {observedAtUtc}, {errorCode}, {now}, {now}, {concurrencyToken})
+            ON CONFLICT ("Provider") DO UPDATE SET
+                "IsAvailable" = FALSE,
+                "LastFailureAtUtc" = EXCLUDED."LastFailureAtUtc",
+                "ErrorCode" = EXCLUDED."ErrorCode",
+                "UpdatedAtUtc" = EXCLUDED."UpdatedAtUtc",
+                "ConcurrencyToken" = EXCLUDED."ConcurrencyToken";
+            """, cancellationToken);
     }
 }
