@@ -21,8 +21,14 @@ displaying it and emits the production JSON in one command. Usage is documented 
 Checks: the complete Release solution and focused API project build with zero warnings
 or errors; PowerShell parser validation passed. The two focused authorization tests
 compiled but local VSTest hit the existing 90-second testhost connection timeout, so
-execution remains a CI responsibility. No deployment was requested or dispatched; the
-endpoint and command will become usable only after an authorized commit/push/deployment.
+execution remains a CI responsibility. Commit `5ed2b31` was pushed and deployment run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39758670062 was dispatched. Its quality
+gate passed, but ZipDeploy received HTTP 502 from Kudu before accepting the package. The
+new diagnostics-key setting had incorrectly been mutated before ZipDeploy, recreating the
+SCM restart race already documented in the workflow. The key mutation is now folded into
+the existing post-package migration restart, and ZipDeploy has three bounded idempotent
+attempts so a transient Kudu 502 can recover automatically. A corrected deployment remains
+to be committed and dispatched.
 
 ## Hero Zero late-session and near-ATM correction
 

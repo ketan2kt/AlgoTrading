@@ -109,23 +109,6 @@ jobs:
             fi
           done
 
-      - name: Ensure read-only diagnostics key exists
-        run: |
-          app="${{ steps.infrastructure.outputs.app }}"
-          diagnostics_key=$(az webapp config appsettings list \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "$app" \
-            --query "[?name=='Diagnostics__ReadOnlyApiKey'].value | [0]" -o tsv)
-          if [[ -z "$diagnostics_key" ]]; then
-            diagnostics_key=$(openssl rand -hex 32)
-            az webapp config appsettings set \
-              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-              --name "$app" \
-              --settings "Diagnostics__ReadOnlyApiKey=$diagnostics_key" \
-              --output none
-          fi
-          unset diagnostics_key
-
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -159,18 +142,39 @@ jobs:
           # Never mutate App Service settings immediately before ZipDeploy. Even an
           # apparently completed settings call can restart the SCM container minutes
           # later and cancel the active deployment.
-          az webapp deploy \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ steps.infrastructure.outputs.app }}" \
-            --src-path trading-system.zip \
-            --type zip \
-            --clean true \
-            --restart true
+          deployed=false
+          for attempt in 1 2 3; do
+            if az webapp deploy \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ steps.infrastructure.outputs.app }}" \
+              --src-path trading-system.zip \
+              --type zip \
+              --clean true \
+              --restart true; then
+              deployed=true
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "ZipDeploy attempt $attempt failed; allowing Kudu to recover before retry."
+              sleep $((attempt * 20))
+            fi
+          done
+          if [[ "$deployed" != true ]]; then
+            echo "ZipDeploy failed after three bounded attempts." >&2
+            exit 1
+          fi
 
       - name: Enable database initialization for the deployed package
         run: |
           # The package is present before this management operation. This restart now
           # starts that package in controlled migration mode without racing ZipDeploy.
+          diagnostics_key=$(az webapp config appsettings list \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ steps.infrastructure.outputs.app }}" \
+            --query "[?name=='Diagnostics__ReadOnlyApiKey'].value | [0]" -o tsv)
+          if [[ -z "$diagnostics_key" ]]; then
+            diagnostics_key=$(openssl rand -hex 32)
+          fi
           az webapp config appsettings set \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ steps.infrastructure.outputs.app }}" \
@@ -178,7 +182,9 @@ jobs:
               LiveExecution__BuildEnabled=true \
               PaperTradeReset__Enabled=true \
               PaperTradeReset__RequestId=clean-slate-2026-10-21 \
+              "Diagnostics__ReadOnlyApiKey=$diagnostics_key" \
             --output none
+          unset diagnostics_key
 
       - name: Wait for database initialization
         run: |
