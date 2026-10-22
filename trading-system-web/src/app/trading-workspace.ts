@@ -66,6 +66,20 @@ export interface TradingWorkspaceSnapshot {
   paperAutomation: PaperAutomationSnapshot;
   futuresVolume?: WorkspaceVolumeBar[] | null;
   research?: DailyResearchPipelineReport | null;
+  operationalReports?: OperationalAutomationReport[] | null;
+}
+
+export interface OperationalAutomationReport {
+  version: string;
+  market: string;
+  tradingDate: string;
+  kind: string;
+  status: string;
+  headline: string;
+  metrics: Record<string, string>;
+  findings: string[];
+  actionRequired: boolean;
+  generatedAtUtc: string;
 }
 
 export interface DailyResearchPipelineReport {

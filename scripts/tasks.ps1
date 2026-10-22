@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'check', 'deploy', 'runs', 'failed-logs', 'analysis')]
+    [ValidateSet('status', 'check', 'deploy', 'runs', 'failed-logs', 'analysis', 'ops', 'replay', 'context')]
     [string]$Task = 'status',
     [ValidateSet('backend', 'frontend', 'all')]
     [string]$Scope = 'all',
@@ -13,6 +13,8 @@ param(
     [string]$Market = 'all',
     [ValidatePattern('^\d{4}-\d{2}-\d{2}$')]
     [string]$Date,
+    [ValidateRange(1, 90)]
+    [int]$Days = 30,
     [switch]$Install,
     [switch]$DryRun
 )
@@ -34,6 +36,41 @@ function Invoke-Captured {
     $captured = & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command failed (exit $LASTEXITCODE)." }
     return ($captured -join "`n").Trim()
+}
+
+function Get-DiagnosticsContext {
+    $resourceGroup = Invoke-Captured gh @(
+        'variable', 'get', 'AZURE_RESOURCE_GROUP', '--repo', $repo)
+    $app = Invoke-Captured az @(
+        'webapp', 'list', '--resource-group', $resourceGroup,
+        '--query', "[?contains(name, 'sarthitradingweb')].name | [0]", '-o', 'tsv')
+    if ([string]::IsNullOrWhiteSpace($app)) {
+        throw "No Sarthi trading web app was found in '$resourceGroup'."
+    }
+    $diagnosticsKey = Invoke-Captured az @(
+        'webapp', 'config', 'appsettings', 'list',
+        '--resource-group', $resourceGroup, '--name', $app,
+        '--query', "[?name=='Diagnostics__ReadOnlyApiKey'].value | [0]", '-o', 'tsv')
+    if ([string]::IsNullOrWhiteSpace($diagnosticsKey)) {
+        throw 'The read-only diagnostics API is not configured. Deploy the diagnostics-capable build first.'
+    }
+    return [pscustomobject]@{
+        App = $app
+        Key = $diagnosticsKey
+    }
+}
+
+function Invoke-DiagnosticsGet {
+    param([string]$Path)
+    $context = Get-DiagnosticsContext
+    try {
+        return Invoke-RestMethod -Method Get `
+            -Uri "https://$($context.App).azurewebsites.net$Path" `
+            -Headers @{ 'X-Sarthi-Diagnostics-Key' = $context.Key }
+    } finally {
+        $context.Key = $null
+        $context = $null
+    }
 }
 
 Push-Location $root
@@ -88,31 +125,29 @@ try {
             if ([string]::IsNullOrWhiteSpace($Date)) {
                 $Date = Get-Date -Format 'yyyy-MM-dd'
             }
-            $resourceGroup = Invoke-Captured gh @(
-                'variable', 'get', 'AZURE_RESOURCE_GROUP', '--repo', $repo)
-            $app = Invoke-Captured az @(
-                'webapp', 'list', '--resource-group', $resourceGroup,
-                '--query', "[?contains(name, 'sarthitradingweb')].name | [0]", '-o', 'tsv')
-            if ([string]::IsNullOrWhiteSpace($app)) {
-                throw "No Sarthi trading web app was found in '$resourceGroup'."
-            }
-            # Capture the dedicated read-only key without ever writing it to output.
-            $diagnosticsKey = Invoke-Captured az @(
-                'webapp', 'config', 'appsettings', 'list',
-                '--resource-group', $resourceGroup, '--name', $app,
-                '--query', "[?name=='Diagnostics__ReadOnlyApiKey'].value | [0]", '-o', 'tsv')
-            if ([string]::IsNullOrWhiteSpace($diagnosticsKey)) {
-                throw 'The read-only diagnostics API is not configured. Deploy the diagnostics-capable build first.'
-            }
-            try {
-                $uri = "https://$app.azurewebsites.net/api/internal/diagnostics/daily?date=$Date&market=$Market"
-                $report = Invoke-RestMethod -Method Get -Uri $uri -Headers @{
-                    'X-Sarthi-Diagnostics-Key' = $diagnosticsKey
-                }
-                $report | ConvertTo-Json -Depth 12
-            } finally {
-                $diagnosticsKey = $null
-            }
+            Invoke-DiagnosticsGet "/api/internal/diagnostics/daily?date=$Date&market=$Market" |
+                ConvertTo-Json -Depth 12
+        }
+        'ops' {
+            $query = "market=$Market"
+            if (-not [string]::IsNullOrWhiteSpace($Date)) { $query += "&date=$Date" }
+            Invoke-DiagnosticsGet "/api/internal/diagnostics/operational?$query" |
+                ConvertTo-Json -Depth 12
+        }
+        'replay' {
+            Invoke-DiagnosticsGet "/api/internal/diagnostics/replay?days=$Days" |
+                ConvertTo-Json -Depth 12
+        }
+        'context' {
+            $manifest = Get-Content (Join-Path $root 'docs/project-state.json') -Raw |
+                ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName branch -NotePropertyValue (
+                Invoke-Captured git @('branch', '--show-current')) -Force
+            $manifest | Add-Member -NotePropertyName headCommit -NotePropertyValue (
+                Invoke-Captured git @('rev-parse', 'HEAD')) -Force
+            $manifest | Add-Member -NotePropertyName workingTree -NotePropertyValue @(
+                & git status --short) -Force
+            $manifest | ConvertTo-Json -Depth 10
         }
     }
 } finally {

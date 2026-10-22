@@ -1,4 +1,5 @@
 using TradingSystem.Application.Execution;
+using TradingSystem.Application.Diagnostics;
 
 namespace TradingSystem.Application.MarketData;
 
@@ -94,7 +95,8 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<WorkspaceStrategyEvaluation> Evaluations,
     PaperAutomationSnapshot PaperAutomation,
     IReadOnlyList<WorkspaceVolumeBar>? FuturesVolume = null,
-    DailyResearchPipelineReportV2? Research = null);
+    DailyResearchPipelineReportV2? Research = null,
+    IReadOnlyList<OperationalAutomationReport>? OperationalReports = null);
 
 public interface ITradingWorkspaceReader
 {

@@ -22,6 +22,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         var selectedMarkets = normalizedMarket == "ALL"
             ? new[] { "NIFTY", "SENSEX" }
             : new[] { normalizedMarket };
+        var selectedMarketCodes = selectedMarkets.Select(value => value.ToLowerInvariant()).ToArray();
         var startUtc = new DateTimeOffset(
             tradingDate.ToDateTime(TimeOnly.MinValue), IndiaOffset).ToUniversalTime();
         var endUtc = startUtc.AddDays(1);
@@ -47,7 +48,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 .OrderBy(value => value.CandleTimeUtc)
                 .ToListAsync(cancellationToken);
         var audits = await db.MarketStrategyAudits.AsNoTracking()
-            .Where(value => selectedMarkets.Contains(value.Market) &&
+            .Where(value => (selectedMarkets.Contains(value.Market) ||
+                             selectedMarketCodes.Contains(value.Market)) &&
                             value.CandleTimeUtc >= startUtc && value.CandleTimeUtc < endUtc)
             .OrderBy(value => value.CandleTimeUtc)
             .ToListAsync(cancellationToken);
@@ -89,7 +91,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             .ToListAsync(cancellationToken);
 
         var marketPositions = await db.MarketPaperPositions.AsNoTracking()
-            .Where(value => selectedMarkets.Contains(value.Market) &&
+            .Where(value => (selectedMarkets.Contains(value.Market) ||
+                             selectedMarketCodes.Contains(value.Market)) &&
                             value.OpenedAtUtc >= startUtc && value.OpenedAtUtc < endUtc)
             .OrderBy(value => value.OpenedAtUtc)
             .ToListAsync(cancellationToken);

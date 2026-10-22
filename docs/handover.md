@@ -2,6 +2,34 @@
 
 Updated: 2026-10-22 (Asia/Calcutta).
 
+## Permanent operational automation and low-credit workflow
+
+Implemented the repeated operational work as an evidence-only server process. On each
+weekday it persists a 09:05 IST authentication/provider readiness check, 10:30/12:00/14:00
+no-trade explanations, a 16:00 deterministic results summary and a 16:05 telemetry audit
+for Nifty and Sensex. The watchdog explains the dominant recorded outcome and escalates a
+midday/late no-trade session without changing strategy settings or placing an order. The
+daily summary includes trades, wins, losses, gross P&L, costs and net P&L; the audit flags
+missing MFE/MAE paths and missing signal/research links. Latest results are visible in the
+workspace and through the secured diagnostics surface.
+
+Added `./scripts/tasks.ps1 ops`, `replay` and `context`. `ops` retrieves the persisted
+operational checks, `replay` exposes the existing bounded strategy replay without opening
+the browser, and `context` combines `docs/project-state.json` with the current branch,
+commit and working-tree state for a compact new-chat handover. The deployment workflow now
+uploads a sanitized failure diagnostic artifact automatically, containing deployment
+history and App Service state but no settings, credentials or request bodies. Existing
+five-minute narrator deduplication/high-signal selection and existing research replay were
+reused instead of duplicated. The daily diagnostics reader was corrected to include the
+lowercase market codes used by persisted Nifty/Sensex audits and positions.
+
+Checks: full Release solution build passed with zero warnings/errors; focused operational
+automation contracts passed 4/4; frontend production build passed; frontend tests passed
+39/39; PowerShell parsing, compact-context execution, JSON parsing and `git diff --check`
+passed. The first sandboxed frontend/testhost attempts failed on Windows sandbox temporary
+file and IPC restrictions; the same tests passed outside that restriction. No deployment
+was requested or dispatched for this package.
+
 ## Permanent production analysis access
 
 Implemented a bounded, read-only production diagnostics surface so daily trade/no-trade
@@ -18,17 +46,12 @@ key only when missing and never prints it. `./scripts/tasks.ps1 analysis -Date Y
 displaying it and emits the production JSON in one command. Usage is documented in
 `docs/routine-work.md`.
 
-Checks: the complete Release solution and focused API project build with zero warnings
-or errors; PowerShell parser validation passed. The two focused authorization tests
-compiled but local VSTest hit the existing 90-second testhost connection timeout, so
-execution remains a CI responsibility. Commit `5ed2b31` was pushed and deployment run
-https://github.com/ketan2kt/AlgoTrading/actions/runs/39758670062 was dispatched. Its quality
-gate passed, but ZipDeploy received HTTP 502 from Kudu before accepting the package. The
-new diagnostics-key setting had incorrectly been mutated before ZipDeploy, recreating the
-SCM restart race already documented in the workflow. The key mutation is now folded into
-the existing post-package migration restart, and ZipDeploy has three bounded idempotent
-attempts so a transient Kudu 502 can recover automatically. A corrected deployment remains
-to be committed and dispatched.
+Commit `5ed2b31` introduced the secured endpoint. The first deployment run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39758670062 failed when a pre-package
+diagnostics-key mutation restarted Kudu. Commit `58a19c6` moved that mutation into the
+post-package settings update and added three bounded ZipDeploy attempts. Corrected run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39760189380 was dispatched; completion
+remains unverified under the repository's no-poll deployment procedure.
 
 ## Hero Zero late-session and near-ATM correction
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using System.Text.Json;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Application.Execution;
+using TradingSystem.Application.Diagnostics;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
@@ -20,6 +21,7 @@ internal sealed class EfTradingWorkspaceReader(
     IOptions<MarketDataOptions> marketDataOptions,
     IOptions<TradingModeOptions> tradingMode,
     IPaperAutomationReader paperAutomation,
+    IOperationalAutomationReportReader operationalReportReader,
     TimeProvider timeProvider) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
@@ -399,6 +401,8 @@ internal sealed class EfTradingWorkspaceReader(
             try { research = JsonSerializer.Deserialize<DailyResearchPipelineReportV2>(researchJson); }
             catch (JsonException) { }
         }
+        var operationalReports = await operationalReportReader.GetLatestAsync(
+            sessionDate, definition.Code, cancellationToken);
         return new TradingWorkspaceSnapshot(
             instrument.TradingSymbol,
             definition.Exchange,
@@ -415,7 +419,8 @@ internal sealed class EfTradingWorkspaceReader(
             evaluations,
             automation,
             futuresVolume,
-            research);
+            research,
+            operationalReports);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,

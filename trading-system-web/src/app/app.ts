@@ -7,7 +7,7 @@ import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
-import { mergeWorkspaceSnapshot, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
 import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMarketCode } from './trade-alerts';
 import { TradingWorkspaceService } from './trading-workspace.service';
@@ -486,6 +486,11 @@ export class App implements OnInit, OnDestroy {
     if (view.paperAutomation.status==='ReconciliationRequired') alerts.push('Paper broker reconciliation requires attention.');
     if (this.killSwitchActive) alerts.push('Emergency kill switch is active.');
     return alerts;
+  }
+
+  protected latestOperationalReport(view:TradingWorkspaceSnapshot):OperationalAutomationReport|null {
+    return [...(view.operationalReports ?? [])]
+      .sort((left,right)=>new Date(right.generatedAtUtc).getTime()-new Date(left.generatedAtUtc).getTime())[0] ?? null;
   }
 
   protected setKillSwitch(active: boolean): void {

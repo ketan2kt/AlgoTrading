@@ -26,6 +26,8 @@ without opening the UI or exposing PostgreSQL:
 ./scripts/tasks.ps1 analysis -Date 2026-10-22 -Market all
 ./scripts/tasks.ps1 analysis -Date 2026-10-22 -Market nifty
 ./scripts/tasks.ps1 analysis -Date 2026-10-22 -Market sensex
+./scripts/tasks.ps1 ops -Date 2026-10-22 -Market all
+./scripts/tasks.ps1 replay -Days 30
 ```
 
 The command obtains the dedicated diagnostics key from the Azure App Service settings
@@ -33,6 +35,20 @@ without printing it, calls the bounded read-only endpoint, and emits JSON. It re
 authenticated `gh` and `az` sessions with access to the existing application. The API
 does not accept SQL and returns 404 when the key has not been configured. Do not copy
 the key into source control, command history, logs, or chat.
+
+`ops` returns the persisted 09:05 readiness check, 10:30/12:00/14:00 no-trade
+explanations, 16:00 daily result and 16:05 telemetry audit. `replay` returns the
+existing bounded strategy replay without browser navigation. Operational automation
+is evidence-only: it cannot change strategy settings or place orders.
+
+For a compact new-chat handover without reading the full history:
+
+```powershell
+./scripts/tasks.ps1 context
+```
+
+This combines the stable `docs/project-state.json` manifest with the current branch,
+commit and working-tree state. It never reads credentials.
 
 ## Deployment
 

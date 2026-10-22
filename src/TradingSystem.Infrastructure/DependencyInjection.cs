@@ -206,6 +206,10 @@ public static class DependencyInjection
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
+        services.AddScoped<IOperationalAutomationReportReader, EfOperationalAutomationReportReader>();
+        services.AddOptions<OperationalAutomationOptions>()
+            .Bind(configuration.GetSection(OperationalAutomationOptions.SectionName));
+        services.AddHostedService<OperationalAutomationService>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
         services.AddHostedService<GrowwNiftyLiveMarketDataService>();
         services.AddHostedService<GrowwAdditionalMarketDataService>();

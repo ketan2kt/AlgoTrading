@@ -262,3 +262,40 @@ jobs:
             echo "App Service is running '$actual'; expected '$expected'." >&2
             exit 1
           fi
+
+      - name: Capture sanitized deployment failure diagnostics
+        if: failure() && steps.infrastructure.outputs.app != ''
+        run: |
+          app="${{ steps.infrastructure.outputs.app }}"
+          {
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "commit=${GITHUB_SHA}"
+            echo "app=$app"
+            echo "captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "deployment_history="
+            az webapp log deployment list \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "$app" \
+              --query "[0:5].{id:id,status:status,start:start_time,end:end_time,message:message}" \
+              --output json || true
+            echo "app_state="
+            az webapp show \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "$app" \
+              --query "{state:state,availabilityState:availabilityState,hostName:defaultHostName}" \
+              --output json || true
+          } > deployment-failure-diagnostics.txt
+          {
+            echo "## Deployment failure diagnostics"
+            echo "A sanitized diagnostic artifact was captured automatically."
+            echo "No application settings, credentials, tokens or runtime request bodies are included."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment failure diagnostics
+        if: failure() && steps.infrastructure.outputs.app != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-failure-${{ github.run_id }}
+          path: deployment-failure-diagnostics.txt
+          if-no-files-found: error
+          retention-days: 14

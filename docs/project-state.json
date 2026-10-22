@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "project": "Sarthi Trading",
+  "repository": "ketan2kt/AlgoTrading",
+  "productionUrl": "https://sarthico.com",
+  "markets": ["nifty", "sensex"],
+  "executionMode": "paper-with-controlled-live-capability",
+  "authoritativeContext": [
+    "AGENTS.md",
+    "docs/handover.md",
+    "docs/routine-work.md",
+    "docs/observation-review.md"
+  ],
+  "routineCommands": {
+    "compactContext": "./scripts/tasks.ps1 context",
+    "status": "./scripts/tasks.ps1 status",
+    "dailyAnalysis": "./scripts/tasks.ps1 analysis -Date YYYY-MM-DD -Market all",
+    "operationalReports": "./scripts/tasks.ps1 ops -Date YYYY-MM-DD -Market all",
+    "replay": "./scripts/tasks.ps1 replay -Days 30",
+    "checks": "./scripts/tasks.ps1 check -Scope all",
+    "deployment": "./scripts/tasks.ps1 deploy -Ref main"
+  },
+  "operationalAutomationIst": {
+    "09:05": "pre-market authentication and provider readiness",
+    "10:30": "early-session no-trade explanation",
+    "12:00": "midday no-trade explanation",
+    "14:00": "late-session no-trade explanation",
+    "16:00": "deterministic daily result summary",
+    "16:05": "trade/research/profit-path telemetry audit"
+  },
+  "safetyBoundaries": [
+    "Diagnostics are read-only and cannot execute arbitrary SQL.",
+    "Operational automation records evidence but cannot change strategy or place orders.",
+    "Deployment still requires explicit user authorization.",
+    "Live execution requires its existing separate controls."
+  ]
+}

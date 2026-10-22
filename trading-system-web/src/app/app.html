@@ -421,6 +421,14 @@
             </article>
           }
         </section>
+        @if (latestOperationalReport(view); as operations) {
+          <section class="market-strip legacy-control-section" aria-label="Latest automatic operational check">
+            <article><span>AUTOMATIC CHECK</span><strong>{{ operations.kind }}</strong></article>
+            <article><span>STATUS</span><strong [class.good]="!operations.actionRequired" [class.bad]="operations.actionRequired">{{ operations.status }}</strong></article>
+            <article><span>RESULT</span><strong>{{ operations.headline }}</strong></article>
+            <article><span>CHECKED</span><strong>{{ operations.generatedAtUtc | date: 'HH:mm' : 'Asia/Kolkata' }} IST</strong></article>
+          </section>
+        }
         <div class="feed-notice legacy-control-section" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
           {{ view.paperAutomation.message }}
         </div>
