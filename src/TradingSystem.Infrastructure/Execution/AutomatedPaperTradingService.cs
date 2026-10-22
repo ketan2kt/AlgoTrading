@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using TradingSystem.Application.Auditing;
 using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
@@ -1610,15 +1611,15 @@ internal sealed partial class AutomatedPaperTradingService(
         CancellationToken cancellationToken,
         MarketStructureQualitySnapshot? shadowStructure = null)
     {
+        var recordedStrategyId = signal?.StrategyId ?? strategy.StrategyId;
+        var recordedStrategyVersion = signal?.StrategyVersion ?? strategy.Version;
         if (await db.StrategyEvaluations.AnyAsync(value =>
-                value.StrategyCode == strategy.StrategyId &&
+                value.StrategyCode == recordedStrategyId &&
                 value.InstrumentId == instrumentId &&
                 value.CandleTimeUtc == candleTimeUtc, cancellationToken))
             return;
 
-        var recordedStrategyId = signal?.StrategyId ?? strategy.StrategyId;
-        var recordedStrategyVersion = signal?.StrategyVersion ?? strategy.Version;
-        db.StrategyEvaluations.Add(new StrategyEvaluation(Guid.NewGuid(), recordedStrategyId,
+        var evaluation = new StrategyEvaluation(Guid.NewGuid(), recordedStrategyId,
             recordedStrategyVersion, instrumentId, candleTimeUtc, currentPrice, openingRangeHigh,
             openingRangeLow, vwap, fastEma, slowEma, atrPercent, relativeFuturesVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, outcome,
@@ -1627,8 +1628,21 @@ internal sealed partial class AutomatedPaperTradingService(
             option?.StrikePrice, optionPremium, timeProvider.GetUtcNow(),
             shadowStructure?.State.ToString(), shadowStructure?.TrendQuality,
             shadowStructure?.WouldPermit,
-            shadowStructure is null ? null : JsonSerializer.Serialize(shadowStructure.Reasons)));
-        await db.SaveChangesAsync(cancellationToken);
+            shadowStructure is null ? null : JsonSerializer.Serialize(shadowStructure.Reasons));
+        db.StrategyEvaluations.Add(evaluation);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+               { SqlState: PostgresErrorCodes.UniqueViolation,
+                 ConstraintName: "IX_strategy_evaluations_StrategyCode_InstrumentId_CandleTimeUtc" })
+        {
+            // Concurrent cycles may persist the same completed-candle decision. The
+            // database uniqueness boundary is authoritative and the duplicate is not a
+            // failed trading cycle.
+            db.Entry(evaluation).State = EntityState.Detached;
+        }
     }
 
     private static void RecordPortfolioRisk(PaperAutomationState automationState,

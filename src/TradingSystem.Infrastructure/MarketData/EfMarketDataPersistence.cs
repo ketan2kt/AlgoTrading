@@ -40,15 +40,43 @@ internal sealed class EfMarketDataPersistence(TradingDbContext dbContext, TimePr
     public async Task RecordProviderHealthAsync(string provider, MarketDataValidationResult result,
         DateTimeOffset observedAtUtc, CancellationToken cancellationToken)
     {
-        var health = await dbContext.ProviderHealth.SingleOrDefaultAsync(value => value.Provider == provider,
-            cancellationToken);
-        if (health is null)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            health = new ProviderHealth(Guid.NewGuid(), provider, timeProvider.GetUtcNow());
-            dbContext.ProviderHealth.Add(health);
+            var health = await dbContext.ProviderHealth.SingleOrDefaultAsync(
+                value => value.Provider == provider, cancellationToken);
+            if (health is null)
+            {
+                health = new ProviderHealth(Guid.NewGuid(), provider, timeProvider.GetUtcNow());
+                dbContext.ProviderHealth.Add(health);
+            }
+
+            if (result.Accepted) health.RecordSuccess(observedAtUtc);
+            else health.RecordFailure(result.Reason.ToString(), observedAtUtc);
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt == 0)
+            {
+                DetachProviderHealthEntries();
+            }
+            catch (DbUpdateException exception) when (attempt == 0 &&
+                exception.InnerException is PostgresException
+                {
+                    SqlState: PostgresErrorCodes.UniqueViolation,
+                    ConstraintName: "IX_provider_health_Provider"
+                })
+            {
+                DetachProviderHealthEntries();
+            }
         }
-        if (result.Accepted) health.RecordSuccess(observedAtUtc);
-        else health.RecordFailure(result.Reason.ToString(), observedAtUtc);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        void DetachProviderHealthEntries()
+        {
+            foreach (var entry in dbContext.ChangeTracker.Entries<ProviderHealth>())
+                entry.State = EntityState.Detached;
+        }
     }
 }

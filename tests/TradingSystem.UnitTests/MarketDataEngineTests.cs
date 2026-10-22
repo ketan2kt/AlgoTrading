@@ -127,14 +127,17 @@ public sealed class MarketDataEngineTests
     }
 
     [Fact]
-    public void GrowwNormalizerFailsClosedWhenCumulativeVolumeRegresses()
+    public void GrowwNormalizerRebasesWhenCumulativeVolumeRegressesWithinSession()
     {
         var normalizer = new GrowwQuoteNormalizer();
         var instrument = Guid.NewGuid();
         normalizer.Normalize(instrument, Quote(100), Now);
 
-        Assert.Throws<InvalidOperationException>(() =>
-            normalizer.Normalize(instrument, Quote(99), Now.AddSeconds(1)));
+        var reset = normalizer.Normalize(instrument, Quote(20), Now.AddSeconds(1));
+        var following = normalizer.Normalize(instrument, Quote(27), Now.AddSeconds(2));
+
+        Assert.Equal(0, reset.VolumeDelta);
+        Assert.Equal(7, following.VolumeDelta);
     }
 
     [Fact]

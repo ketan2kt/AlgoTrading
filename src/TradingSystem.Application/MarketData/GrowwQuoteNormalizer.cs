@@ -29,7 +29,13 @@ public sealed class GrowwQuoteNormalizer
             if (sessionDate < previous.SessionDate)
                 throw new InvalidOperationException("Groww cumulative volume belongs to an older trading session.");
             if (currentVolume < previous.CumulativeVolume)
-                throw new InvalidOperationException("Groww cumulative volume regressed; session reconciliation is required.");
+            {
+                // Groww can revise or reset its cumulative-volume counter during an
+                // active session. Treat that quote as a new baseline: manufacturing a
+                // negative delta would corrupt candles, while throwing here would keep
+                // the confirmation feed unavailable for the rest of the session.
+                return new VolumeState(sessionDate, currentVolume);
+            }
             delta = checked((long)(currentVolume - previous.CumulativeVolume));
             return new VolumeState(sessionDate, currentVolume);
         });
