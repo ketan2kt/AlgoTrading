@@ -664,10 +664,10 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var adaptiveDecision = AdaptivePaperTradePolicy.Evaluate(tradeState.TradesToday,
-            options.Value.MaximumResearchEntriesPerDay, tradeState.ConsecutiveLosses,
-            options.Value.MaximumConsecutiveLosses, tradeState.LastLossAtUtc, now,
-            options.Value.LossCooldownMinutes, persistentDirectionalEntry,
-            options.Value.MaximumDirectionalRecoveryEntriesPerDay);
+            int.MaxValue, tradeState.ConsecutiveLosses,
+            int.MaxValue, tradeState.LastLossAtUtc, now,
+            0, persistentDirectionalEntry,
+            0);
         if (!adaptiveDecision.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
@@ -677,14 +677,6 @@ internal sealed partial class AutomatedPaperTradingService(
             state.Record("AdaptiveRiskRejected", true, string.Join(" ", adaptiveDecision.Reasons),
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString());
-            return;
-        }
-
-        if (tradeState.OpenPositions.Count >= options.Value.MaximumConcurrentPositions)
-        {
-            state.Record("PortfolioCapacity", false,
-                $"Concurrent paper-position capacity ({options.Value.MaximumConcurrentPositions}) is reached.",
-                tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
 
@@ -877,28 +869,19 @@ internal sealed partial class AutomatedPaperTradingService(
             selectedOption.StrikePrice, selectedOption.LotSize,
             maximumLots, pricing.EntryPrice,
             protective.StopLoss, protective.Target);
-        var maximumOptionQuantity = checked(selectedOption.LotSize * maximumLots);
         var riskOptions = scope.ServiceProvider.GetRequiredService<IOptions<PreliminaryRiskOptions>>().Value;
         var existingCapitalExposure = tradeState.OpenPositions.Sum(open =>
             open.Entry.AverageFillPrice.GetValueOrDefault() * open.RemainingQuantity);
         var openUnrealisedPnl = state.GetCurrent().ActivePositionMarks?.Sum(mark =>
             mark.UnrealisedPnl.GetValueOrDefault()) ?? 0m;
-        var hardenedDecision = PaperPortfolioRiskPolicy.Evaluate(new(
+        var hardenedDecision = PaperPortfolioRiskPolicy.EvaluateUncappedPaper(new(
             executionSignal.ProposedEntry, executionSignal.ProposedStopLoss,
             selectedOption.LotSize, maximumLots, riskOptions.MaximumRiskPerTrade,
             riskOptions.MaximumCapitalExposure, existingCapitalExposure,
             tradeState.RealisedPnl, openUnrealisedPnl, options.Value.MaximumDailyLoss,
             tradeState.OpenPositions.Count, options.Value.MaximumConcurrentPositions,
             killSwitchActive, true, fresh, dailyLossLimitOverridden));
-        var decision = !hardenedDecision.Approved
-            ? hardenedDecision with { FinalTarget = executionSignal.ProposedTarget }
-            : options.Value.PermissivePaperExecution
-                ? hardenedDecision with { FinalTarget = executionSignal.ProposedTarget }
-                : scope.ServiceProvider.GetRequiredService<PreliminaryRiskEngine>().Evaluate(
-                executionSignal, new RiskContext(now, tradeState.TradesToday, tradeState.OpenPositions.Count,
-                    tradeState.RealisedPnl, options.Value.MaximumDailyLoss,
-                    killSwitchActive, true, fresh, dailyLossLimitOverridden), selectedOption.LotSize,
-                    Math.Min(maximumOptionQuantity, hardenedDecision.ApprovedQuantity));
+        var decision = hardenedDecision with { FinalTarget = executionSignal.ProposedTarget };
         if (decision.Approved)
         {
             var configuredQuantity = checked(selectedOption.LotSize * configuredLots);

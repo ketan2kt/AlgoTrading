@@ -509,16 +509,6 @@ internal sealed partial class MultiMarketPaperTradingService(
             stop = RoundToTick(entry - riskDistance, tick);
             target = RoundToTick(entry + riskDistance, tick);
             var configuredLots = lotConfiguration.SensexLots;
-            var configuredRisk = Math.Abs(entry - stop) * execution.LotSize * configuredLots;
-            if (configuredRisk > 5000m)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "ConfiguredLotSizeRejected", decision.Confidence,
-                    [$"Configured Sensex size is {configuredLots} lots, requiring approximately {configuredRisk:F2} risk against the 5000.00 per-trade boundary.",
-                     "The system rejected the entry instead of silently reducing the saved lot size."],
-                    cancellationToken);
-                return;
-            }
             quantity = checked(execution.LotSize * configuredLots);
         }
         ProfessionalTradePlan? professionalPlan = null;

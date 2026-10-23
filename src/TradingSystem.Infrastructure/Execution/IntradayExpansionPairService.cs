@@ -146,8 +146,9 @@ internal sealed partial class IntradayExpansionPairService(
             return;
         }
         var candidateDecision = ExpansionPairCandidatePolicy.Evaluate(call, put,
-            options.Value.MaximumCombinedPremium, options.Value.MaximumPremiumImbalance,
-            options.Value.MaximumBasketRisk, options.Value.BasketStopPercent,
+            decimal.MaxValue, options.Value.MaximumPremiumImbalance,
+            (call.Premium + put.Premium) * call.LotSize * options.Value.BasketStopPercent * configuredLots,
+            options.Value.BasketStopPercent,
             configuredLots);
         if (!candidateDecision.Permitted || candidateDecision.Lots != configuredLots)
         {

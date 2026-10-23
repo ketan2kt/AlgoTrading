@@ -113,7 +113,6 @@ internal sealed partial class HeroZeroPaperTradingService(
         var canEnter = call is not null && put is not null &&
                        call.Score >= options.Value.MinimumCandidateScore &&
                        put.Score >= options.Value.MinimumCandidateScore &&
-                       call.Premium + put.Premium <= options.Value.MaximumCombinedPremium &&
                        IndexEntryWindowPolicy.AllowsEntry(localTime,
                            ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff)) &&
                        await ExpansionTriggerAsync(db, underlying.Id, cancellationToken);
@@ -140,8 +139,6 @@ internal sealed partial class HeroZeroPaperTradingService(
             explanation = $"Both liquid near-ATM CE and PE candidates are not available within {maximumStrikeDistance:0} index points.";
         else if (call.Score < options.Value.MinimumCandidateScore || put.Score < options.Value.MinimumCandidateScore)
             explanation = "Candidate liquidity/OI/volume quality is below the entry threshold.";
-        else if (call.Premium + put.Premium > options.Value.MaximumCombinedPremium)
-            explanation = "The combined debit is above the configured expiry-risk ceiling.";
         else
             explanation = "Candidates are valid; waiting for a price-range expansion trigger.";
 

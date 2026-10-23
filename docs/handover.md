@@ -1,6 +1,27 @@
 # Current handover
 
-Updated: 2026-10-22 (Asia/Calcutta).
+Updated: 2026-10-23 (Asia/Calcutta).
+
+## 23 October paper entry budget removal
+
+At 10:40 IST production showed no trades in either index. Sensex had 23 explicit
+configured-size rejections: ten lots required approximately Rs 11,070–13,010 against
+the hard-coded Rs 5,000 per-trade cap. Nifty had 14 OI-approved candidates and several
+cooldown/regime/location rejections; its first-write-only strategy evaluation hides
+later execution-stage outcomes, so its exact final rejection remains unverified.
+
+At the user's request, paper entry budget ceilings are removed: Sensex's Rs 5,000
+check, Nifty per-trade risk, capital exposure, daily losses, concurrent position count,
+daily research allocation and loss-based cooldown/consecutive-loss allocation. Saved
+market lots remain exact. Expansion pairs use the configured number of lots without
+a basket budget or combined-debit ceiling; Hero Zero's combined-debit ceiling is removed.
+Signal, liquidity, session, duplicate-position and structural-entry rules still apply;
+trade exits, kill switch, reconciliation and fresh-data checks remain. Controlled-live
+approval rules are unchanged. This does not guarantee an entry on every directional move.
+
+User authorized deployment after checks. Release compilation and 31 focused backend
+tests passed (28 unit, one contract, two integration). PostgreSQL opt-in coverage was
+not run. Preserve the unrelated pre-existing working-tree changes.
 
 ## Permanent operational automation and low-credit workflow
 

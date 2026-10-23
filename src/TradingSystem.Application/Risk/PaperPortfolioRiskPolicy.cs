@@ -20,6 +20,16 @@ public sealed record PaperPortfolioRiskInput(
 
 public static class PaperPortfolioRiskPolicy
 {
+    // Paper experiments use the administrator's exact size without account-budget caps.
+    public static RiskDecisionResult EvaluateUncappedPaper(PaperPortfolioRiskInput input) =>
+        Evaluate(input with
+        {
+            MaximumRiskPerTrade = Math.Abs(input.EntryPrice - input.StopLoss) * input.LotSize * input.MaximumLots,
+            MaximumPortfolioExposure = input.ExistingCapitalExposure + input.EntryPrice * input.LotSize * input.MaximumLots,
+            MaximumOpenPositions = int.MaxValue,
+            DailyLossLimitOverridden = true
+        });
+
     public static RiskDecisionResult Evaluate(PaperPortfolioRiskInput input)
     {
         var reasons = new List<string>();

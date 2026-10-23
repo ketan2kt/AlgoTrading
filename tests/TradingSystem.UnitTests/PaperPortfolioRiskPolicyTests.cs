@@ -5,6 +5,30 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperPortfolioRiskPolicyTests
 {
     [Fact]
+    public void UncappedPaperUsesSavedLotsDespiteLossCapitalAndPositionLimits()
+    {
+        var result = PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+        {
+            MaximumLots = 10, LotSize = 65, EntryPrice = 100m, StopLoss = 80m,
+            MaximumRiskPerTrade = 5000m, MaximumPortfolioExposure = 1000m,
+            ExistingCapitalExposure = 200000m, DailyRealisedPnl = -20000m,
+            DailyUnrealisedPnl = -10000m, OpenPositions = 20, MaximumOpenPositions = 1
+        });
+        Assert.True(result.Approved);
+        Assert.Equal(650, result.ApprovedQuantity);
+        Assert.Equal(13000m, result.RiskAmount);
+    }
+
+    [Fact]
+    public void UncappedPaperStillHonoursEmergencyStopAndFreshData()
+    {
+        Assert.False(PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+            { KillSwitchActive = true }).Approved);
+        Assert.False(PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+            { MarketDataFresh = false }).Approved);
+    }
+
+    [Fact]
     public void FloorsFiveLotRequestToRiskBudgetInWholeLots()
     {
         var result = PaperPortfolioRiskPolicy.Evaluate(Valid() with
