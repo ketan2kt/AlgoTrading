@@ -6,9 +6,8 @@ public sealed record PersistentDirectionalStopDecision(
     IReadOnlyList<string> Reasons);
 
 /// <summary>
-/// Prevents an explicitly paper-only directional thesis from being invalidated by a
-/// transient option-premium print. Profit-protection stops remain immediate; this policy
-/// applies only to the original loss stop and always retains a catastrophic loss boundary.
+/// A breached premium stop is authoritative, including for persistent paper theses.
+/// Directional conviction must never defer the position's declared loss boundary.
 /// </summary>
 public static class PersistentDirectionalStopPolicy
 {
@@ -24,20 +23,8 @@ public static class PersistentDirectionalStopPolicy
     {
         if (!initialLossStopHit)
             return new(false, false, ["The initial loss stop has not been reached."]);
-        if (!persistentDirectionalPaperTrade)
-            return new(true, false, ["The normal premium stop remains authoritative."]);
-        if (underlyingThesisInvalidated)
-            return new(true, false,
-                ["The option stop and a confirmed underlying change of character agree."]);
-        if (adverseRiskMultiple >= CatastrophicAdverseRiskMultiple)
-            return new(true, false,
-                [$"The catastrophic paper boundary of {CatastrophicAdverseRiskMultiple:F1}R was reached."]);
-
-        var observation = elapsed < MinimumObservation
-            ? $"Only {Math.Max(0, elapsed.TotalMinutes):F1} minutes have elapsed; wait for two completed five-minute candles."
-            : "The underlying directional thesis remains valid after the observation window.";
-        return new(false, true,
-            [observation, "The premium-only stop is deferred while the paper thesis remains valid."]);
+        return new(true, false,
+            ["The premium stop is authoritative; directional conviction and elapsed time cannot defer it."]);
     }
 }
 

@@ -769,47 +769,8 @@ internal sealed partial class MultiMarketPaperTradingService(
             var expectedUnderlyingDirection = market.ExecuteOptions
                 ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
                 : position.Direction;
-            if (stopHit && market == TradingMarketCatalog.Sensex &&
-                position.Strategy.StartsWith(PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix,
-                    StringComparison.Ordinal))
-            {
-                var multiplier = position.Direction == Direction.Buy ? 1m : -1m;
-                var stopProtectsProfit = (position.StopLoss - position.EntryPrice) * multiplier > 0m;
-                var adverseRiskMultiple = initialRisk <= 0m ? decimal.MaxValue :
-                    Math.Max(0m, (position.EntryPrice - price) * multiplier / initialRisk);
-                var underlyingInvalidated = !stopProtectsProfit &&
-                    await HasConfirmedDirectionalInvalidationAsync(db,
-                        position.UnderlyingInstrumentId, expectedUnderlyingDirection,
-                        position.OpenedAtUtc, cancellationToken);
-                var stopDecision = PersistentDirectionalStopPolicy.Evaluate(true,
-                    !stopProtectsProfit, now - position.OpenedAtUtc,
-                    adverseRiskMultiple, underlyingInvalidated);
-                if (stopDecision.Deferred)
-                {
-                    stopHit = false;
-                    var deferredOutcome =
-                        $"DirectionalStopDeferred:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}";
-                    if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
-                            value.Market == market.Code && value.Outcome == deferredOutcome,
-                            cancellationToken))
-                    {
-                        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
-                            position.UnderlyingInstrumentId, sampleMinute, deferredOutcome, 0m,
-                            JsonSerializer.Serialize(new
-                            {
-                                positionId = position.Id,
-                                price,
-                                position.EntryPrice,
-                                position.StopLoss,
-                                adverseRiskMultiple,
-                                stopDecision.Reasons,
-                                paperOnly = true,
-                                observedAtUtc = now
-                            })));
-                    }
-                }
-            }
-            var continuationConfirmed = targetHit && options.Value.TargetExtensionEnabled &&
+            // A breached stop takes precedence over continuation, add-ons and partial exits.
+            var continuationConfirmed = !stopHit && targetHit && options.Value.TargetExtensionEnabled &&
                                         exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
@@ -855,7 +816,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
             var partialReached = position.Direction == Direction.Buy
                 ? price >= partialThreshold : price <= partialThreshold;
-            if (market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
+            if (!stopHit && market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
             {
                 var totalLots = Math.Max(1, position.RemainingQuantity / instrument.LotSize);
@@ -879,7 +840,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                         new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
                         new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
-                position.Close(price, costs, targetHit ? "TargetHit" : stopHit ? "StopLossHit" : "TimeExit", now);
+                position.Close(price, costs, stopHit ? "StopLossHit" : targetHit ? "TargetHit" : "TimeExit", now);
                 favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,

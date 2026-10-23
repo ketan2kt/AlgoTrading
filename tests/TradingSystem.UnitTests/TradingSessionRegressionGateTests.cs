@@ -23,8 +23,8 @@ public sealed class TradingSessionRegressionGateTests
         {
             var decision = PersistentDirectionalStopPolicy.Evaluate(true, true,
                 TimeSpan.FromSeconds(stop.SecondsAfterEntry), stop.AdverseRiskMultiple, false);
-            Assert.True(decision.Deferred);
-            Assert.False(decision.ShouldExit);
+            Assert.False(decision.Deferred);
+            Assert.True(decision.ShouldExit);
         }
 
         var recovery = AdaptivePaperTradePolicy.Evaluate(fixture.Nifty.EntriesToday,

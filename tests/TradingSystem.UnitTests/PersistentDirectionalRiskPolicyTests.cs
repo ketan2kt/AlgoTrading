@@ -14,14 +14,38 @@ public sealed class PersistentDirectionalRiskPolicyTests
         Assert.False(result.Deferred);
     }
 
-    [Fact]
-    public void DefersEarlyPremiumNoiseForPersistentPaperThesis()
+    [Theory]
+    [InlineData(45)]
+    [InlineData(1020)]
+    [InlineData(3600)]
+    public void PersistentPaperThesisCannotDeferPremiumStop(int seconds)
     {
         var result = PersistentDirectionalStopPolicy.Evaluate(true, true,
-            TimeSpan.FromSeconds(45), 1.05m, false);
+            TimeSpan.FromSeconds(seconds), 1.05m, false);
 
+        Assert.True(result.ShouldExit);
+        Assert.False(result.Deferred);
+    }
+
+    [Fact]
+    public void October23SensexObservedStopBreachExitsWithoutWaitingForTwoRiskUnits()
+    {
+        var entry = 550.95m;
+        var stop = 495.85m;
+        var observedPrice = 494.85m;
+        var result = PersistentDirectionalStopPolicy.Evaluate(true, observedPrice <= stop,
+            TimeSpan.FromMinutes(17.5), (entry - observedPrice) / (entry - stop), false);
+        Assert.True(result.ShouldExit);
+        Assert.False(result.Deferred);
+    }
+
+    [Fact]
+    public void UnbreachedStopDoesNotForceAnExit()
+    {
+        var result = PersistentDirectionalStopPolicy.Evaluate(true, false,
+            TimeSpan.FromMinutes(20), .5m, false);
         Assert.False(result.ShouldExit);
-        Assert.True(result.Deferred);
+        Assert.False(result.Deferred);
     }
 
     [Theory]

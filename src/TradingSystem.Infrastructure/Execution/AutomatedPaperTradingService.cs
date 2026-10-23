@@ -1093,7 +1093,9 @@ internal sealed partial class AutomatedPaperTradingService(
                                  open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence;
         var targetReachedForAddOn = open.Entry.Direction == Direction.Buy
             ? price >= open.Target : price <= open.Target;
-        if (extendBeyondTarget && targetReachedForAddOn && open.AddOn is null &&
+        var premiumStopBreached = open.Entry.Direction == Direction.Buy
+            ? price <= effectiveStop : price >= effectiveStop;
+        if (!premiumStopBreached && extendBeyondTarget && targetReachedForAddOn && open.AddOn is null &&
             open.PartialExit is null && open.Signal.Confidence >= .72m)
         {
             var addOnRiskPerUnit = Math.Max(0m, (price - effectiveStop) * multiplier);
@@ -1131,26 +1133,6 @@ internal sealed partial class AutomatedPaperTradingService(
         if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
-        if (exitReason == PaperExitReason.StopLoss &&
-            TimeOnly.FromTimeSpan(indiaTime) < ParseTime(options.Value.ForcedExit))
-        {
-            var persistentDirectionalPaperTrade = open.Signal.StrategyId.StartsWith(
-                PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix, StringComparison.Ordinal);
-            var stopProtectsProfit = (effectiveStop - entryPrice) * multiplier > 0m;
-            var adverseRiskMultiple = initialRiskPerUnit <= 0m ? decimal.MaxValue :
-                Math.Max(0m, (entryPrice - price) * multiplier / initialRiskPerUnit);
-            var stopDecision = PersistentDirectionalStopPolicy.Evaluate(
-                persistentDirectionalPaperTrade, !stopProtectsProfit,
-                timeProvider.GetUtcNow() - open.Entry.UpdatedAtUtc,
-                adverseRiskMultiple, invalidation.ShouldExit);
-            if (stopDecision.Deferred)
-            {
-                exitReason = PaperExitReason.None;
-                await PersistDeferredDirectionalStopAsync(researchDb, open,
-                    underlyingInstrumentId, price, effectiveStop, adverseRiskMultiple,
-                    stopDecision.Reasons, cancellationToken);
-            }
-        }
         if (exitReason == PaperExitReason.ForcedIntradayExit && options.Value.WeeklyCarryForwardEnabled)
         {
             var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(

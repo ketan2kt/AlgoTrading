@@ -2,6 +2,29 @@
 
 Updated: 2026-10-23 (Asia/Calcutta).
 
+## 23 October stop-loss incident
+
+Read-only production diagnostics around 13:48 IST: 18 completed legs, Nifty net
+-2663.64 (12 legs, five wins), Sensex net -23796.32 (six trades, two wins), combined
+-26459.96 after 4457.46 costs. This is an intraday snapshot, not an end-of-day report.
+Sensex position eccfc8da-1ad5-4d7e-bb24-a7c81885cee6 entered 13:15:02 at 550.95,
+quantity 200, declared stop 495.85, exited 13:38:56 at 440.20, net -22415.91.
+Audit at 13:32:32 explicitly deferred the stop at observed price 494.85 because
+the underlying thesis remained valid. Later deferrals at 487.60, 495.85 and 483.45
+are also recorded. The old policy permitted deferral until underlying invalidation
+or 2R loss. The recent re-entry fix did not introduce that override.
+
+Removed the deferral branches from both main execution engines. Hardened the shared
+legacy stop policy to never defer a breached stop. Stop exits take precedence over
+Sensex continuation/partials and Nifty add-ons. Regression tests now expect immediate
+stop handling, including the observed price/stop and continued-target scenario.
+Entry logic, sizing, financial caps and existing HZ/pair strategy rules are unchanged.
+No promise of exact stop-price fills: polling, unavailable quotes and gaps still matter.
+User subsequently authorized deployment of this fix to main. Dispatch once using
+scripts/tasks.ps1; completion remains unverified until explicitly checked.
+Release solution compilation and 43 focused unit regressions passed. No PostgreSQL
+integration run or production validation of this local fix has been performed.
+
 ## 23 October directional re-entry correction
 
 Production diagnostics at 12:23 IST confirmed Sensex exited at 12:00:14 and
