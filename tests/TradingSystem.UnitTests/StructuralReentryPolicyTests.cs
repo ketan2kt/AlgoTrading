@@ -6,6 +6,45 @@ namespace TradingSystem.UnitTests;
 
 public sealed class StructuralReentryPolicyTests
 {
+    [Theory]
+    [InlineData(Direction.Buy)]
+    [InlineData(Direction.Sell)]
+    public void FirstEntryIsNotRestricted(Direction direction)
+    {
+        Assert.True(StructuralReentryPolicy.Evaluate([], direction, null, true).Permitted);
+    }
+
+    [Fact]
+    public void PersistentThesisCannotReuseStructureAtTodaysRapidReentryTiming()
+    {
+        // Timing regression from 23 October; synthetic prices, not a historical P&L replay.
+        var exit = new DateTimeOffset(2026, 10, 23, 12, 0, 14, TimeSpan.FromHours(5.5));
+        var bars = Bars([110m, 109m, 108m, 107m, 106m, 105m, 104m, 103m, 102m, 101m]);
+        bars = bars.Select((bar, i) => bar with { OpenTimeUtc = exit.AddSeconds(-14).AddMinutes(i - 8) }).ToArray();
+        // At 12:02:01 only the 12:01 bar has formed wholly after the exit.
+        var decision = StructuralReentryPolicy.Evaluate(bars, Direction.Sell, exit, true);
+        Assert.False(decision.Permitted);
+        Assert.Equal(1, decision.CompletedBarsSinceExit);
+    }
+
+    [Fact]
+    public void PersistentBearishContinuationRemainsEligibleAfterFreshBase()
+    {
+        var bars = Bars([110m, 109m, 108m, 107m, 106m, 105m, 104m, 103m,
+            102.8m, 102.9m, 101.5m]);
+        bars[^1] = bars[^1] with { Open = 102.5m };
+        Assert.True(StructuralReentryPolicy.Evaluate(bars, Direction.Sell,
+            bars[7].OpenTimeUtc, true).Permitted);
+    }
+
+    [Fact]
+    public void ElapsedTimeWithoutNewStructureDoesNotPermitReentry()
+    {
+        var bars = Bars(Enumerable.Repeat(100m, 15).ToArray());
+        Assert.False(StructuralReentryPolicy.Evaluate(bars, Direction.Sell,
+            bars[7].OpenTimeUtc, true).Permitted);
+    }
+
     [Fact]
     public void RejectsImmediateSameDirectionReentryWithoutNewCandles()
     {

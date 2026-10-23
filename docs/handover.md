@@ -2,6 +2,27 @@
 
 Updated: 2026-10-23 (Asia/Calcutta).
 
+## 23 October directional re-entry correction
+
+Production diagnostics at 12:23 IST confirmed Sensex exited at 12:00:14 and
+re-entered the same PE at 12:02:01. Both entry services bypassed structural
+re-entry rejection for persistent directional signals. Removed that bypass in
+AutomatedPaperTradingService and MultiMarketPaperTradingService. Persistent entries
+still qualify for the existing three-bar continuation-base route as well as fresh
+pullback/rejection; only fully completed candles count. Sensex prior exits are now
+session-scoped, so yesterday's exit cannot restrict today's first entry.
+
+No financial caps, daily allocations or loss cooldowns were restored. Initial-entry
+logic and exits are unchanged. Tests cover first entries, the observed rapid-repeat
+timing using synthetic prices, fresh bullish/bearish continuation, and elapsed time
+without structure. This is not a historical candle/P&L replay. Full historical replay
+and exit/entry thesis alignment remain follow-up work; no claim of improved P&L.
+Release compilation and 29 focused tests passed (28 unit, one contract); diff checks
+passed. PostgreSQL integration coverage and historical replay were not run.
+Deployment is authorized; preserve unrelated working-tree edits. Deployment progress:
+https://github.com/ketan2kt/AlgoTrading/actions/workflows/azure-deploy.yml
+Completion remains unverified; dispatch once without polling under AGENTS.md.
+
 ## 23 October paper entry budget removal
 
 At 10:40 IST production showed no trades in either index. Sensex had 23 explicit
@@ -22,6 +43,9 @@ approval rules are unchanged. This does not guarantee an entry on every directio
 User authorized deployment after checks. Release compilation and 31 focused backend
 tests passed (28 unit, one contract, two integration). PostgreSQL opt-in coverage was
 not run. Preserve the unrelated pre-existing working-tree changes.
+Commit `909745b` was pushed and deployment dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39906613841
+Deployment completion has not been verified.
 
 ## Permanent operational automation and low-credit workflow
 

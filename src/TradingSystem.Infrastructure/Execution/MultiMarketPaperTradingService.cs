@@ -361,19 +361,19 @@ internal sealed partial class MultiMarketPaperTradingService(
                 join executionInstrument in db.Instruments.AsNoTracking()
                     on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
                 where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
-                      priorPosition.ClosedAtUtc != null &&
+                      priorPosition.ClosedAtUtc != null && priorPosition.ClosedAtUtc >= sessionStartUtc &&
                       (decision.Direction == Direction.Buy
                           ? executionInstrument.Type == InstrumentType.CallOption
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
                 select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
-            var persistentDirectionalContext = marketStateV2 is not null &&
-                ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional;
-            var reentry = StructuralReentryPolicy.Evaluate(priceBars,
+            var persistentDirectionalContext = persistentDirectionalEntry || (marketStateV2 is not null &&
+                ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional);
+            var reentry = StructuralReentryPolicy.Evaluate(priceBars
+                    .Where(bar => bar.OpenTimeUtc.AddSeconds(interval) <= now).ToArray(),
                 decision.Direction.Value, priorSameDirectionExit, persistentDirectionalContext);
-            // The persistent paper thesis already proves a completed failed-countertrend
-            // pullback, so do not require the same reset twice.
-            if (!reentry.Permitted && !persistentDirectionalEntry)
+            // A persistent thesis is not fresh post-exit evidence. Continuation bases remain eligible.
+            if (!reentry.Permitted)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
