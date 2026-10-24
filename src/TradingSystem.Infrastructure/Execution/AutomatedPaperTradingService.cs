@@ -377,12 +377,19 @@ internal sealed partial class AutomatedPaperTradingService(
             candles[0].Open, openingRangeHigh, openingRangeLow,
             vwap, fast, slow, atr, relativeVolume, 1m, true), cancellationToken);
         var strategy = scope.ServiceProvider.GetRequiredService<ITradingStrategy>();
+        // Rejected/unfilled signals must not consume the strategy's entry cooldown.
+        var lastCompletedSignalTime = await (from result in db.PaperTradeResults.AsNoTracking()
+            join priorSignal in db.Signals.AsNoTracking() on result.SignalId equals priorSignal.Id
+            where priorSignal.InstrumentId == instrument.Id &&
+                  priorSignal.MarketDataTimestampUtc >= sessionStart &&
+                  priorSignal.MarketDataTimestampUtc < sessionEnd
+            orderby priorSignal.MarketDataTimestampUtc descending
+            select (DateTimeOffset?)priorSignal.MarketDataTimestampUtc).FirstOrDefaultAsync(cancellationToken);
         var strategyContext = new StrategyEvaluationContext(instrument.Id,
             candleDecisionTime, latestCandle.Close,
             openingRangeHigh, openingRangeLow, relativeVolume,
             regime.Regime, regime.DirectionalBias, regime.Confidence, regime.TradingPermitted, true,
-            sessionSignals.OrderByDescending(value => value.MarketDataTimestampUtc)
-                .Select(value => (DateTimeOffset?)value.MarketDataTimestampUtc).FirstOrDefault(),
+            lastCompletedSignalTime,
             tradeState.TradesToday)
         {
             Vwap = vwap,
@@ -1578,6 +1585,17 @@ internal sealed partial class AutomatedPaperTradingService(
     {
         var recordedStrategyId = signal?.StrategyId ?? strategy.StrategyId;
         var recordedStrategyVersion = signal?.StrategyVersion ?? strategy.Version;
+        // Keep every decision stage: the unique evaluation row retains only the first stage.
+        var auditOutcome = $"EntryStage:{outcome}";
+        if (!await db.MarketStrategyAudits.AnyAsync(value => value.Market == "nifty" &&
+                value.CandleTimeUtc == candleTimeUtc && value.Outcome == auditOutcome, cancellationToken))
+        {
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", instrumentId,
+                candleTimeUtc, auditOutcome, signal?.Confidence ?? 0m,
+                JsonSerializer.Serialize(new { strategy = recordedStrategyId, outcome, reasons = failedConditions,
+                    signalId = signal?.SignalId, observedAtUtc = timeProvider.GetUtcNow() })));
+            await db.SaveChangesAsync(cancellationToken);
+        }
         if (await db.StrategyEvaluations.AnyAsync(value =>
                 value.StrategyCode == recordedStrategyId &&
                 value.InstrumentId == instrumentId &&

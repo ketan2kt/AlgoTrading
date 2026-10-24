@@ -86,13 +86,16 @@ internal sealed partial class IntradayExpansionPairService(
         var completedBefore = now.AddSeconds(-marketData.Value.CandleIntervalSeconds);
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
                 value.IntervalSeconds == marketData.Value.CandleIntervalSeconds && value.Source == "Groww" &&
-                value.OpenTimeUtc <= completedBefore)
-            .OrderByDescending(value => value.OpenTimeUtc).Take(15)
+                value.OpenTimeUtc >= dayStart && value.OpenTimeUtc <= completedBefore)
+            .OrderByDescending(value => value.OpenTimeUtc).Take(90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         if (candles.Count == 0) return;
-        var decision = IntradayExpansionPairPolicy.Evaluate(candles.Select(value =>
-            new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray());
-        var decisionTime = candles[^1].OpenTimeUtc;
+        var fiveMinuteBars = IntradayExpansionPairPolicy.CompletedFiveMinuteBars(candles.Select(value =>
+            new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray(),
+            marketData.Value.CandleIntervalSeconds, now);
+        if (fiveMinuteBars.Length == 0) return;
+        var decision = IntradayExpansionPairPolicy.Evaluate(fiveMinuteBars);
+        var decisionTime = fiveMinuteBars[^1].OpenTimeUtc;
         if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value => value.Market == market.Code &&
             value.CandleTimeUtc == decisionTime && value.Outcome.StartsWith("ExpansionPair:"), cancellationToken)) return;
         if (!decision.Permitted)
@@ -103,10 +106,10 @@ internal sealed partial class IntradayExpansionPairService(
             return;
         }
 
-        var releaseDirection = candles[^1].Close >= candles[^1].Open
+        var releaseDirection = fiveMinuteBars[^1].Close >= fiveMinuteBars[^1].Open
             ? Direction.Buy : Direction.Sell;
         var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db, underlying.Id,
-            releaseDirection, candles[^1].Close, Math.Max(decision.BaselineRange, .01m), now,
+            releaseDirection, fiveMinuteBars[^1].Close, Math.Max(decision.BaselineRange, .01m), now,
             cancellationToken);
         if (!optionInterest.Permitted)
         {
@@ -275,13 +278,15 @@ internal sealed partial class IntradayExpansionPairService(
             }
         }
         else if (action is ExpansionPairExitAction.StopBasket or ExpansionPairExitAction.TimeExit or
-                 ExpansionPairExitAction.ForceExit or ExpansionPairExitAction.TrailRunner)
+                 ExpansionPairExitAction.ForceExit or ExpansionPairExitAction.TrailRunner or
+                 ExpansionPairExitAction.ProtectBasketProfit)
         {
             var status = action switch
             {
                 ExpansionPairExitAction.StopBasket => "ExpansionPairStop",
                 ExpansionPairExitAction.TimeExit => "ExpansionPairNoExpansion",
                 ExpansionPairExitAction.ForceExit => "ExpansionPairTimeExit",
+                ExpansionPairExitAction.ProtectBasketProfit => "ExpansionPairProfitProtection",
                 _ => "ExpansionPairRunnerTrail"
             };
             foreach (var leg in legs) Close(leg, status);

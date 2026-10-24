@@ -1,6 +1,34 @@
 # Current handover
 
-Updated: 2026-10-23 (Asia/Calcutta).
+Updated: 2026-10-24 (Asia/Calcutta).
+
+## 24 October entry quality, profit protection and expansion-pair corrections
+
+User authorized one combined deployment. Nifty strategy cooldown now derives from
+completed trades rather than unfilled/rejected persisted signals. Each execution-stage
+outcome is also saved to MarketStrategyAudits (EntryStage:*), avoiding first-write-only
+StrategyEvaluation hiding later rejection reasons. No financial/daily risk caps restored.
+Structural re-entry still requires post-exit evidence; the trigger candle itself cannot
+be the pullback and continuation bases must contain a countertrend/flat pause candle.
+
+Shared protective-stop calculation locks at least half of observed peak premium gain
+once its existing profit-lock activation threshold is reached, without lowering an
+existing stronger fixed lock. This is a research parameter, not a proven optimal value.
+Hard stop precedence remains intact. Expansion service now builds complete contiguous
+five-minute candles from the feed (previously raw feed bars were passed to a policy
+described as five-minute). Missing/in-progress buckets are excluded; session boundaries
+are respected. Entry requires a CLOSE outside the squeeze rather than a wick excursion.
+Basket gains receive half-peak-gain protection after minimum expansion, including when
+partial recovery is impossible due to whole-lot sizing. Pair losses remain possible.
+
+These are targeted logic corrections, not a guarantee of trades, win rate, or profit.
+No full historical option-tick replay was performed; sampled telemetry cannot prove
+counterfactual fills. Keep observing no-trade stage reasons, entry count, net giveback
+and paired (not individual leg) expectancy. Preserve unrelated working-tree changes.
+Verification: Release solution build and full backend suite passed: 324 unit,
+82 contract, 18 integration and two architecture tests; three opt-in PostgreSQL tests
+skipped. No frontend changes. Deployment authorized to main; dispatch once, no polling.
+
 
 ## 23 October stop-loss incident
 
@@ -22,6 +50,8 @@ Entry logic, sizing, financial caps and existing HZ/pair strategy rules are unch
 No promise of exact stop-price fills: polling, unavailable quotes and gaps still matter.
 User subsequently authorized deployment of this fix to main. Dispatch once using
 scripts/tasks.ps1; completion remains unverified until explicitly checked.
+Commit e1c3523 pushed; dispatch accepted:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/39940883955
 Release solution compilation and 43 focused unit regressions passed. No PostgreSQL
 integration run or production validation of this local fix has been performed.
 

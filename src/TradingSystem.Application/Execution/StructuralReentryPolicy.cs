@@ -30,9 +30,9 @@ public static class StructuralReentryPolicy
         var prior = afterExit[^2];
         var meaningfulRange = atr > 0 && afterExit.Max(x => x.High) - afterExit.Min(x => x.Low) >= atr * .75m;
         var reset = direction == Direction.Buy
-            ? afterExit.Any(x => x.Low <= fast - atr * .15m) && meaningfulRange && latest.Close > fast &&
+            ? afterExit.SkipLast(1).Any(x => x.Low <= fast - atr * .15m) && meaningfulRange && latest.Close > fast &&
               latest.Close > latest.Open && latest.Close > prior.Close
-            : afterExit.Any(x => x.High >= fast + atr * .15m) && meaningfulRange && latest.Close < fast &&
+            : afterExit.SkipLast(1).Any(x => x.High >= fast + atr * .15m) && meaningfulRange && latest.Close < fast &&
               latest.Close < latest.Open && latest.Close < prior.Close;
         var continuationBase = false;
         if (persistentDirectionalContext && afterExit.Length >= 3 && atr > 0m)
@@ -40,7 +40,9 @@ public static class StructuralReentryPolicy
             var baseBars = afterExit.TakeLast(3).ToArray();
             var baseRange = baseBars.SkipLast(1).Max(x => x.High) -
                             baseBars.SkipLast(1).Min(x => x.Low);
-            continuationBase = baseRange <= atr * 1.50m && meaningfulRange &&
+            var pauseObserved = baseBars.SkipLast(1).Any(x => direction == Direction.Buy
+                ? x.Close <= x.Open : x.Close >= x.Open);
+            continuationBase = pauseObserved && baseRange <= atr * 1.50m && meaningfulRange &&
                 (direction == Direction.Buy
                     ? latest.Close > baseBars.SkipLast(1).Max(x => x.High) &&
                       latest.Close > latest.Open && latest.Close > fast

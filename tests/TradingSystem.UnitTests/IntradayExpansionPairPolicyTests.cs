@@ -6,6 +6,30 @@ namespace TradingSystem.UnitTests;
 public sealed class IntradayExpansionPairPolicyTests
 {
     [Fact]
+    public void AggregationExcludesIncompleteAndMissingMinuteBuckets()
+    {
+        var start = new DateTimeOffset(2026, 10, 23, 4, 0, 0, TimeSpan.Zero);
+        var minutes = Enumerable.Range(0, 12).Where(i => i != 7)
+            .Select(i => Bar(start.AddMinutes(i), 100m + i, 2m, .5m)).ToArray();
+        var result = IntradayExpansionPairPolicy.CompletedFiveMinuteBars(minutes, 60, start.AddMinutes(12));
+        Assert.Single(result);
+        Assert.Equal(100m, result[0].Open);
+        Assert.Equal(104.5m, result[0].Close);
+        Assert.Equal(105m, result[0].High);
+    }
+
+    [Fact]
+    public void ElevenMinuteCandlesCannotMasqueradeAsElevenFiveMinuteCandles()
+    {
+        var start = new DateTimeOffset(2026, 10, 23, 4, 0, 0, TimeSpan.Zero);
+        var minutes = Enumerable.Range(0, 11)
+            .Select(i => Bar(start.AddMinutes(i), 100m, 2m, .5m)).ToArray();
+        var result = IntradayExpansionPairPolicy.CompletedFiveMinuteBars(minutes, 60, start.AddMinutes(11));
+        Assert.Equal(2, result.Length);
+        Assert.False(IntradayExpansionPairPolicy.Evaluate(result).Permitted);
+    }
+
+    [Fact]
     [Trait("Category", "DeploymentRegression")]
     public void EntryRequiresRealCompressionReleaseBeforeDirectionIsMature()
     {
@@ -70,6 +94,8 @@ public sealed class IntradayExpansionPairPolicyTests
     [InlineData(105, 100, 105, 16, 11, 0, ExpansionPairExitAction.TimeExit)]
     [InlineData(126, 100, 126, 5, 11, 0, ExpansionPairExitAction.RecoverAndRun)]
     [InlineData(110, 100, 150, 20, 11, 1, ExpansionPairExitAction.TrailRunner)]
+    [InlineData(109, 100, 120, 10, 11, 0, ExpansionPairExitAction.ProtectBasketProfit)]
+    [InlineData(115, 100, 120, 10, 11, 0, ExpansionPairExitAction.Hold)]
     public void ExitPolicyControlsCombinedDebitAndPreservesRunner(decimal current,
         decimal entry, decimal peak, int ageMinutes, int hour, int recovery,
         ExpansionPairExitAction expected)

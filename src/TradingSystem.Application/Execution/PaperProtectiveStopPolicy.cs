@@ -47,7 +47,8 @@ public static class PaperProtectiveStopPolicy
             if (highWater >= entry + risk * breakEvenTriggerR) result = Math.Max(result, entry);
             if (profitLockTriggerR != decimal.MaxValue &&
                 highWater >= entry + risk * profitLockTriggerR)
-                result = Math.Max(result, entry + risk * profitLockR);
+                result = Math.Max(result, entry + Math.Max(risk * profitLockR,
+                    (highWater - entry) * .50m));
             if (highWater >= entry + risk * (breakEvenTriggerR + trailingDistanceR))
                 result = Math.Max(result, highWater - risk * trailingDistanceR);
             return result;
@@ -56,7 +57,8 @@ public static class PaperProtectiveStopPolicy
         if (highWater <= entry - risk * breakEvenTriggerR) resultForShort = Math.Min(resultForShort, entry);
         if (profitLockTriggerR != decimal.MaxValue &&
             highWater <= entry - risk * profitLockTriggerR)
-            resultForShort = Math.Min(resultForShort, entry - risk * profitLockR);
+            resultForShort = Math.Min(resultForShort, entry - Math.Max(risk * profitLockR,
+                (entry - highWater) * .50m));
         if (highWater <= entry - risk * (breakEvenTriggerR + trailingDistanceR))
             resultForShort = Math.Min(resultForShort, highWater + risk * trailingDistanceR);
         return resultForShort;

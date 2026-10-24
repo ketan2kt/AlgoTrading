@@ -12,6 +12,23 @@ public sealed record ExpansionPairEntryDecision(
 
 public static class IntradayExpansionPairPolicy
 {
+    public static StrategyPriceBar[] CompletedFiveMinuteBars(
+        IReadOnlyList<StrategyPriceBar> source, int intervalSeconds, DateTimeOffset now)
+    {
+        if (intervalSeconds <= 0 || intervalSeconds > 300 || 300 % intervalSeconds != 0)
+            return [];
+        return source.GroupBy(bar => bar.OpenTimeUtc.ToUnixTimeSeconds() / 300 * 300)
+            .OrderBy(group => group.Key)
+            .Where(group => group.Key + 300 <= now.ToUnixTimeSeconds())
+            .Select(group => group.OrderBy(bar => bar.OpenTimeUtc).ToArray())
+            .Where(bars => bars.Length == 300 / intervalSeconds &&
+                bars.Select(bar => bar.OpenTimeUtc.ToUnixTimeSeconds()).SequenceEqual(
+                    Enumerable.Range(0, bars.Length).Select(i =>
+                        bars[0].OpenTimeUtc.ToUnixTimeSeconds() / 300 * 300 + i * intervalSeconds)))
+            .Select(bars => new StrategyPriceBar(bars[0].OpenTimeUtc, bars[0].Open,
+                bars.Max(bar => bar.High), bars.Min(bar => bar.Low), bars[^1].Close)).ToArray();
+    }
+
     public static ExpansionPairEntryDecision Evaluate(IReadOnlyList<StrategyPriceBar> source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -40,9 +57,9 @@ public static class IntradayExpansionPairPolicy
         var releaseRange = Range(release);
         var releaseRatio = squeezeRange <= 0m ? 0m : releaseRange / squeezeRange;
         var bodyRatio = releaseRange <= 0m ? 0m : Math.Abs(release.Close - release.Open) / releaseRange;
-        var released = release.High > squeezeHigh || release.Low < squeezeLow;
+        var released = release.Close > squeezeHigh || release.Close < squeezeLow;
         if (!released || releaseRatio < 1.15m || bodyRatio < .45m)
-            return Reject("Compression exists, but no decisive 1.15x release candle has started.", baselineRange, compressionRatio, releaseRatio);
+            return Reject("Compression exists, but no decisive 1.15x candle has closed outside the squeeze.", baselineRange, compressionRatio, releaseRatio);
 
         // A paired debit is useful while magnitude is emerging and direction is not yet mature.
         // It is not opened after an already exhausted multi-candle impulse.
@@ -118,7 +135,8 @@ public enum ExpansionPairExitAction
     TimeExit,
     ForceExit,
     RecoverAndRun,
-    TrailRunner
+    TrailRunner,
+    ProtectBasketProfit
 }
 
 public static class ExpansionPairExitPolicy
@@ -132,6 +150,10 @@ public static class ExpansionPairExitPolicy
         if (entryValue <= 0m) return ExpansionPairExitAction.StopBasket;
         if (!recoveryTaken && currentValue <= entryValue * (1m - stopPercent))
             return ExpansionPairExitAction.StopBasket;
+        // Protect an actual basket expansion even if lot granularity prevents partial recovery.
+        if (!recoveryTaken && peakValue >= entryValue * (1m + minimumExpansionPercent) &&
+            currentValue <= entryValue + (peakValue - entryValue) * .50m)
+            return ExpansionPairExitAction.ProtectBasketProfit;
         if (!recoveryTaken && age >= TimeSpan.FromMinutes(15) &&
             peakValue < entryValue * (1m + minimumExpansionPercent))
             return ExpansionPairExitAction.TimeExit;

@@ -6,6 +6,15 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperProtectiveStopPolicyTests
 {
     [Theory]
+    [InlineData(Direction.Buy, 90, 108, 104)]
+    [InlineData(Direction.Buy, 90, 116, 108)]
+    [InlineData(Direction.Sell, 110, 92, 96)]
+    public void ProgressiveLockRetainsHalfOfPeakAfterActivation(Direction direction,
+        decimal initialStop, decimal extreme, decimal expected) =>
+        Assert.Equal(expected, PaperProtectiveStopPolicy.Calculate(direction,
+            100m, initialStop, extreme, .5m, 1.25m, .65m, .2m));
+
+    [Theory]
     [InlineData(Direction.Buy, 100, 95, 100, 120, 101.25)]
     [InlineData(Direction.Sell, 100, 105, 100, 120, 98.75)]
     public void CostFloorProtectsAPositiveNetExit(Direction direction, decimal entry,
