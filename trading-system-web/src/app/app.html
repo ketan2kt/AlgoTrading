@@ -211,10 +211,10 @@
         <div class="logs-backdrop" (click)="closeNarrator()">
           <section class="evaluation-panel logs-modal narrator-modal" role="dialog" aria-modal="true"
             aria-label="Spoken market narrator" (click)="$event.stopPropagation()">
-            <div class="panel-heading">
-              <div><span>MARKET NARRATOR</span><strong>Spoken Nifty and Sensex market events</strong></div>
-              <button type="button" (click)="closeNarrator()">Close</button>
-            </div>
+            <header class="panel-heading dialog-heading">
+              <div><span>MARKET NARRATOR</span><h2>Market narrator</h2><p>Spoken Nifty and Sensex market events</p></div>
+              <button type="button" class="dialog-close" (click)="closeNarrator()" aria-label="Close market narrator">×</button>
+            </header>
             <section class="narrator-controls">
               <div class="narrator-mode" aria-label="Narrator mode">
                 <button type="button" [class.active]="narratorMode === 'learning'" (click)="setNarratorMode('learning')">Learning · all alerts</button>
@@ -259,10 +259,10 @@
         <div class="logs-backdrop" (click)="closeControls()">
           <section class="evaluation-panel logs-modal control-center" role="dialog" aria-modal="true"
             aria-label="Trading control center" (click)="$event.stopPropagation()">
-            <div class="panel-heading">
-              <div><span>CONTROL CENTER</span><strong>{{ preparedMarketName() }} settings and system state</strong></div>
-              <button type="button" (click)="closeControls()">Close</button>
-            </div>
+            <header class="panel-heading dialog-heading">
+              <div><span>CONTROL CENTER</span><h2>Controls</h2><p>{{ preparedMarketName() }} settings and system state</p></div>
+              <button type="button" class="dialog-close" (click)="closeControls()" aria-label="Close controls">×</button>
+            </header>
             <div class="control-center-actions">
               <button type="button" (click)="refreshWorkspace()">Refresh workspace</button>
               <button type="button" (click)="openGrowwPositions()">Groww live positions</button>
@@ -328,7 +328,7 @@
         <div class="logs-backdrop" (click)="closePnlReport()">
           <section class="evaluation-panel logs-modal pnl-report-modal" role="dialog" aria-modal="true"
             aria-label="Paper trading profit and loss report" (click)="$event.stopPropagation()">
-            <div class="panel-heading"><div><span>P&amp;L REPORT</span><strong>Paper-trading net performance</strong></div><button type="button" (click)="closePnlReport()">Close</button></div>
+            <header class="panel-heading dialog-heading"><div><span>P&amp;L REPORT</span><h2>P&amp;L report</h2><p>Paper-trading net performance</p></div><button type="button" class="dialog-close" (click)="closePnlReport()" aria-label="Close P and L report">×</button></header>
             <form class="pnl-report-filter" (ngSubmit)="searchPnl()">
               <label>From<input name="pnlFrom" type="date" [(ngModel)]="pnlFrom" required /></label>
               <label>To<input name="pnlTo" type="date" [(ngModel)]="pnlTo" required /></label>
@@ -675,11 +675,11 @@
 
         @if (logsOpen) {
         <div class="logs-backdrop" (click)="closeLogs()">
-        <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Research logs" (click)="$event.stopPropagation()">
-          <div class="panel-heading">
-            <div><span>RESEARCH LOGS</span><strong>15-minute decisions and trade outcomes</strong></div>
-            <button type="button" (click)="closeLogs()">Close</button>
-          </div>
+        <section class="evaluation-panel logs-modal research-modal" role="dialog" aria-modal="true" aria-label="Research logs" (click)="$event.stopPropagation()">
+          <header class="panel-heading dialog-heading">
+            <div><span>RESEARCH LOGS</span><h2>Research logs</h2><p>15-minute decisions and trade outcomes</p></div>
+            <button type="button" class="dialog-close" (click)="closeLogs()" aria-label="Close research logs">×</button>
+          </header>
           @if (view.evaluations.length) {
             <div class="evaluation-table" role="table" aria-label="Strategy evaluation history">
               @for (evaluation of view.evaluations; track evaluation.evaluationId) {
@@ -726,13 +726,13 @@
         @if (growwPositionsOpen) {
         <div class="logs-backdrop" (click)="closeGrowwPositions()">
           <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Groww live positions" (click)="$event.stopPropagation()">
-            <div class="panel-heading">
-              <div><span>GROWW ACCOUNT · READ ONLY</span><strong>Currently open broker positions</strong></div>
+            <header class="panel-heading dialog-heading">
+              <div><span>GROWW ACCOUNT · READ ONLY</span><h2>Groww positions</h2><p>Currently open broker positions</p></div>
               <div class="modal-actions">
                 <button type="button" (click)="openGrowwPositions()" [disabled]="growwPositionsLoading">Refresh</button>
-                <button type="button" (click)="closeGrowwPositions()">Close</button>
+                <button type="button" class="dialog-close" (click)="closeGrowwPositions()" aria-label="Close Groww positions">×</button>
               </div>
-            </div>
+            </header>
             @if (growwPositionsLoading) { <p class="empty-copy">Reading Groww positions…</p> }
             @else if (growwPositionsError) { <p class="form-error">{{ growwPositionsError }}</p> }
             @else if (!growwPositions.length) { <p class="empty-copy">No currently open Groww positions. Closed trades are not included here.</p> }
@@ -759,13 +759,13 @@
         <div class="logs-backdrop" (click)="closeHeroZero()">
           <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true"
             aria-label="Hero Zero expiry monitor" (click)="$event.stopPropagation()">
-            <div class="panel-heading">
-              <div><span>HERO ZERO · PAPER ONLY</span><strong>{{ preparedMarketName() }} expiry monitor</strong></div>
+            <header class="panel-heading dialog-heading">
+              <div><span>HERO ZERO · PAPER ONLY</span><h2>Hero Zero</h2><p>{{ preparedMarketName() }} expiry monitor</p></div>
               <div class="modal-actions">
                 <button type="button" (click)="openHeroZero()" [disabled]="heroZeroLoading">Refresh</button>
-                <button type="button" (click)="closeHeroZero()">Close</button>
+                <button type="button" class="dialog-close" (click)="closeHeroZero()" aria-label="Close Hero Zero monitor">×</button>
               </div>
-            </div>
+            </header>
             @if (heroZeroLoading) { <p class="empty-copy">Reading live expiry candidates…</p> }
             @else if (heroZeroError) { <p class="form-error">{{ heroZeroError }}</p> }
             @else if (heroZero; as hz) {
@@ -816,8 +816,8 @@
 
         @if (reportOpen) {
         <div class="logs-backdrop" (click)="closeReport()">
-          <section class="evaluation-panel logs-modal" role="dialog" aria-modal="true" aria-label="Paper performance and trade history" (click)="$event.stopPropagation()">
-            <div class="panel-heading"><div><span>PAPER REPORT</span><strong>Daily performance and trade history</strong></div><button type="button" (click)="closeReport()">Close</button></div>
+          <section class="evaluation-panel logs-modal performance-modal" role="dialog" aria-modal="true" aria-label="Paper performance and trade history" (click)="$event.stopPropagation()">
+            <header class="panel-heading dialog-heading"><div><span>PAPER REPORT</span><h2>Performance</h2><p>Daily results, execution quality and trade history</p></div><button type="button" class="dialog-close" (click)="closeReport()" aria-label="Close performance report">×</button></header>
             @if (reportLoading) { <p class="empty-copy">Loading report…</p> }
             @else if (reportError) { <p class="form-error">{{reportError}}</p> }
             @else if (report) {

@@ -565,3 +565,264 @@ app-root .workspace-brand__mark { color: #fff; }
   app-root .market-tabs { padding: .25rem; }
   app-root .market-tab-group > button { min-height: 32px; }
 }
+
+/* Richer leaf-green surfaces throughout the desk; retain dark ink and clear chart contrast. */
+html, body { background: #dcefd9; }
+app-root {
+  --desk-page: #dcefd9;
+  --desk-surface: #e8f3e4;
+  --desk-surface-raised: #d8ecd4;
+  --desk-line: #a8caab;
+  --desk-muted: #4f705a;
+  background: var(--desk-page);
+}
+app-root main,
+app-root .market-theme--sensex,
+app-root .market-theme--gas { background: var(--desk-page); }
+app-root :is(.workspace-heading, .chart-panel, .positions-panel, .safety-panel,
+  .login-card, .logs-launch, .evaluation-panel, .market-card, .prepared-chart,
+  .prepared-grid section, .token-card, .instrument-sync-card, .control-center-card,
+  .daily-analysis-modal, .logs-modal) {
+  background: var(--desk-surface) !important;
+  border-color: var(--desk-line) !important;
+}
+app-root .workspace-heading { background: linear-gradient(105deg, #e4f2df, #d7ebd2) !important; }
+app-root :is(.market-card, .prepared-chart, .prepared-grid section, .market-strip article,
+  .readiness-grid article, .option-routing-panel > div, .hz-summary > div,
+  .chart-status-rail > div, .daily-analysis-summary article, .daily-analysis-section,
+  .daily-analysis-insight, .narrator-controls, .narrator-category-grid label,
+  .narrator-toast) {
+  background: #e0efdb;
+  border-color: var(--desk-line);
+}
+app-root .chart-status-rail > div { background: #e0efdb; }
+app-root .daily-analysis-section { background: #e8f3e4; }
+app-root .daily-analysis-table th { background: #cfe5ca; }
+app-root .daily-analysis-table tbody tr:nth-child(even) { background: #e0efdb; }
+app-root .daily-analysis-table tbody tr:hover { background: #d3e9cd; }
+app-root :is(input, select, textarea, .timeframe-control select,
+  .daily-analysis-controls input, .daily-analysis-prompt textarea) {
+  background: #f1f8ee;
+  border-color: #9cbea0;
+}
+app-root .logs-modal .dialog-heading,
+app-root .daily-analysis-header,
+app-root .daily-analysis-controls,
+app-root .report-tools { background: #d5ead0; border-color: var(--desk-line); }
+
+/* Shared Daily Analysis-inspired architecture for every secondary dialog. */
+app-root .logs-modal:not(.daily-analysis-modal) {
+  border: 1px solid #9cbea0 !important;
+  border-radius: 16px;
+  background: #e8f3e4 !important;
+  box-shadow: 0 25px 70px rgba(19, 66, 38, .28);
+}
+app-root .logs-modal > .dialog-heading {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .72rem 1rem;
+  border-bottom: 1px solid #a8caab;
+  background: #d5ead0;
+  backdrop-filter: blur(12px);
+}
+app-root .dialog-heading > div:first-child { display: grid; gap: .12rem; min-width: 0; }
+app-root .dialog-heading span {
+  color: #1e6d40;
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+app-root .dialog-heading h2 { margin: 0; color: #153d2a; font-size: 1.17rem; letter-spacing: -.02em; }
+app-root .dialog-heading p { margin: 0; color: #4f705a; font-size: .74rem; line-height: 1.3; }
+app-root .dialog-heading .modal-actions { flex-shrink: 0; }
+app-root .dialog-heading .modal-actions > button:not(.dialog-close) {
+  min-height: 31px;
+  padding: .32rem .65rem;
+  color: #1e613e;
+  border: 1px solid #98bf9e;
+  background: #e6f3e2;
+}
+app-root .dialog-heading .dialog-close {
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
+  flex: 0 0 2.1rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #98bf9e;
+  border-radius: 50%;
+  color: #24583a;
+  background: #e9f5e5;
+  font-size: 1.35rem;
+  font-weight: 400;
+  line-height: 1;
+}
+app-root .dialog-heading .dialog-close:hover:not(:disabled),
+app-root .dialog-heading .modal-actions > button:hover:not(:disabled) {
+  color: #103b24;
+  background: #c7e5c4;
+}
+app-root .logs-modal > .panel-heading:not(.dialog-heading) {
+  position: static;
+  margin: .85rem .85rem .2rem;
+  padding: .35rem .6rem;
+  border: 0;
+  border-left: 3px solid #25834d;
+  background: transparent;
+}
+app-root .logs-modal > .panel-heading:not(.dialog-heading) span { font-size: .62rem; font-weight: 700; }
+app-root .logs-modal > .panel-heading:not(.dialog-heading) strong { font-size: .9rem; }
+app-root .logs-modal > .evaluation-table {
+  display: grid;
+  gap: .45rem;
+  margin: .65rem .85rem;
+}
+app-root .logs-modal .evaluation-row {
+  gap: .5rem;
+  padding: .65rem .75rem;
+  border: 1px solid #b4d0b2;
+  border-radius: 10px;
+  background: #e1f0dc;
+}
+app-root .logs-modal .evaluation-row > div { min-width: 0; gap: .15rem; }
+app-root .logs-modal .evaluation-row span { font-size: .61rem; font-weight: 700; }
+app-root .logs-modal .evaluation-row strong { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+app-root .logs-modal .evaluation-reasons {
+  padding: .48rem .55rem 0;
+  border-top: 1px solid #b4d0b2;
+}
+app-root .logs-modal .empty-copy,
+app-root .logs-modal .form-error { margin: .65rem .85rem; }
+app-root .logs-modal details { margin: .5rem .85rem; color: #315b43; }
+app-root .logs-modal .hz-summary { margin: .75rem .85rem; border: 1px solid #a8caab; border-radius: 10px; overflow: hidden; }
+
+/* Controls use a clear two-column hierarchy, not a list of unframed inputs. */
+app-root .control-center {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: .7rem;
+  width: min(1120px, calc(100vw - 2rem));
+  padding: 0 .85rem .9rem;
+}
+app-root .control-center > .dialog-heading { grid-column: 1 / -1; margin: 0 -.85rem; }
+app-root .control-center > :is(.control-center-actions, .market-strip, .readiness-panel,
+  .option-routing-panel, .feed-notice, .safety-panel:not(.live-execution-card)) {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+app-root .control-center-actions {
+  gap: .35rem;
+  padding: .6rem 0;
+  border-bottom: 1px solid #a8caab;
+}
+app-root .control-center-actions button {
+  padding: .35rem .55rem;
+  color: #24583a;
+  border: 1px solid #a8caab;
+  background: #e4f2df;
+  font-size: .72rem;
+}
+app-root .control-center-actions button:hover:not(:disabled) { color: #123c28; background: #cce5c8; }
+app-root .control-center > .control-center-card {
+  min-width: 0;
+  margin: 0;
+  padding: .78rem .85rem;
+  border: 1px solid #a8caab !important;
+  border-radius: 11px;
+  background: #e1f0dc !important;
+  box-shadow: none;
+}
+app-root .control-center-card > div:first-child > span,
+app-root .control-center-card > span:first-child {
+  color: #1e6d40;
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+app-root .control-center-card > div:first-child > strong { display: block; margin: .18rem 0; font-size: .95rem; }
+app-root .control-center-card p { margin: .32rem 0; font-size: .73rem; line-height: 1.45; }
+app-root .trading-lots-card { display: grid; align-content: start; gap: .65rem; }
+app-root .trading-lots-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; align-items: end; }
+app-root .trading-lots-grid label { gap: .25rem; font-size: .74rem; font-weight: 650; }
+app-root .trading-lots-grid input { min-width: 0; padding: .55rem .65rem; font-size: .95rem; font-variant-numeric: tabular-nums; }
+app-root .trading-lots-grid button { grid-column: 1 / -1; justify-self: start; }
+app-root .live-execution-card { border-left: 4px solid #d19d56 !important; }
+app-root .live-execution-card label { gap: .25rem; font-size: .72rem; }
+app-root .live-execution-card input { padding: .48rem .6rem; }
+app-root .live-execution-card > button { justify-self: start; }
+app-root .control-center > .token-card { gap: .75rem; align-items: start; }
+app-root .control-center > .token-card--required { background: #f8efd2 !important; border-left: 4px solid #b58024 !important; }
+app-root .control-center .token-form { flex-wrap: wrap; width: min(100%, 400px); }
+app-root .control-center .token-form label { min-width: 170px; }
+app-root .control-center .token-form input { padding: .48rem .6rem; }
+app-root .control-center > .instrument-sync-card { align-items: start; }
+app-root .control-center > .market-strip { border-color: #a8caab; }
+app-root .control-center .readiness-panel { border: 1px solid #a8caab; border-radius: 10px; }
+app-root .control-center .readiness-panel > .panel-heading { position: static; background: #d5ead0; }
+app-root .control-center .readiness-grid { gap: 1px; }
+app-root .control-center > .safety-panel:not(.live-execution-card) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem 1rem;
+  border-left: 4px solid #b58024 !important;
+}
+app-root .control-center > .safety-panel:not(.live-execution-card) > button { margin-left: auto; }
+
+/* Report filters and totals match the compact Daily Analysis KPI rhythm. */
+app-root .pnl-report-filter {
+  margin: .8rem .85rem 0;
+  padding: .7rem;
+  border: 1px solid #a8caab;
+  border-radius: 10px;
+  background: #dff0db;
+}
+app-root .pnl-report-filter label { gap: .25rem; font-size: .65rem; font-weight: 750; }
+app-root .pnl-report-filter input,
+app-root .pnl-report-filter select { padding: .5rem .58rem; }
+app-root .pnl-results { margin-top: .8rem; }
+app-root .pnl-total {
+  gap: .6rem;
+  margin: .8rem .85rem;
+  padding: .65rem;
+  border: 1px solid #a8caab;
+  border-radius: 10px;
+  background: #d9ecd4;
+}
+app-root .pnl-total > div { min-width: 0; padding: .3rem .55rem; border-left: 1px solid #a8caab; }
+app-root .pnl-total strong { font-size: 1.02rem; font-variant-numeric: tabular-nums; }
+app-root .performance-modal .report-tools { position: static; margin: .65rem .85rem; border: 1px solid #a8caab; border-radius: 9px; }
+app-root .research-modal .evaluation-row { border-left: 3px solid #69a679; }
+app-root :is(.chart-status-rail span, .signal-row span, .evaluation-row span,
+  .market-strip article > span, .daily-analysis-summary article > small,
+  .daily-analysis-table td small, .narrator-event > div, .narrator-toast span,
+  .narrator-toast small) { color: #4f705a; }
+
+@media (max-width: 800px) {
+  app-root .control-center { grid-template-columns: 1fr; }
+  app-root .control-center > :is(.control-center-card, .market-strip, .readiness-panel,
+    .option-routing-panel, .feed-notice) { grid-column: 1; }
+}
+@media (max-width: 560px) {
+  app-root .logs-backdrop { padding: .3rem; }
+  app-root .logs-modal:not(.daily-analysis-modal) { width: calc(100vw - .6rem); max-height: calc(100vh - .6rem); }
+  app-root .logs-modal > .dialog-heading { min-height: 68px; padding: .58rem .7rem; }
+  app-root .dialog-heading h2 { font-size: 1.02rem; }
+  app-root .dialog-heading p { font-size: .68rem; }
+  app-root .control-center { width: calc(100vw - .6rem); padding-inline: .6rem; }
+  app-root .control-center > .dialog-heading { margin-inline: -.6rem; }
+  app-root .control-center > .token-card,
+  app-root .control-center > .instrument-sync-card { flex-wrap: wrap; }
+  app-root .pnl-report-filter { grid-template-columns: 1fr 1fr; }
+  app-root .pnl-report-filter button { grid-column: 1 / -1; }
+  app-root .pnl-total { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  app-root .pnl-total > span { grid-column: 1 / -1; }
+}

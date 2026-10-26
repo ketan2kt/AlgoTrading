@@ -94,7 +94,7 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         display: block;
         min-height: clamp(340px, calc(70vh - 110px), 520px);
       }
-      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#f8fcf7; }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#e6f2e2; }
       .chart-stage { position:relative; min-width:0; min-height:clamp(340px,calc(70vh - 110px),520px); }
       .chart {
         width: 100%;
@@ -124,9 +124,9 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         pointer-events: none;
       }
       .overlay-controls { position:absolute; z-index:2; top:7px; left:8px; display:flex; flex-wrap:wrap; gap:4px; max-width:calc(100% - 110px); }
-      .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#f8fcf7ee; color:#315b43; font-size:.7rem; }
+      .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#e6f2e2ee; color:#315b43; font-size:.7rem; }
       .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
-      .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#f8fcf7ee; }
+      .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
       .decision-map { margin:0; border:0; border-bottom:1px solid #c6dac5; background:#edf6eb; }
       .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
       .decision-map summary::-webkit-details-marker { display:none; }
@@ -195,8 +195,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: '#f8fcf7' }, textColor: '#45644d' },
-      grid: { vertLines: { color: '#dce9db' }, horzLines: { color: '#dce9db' } },
+      layout: { background: { type: ColorType.Solid, color: '#e6f2e2' }, textColor: '#45644d' },
+      grid: { vertLines: { color: '#c9dec7' }, horzLines: { color: '#c9dec7' } },
       rightPriceScale: { borderColor: '#b7cfba' },
       localization: { timeFormatter: formatCrosshairTimeIst },
       timeScale: {
