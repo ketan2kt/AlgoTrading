@@ -76,7 +76,9 @@ public sealed record DailyTradingTrade(
     decimal? MaximumFavourableExcursion,
     DateTimeOffset? MaximumFavourableExcursionAtUtc,
     decimal? MaximumAdverseExcursion,
-    DateTimeOffset? MaximumAdverseExcursionAtUtc);
+    DateTimeOffset? MaximumAdverseExcursionAtUtc,
+    string ExcursionCoverage = "Unknown",
+    int ExcursionSampleCount = 0);
 
 public sealed record DailyTradingSystemEvent(
     DateTimeOffset OccurredAtUtc,

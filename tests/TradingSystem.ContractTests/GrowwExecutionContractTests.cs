@@ -8,6 +8,35 @@ namespace TradingSystem.ContractTests;
 
 public sealed class GrowwExecutionContractTests
 {
+    [Theory]
+    [InlineData(true, 401)]
+    [InlineData(false, 401)]
+    [InlineData(false, 403)]
+    public async Task AuthorizationFailureIdentifiesStageWithoutRetryOrSecrets(bool failLookup, int status)
+    {
+        var calls = new List<HttpMethod>();
+        var gateway = CreateGateway(request =>
+        {
+            calls.Add(request.Method);
+            return Task.FromResult(request.Method == HttpMethod.Get && !failLookup
+                ? Json(HttpStatusCode.NotFound, "{}")
+                : Json((HttpStatusCode)status, "sensitive-broker-body"));
+        });
+
+        var error = await Assert.ThrowsAsync<GrowwApiException>(() => gateway.SubmitAsync(
+            new BrokerOrderRequest("LIVE-0001", Guid.NewGuid(), Direction.Buy, 65, 100m,
+                TradingSymbol: "NIFTY26SEP24500CE", Exchange: "NSE"), CancellationToken.None));
+
+        Assert.Equal(status, error.StatusCode);
+        Assert.Equal(failLookup ? 1 : 2, calls.Count);
+        Assert.Contains(failLookup ? "GET /v1/order/status/reference/{reference}" : "POST /v1/order/create", error.Message);
+        Assert.Contains("route: direct", error.Message);
+        Assert.Contains("allowlisted outbound IP", error.Message);
+        Assert.DoesNotContain("LIVE-0001", error.Message);
+        Assert.DoesNotContain("test-token", error.Message);
+        Assert.DoesNotContain("sensitive-broker-body", error.Message);
+    }
+
     [Fact]
     public async Task SubmitChecksReferenceThenUsesOfficialCreateContract()
     {

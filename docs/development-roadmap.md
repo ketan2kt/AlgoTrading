@@ -233,6 +233,50 @@ Backtesting → paper trading → shadow mode → minimum-quantity live testing 
 
 Promotion evidence must include test report, manual verification record, open-risk register, security review, limitations, rollback/recovery plan, and signed user approval. No strategy skips a stage.
 
+## Long-term product and commercial roadmap — recorded 2026-10-13
+
+The long-term objective is to first establish Sarthi as a dependable internal trading system and
+only then consider monetisation. This objective does not change the current observation freeze,
+authorise live trading, or treat recent profitable paper sessions as proof of durable performance.
+
+### Internal-capital validation
+
+- Continue paper and shadow observation across directional, range, choppy, transition and event-risk
+  sessions. Directional-market performance alone is insufficient for promotion.
+- After strategy stability, broker execution, reconciliation, security and risk controls satisfy the
+  existing promotion gates, consider a separately approved controlled-live phase with up to INR 5
+  lakh of user-provided capital. Start below the ceiling and increase exposure gradually using
+  explicit loss, drawdown and operational stop conditions.
+- Measure realised results after brokerage, taxes, slippage, rejected orders and outages. Preserve
+  immutable strategy/build identity and do not tune the system during a declared evaluation window.
+- The user's aspirations are seven positive sessions out of ten and approximately 10–12% monthly
+  return. Treat these as research ambitions, not assumed returns, marketing claims, or automatic
+  promotion criteria. Optimise for after-cost expectancy and controlled drawdown rather than daily
+  win rate alone.
+- Three consecutive profitable controlled-live months are the first commercial-review checkpoint,
+  not sufficient proof by themselves. Review regime coverage, trade count, profit factor, maximum
+  and recovery drawdown, tail losses, capital utilisation, execution reliability and audit quality.
+
+### Commercial sequence
+
+1. Internal trading and evidence collection using only approved capital and controlled-live gates.
+2. Private analytics/journaling pilot: reasoning, replay, MFE/MAE, regime analysis, alerts and
+   performance reporting without promises of returns or client order execution.
+3. Broker-neutral analytics SaaS after customer discovery, data-licensing review, tenancy,
+   security, support and billing readiness.
+4. B2B licensing to appropriately regulated research/advisory firms or brokers as the preferred
+   higher-value route with fewer operationally intensive retail customers.
+5. Paid recommendations only through the applicable SEBI Research Analyst or Investment Adviser
+   framework, with qualified legal/compliance review, required certification, disclosures,
+   recordkeeping and independently supportable performance communications.
+6. Retail automated execution only after broker integration and the applicable recognised-exchange
+   algo-provider empanelment, security and operational requirements are satisfied.
+
+Do not redistribute broker/exchange market data without contractual rights. Do not advertise
+returns, offer copy trading, pool/manage client money, or expose automatic execution to customers
+based solely on internal paper results. The system's evidence and risk controls are product assets;
+profit guarantees are not.
+
 ## Cross-cutting definition of done
 
 - Small testable methods, dependency injection, nullable enabled, cancellation tokens, no static mutable business state.

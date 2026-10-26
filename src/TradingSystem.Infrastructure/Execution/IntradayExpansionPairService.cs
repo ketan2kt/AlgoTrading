@@ -239,7 +239,7 @@ internal sealed partial class IntradayExpansionPairService(
             var instrument = instruments[leg.ExecutionInstrumentId];
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
-            if (quote.LastPrice > 0m) leg.Mark(quote.LastPrice, leg.StopLoss);
+            if (quote.LastPrice > 0m) leg.Mark(quote.LastPrice, leg.StopLoss, now);
         }
 
         var key = market.Code + ":" + pairPrefix;
@@ -269,7 +269,7 @@ internal sealed partial class IntradayExpansionPairService(
                 {
                     Close(loser, "ExpansionPairRecovery");
                     winner.TakePartial(winner.CurrentPrice, recoveryQuantity,
-                        Charges(winner, winner.CurrentPrice, recoveryQuantity));
+                        Charges(winner, winner.CurrentPrice, recoveryQuantity), now);
                     _peakValues[key] = winner.CurrentPrice * winner.RemainingQuantity;
                     await AuditAsync(db, market.Code, underlyingId, now, "ExpansionPair:Recovered",
                         1m, new { pairPrefix, entryValue, currentValue, winner = winner.Id,

@@ -230,8 +230,26 @@ public sealed class GrowwBrokerGateway(
         using var response = await httpClientFactory.CreateClient(ApiClientName)
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new GrowwApiException($"Groww execution API returned {(int)response.StatusCode}.",
+        {
+            // Keep the numeric prefix used by execution failure classification. Never
+            // include response bodies, bearer tokens, or client references in diagnostics.
+            var operation = path.Split('?', 2)[0];
+            if (operation.StartsWith("/v1/order/status/reference/", StringComparison.Ordinal))
+                operation = "/v1/order/status/reference/{reference}";
+            else if (operation.StartsWith("/v1/order/trades/", StringComparison.Ordinal))
+                operation = "/v1/order/trades/{orderId}";
+            else if (operation.StartsWith("/v1/order-advance/modify/", StringComparison.Ordinal))
+                operation = "/v1/order-advance/modify/{orderId}";
+            else if (operation.StartsWith("/v1/order-advance/cancel/", StringComparison.Ordinal))
+                operation = "/v1/order-advance/cancel/{segment}/{type}/{orderId}";
+            var route = request.RequestUri?.Host == "api.groww.in" ? "direct" : "relay";
+            var guidance = (int)response.StatusCode is 401 or 403
+                ? " Check token validity and Groww's allowlisted outbound IP; successful quotes do not verify order authorization."
+                : string.Empty;
+            throw new GrowwApiException(
+                $"Groww execution API returned {(int)response.StatusCode}. Operation: {method} {operation}; route: {route}.{guidance}",
                 statusCode: (int)response.StatusCode);
+        }
         var envelope = await response.Content.ReadFromJsonAsync<Envelope<T>>(JsonOptions, cancellationToken)
                        ?? throw new GrowwApiException("Groww execution API returned an empty response.");
         if (!string.Equals(envelope.Status, "SUCCESS", StringComparison.OrdinalIgnoreCase) || envelope.Payload is null)

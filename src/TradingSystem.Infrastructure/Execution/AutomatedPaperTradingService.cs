@@ -1045,15 +1045,19 @@ internal sealed partial class AutomatedPaperTradingService(
         var multiplier = open.Entry.Direction == Direction.Buy ? 1m : -1m;
         var entryPrice = open.AverageEntryPrice;
         var exitPlan = ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(open.Signal.Regime));
-        var persistedPrices = await researchDb.PaperTradePriceSamples.AsNoTracking()
-            .Where(value => value.SignalId == open.Signal.SignalId)
-            .Select(value => new { value.OptionPrice, value.ObservedAtUtc })
-            .ToListAsync(cancellationToken);
-        var persistedFavourable = persistedPrices.Count == 0
-            ? entryPrice
-            : open.Entry.Direction == Direction.Buy
-                ? persistedPrices.Max(value => value.OptionPrice)
-                : persistedPrices.Min(value => value.OptionPrice);
+        var persistedPrices = researchDb.PaperTradePriceSamples.AsNoTracking()
+            .Where(value => value.SignalId == open.Signal.SignalId);
+        var peakPoint = open.Entry.Direction == Direction.Buy
+            ? await persistedPrices.OrderByDescending(value => value.OptionPrice)
+                .Select(value => new { value.OptionPrice, value.ObservedAtUtc }).FirstOrDefaultAsync(cancellationToken)
+            : await persistedPrices.OrderBy(value => value.OptionPrice)
+                .Select(value => new { value.OptionPrice, value.ObservedAtUtc }).FirstOrDefaultAsync(cancellationToken);
+        var worstPoint = open.Entry.Direction == Direction.Buy
+            ? await persistedPrices.OrderBy(value => value.OptionPrice)
+                .Select(value => new { value.OptionPrice, value.ObservedAtUtc }).FirstOrDefaultAsync(cancellationToken)
+            : await persistedPrices.OrderByDescending(value => value.OptionPrice)
+                .Select(value => new { value.OptionPrice, value.ObservedAtUtc }).FirstOrDefaultAsync(cancellationToken);
+        var persistedFavourable = peakPoint?.OptionPrice ?? entryPrice;
         var favourable = favourablePriceBySignal.GetValueOrDefault(open.Signal.SignalId,
             persistedFavourable);
         favourable = open.Entry.Direction == Direction.Buy
@@ -1081,12 +1085,6 @@ internal sealed partial class AutomatedPaperTradingService(
                 entryPrice, effectiveStop, open.Entry.FilledQuantity, protectionCosts);
         }
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
-        var peakPoint = open.Entry.Direction == Direction.Buy
-            ? persistedPrices.OrderByDescending(value => value.OptionPrice).FirstOrDefault()
-            : persistedPrices.OrderBy(value => value.OptionPrice).FirstOrDefault();
-        var worstPoint = open.Entry.Direction == Direction.Buy
-            ? persistedPrices.OrderBy(value => value.OptionPrice).FirstOrDefault()
-            : persistedPrices.OrderByDescending(value => value.OptionPrice).FirstOrDefault();
         await PersistProfitProtectionSnapshotAsync(researchDb, open, underlyingInstrumentId,
             price, effectiveStop, peakPoint?.OptionPrice ?? price,
             peakPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(),
@@ -1345,10 +1343,9 @@ internal sealed partial class AutomatedPaperTradingService(
     {
         if (price <= 0) return;
         var now = timeProvider.GetUtcNow();
-        var minute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0,
-            TimeSpan.Zero);
+        var sampleBucket = PaperTradePriceSample.BucketFor(now);
         if (await db.PaperTradePriceSamples.AsNoTracking().AnyAsync(value =>
-                value.SignalId == signalId && value.ObservedMinuteUtc == minute,
+                value.SignalId == signalId && value.ObservedBucketUtc == sampleBucket,
                 cancellationToken)) return;
 
         db.PaperTradePriceSamples.Add(new PaperTradePriceSample(Guid.NewGuid(), signalId,

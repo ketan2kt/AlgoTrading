@@ -748,7 +748,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     ? Math.Max(position.StopLoss, trailing)
                     : Math.Min(position.StopLoss, trailing);
             }
-            position.Mark(price, trailing);
+            position.Mark(price, trailing, now);
             var sampleMinute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute,
                 0, TimeSpan.Zero);
             var sampleOutcome = $"PositionSample:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}";
@@ -841,7 +841,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 var partialCosts = PaperTradingCostModel.CalculateOptionCharges([
                     new(PaperOptionTransactionSide.Buy, position.EntryPrice, partialQuantity),
                     new(PaperOptionTransactionSide.Sell, price, partialQuantity)]).Total;
-                position.TakePartial(price, partialQuantity, partialCosts);
+                position.TakePartial(price, partialQuantity, partialCosts, now);
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, now, $"PartialProfit:{position.Id:N}", 0m,
                     JsonSerializer.Serialize(new { positionId = position.Id, price, partialQuantity,

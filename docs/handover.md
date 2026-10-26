@@ -2,6 +2,41 @@
 
 Updated: 2026-10-26 (Asia/Calcutta).
 
+## Portal-wide green UI refresh (26 October)
+
+Re-themed the portal UI from near-black to a light/dark green system, including the
+market navigation, Nifty/Sensex workspace, chart canvas and overlays, controls, reports,
+Daily Analysis, and narrator surfaces. Reduced spacing on the workspace/status/report
+layouts, improved data-label sizes and form contrast, and unified Sensex with the shared
+green palette. This is presentation-only; strategy logic and execution controls were
+not changed. Frontend production build completed and all 39 frontend tests passed;
+existing Angular bundle and component stylesheet budget warnings remain. The in-app
+browser could not reach the local loopback preview, so rendered-page visual verification
+was unavailable. Isolated UI commit `2ee4cc2` was pushed to `main` and deployment run
+[40312839020](https://github.com/ketan2kt/AlgoTrading/actions/runs/40312839020) was
+accepted; completion is unverified. Other pending backend, strategy and telemetry edits
+were not included.
+
+## Daily Analysis excursion telemetry and UI follow-up (26 October)
+
+Local implementation now links Daily Analysis rows to Nifty paper quote samples and
+Nifty/Sensex market-position samples. New MarketPaperPosition fields retain peak
+favourable P&L, worst adverse P&L, timestamps, observed-from time and sample count as
+each existing quote is evaluated. Legacy Nifty paper quote samples now deduplicate at
+the existing two-second quote cadence (no additional broker requests). The report
+always renders known entry/exit-based values and clearly labels historical trades whose
+intratrade path was not recorded; it does not invent past peaks. Added migration
+20261026120000_AddTradeExcursionTelemetry. Daily Analysis layout was redesigned with a
+compact inline date control, KPI cards, bordered responsive trade table, peak/adverse
+timestamps and per-trade telemetry coverage.
+
+Frontend production build and 39/39 tests passed after redirecting Vitest's temporary
+files into the repository; existing bundle and stylesheet budget warnings remain.
+Backend test/build was blocked because the machine only has .NET SDK 6.0.402 while
+global.json pins 10.0.302. Changes are local and uncommitted; no deployment was
+dispatched. Historical trades without stored intra-trade samples can only show
+entry/exit-derived bounds and are flagged as incomplete. Preserve unrelated user edits.
+
 ## Shared index session maturity, re-entry and profit protection (26 October)
 
 Applied the targeted follow-up to both Nifty and Sensex through shared execution

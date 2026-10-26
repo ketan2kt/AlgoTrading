@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TradingSystem.Application.Diagnostics;
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
 
@@ -117,7 +118,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         foreach (var row in paperRows)
         {
             samplesBySignal.TryGetValue(row.Result.SignalId, out var tradeSamples);
-            var path = CalculateLongPath(row.Result.EntryPrice, row.Result.Quantity,
+            var path = CalculateExcursionPath(row.Result.EntryPrice, row.Result.Quantity,
+                row.Signal.Direction, row.Signal.MarketDataTimestampUtc, row.Result.ExitPrice,
                 row.Result.ClosedAtUtc, tradeSamples ?? []);
             trades.Add(new DailyTradingTrade(
                 MarketFromSymbol(row.Instrument.TradingSymbol),
@@ -140,31 +142,75 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 path.MaximumFavourableExcursion,
                 path.MaximumFavourableExcursionAtUtc,
                 path.MaximumAdverseExcursion,
-                path.MaximumAdverseExcursionAtUtc));
+                path.MaximumAdverseExcursionAtUtc,
+                path.Coverage,
+                path.SampleCount));
         }
 
-        trades.AddRange(marketPositions.Select(value => new DailyTradingTrade(
-            value.Market.ToUpperInvariant(),
-            "MarketPaperPosition",
-            value.Id,
-            null,
-            executionSymbols.GetValueOrDefault(value.ExecutionInstrumentId, value.ExecutionInstrumentId.ToString()),
-            value.Strategy,
-            value.Direction.ToString(),
-            value.Quantity,
-            value.EntryPrice,
-            value.CurrentPrice,
-            value.OpenedAtUtc,
-            value.ClosedAtUtc,
-            value.Status,
-            value.Status == "Active" ? null : value.Status,
-            value.RealisedPnl + value.CostsPaid,
-            value.CostsPaid,
-            value.RealisedPnl,
-            null,
-            null,
-            null,
-            null)));
+        var marketPositionIds = marketPositions.Select(value => value.Id).ToArray();
+        var marketPositionAudits = marketPositionIds.Length == 0
+            ? []
+            : await db.MarketStrategyAudits.AsNoTracking()
+                .Where(value => (selectedMarkets.Contains(value.Market) ||
+                                 selectedMarketCodes.Contains(value.Market)) &&
+                                value.CandleTimeUtc >= startUtc && value.CandleTimeUtc < endUtc &&
+                                value.Outcome.StartsWith("PositionSample:"))
+                .Select(value => value.ReasonsJson)
+                .ToListAsync(cancellationToken);
+        var positionSamples = marketPositionAudits
+            .Select(SensexResearchAuditParser.ParsePricePoint)
+            .Where(value => value.HasValue && marketPositionIds.Contains(value.Value.PositionId))
+            .Select(value => value!.Value)
+            .GroupBy(value => value.PositionId)
+            .ToDictionary(value => value.Key,
+                value => value.Select(sample => sample.Point).OrderBy(sample => sample.ObservedAtUtc).ToArray());
+
+        foreach (var position in marketPositions)
+        {
+            positionSamples.TryGetValue(position.Id, out var samplesForPosition);
+            var exitAt = position.ClosedAtUtc ?? timeProvider.GetUtcNow();
+            var path = CalculatePositionPath(position, samplesForPosition ?? [], exitAt);
+            var hasPersistedPath = position.MaximumFavourablePnl.HasValue &&
+                                   position.MaximumAdversePnl.HasValue &&
+                                   position.ExcursionSampleCount > 1;
+            var maximumFavourable = hasPersistedPath
+                ? Math.Max(0m, position.MaximumFavourablePnl!.Value)
+                : path.MaximumFavourableExcursion;
+            var maximumAdverse = hasPersistedPath
+                ? Math.Max(0m, -position.MaximumAdversePnl!.Value)
+                : path.MaximumAdverseExcursion;
+            var sampleCount = Math.Max(position.ExcursionSampleCount, path.SampleCount);
+            var coverage = hasPersistedPath ? "Persisted quote observations"
+                : path.SampleCount > 2 ? "Historical sampled path; legacy cadence"
+                : "Entry/exit only; historical intratrade path unavailable";
+            if (hasPersistedPath && position.ExcursionObservedFromUtc is { } observedFrom &&
+                observedFrom > position.OpenedAtUtc)
+                coverage = $"Quote observations since {observedFrom:HH:mm:ss} UTC; earlier path unavailable";
+            trades.Add(new DailyTradingTrade(
+                position.Market.ToUpperInvariant(),
+                "MarketPaperPosition",
+                position.Id,
+                null,
+                executionSymbols.GetValueOrDefault(position.ExecutionInstrumentId, position.ExecutionInstrumentId.ToString()),
+                position.Strategy,
+                position.Direction.ToString(),
+                position.Quantity,
+                position.EntryPrice,
+                position.CurrentPrice,
+                position.OpenedAtUtc,
+                position.ClosedAtUtc,
+                position.Status,
+                position.Status == "Active" ? null : position.Status,
+                position.RealisedPnl + position.CostsPaid,
+                position.CostsPaid,
+                position.RealisedPnl,
+                maximumFavourable,
+                hasPersistedPath ? position.MaximumFavourableAtUtc : path.MaximumFavourableExcursionAtUtc,
+                maximumAdverse,
+                hasPersistedPath ? position.MaximumAdverseAtUtc : path.MaximumAdverseExcursionAtUtc,
+                coverage,
+                sampleCount));
+        }
         trades.Sort((left, right) => left.OpenedAtUtc.CompareTo(right.OpenedAtUtc));
 
         var feeds = await db.ProviderHealth.AsNoTracking()
@@ -206,6 +252,10 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             warnings.Add("No underlying candle exists for the selected date and market.");
         if (trades.Count == 0)
             warnings.Add("No paper trade was recorded for the selected date and market.");
+        var pathIncomplete = trades.Count(value => value.ClosedAtUtc is not null &&
+            value.ExcursionCoverage.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+        if (pathIncomplete > 0)
+            warnings.Add($"{pathIncomplete} completed trade(s) have no persisted intratrade price path; peak/adverse values use only known entry/exit prices and cannot recover historical extremes.");
         if (decisions.Count > MaximumDecisions)
             warnings.Add($"Decision details were limited to the latest {MaximumDecisions}; summary counts cover the full day.");
 
@@ -262,28 +312,55 @@ internal sealed class EfDailyTradingDiagnosticsReader(
 
     private static string Limit(string value) => value.Length <= 4000 ? value : value[..4000];
 
-    private static ProfitPath CalculateLongPath(
+    private static ProfitPath CalculateExcursionPath(
         decimal entryPrice,
         int quantity,
+        Direction direction,
+        DateTimeOffset openedAtUtc,
+        decimal exitPrice,
         DateTimeOffset closedAtUtc,
         IReadOnlyList<PaperTradePriceSample> samples)
     {
-        var eligible = samples.Where(value => value.ObservedAtUtc <= closedAtUtc).ToArray();
-        if (eligible.Length == 0)
-            return new ProfitPath(null, null, null, null);
+        var eligible = samples.Where(value => value.ObservedAtUtc >= openedAtUtc &&
+            value.ObservedAtUtc <= closedAtUtc).ToArray();
+        var points = eligible.Select(value => new PaperTradePricePoint(value.ObservedAtUtc, value.OptionPrice))
+            .Append(new PaperTradePricePoint(closedAtUtc, exitPrice))
+            .Append(new PaperTradePricePoint(openedAtUtc, entryPrice))
+            .Where(value => value.Price > 0).ToArray();
+        return CalculateExcursionPath(entryPrice, quantity, direction, points,
+            eligible.Length > 0 ? "Sampled price path; historical cadence" : "Entry/exit only");
+    }
 
-        var favourable = eligible.MaxBy(value => value.OptionPrice)!;
-        var adverse = eligible.MinBy(value => value.OptionPrice)!;
-        return new ProfitPath(
-            (favourable.OptionPrice - entryPrice) * quantity,
-            favourable.ObservedAtUtc,
-            (adverse.OptionPrice - entryPrice) * quantity,
-            adverse.ObservedAtUtc);
+    private static ProfitPath CalculatePositionPath(MarketPaperPosition position,
+        IReadOnlyList<PaperTradePricePoint> samples, DateTimeOffset exitAtUtc)
+    {
+        var points = samples.Where(value => value.ObservedAtUtc >= position.OpenedAtUtc &&
+                value.ObservedAtUtc <= exitAtUtc)
+            .Append(new PaperTradePricePoint(position.OpenedAtUtc, position.EntryPrice))
+            .Append(new PaperTradePricePoint(exitAtUtc, position.CurrentPrice))
+            .ToArray();
+        return CalculateExcursionPath(position.EntryPrice, position.Quantity, position.Direction,
+            points, samples.Count > 0 ? "Historical sampled path; legacy cadence" : "Entry/exit only");
+    }
+
+    private static ProfitPath CalculateExcursionPath(decimal entryPrice, int quantity,
+        Direction direction, IReadOnlyList<PaperTradePricePoint> points, string coverage)
+    {
+        var multiplier = direction == Direction.Buy ? 1m : -1m;
+        var path = points.Where(value => value.Price > 0)
+            .Select(value => (value.ObservedAtUtc, Pnl: (value.Price - entryPrice) * quantity * multiplier))
+            .ToArray();
+        var favourable = path.MaxBy(value => value.Pnl);
+        var adverse = path.MinBy(value => value.Pnl);
+        return new ProfitPath(Math.Max(0m, favourable.Pnl), favourable.ObservedAtUtc,
+            Math.Max(0m, -adverse.Pnl), adverse.ObservedAtUtc, coverage, points.Count);
     }
 
     private sealed record ProfitPath(
-        decimal? MaximumFavourableExcursion,
-        DateTimeOffset? MaximumFavourableExcursionAtUtc,
-        decimal? MaximumAdverseExcursion,
-        DateTimeOffset? MaximumAdverseExcursionAtUtc);
+        decimal MaximumFavourableExcursion,
+        DateTimeOffset MaximumFavourableExcursionAtUtc,
+        decimal MaximumAdverseExcursion,
+        DateTimeOffset MaximumAdverseExcursionAtUtc,
+        string Coverage,
+        int SampleCount);
 }

@@ -150,13 +150,18 @@ public sealed class PaperTradePriceSample : Entity, IAppendOnlyEntity
         InstrumentId = instrumentId;
         OptionPrice = optionPrice;
         ObservedAtUtc = observedAtUtc.ToUniversalTime();
-        ObservedMinuteUtc = new DateTimeOffset(ObservedAtUtc.Year, ObservedAtUtc.Month,
-            ObservedAtUtc.Day, ObservedAtUtc.Hour, ObservedAtUtc.Minute, 0, TimeSpan.Zero);
+        ObservedBucketUtc = BucketFor(ObservedAtUtc);
     }
 
     public Guid SignalId { get; private init; }
     public Guid InstrumentId { get; private init; }
     public decimal OptionPrice { get; private init; }
     public DateTimeOffset ObservedAtUtc { get; private init; }
-    public DateTimeOffset ObservedMinuteUtc { get; private init; }
+    public DateTimeOffset ObservedBucketUtc { get; private init; }
+
+    public static DateTimeOffset BucketFor(DateTimeOffset observedAtUtc)
+    {
+        var bucketSecond = observedAtUtc.ToUnixTimeSeconds() / 2 * 2 + 1;
+        return DateTimeOffset.FromUnixTimeSeconds(bucketSecond);
+    }
 }

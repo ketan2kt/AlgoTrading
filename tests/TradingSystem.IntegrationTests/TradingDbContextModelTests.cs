@@ -35,7 +35,7 @@ public sealed class TradingDbContextModelTests
         Assert.NotNull(priceSamples);
         Assert.Contains(priceSamples.GetIndexes(), index => index.IsUnique &&
             index.Properties.Select(property => property.Name)
-                .SequenceEqual(["SignalId", "ObservedMinuteUtc"]));
+                .SequenceEqual(["SignalId", "ObservedBucketUtc"]));
     }
 
     [Fact]

@@ -13,6 +13,12 @@ public sealed class MarketPaperPosition : MutableEntity
         ExecutionInstrumentId = executionInstrumentId; Strategy = strategy; Direction = direction;
         Quantity = quantity; RemainingQuantity = quantity; EntryPrice = entryPrice; CurrentPrice = entryPrice;
         StopLoss = stopLoss; Target = target; OpenedAtUtc = openedAtUtc.ToUniversalTime();
+        MaximumFavourablePnl = 0m;
+        MaximumFavourableAtUtc = OpenedAtUtc;
+        MaximumAdversePnl = 0m;
+        MaximumAdverseAtUtc = OpenedAtUtc;
+        ExcursionSampleCount = 1;
+        ExcursionObservedFromUtc = OpenedAtUtc;
     }
 
     public string Market { get; private init; }
@@ -33,12 +39,19 @@ public sealed class MarketPaperPosition : MutableEntity
     public string Status { get; private set; } = "Active";
     public DateTimeOffset OpenedAtUtc { get; private init; }
     public DateTimeOffset? ClosedAtUtc { get; private set; }
+    public decimal? MaximumFavourablePnl { get; private set; }
+    public DateTimeOffset? MaximumFavourableAtUtc { get; private set; }
+    public decimal? MaximumAdversePnl { get; private set; }
+    public DateTimeOffset? MaximumAdverseAtUtc { get; private set; }
+    public int ExcursionSampleCount { get; private set; }
+    public DateTimeOffset? ExcursionObservedFromUtc { get; private set; }
 
-    public void Mark(decimal price, decimal trailingStop)
+    public void Mark(decimal price, decimal trailingStop, DateTimeOffset observedAtUtc)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(price);
         CurrentPrice = price;
         StopLoss = Direction == Direction.Buy ? Math.Max(StopLoss, trailingStop) : Math.Min(StopLoss, trailingStop);
+        RecordExcursion(CurrentPnlAt(price), observedAtUtc);
     }
 
     public void Close(decimal price, decimal costs, string status, DateTimeOffset closedAtUtc)
@@ -51,9 +64,10 @@ public sealed class MarketPaperPosition : MutableEntity
         RemainingQuantity = 0;
         Status = status;
         ClosedAtUtc = closedAtUtc.ToUniversalTime();
+        RecordExcursion(RealisedPnl, closedAtUtc);
     }
 
-    public void TakePartial(decimal price, int quantity, decimal costs)
+    public void TakePartial(decimal price, int quantity, decimal costs, DateTimeOffset observedAtUtc)
     {
         if (Status != "Active") throw new InvalidOperationException("Position is already closed.");
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(price);
@@ -65,6 +79,39 @@ public sealed class MarketPaperPosition : MutableEntity
         RemainingQuantity -= quantity;
         PartialExitQuantity += quantity;
         PartialExitPrice = price;
+        RecordExcursion(CurrentPnlAt(price), observedAtUtc);
+    }
+
+    private decimal CurrentPnlAt(decimal price) => RealisedPnl +
+        (Direction == Direction.Buy ? price - EntryPrice : EntryPrice - price) * RemainingQuantity;
+
+    private void RecordExcursion(decimal pnl, DateTimeOffset observedAtUtc)
+    {
+        var observed = observedAtUtc.ToUniversalTime();
+        ExcursionObservedFromUtc ??= observed;
+        // Existing rows have null excursion columns. Include the known entry baseline, but
+        // do not imply that the pre-deployment intraday path can be reconstructed.
+        if (MaximumFavourablePnl is null || MaximumFavourableAtUtc is null)
+        {
+            MaximumFavourablePnl = 0m;
+            MaximumFavourableAtUtc = OpenedAtUtc;
+        }
+        if (MaximumAdversePnl is null || MaximumAdverseAtUtc is null)
+        {
+            MaximumAdversePnl = 0m;
+            MaximumAdverseAtUtc = OpenedAtUtc;
+        }
+        if (MaximumFavourablePnl is null || MaximumFavourableAtUtc is null || pnl > MaximumFavourablePnl)
+        {
+            MaximumFavourablePnl = pnl;
+            MaximumFavourableAtUtc = observed;
+        }
+        if (MaximumAdversePnl is null || MaximumAdverseAtUtc is null || pnl < MaximumAdversePnl)
+        {
+            MaximumAdversePnl = pnl;
+            MaximumAdverseAtUtc = observed;
+        }
+        ExcursionSampleCount++;
     }
 }
 

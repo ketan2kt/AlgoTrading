@@ -77,6 +77,9 @@ TradingSystem.slnx
 
 ## Build and test
 
+For reusable scoped checks, deployment dispatch, and chat handovers, see
+[Routine commands](docs/routine-work.md) and [Current handover](docs/handover.md).
+
 Prerequisites: .NET SDK 10.0.302, Node.js 24.15.0, npm 11.12.1, and Docker Desktop with Compose.
 
 ```powershell

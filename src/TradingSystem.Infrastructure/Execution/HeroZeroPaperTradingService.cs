@@ -207,7 +207,7 @@ internal sealed partial class HeroZeroPaperTradingService(
             var instrument = instruments[leg.ExecutionInstrumentId];
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
-            if (quote.LastPrice > 0) leg.Mark(quote.LastPrice, leg.StopLoss);
+            if (quote.LastPrice > 0) leg.Mark(quote.LastPrice, leg.StopLoss, now);
         }
         var entryCost = legs.Sum(value => value.EntryPrice * value.Quantity);
         var currentValue = legs.Sum(value => value.CurrentPrice * value.Quantity);

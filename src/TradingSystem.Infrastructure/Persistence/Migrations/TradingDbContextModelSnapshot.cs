@@ -664,6 +664,26 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
+                    b.Property<decimal?>("MaximumFavourablePnl")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTimeOffset?>("MaximumFavourableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("MaximumAdversePnl")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTimeOffset?>("MaximumAdverseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ExcursionSampleCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Direction")
                         .HasColumnType("integer");
 
@@ -931,7 +951,8 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("ObservedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTimeOffset>("ObservedMinuteUtc")
+                    b.Property<DateTimeOffset>("ObservedBucketUtc")
+                        .HasColumnName("ObservedMinuteUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal>("OptionPrice")
@@ -945,8 +966,11 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("InstrumentId", "ObservedAtUtc");
 
-                    b.HasIndex("SignalId", "ObservedMinuteUtc")
+                    b.HasIndex("SignalId", "ObservedBucketUtc")
+                        .HasDatabaseName("IX_paper_trade_price_samples_SignalId_ObservedMinuteUtc")
                         .IsUnique();
+
+                    b.HasIndex("SignalId", "OptionPrice");
 
                     b.ToTable("paper_trade_price_samples", "trading");
                 });

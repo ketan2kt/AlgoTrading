@@ -164,6 +164,8 @@ public sealed class TradingDbContext(
             entity.Property(value => value.RealisedPnl).HasPrecision(18, 4);
             entity.Property(value => value.PartialExitPrice).HasPrecision(18, 4);
             entity.Property(value => value.CostsPaid).HasPrecision(18, 4);
+            entity.Property(value => value.MaximumFavourablePnl).HasPrecision(18, 4);
+            entity.Property(value => value.MaximumAdversePnl).HasPrecision(18, 4);
             entity.HasIndex(value => new { value.Market, value.Status, value.OpenedAtUtc });
         });
         builder.Entity<MarketStrategyAudit>(entity =>
@@ -324,7 +326,11 @@ public sealed class TradingDbContext(
         {
             ConfigureAppendOnly(entity, "paper_trade_price_samples");
             entity.Property(value => value.OptionPrice).HasPrecision(18, 4);
-            entity.HasIndex(value => new { value.SignalId, value.ObservedMinuteUtc }).IsUnique();
+            entity.Property(value => value.ObservedBucketUtc).HasColumnName("ObservedMinuteUtc");
+            entity.HasIndex(value => new { value.SignalId, value.ObservedBucketUtc })
+                .HasDatabaseName("IX_paper_trade_price_samples_SignalId_ObservedMinuteUtc")
+                .IsUnique();
+            entity.HasIndex(value => new { value.SignalId, value.OptionPrice });
             entity.HasIndex(value => new { value.InstrumentId, value.ObservedAtUtc });
         });
         builder.Entity<RiskDecision>(entity =>
