@@ -48,12 +48,19 @@ public sealed class PaperProtectiveStopPolicyTests
         Assert.Equal(92, PaperProtectiveStopPolicy.Calculate(Direction.Sell,
             100, 110, 91, 1, 1, 0.9m, 0.8m));
 
-    [Theory]
-    [InlineData(1m, .50m)]
-    [InlineData(1.5m, .65m)]
-    [InlineData(2.5m, .75m)]
-    public void PeakProfitLockStrengthensByRiskMultiple(decimal peakR, decimal lockedFraction) =>
-        Assert.Equal(lockedFraction, PaperProtectiveStopPolicy.PeakProfitLockFraction(peakR));
+    [Fact]
+    public void PeakProfitLockStrengthensByRiskMultiple()
+    {
+        var cases = new (decimal PeakR, decimal LockedFraction)[]
+        {
+            (1m, .50m),
+            (1.5m, .65m),
+            (2.5m, .75m)
+        };
+
+        foreach (var (peakR, lockedFraction) in cases)
+            Assert.Equal(lockedFraction, PaperProtectiveStopPolicy.PeakProfitLockFraction(peakR));
+    }
 
     [Theory]
     [InlineData(Direction.Buy, 100, 110, 90, 108)]

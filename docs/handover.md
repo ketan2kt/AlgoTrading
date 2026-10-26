@@ -28,11 +28,13 @@ no actual-session evidence to validate a step-down without cutting strong contin
 Backend tests are pending because only .NET 6.0.402 is installed; the repository pins
 .NET 10.0.302. Final `git diff --check` and settings JSON parsing passed. Focused
 re-entry, profit-lock, and full-session maturity tests are included; local execution was
-blocked because .NET 10.0.302 is unavailable. Commit `dc08351` was pushed to `main` and
-the deployment workflow was dispatched once:
-https://github.com/ketan2kt/AlgoTrading/actions/runs/40305802163
-Completion is unverified; follow the repository's no-poll procedure. Preserve unrelated
-working-tree changes and do not dispatch a duplicate run.
+blocked because .NET 10.0.302 is unavailable. Commit `dc08351` was pushed to `main`; run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40305802163 failed in the protected-
+session quality gate while compiling `PaperProtectiveStopPolicyTests`: decimal values in
+`InlineData` are invalid attribute arguments. The test has been corrected to a `[Fact]`
+in the local follow-up; backend execution remains delegated to GitHub CI. Dispatch one
+new run after committing the fix; do not repeat unchanged failed runs. Preserve unrelated
+working-tree changes.
 
 ## Groww feed load and position-mark freshness (26 October)
 
