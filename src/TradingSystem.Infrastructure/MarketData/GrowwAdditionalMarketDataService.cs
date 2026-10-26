@@ -28,7 +28,8 @@ internal sealed partial class GrowwAdditionalMarketDataService(
         if (!options.Value.Enabled) return;
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var market in new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.NaturalGas })
+            // Natural Gas is intentionally paused; keep its feed quiet even if its UI is hidden.
+            foreach (var market in new[] { TradingMarketCatalog.Sensex })
             {
                 try
                 {

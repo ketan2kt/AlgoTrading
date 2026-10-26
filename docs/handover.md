@@ -2,6 +2,22 @@
 
 Updated: 2026-10-26 (Asia/Calcutta).
 
+## Groww feed load and position-mark freshness (26 October)
+
+The current Groww chart feeds poll quotes every two seconds, and automated position
+evaluation is configured for every two seconds. The additional market-data service also
+polled Natural Gas unconditionally, even though Natural Gas strategy execution is
+disabled in the checked-in API settings. Local changes remove Natural Gas from that
+continuous polling loop and reduce position evaluation to two seconds; the chart quote
+cadence and one-minute option-chain capture remain unchanged. Groww documents 300 live
+data requests/minute shared by quote/LTP/OHLC; no per-endpoint production request counter
+is currently available, so do not lower feed intervals further until usage is measured
+or a push feed is implemented. The official Groww Feed supports callback subscriptions
+for up to 1000 instruments, but the documented client is Python; .NET integration needs
+design and validation. The 2-second evaluation and Natural Gas polling changes are
+approved for deployment to `main`; local backend testing requires the repository's
+pinned .NET 10 SDK, while the deployment workflow runs the full CI gate.
+
 ## Persistent-trend cooling-off entry correction (26 October)
 
 Production Nifty audit for 26 October showed a bullish persistent-thesis window at
