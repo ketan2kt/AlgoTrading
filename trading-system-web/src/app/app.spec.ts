@@ -3,7 +3,7 @@ import { provideHttpClientTesting, HttpTestingController } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { Component, Input } from '@angular/core';
 import { NEVER, Subject, of } from 'rxjs';
-import { App } from './app';
+import { App, buildDailyAnalysisTradesTsv } from './app';
 import { AuthService, CurrentUser } from './auth.service';
 import { GrowwTokenService } from './groww-token.service';
 import { TradingWorkspaceService } from './trading-workspace.service';
@@ -29,6 +29,29 @@ describe('App', () => {
       add: { imports: [MockNiftyChartComponent] },
     });
     await TestBed.compileComponents();
+  });
+
+  it('copies all displayed trade columns with strategy, size, excursion times and coverage', () => {
+    const tsv = buildDailyAnalysisTradesTsv('2026-10-26', [{
+      market: 'NIFTY', tradeId: 'trade-1', symbol: 'NIFTY26OCT25000CE',
+      strategy: 'Core', direction: 'Buy', quantity: 10, entryPrice: 125,
+      exitOrCurrentPrice: 140, openedAtUtc: '2026-10-26T03:00:00Z',
+      closedAtUtc: '2026-10-26T03:05:00Z', exitReason: 'Target',
+      grossPnl: 1234.5, costs: 24.25, netRealisedPnl: 1210.25,
+      maximumFavourableExcursion: 1550, maximumFavourableExcursionAtUtc: '2026-10-26T03:03:00Z',
+      maximumAdverseExcursion: 325, maximumAdverseExcursionAtUtc: '2026-10-26T03:01:00Z',
+      excursionCoverage: 'Persisted quote observations', excursionSampleCount: 91, signalId: 'signal-1',
+    }]);
+
+    const lines = tsv.split('\r\n');
+    expect(lines[0]).toBe('Daily Analysis — 2026-10-26 IST');
+    expect(lines[1].split('\t')).toHaveLength(8);
+    expect(lines[2].split('\t')).toHaveLength(8);
+    expect(tsv).toContain('NIFTY · NIFTY26OCT25000CE · Core · Buy · 10 qty');
+    expect(tsv).toContain('08:30:00 IST → 08:35:00 IST');
+    expect(tsv).toContain('₹1,234.50');
+    expect(tsv).toContain('₹1,550.00 at 08:33:00 IST');
+    expect(tsv).toContain('₹325.00 at 08:31:00 IST · Persisted quote observations · 91 observations');
   });
 
   it('renders paper mode and requires sign-in for the live workspace', async () => {

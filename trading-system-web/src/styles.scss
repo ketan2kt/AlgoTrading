@@ -200,6 +200,11 @@ app-root .daily-analysis-header span,.daily-analysis-section-heading>div>span,.d
 app-root .daily-analysis-header h2{margin:0;color:#eef7f1;font-size:1.25rem;letter-spacing:-.02em}
 app-root .daily-analysis-header p{margin:0;color:#91a39a;font-size:.78rem}
 app-root .daily-analysis-close{width:2.2rem;height:2.2rem;padding:0;border-radius:50%;font-size:1.4rem;line-height:1}
+app-root .daily-analysis-header-actions{display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+app-root .daily-analysis-copy{min-height:2.2rem;padding:.45rem .75rem;border:1px solid #25834d;border-radius:7px;background:#25834d;color:#fff;font-size:.76rem;font-weight:700;white-space:nowrap}
+app-root .daily-analysis-copy:disabled{opacity:.55;cursor:not-allowed}
+app-root .daily-analysis-copy-status{color:#167143;font-size:.7rem;font-weight:700;white-space:nowrap}
+app-root .daily-analysis-copy-status--error{color:#a9363e}
 app-root .daily-analysis-controls{display:flex;align-items:center;gap:.65rem;padding:.65rem 1.25rem;border-bottom:1px solid #22352c;background:#0f1b16}
 app-root .daily-analysis-controls label{color:#b7c8be;font-size:.75rem;font-weight:600}
 app-root .daily-analysis-controls input{width:10.5rem;min-width:0;padding:.45rem .6rem;border:1px solid #344d40;border-radius:7px;background:#09120f;color:#eaf4ee}
@@ -242,7 +247,7 @@ app-root .daily-analysis-flags h4{margin:.8rem 0 .3rem;color:#d3b978;font-size:.
 app-root .daily-analysis-prompt p{margin:.3rem 0 .55rem;color:#84978c;font-size:.72rem}
 app-root .daily-analysis-prompt textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;border:1px solid #2c4237;border-radius:8px;background:#08110d;color:#b7c9be;font-size:.72rem;line-height:1.5}
 @media(max-width:800px){app-root .daily-analysis-summary{grid-template-columns:repeat(2,minmax(0,1fr))}app-root .daily-analysis-summary article:first-child{grid-column:1/-1}app-root .daily-analysis-insights{grid-template-columns:1fr}}
-@media(max-width:520px){app-root .daily-analysis-header,app-root .daily-analysis-body{padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-controls{flex-wrap:wrap;padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-controls>span{width:100%;margin-left:0}app-root .daily-analysis-controls input{flex:1}app-root .daily-analysis-section{padding:.65rem}app-root .daily-analysis-section-heading{align-items:start;flex-direction:column}app-root .daily-analysis-section-heading>small{text-align:left}}
+@media(max-width:520px){app-root .daily-analysis-header,app-root .daily-analysis-body{padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-header-actions{gap:.3rem}app-root .daily-analysis-copy{padding:.4rem .5rem}app-root .daily-analysis-controls{flex-wrap:wrap;padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-controls>span{width:100%;margin-left:0}app-root .daily-analysis-controls input{flex:1}app-root .daily-analysis-section{padding:.65rem}app-root .daily-analysis-section-heading{align-items:start;flex-direction:column}app-root .daily-analysis-section-heading>small{text-align:left}}
 
 app-root .market-theme--sensex { --desk-accent: #25834d; --desk-line: #c6dac5; }
 app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #4ca76d, #247d49); }

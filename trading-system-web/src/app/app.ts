@@ -90,6 +90,8 @@ export class App implements OnInit, OnDestroy {
   protected dailyAnalysis: DailyDiagnostics | null = null;
   protected dailyAnalysisDate = this.isoDateDaysAgo(0);
   protected dailyAnalysisPromptCopied = false;
+  protected dailyAnalysisTradesCopied = false;
+  protected dailyAnalysisTradesCopyError = false;
   protected pnlReportOpen = false;
   protected pnlReportLoading = false;
   protected pnlReportError = '';
@@ -498,6 +500,24 @@ export class App implements OnInit, OnDestroy {
     this.dailyAnalysisPromptCopied = true;
     setTimeout(() => { this.dailyAnalysisPromptCopied = false; this.refreshView(); }, 2500);
   }
+  protected async copyDailyAnalysisTrades(): Promise<void> {
+    const analysis = this.dailyAnalysis;
+    if (!analysis || analysis.trades.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(buildDailyAnalysisTradesTsv(analysis.tradingDate, analysis.trades));
+      this.dailyAnalysisTradesCopied = true;
+      this.dailyAnalysisTradesCopyError = false;
+    } catch {
+      this.dailyAnalysisTradesCopied = false;
+      this.dailyAnalysisTradesCopyError = true;
+    }
+    this.refreshView();
+    setTimeout(() => {
+      this.dailyAnalysisTradesCopied = false;
+      this.dailyAnalysisTradesCopyError = false;
+      this.refreshView();
+    }, 2500);
+  }
   protected openPnlReport():void { this.controlsOpen=false; this.pnlReportOpen=true; }
   protected closePnlReport():void { this.pnlReportOpen=false; }
   protected searchPnl():void {
@@ -856,4 +876,48 @@ export class App implements OnInit, OnDestroy {
     const value = Number(localStorage.getItem('sarthi.chartTimeframeMinutes'));
     return [1, 5, 15].includes(value) ? value : 5;
   }
+}
+
+export function buildDailyAnalysisTradesTsv(
+  tradingDate: string,
+  trades: DailyDiagnostics['trades'],
+): string {
+  const formatMoney = (value: number | null): string =>
+    value === null ? '—' : `₹${new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  const formatTime = (value: string | null): string => {
+    if (!value) return 'time unavailable';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'time unavailable';
+    const time = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(date);
+    return `${time} IST`;
+  };
+  const cell = (value: string): string => `"${value.replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`;
+  const headers = [
+    'Market / contract', 'Entry → exit', 'Exit reason', 'Gross', 'Costs', 'Net',
+    'Peak profit', 'Max adverse',
+  ];
+  const rows = trades.map((trade) => [
+    `${trade.market} · ${trade.symbol} · ${trade.strategy} · ${trade.direction} · ${trade.quantity} qty`,
+    `${formatTime(trade.openedAtUtc)} → ${trade.closedAtUtc ? formatTime(trade.closedAtUtc) : 'Open'}`,
+    trade.exitReason ?? 'Open',
+    formatMoney(trade.grossPnl),
+    formatMoney(trade.costs),
+    formatMoney(trade.netRealisedPnl),
+    `${formatMoney(trade.maximumFavourableExcursion)} at ${formatTime(trade.maximumFavourableExcursionAtUtc)}`,
+    `${formatMoney(trade.maximumAdverseExcursion)} at ${formatTime(trade.maximumAdverseExcursionAtUtc)} · ${trade.excursionCoverage || 'coverage unavailable'} · ${trade.excursionSampleCount ?? 0} observations`,
+  ]);
+  return [
+    `Daily Analysis — ${tradingDate} IST`,
+    headers.map(cell).join('\t'),
+    ...rows.map((row) => row.map(cell).join('\t')),
+  ].join('\r\n');
 }
