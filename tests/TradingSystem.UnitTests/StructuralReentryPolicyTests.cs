@@ -31,7 +31,8 @@ public sealed class StructuralReentryPolicyTests
     public void PersistentBearishContinuationRemainsEligibleAfterFreshBase()
     {
         var bars = Bars([110m, 109m, 108m, 107m, 106m, 105m, 104m, 103m,
-            102.8m, 102.9m, 101.5m]);
+            102.8m, 102.8m, 102.7m, 102.7m, 101.5m]);
+        bars[^3] = bars[^3] with { Open = 102.8m };
         bars[^1] = bars[^1] with { Open = 102.5m };
         Assert.True(StructuralReentryPolicy.Evaluate(bars, Direction.Sell,
             bars[7].OpenTimeUtc, true).Permitted);
@@ -74,13 +75,25 @@ public sealed class StructuralReentryPolicyTests
     public void AllowsPersistentTrendReentryAfterCompactContinuationBase()
     {
         var bars = Bars([100m, 101m, 102m, 103m, 104m, 105m, 106m, 107m,
-            107.2m, 107.1m, 108.5m]);
+            107.2m, 107.1m, 107.2m, 107.1m, 108.5m]);
+        bars[^3] = bars[^3] with { Open = 107.3m };
         var exit = bars[7].OpenTimeUtc;
 
         var result = StructuralReentryPolicy.Evaluate(bars, Direction.Buy, exit, true);
 
         Assert.True(result.Permitted);
         Assert.Contains(result.Reasons, value => value.Contains("continuation base"));
+    }
+
+    [Fact]
+    public void PersistentTrendStillNeedsStructureAfterFourCompletedBars()
+    {
+        var bars = Bars(Enumerable.Range(100, 13).Select(value => (decimal)value).ToArray());
+        var result = StructuralReentryPolicy.Evaluate(bars, Direction.Buy,
+            bars[8].OpenTimeUtc, true);
+
+        Assert.False(result.Permitted);
+        Assert.Equal(4, result.CompletedBarsSinceExit);
     }
 
     private static StrategyPriceBar[] Bars(decimal[] closes)

@@ -157,8 +157,17 @@ public sealed class ProfessionalTradeFrameworkTests
         var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
         Assert.Equal(.65m, plan.ProfitLockTriggerR);
         Assert.Equal(1.25m, plan.TrailDistanceR);
+        Assert.Equal(.50m, plan.PartialExitFraction);
         Assert.True(plan.ExtendTarget);
     }
+
+    [Theory]
+    [InlineData(ProfessionalTradeRegime.Directional)]
+    [InlineData(ProfessionalTradeRegime.Range)]
+    [InlineData(ProfessionalTradeRegime.Transition)]
+    [InlineData(ProfessionalTradeRegime.Exhausted)]
+    public void EveryIndexRegimeBooksHalfOfAQualifyingWinner(ProfessionalTradeRegime regime) =>
+        Assert.Equal(.50m, ProfessionalExitPolicy.For(regime).PartialExitFraction);
 
     [Fact]
     public void WinnerAddOnRequiresProfitContinuationAndSingleUse()

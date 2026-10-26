@@ -7,7 +7,7 @@ public sealed class PaperProtectiveStopPolicyTests
 {
     [Theory]
     [InlineData(Direction.Buy, 90, 108, 104)]
-    [InlineData(Direction.Buy, 90, 116, 108)]
+    [InlineData(Direction.Buy, 90, 116, 110.4)]
     [InlineData(Direction.Sell, 110, 92, 96)]
     public void ProgressiveLockRetainsHalfOfPeakAfterActivation(Direction direction,
         decimal initialStop, decimal extreme, decimal expected) =>
@@ -47,6 +47,13 @@ public sealed class PaperProtectiveStopPolicyTests
     public void ShortPositionLocksSymmetricProfit() =>
         Assert.Equal(92, PaperProtectiveStopPolicy.Calculate(Direction.Sell,
             100, 110, 91, 1, 1, 0.9m, 0.8m));
+
+    [Theory]
+    [InlineData(1m, .50m)]
+    [InlineData(1.5m, .65m)]
+    [InlineData(2.5m, .75m)]
+    public void PeakProfitLockStrengthensByRiskMultiple(decimal peakR, decimal lockedFraction) =>
+        Assert.Equal(lockedFraction, PaperProtectiveStopPolicy.PeakProfitLockFraction(peakR));
 
     [Theory]
     [InlineData(Direction.Buy, 100, 110, 90, 108)]

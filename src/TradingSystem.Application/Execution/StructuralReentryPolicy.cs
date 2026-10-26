@@ -18,7 +18,9 @@ public static class StructuralReentryPolicy
             return new(true, true, 0, ["No prior same-direction exit exists in this session."]);
 
         var afterExit = source.Where(x => x.OpenTimeUtc > previousExitUtc.Value).ToArray();
-        var minimumBars = persistentDirectionalContext ? 3 : 5;
+        // First entries remain untouched. After a persistent trend entry exits, require
+        // a full pullback/base plus a separate completed trigger candle before re-entry.
+        var minimumBars = persistentDirectionalContext ? 4 : 5;
         if (afterExit.Length < minimumBars)
             return new(false, false, afterExit.Length,
                 [$"Only {afterExit.Length} completed candle(s) exist after the previous same-direction exit; a fresh structure has not formed."]);
@@ -35,14 +37,14 @@ public static class StructuralReentryPolicy
             : afterExit.SkipLast(1).Any(x => x.High >= fast + atr * .15m) && meaningfulRange && latest.Close < fast &&
               latest.Close < latest.Open && latest.Close < prior.Close;
         var continuationBase = false;
-        if (persistentDirectionalContext && afterExit.Length >= 3 && atr > 0m)
+        if (persistentDirectionalContext && afterExit.Length >= 4 && atr > 0m)
         {
-            var baseBars = afterExit.TakeLast(3).ToArray();
+            var baseBars = afterExit.TakeLast(4).ToArray();
             var baseRange = baseBars.SkipLast(1).Max(x => x.High) -
                             baseBars.SkipLast(1).Min(x => x.Low);
             var pauseObserved = baseBars.SkipLast(1).Any(x => direction == Direction.Buy
                 ? x.Close <= x.Open : x.Close >= x.Open);
-            continuationBase = pauseObserved && baseRange <= atr * 1.50m && meaningfulRange &&
+            continuationBase = pauseObserved && baseRange <= atr * 1.10m && meaningfulRange &&
                 (direction == Direction.Buy
                     ? latest.Close > baseBars.SkipLast(1).Max(x => x.High) &&
                       latest.Close > latest.Open && latest.Close > fast

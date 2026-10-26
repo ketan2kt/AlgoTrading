@@ -303,13 +303,16 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == instrument.Id && value.Source == "Groww" &&
+                value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc < sessionStart)
-            .OrderByDescending(value => value.OpenTimeUtc).Take(150)
+            .OrderByDescending(value => value.OpenTimeUtc).Take(2500)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         var previousSessionCandles = previousCandidates
             .GroupBy(value => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc,
                 IndiaTimeZone).Date))
-            .OrderByDescending(group => group.Key).FirstOrDefault()?.ToArray() ?? [];
+            .OrderByDescending(group => group.Key).Take(5)
+            .OrderBy(group => group.Key).SelectMany(group => group.OrderBy(value => value.OpenTimeUtc))
+            .ToArray();
         var previousClose = previousSessionCandles.LastOrDefault()?.Close;
         if (previousClose is null)
         {
@@ -611,7 +614,11 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.Vwap, strategyContext.AtrPercent, strategyContext.OpeningRangeHigh,
             strategyContext.OpeningRangeLow, Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
 
-        var location = MarketLocationPolicy.Evaluate(strategyContext.RecentCandles,
+        var fullSessionBars = candles
+            .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= now)
+            .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+                value.Open, value.High, value.Low, value.Close)).ToArray();
+        var location = MarketLocationPolicy.Evaluate(fullSessionBars,
             previousSessionCandles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                 value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
@@ -625,6 +632,21 @@ internal sealed partial class AutomatedPaperTradingService(
             state.Record("MarketLocationRejected", true,
                 $"{location.Context}. {string.Join(" ", location.Reasons)}",
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
+
+        var sessionMove = SessionMoveQualityPolicy.Evaluate(fullSessionBars, signal.Direction,
+            strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m);
+        if (!sessionMove.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "SessionMoveMaturityRejected", sessionMove.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("SessionMoveMaturityRejected", true,
+                string.Join(" ", sessionMove.Reasons), tradeState.TradesToday,
+                tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString());
             return;
         }

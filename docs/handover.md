@@ -2,6 +2,35 @@
 
 Updated: 2026-10-26 (Asia/Calcutta).
 
+## Shared index session maturity, re-entry and profit protection (26 October; local, not deployed)
+
+Applied the targeted follow-up to both Nifty and Sensex through shared execution
+policies. Nifty entry location now receives the full current-session candles and up to
+five prior sessions; Sensex now retains the full current session and the same five prior
+sessions instead of a rolling 90-minute window. A shared ATR-normalized guard rejects
+same-direction chasing only when the favorable session move is at least 2.5 ATR and
+price remains within 0.35 ATR of its extreme without a completed pullback/resumption
+trigger. Market levels and OI room checks remain active. The point examples are not
+hard-coded. This threshold has synthetic regression coverage, not historical replay
+calibration.
+
+Initial entries remain otherwise unchanged. After a persistent-trend position exits,
+same-direction re-entry now needs at least four completed candles and a fresh pullback/
+rejection or compact continuation base; the base limit tightened from 1.5 ATR to 1.1 ATR.
+The shared option stop now locks 50% of a peak move after activation, 65% from 1.5R,
+and 75% from 2.5R. All exit regimes now book half at their existing R-based partial
+threshold, leaving the remainder to existing trailing/target logic. There are no fixed
+rupee thresholds, entry-count caps, or blanket restriction on first entries.
+
+Sizing down after a profitable morning was not added: the requested 30-day production
+replay endpoint was unavailable (`gh` could not connect to api.github.com), so there is
+no actual-session evidence to validate a step-down without cutting strong continuations.
+Backend tests are pending because only .NET 6.0.402 is installed; the repository pins
+.NET 10.0.302. Final `git diff --check` and settings JSON parsing passed. Focused
+re-entry, profit-lock, and full-session maturity tests are added but unexecuted. User explicitly
+said not to deploy until they confirm. Preserve unrelated working-tree changes; do not
+stage or deploy them.
+
 ## Groww feed load and position-mark freshness (26 October)
 
 The current Groww chart feeds poll quotes every two seconds, and automated position

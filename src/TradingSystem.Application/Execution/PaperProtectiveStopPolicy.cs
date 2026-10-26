@@ -48,7 +48,7 @@ public static class PaperProtectiveStopPolicy
             if (profitLockTriggerR != decimal.MaxValue &&
                 highWater >= entry + risk * profitLockTriggerR)
                 result = Math.Max(result, entry + Math.Max(risk * profitLockR,
-                    (highWater - entry) * .50m));
+                    (highWater - entry) * PeakProfitLockFraction((highWater - entry) / risk)));
             if (highWater >= entry + risk * (breakEvenTriggerR + trailingDistanceR))
                 result = Math.Max(result, highWater - risk * trailingDistanceR);
             return result;
@@ -58,9 +58,18 @@ public static class PaperProtectiveStopPolicy
         if (profitLockTriggerR != decimal.MaxValue &&
             highWater <= entry - risk * profitLockTriggerR)
             resultForShort = Math.Min(resultForShort, entry - Math.Max(risk * profitLockR,
-                (entry - highWater) * .50m));
+                (entry - highWater) * PeakProfitLockFraction((entry - highWater) / risk)));
         if (highWater <= entry - risk * (breakEvenTriggerR + trailingDistanceR))
             resultForShort = Math.Min(resultForShort, highWater + risk * trailingDistanceR);
         return resultForShort;
     }
+
+    // Scale protection with the size of the winning excursion, not a fixed currency
+    // threshold: retain at least 50% after activation, 65% from 1.5R, and 75% from 2.5R.
+    public static decimal PeakProfitLockFraction(decimal peakR) => peakR switch
+    {
+        >= 2.5m => .75m,
+        >= 1.5m => .65m,
+        _ => .50m
+    };
 }

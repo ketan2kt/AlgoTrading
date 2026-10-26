@@ -73,7 +73,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
                 value.IntervalSeconds == interval && value.Source == "Groww" &&
                 (market != TradingMarketCatalog.Sensex || value.OpenTimeUtc >= sessionStartUtc))
-            .OrderByDescending(value => value.OpenTimeUtc).Take(90)
+            .OrderByDescending(value => value.OpenTimeUtc).Take(market == TradingMarketCatalog.Sensex ? 600 : 90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         if (candles.Count < (market == TradingMarketCatalog.Sensex ? 12 : 21)) return;
         var latest = candles[^1];
@@ -322,16 +322,21 @@ internal sealed partial class MultiMarketPaperTradingService(
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
                     value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
-                .OrderByDescending(value => value.OpenTimeUtc).Take(150)
+                .OrderByDescending(value => value.OpenTimeUtc).Take(2500)
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
             var previousSession = previousCandidates
                 .GroupBy(value => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc,
                     IndiaTimeZone).Date))
-                .OrderByDescending(group => group.Key).FirstOrDefault()?.ToArray() ?? [];
+                .OrderByDescending(group => group.Key).Take(5)
+                .OrderBy(group => group.Key).SelectMany(group => group.OrderBy(value => value.OpenTimeUtc))
+                .ToArray();
+            var completedSessionBars = candles
+                .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= now)
+                .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+                    value.Open, value.High, value.Low, value.Close)).ToArray();
             var openingBars = candles.Take(Math.Min(3, candles.Count)).ToArray();
             var location = MarketLocationPolicy.Evaluate(
-                candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
-                    value.High, value.Low, value.Close)).ToArray(),
+                completedSessionBars,
                 previousSession.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
                     value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
                 AverageTrueRange(candles.TakeLast(15).ToArray()),
@@ -341,6 +346,16 @@ internal sealed partial class MultiMarketPaperTradingService(
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MarketLocationRejected", decision.Confidence,
                     [$"{location.Context}.", .. location.Reasons], cancellationToken);
+                return;
+            }
+
+            var sessionMove = SessionMoveQualityPolicy.Evaluate(completedSessionBars,
+                decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()));
+            if (!sessionMove.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "SessionMoveMaturityRejected", decision.Confidence,
+                    sessionMove.Reasons, cancellationToken);
                 return;
             }
 
