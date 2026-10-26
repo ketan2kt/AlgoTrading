@@ -19,7 +19,7 @@ class MockNiftyChartComponent {
 
 describe('App', () => {
   beforeEach(async () => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/nifty');
     TestBed.configureTestingModule({
       imports: [App],
       providers: [provideHttpClient(), provideHttpClientTesting()],
@@ -116,12 +116,8 @@ describe('App', () => {
     currentUser.next({ username: 'administrator', roles: ['Administrator'] });
     await fixture.whenStable();
 
-    expect(fixture.nativeElement.textContent).toContain('Markets');
+    expect(fixture.nativeElement.textContent).toContain('Nifty command view');
     expect(fixture.nativeElement.textContent).toContain('Sensex');
-    const niftyButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
-      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Nifty')) as HTMLButtonElement;
-    niftyButton.click();
-    fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Nifty command view');
     expect(fixture.nativeElement.textContent).toContain('Checking token status');
     expect(fixture.nativeElement.textContent).not.toContain('Enable loud trade alerts');
@@ -192,11 +188,6 @@ describe('App', () => {
       status: 'FoundationOnly', observedAtUtc: '2026-08-03T08:30:00Z',
     });
     await fixture.whenStable();
-    fixture.detectChanges();
-
-    const niftyButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
-      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('Nifty')) as HTMLButtonElement;
-    niftyButton.click();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('SESSION READINESS');

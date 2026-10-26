@@ -5,6 +5,7 @@ import { RouterOutlet } from '@angular/router';
 import { catchError, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
+import { PublicHomeComponent } from './public-home.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
@@ -28,7 +29,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, RouterOutlet],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -177,7 +178,7 @@ export class App implements OnInit, OnDestroy {
         next: (user) => {
           this.user = user;
           this.checkingSession = false;
-          if (user) this.startWorkspace();
+          if (user && this.selectedMarket !== null) this.startWorkspace();
           this.refreshView();
         },
         error: () => {
@@ -244,9 +245,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected backToMarkets(): void {
-    window.history.pushState({}, '', '/');
-    this.selectedMarket = null;
-    this.refreshView();
+    window.location.assign('/');
   }
 
   protected openControls(): void {

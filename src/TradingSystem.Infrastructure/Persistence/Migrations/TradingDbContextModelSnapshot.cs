@@ -384,6 +384,27 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.ToTable("candles", "trading");
                 });
 
+            modelBuilder.Entity("TradingSystem.Domain.Trading.ContactInquiry", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<string>("Company").HasMaxLength(120).HasColumnType("character varying(120)");
+                    b.Property<Guid>("ConcurrencyToken").IsConcurrencyToken().HasColumnType("uuid");
+                    b.Property<DateTimeOffset>("CreatedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<int>("DeliveryAttempts").HasColumnType("integer");
+                    b.Property<string>("DeliveryStatus").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Email").IsRequired().HasMaxLength(254).HasColumnType("character varying(254)");
+                    b.Property<string>("Message").IsRequired().HasMaxLength(4000).HasColumnType("character varying(4000)");
+                    b.Property<string>("Name").IsRequired().HasMaxLength(120).HasColumnType("character varying(120)");
+                    b.Property<DateTimeOffset>("NextDeliveryAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Service").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+                    b.Property<DateTimeOffset>("UpdatedAtUtc").HasColumnType("timestamp with time zone");
+                    b.HasKey("Id");
+                    b.HasIndex("CreatedAtUtc");
+                    b.HasIndex("DeliveryStatus", "NextDeliveryAtUtc");
+                    b.ToTable("contact_inquiries", "trading");
+                });
+
             modelBuilder.Entity("TradingSystem.Domain.Trading.DailyRisk", b =>
                 {
                     b.Property<Guid>("Id")

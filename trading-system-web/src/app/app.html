@@ -1,4 +1,6 @@
-@if (status$ | async; as status) {
+@if (selectedMarket === null) {
+  <app-public-home />
+} @else if (status$ | async; as status) {
   @if (user) {
     <header class="mode-banner" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
       <span class="mode-banner__label">Operating mode</span>
@@ -46,22 +48,6 @@
             {{ loginBusy ? 'Signing in…' : 'Open workspace' }}
           </button>
         </form>
-      </section>
-    } @else if (selectedMarket === null) {
-      <section class="market-home" aria-label="Trading markets">
-        <div class="market-home__heading">
-          <p class="eyebrow">SELECT TRADING WORKSPACE</p>
-          <h1>Markets</h1>
-          <p>Each market keeps separate instruments, research evidence, risk settings and paper positions.</p>
-        </div>
-        <div class="market-cards">
-          <button class="market-card market-card--nifty" type="button" (click)="openMarket('nifty')">
-            <span>NSE · INDEX OPTIONS</span><strong>Nifty</strong><small>Live paper workspace</small>
-          </button>
-          <button class="market-card market-card--sensex" type="button" (click)="openMarket('sensex')">
-            <span>BSE · INDEX OPTIONS</span><strong>Sensex</strong><small>Live paper workspace</small>
-          </button>
-        </div>
       </section>
     } @else {
       <div class="workspace-layout">

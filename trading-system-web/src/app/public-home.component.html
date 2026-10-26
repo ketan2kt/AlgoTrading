@@ -1,0 +1,59 @@
+<div class="company-site">
+  <header class="company-nav">
+    <a class="company-logo" href="/" aria-label="Sarthico home"><span class="company-logo__mark">S<span>.</span></span><span>Sarthico</span></a>
+    <nav aria-label="Main navigation"><a href="#services">Services</a><a href="#approach">How we work</a><a href="#contact">Contact</a></nav>
+    <a class="company-nav__action" href="#contact">Start a conversation <span aria-hidden="true">↗</span></a>
+  </header>
+
+  <main>
+    <section class="company-hero" aria-labelledby="company-hero-title">
+      <div class="company-hero__copy">
+        <p class="company-kicker"><span></span> SOFTWARE THAT MOVES YOU FORWARD</p>
+        <h1 id="company-hero-title">Ideas deserve<br><em>better software.</em></h1>
+        <p class="company-hero__lead">We design and build thoughtful digital products — from modern websites to ambitious applications and practical AI experiences.</p>
+        <div class="company-hero__actions"><a class="company-button company-button--primary" href="#contact">Tell us what you’re building <span aria-hidden="true">↗</span></a><a class="company-text-link" href="#services">Explore our work <span aria-hidden="true">↓</span></a></div>
+        <div class="company-hero__foot"><span>Strategy</span><i></i><span>Design</span><i></i><span>Engineering</span></div>
+      </div>
+      <div class="company-visual" aria-hidden="true">
+        <div class="company-visual__grid"></div>
+        <div class="company-visual__orbit company-visual__orbit--one"></div><div class="company-visual__orbit company-visual__orbit--two"></div>
+        <div class="company-visual__core"><span class="company-visual__core-small">FROM COMPLEXITY</span><strong>Clarity<br>at scale<span>.</span></strong><span class="company-visual__core-bottom">01 / 03</span></div>
+        <div class="company-visual__note company-visual__note--top">Build with purpose <span>↗</span></div>
+        <div class="company-visual__note company-visual__note--bottom"><span>●</span> Made for what’s next</div>
+      </div>
+    </section>
+
+    <section class="company-intro" aria-label="Our perspective"><span class="company-section-number">01 / WHAT WE DO</span><p>Good software is more than code. It makes a complicated idea feel <strong>simple, useful and ready for growth.</strong></p></section>
+
+    <section class="company-services" id="services" aria-labelledby="company-services-title">
+      <div class="company-section-heading"><div><span class="company-section-number">02 / EXPERTISE</span><h2 id="company-services-title">What we can build <em>together.</em></h2></div><p>From the first sketch to a dependable launch, we shape the right solution around the problem — not around a technology checklist.</p></div>
+      <div class="company-service-list">
+        <article><span class="company-service-list__index">01</span><div><h3>Web development</h3><p>Distinctive, responsive websites and web platforms that are clear to use and built to evolve.</p></div><span class="company-service-list__icon" aria-hidden="true">↗</span></article>
+        <article><span class="company-service-list__index">02</span><div><h3>Application development</h3><p>Purpose-built business tools and customer-facing applications that turn complex workflows into effortless ones.</p></div><span class="company-service-list__icon" aria-hidden="true">↗</span></article>
+        <article><span class="company-service-list__index">03</span><div><h3>AI applications</h3><p>Practical AI-powered experiences that help people find answers, make decisions and get meaningful work done.</p></div><span class="company-service-list__icon" aria-hidden="true">↗</span></article>
+      </div>
+    </section>
+
+    <section class="company-approach" id="approach" aria-labelledby="company-approach-title"><div><span class="company-section-number">03 / OUR APPROACH</span><h2 id="company-approach-title">Small details.<br><em>Big-picture thinking.</em></h2></div><div class="company-approach__steps"><article><span>01 — Understand</span><p>We start with your goals, users and the problem worth solving.</p></article><article><span>02 — Shape</span><p>We bring design and engineering together around a clear direction.</p></article><article><span>03 — Build</span><p>We deliver, learn and refine as your product grows.</p></article></div></section>
+
+    <section class="company-contact" id="contact" aria-labelledby="company-contact-title"><div class="company-contact__copy"><span class="company-section-number">04 / LET’S TALK</span><h2 id="company-contact-title">Something in mind?<br><em>Let’s make it real.</em></h2><p>Tell us a little about your idea or challenge. We’ll use your details only to respond to your enquiry.</p><div class="company-contact__accent">A good project starts with a conversation. <span>↗</span></div></div>
+      <div class="company-contact__panel">
+        @if (config === null) { <p class="company-contact__status" role="status">Checking contact availability…</p> }
+        @else if (!config.enabled) { <p class="company-contact__status" role="status">Our contact form is being prepared. Please check back shortly.</p> }
+          <form #contactForm="ngForm" (ngSubmit)="submit(contactForm)">
+            <div class="company-contact__panel-heading"><span>YOUR ENQUIRY</span><strong>Tell us about your project.</strong></div>
+            <div class="company-form-row"><label>Your name <input name="name" [(ngModel)]="fields.name" required maxlength="120" autocomplete="name" placeholder="How should we address you?"></label><label>Email address <input name="email" [(ngModel)]="fields.email" required maxlength="254" type="email" autocomplete="email" placeholder="you@company.com"></label></div>
+            <div class="company-form-row"><label>Company <span>(optional)</span><input name="company" [(ngModel)]="fields.company" maxlength="120" autocomplete="organization" placeholder="Your organization"></label><label>What can we help with? <select name="service" [(ngModel)]="fields.service" required><option value="" disabled>Select a service</option><option>Web development</option><option>Application development</option><option>AI applications</option><option>Other</option></select></label></div>
+            <label>Your message <textarea name="message" [(ngModel)]="fields.message" required minlength="10" maxlength="4000" rows="4" placeholder="A few lines about what you have in mind…"></textarea></label>
+            <label class="company-honeypot" aria-hidden="true">Website<input name="website" [(ngModel)]="fields.website" tabindex="-1" autocomplete="off"></label>
+            <div id="sarthico-contact-captcha" class="company-captcha"></div>
+            @if (error) { <p class="company-form-error" role="alert">{{ error }}</p> }
+            @if (feedback) { <p class="company-form-success" role="status">{{ feedback }}</p> }
+            <button class="company-button company-button--primary" type="submit" [disabled]="!config?.enabled || contactForm.invalid || !captchaToken || busy">{{ busy ? 'Sending…' : 'Send enquiry' }} <span aria-hidden="true">↗</span></button>
+            <p class="company-contact__privacy">Protected by Google reCAPTCHA. Your message is used only to reply to you.</p>
+          </form>
+      </div>
+    </section>
+  </main>
+  <footer class="company-footer"><a class="company-logo" href="/"><span class="company-logo__mark">S<span>.</span></span><span>Sarthico</span></a><span>Thoughtful software for what’s next.</span><a href="/nifty">Trading workspace ↗</a><small>© 2026 Sarthico</small></footer>
+</div>

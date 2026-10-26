@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -7,6 +8,7 @@ using Serilog;
 using TradingSystem.Api.Hubs;
 using TradingSystem.Api.Controllers;
 using TradingSystem.Infrastructure;
+using TradingSystem.Api.PublicContact;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,6 +27,9 @@ builder.Services
         "postgresql",
         tags: ["ready", "trading-ready"]);
 builder.Services.AddProblemDetails();
+builder.Services.AddSingleton(builder.Configuration.GetSection("PublicContact").Get<PublicContactOptions>() ?? new());
+builder.Services.AddHttpClient<RecaptchaVerifier>(client => client.Timeout = TimeSpan.FromSeconds(8));
+builder.Services.AddHostedService<ContactEmailWorker>();
 builder.Services.AddOptions<ReadOnlyDiagnosticsOptions>()
     .Bind(builder.Configuration.GetSection(ReadOnlyDiagnosticsOptions.SectionName));
 var dataProtectionPath = builder.Configuration["DataProtection:KeysPath"];
@@ -83,6 +88,15 @@ builder.Services.AddRateLimiter(options =>
         limiter.Window = TimeSpan.FromMinutes(1);
         limiter.QueueLimit = 0;
     });
+    options.AddPolicy("public-contact", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 3,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            }));
 });
 builder.Services
     .AddHttpClient("resilient-external")

@@ -44,6 +44,7 @@ public sealed class TradingDbContext(
     public DbSet<SystemEvent> SystemEvents => Set<SystemEvent>();
     public DbSet<PaperBrokerEvent> PaperBrokerEvents => Set<PaperBrokerEvent>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<ContactInquiry> ContactInquiries => Set<ContactInquiry>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -101,6 +102,19 @@ public sealed class TradingDbContext(
 
     private static void ConfigureTradingModel(ModelBuilder builder)
     {
+        builder.Entity<ContactInquiry>(entity =>
+        {
+            ConfigureMutable(entity, "contact_inquiries");
+            entity.Property(value => value.Name).HasMaxLength(120);
+            entity.Property(value => value.Email).HasMaxLength(254);
+            entity.Property(value => value.Company).HasMaxLength(120);
+            entity.Property(value => value.Service).HasMaxLength(80);
+            entity.Property(value => value.Message).HasMaxLength(4000);
+            entity.Property(value => value.DeliveryStatus).HasMaxLength(20);
+            entity.HasIndex(value => new { value.DeliveryStatus, value.NextDeliveryAtUtc });
+            entity.HasIndex(value => value.CreatedAtUtc);
+        });
+
         builder.Entity<DataSnapshot>(entity =>
         {
             entity.UseTpcMappingStrategy();
