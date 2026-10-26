@@ -6,7 +6,7 @@ Updated: 2026-10-26 (Asia/Calcutta).
 
 Added an administrator-only `/api/market-analysis/daily` endpoint and workspace
 button. The button opens a date-selectable report with IST entry/exit times, gross,
-charges, net P&L, MFE/MAE, decision counts/outcomes, decision evidence, feed health,
+charges, net P&L, MFE/MAE, concise decision counts/outcomes, feed health,
 telemetry flags, and a copyable evidence-based correction prompt. Same-day data is
 available from 15:45 IST; earlier dates remain queryable. No trading logic or live
 execution controls changed.
@@ -19,6 +19,9 @@ quality gate uses that pinned SDK and runs the complete backend suite before dep
 Daily Analysis code commit `8b8eda8` was pushed to `main`; deployment run was
 dispatched once and is unverified:
 https://github.com/ketan2kt/AlgoTrading/actions/runs/40268304758
+Follow-up removed the verbose decision-by-decision table while retaining compact
+outcome counts. Frontend build and 39 tests passed; this follow-up is now authorized
+for deployment.
 Do not stage the unrelated Groww, roadmap, README, angular config, or temporary files.
 
 ## 24 October entry quality, profit protection and expansion-pair corrections
