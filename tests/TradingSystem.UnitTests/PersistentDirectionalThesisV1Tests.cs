@@ -62,7 +62,7 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.False(rejected.WouldEnter);
 
         // A completed bullish close that reclaims the pullback candle validates continuation.
-        bars[^1] = Bar(14, 102.2m, 102.8m, 102.1m, 102.75m);
+        bars[^1] = Bar(14, 102.2m, 102.7m, 102.1m, 102.61m);
         var confirmed = PersistentDirectionalThesisAnalyzerV1.Analyze(
             bars, 101m, 102m, 99m, previous);
 

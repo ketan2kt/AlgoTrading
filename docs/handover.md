@@ -27,9 +27,11 @@ because only .NET SDK 6.0.402 is installed while `global.json` requires 10.0.302
 `fbcd2fd` was deployed through run
 https://github.com/ketan2kt/AlgoTrading/actions/runs/40276896129; CI compiled the code
 but found two failing synthetic unit fixtures (323 other unit tests, all contracts and
-architecture tests passed; three opt-in database tests skipped). The fixtures are now
-being corrected; do not treat this deployment as successful or verified. Preserve the
-unrelated user changes and dispatch a new deployment only after the targeted CI tests pass.
+architecture tests passed; three opt-in database tests skipped). Follow-up run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40277251406 passed all but the
+bullish continuation fixture, whose synthetic trigger candle exceeded the policy's
+anti-chase threshold. The fixture has been adjusted to model a fresh, in-range breakout;
+the fix remains undeployed until a new quality gate passes. Preserve unrelated user changes.
 
 ## Daily Analysis session report
 
