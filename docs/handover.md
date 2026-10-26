@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26 (Asia/Calcutta).
 
-## Shared index session maturity, re-entry and profit protection (26 October; local, not deployed)
+## Shared index session maturity, re-entry and profit protection (26 October)
 
 Applied the targeted follow-up to both Nifty and Sensex through shared execution
 policies. Nifty entry location now receives the full current-session candles and up to
@@ -27,9 +27,12 @@ replay endpoint was unavailable (`gh` could not connect to api.github.com), so t
 no actual-session evidence to validate a step-down without cutting strong continuations.
 Backend tests are pending because only .NET 6.0.402 is installed; the repository pins
 .NET 10.0.302. Final `git diff --check` and settings JSON parsing passed. Focused
-re-entry, profit-lock, and full-session maturity tests are added but unexecuted. User explicitly
-said not to deploy until they confirm. Preserve unrelated working-tree changes; do not
-stage or deploy them.
+re-entry, profit-lock, and full-session maturity tests are included; local execution was
+blocked because .NET 10.0.302 is unavailable. Commit `dc08351` was pushed to `main` and
+the deployment workflow was dispatched once:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40305802163
+Completion is unverified; follow the repository's no-poll procedure. Preserve unrelated
+working-tree changes and do not dispatch a duplicate run.
 
 ## Groww feed load and position-mark freshness (26 October)
 
