@@ -31,10 +31,11 @@ re-entry, profit-lock, and full-session maturity tests are included; local execu
 blocked because .NET 10.0.302 is unavailable. Commit `dc08351` was pushed to `main`; run
 https://github.com/ketan2kt/AlgoTrading/actions/runs/40305802163 failed in the protected-
 session quality gate while compiling `PaperProtectiveStopPolicyTests`: decimal values in
-`InlineData` are invalid attribute arguments. The test has been corrected to a `[Fact]`
-in the local follow-up; backend execution remains delegated to GitHub CI. Dispatch one
-new run after committing the fix; do not repeat unchanged failed runs. Preserve unrelated
-working-tree changes.
+`InlineData` are invalid attribute arguments. Fixed in commit `98236b0` by using a `[Fact]`
+with decimal test cases, then dispatched one retry:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40306239405
+Completion is unverified; do not poll or dispatch another run unless requested. Preserve
+unrelated working-tree changes.
 
 ## Groww feed load and position-mark freshness (26 October)
 
