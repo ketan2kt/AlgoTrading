@@ -48,7 +48,7 @@ public sealed class PersistentDirectionalThesisV1Tests
             var close = open + .12m;
             return Bar(index, open, close + .10m, open - .10m, close);
         }).ToList();
-        bars[^2] = Bar(13, 102.6m, 102.7m, 102.1m, 102.2m);
+        bars[^2] = Bar(13, 102.6m, 102.6m, 102.2m, 102.2m);
         bars[^1] = Bar(14, 102.2m, 102.5m, 101.8m, 101.9m);
         var previous = new PersistentDirectionalThesisV1(
             PersistentDirectionalThesisAnalyzerV1.Version, "PaperEligible",
@@ -62,7 +62,7 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.False(rejected.WouldEnter);
 
         // A completed bullish close that reclaims the pullback candle validates continuation.
-        bars[^1] = Bar(14, 102.2m, 103.0m, 102.1m, 102.9m);
+        bars[^1] = Bar(14, 102.2m, 102.8m, 102.1m, 102.75m);
         var confirmed = PersistentDirectionalThesisAnalyzerV1.Analyze(
             bars, 101m, 102m, 99m, previous);
 
@@ -203,6 +203,8 @@ public sealed class PersistentDirectionalThesisV1Tests
         var bars = Enumerable.Range(0, 15).Select(index =>
             Bar(index, 100m, 101m, 99m, 100m)).ToArray();
         bars[^5] = bars[^5] with { High = 120m };
+        bars[^2] = Bar(13, 100.4m, 100.6m, 100.2m, 100.55m);
+        bars[^1] = Bar(14, 100.55m, 100.58m, 100.1m, 100.15m);
         var thesis = new PersistentDirectionalThesisV1(
             PersistentDirectionalThesisAnalyzerV1.Version,
             PersistentDirectionalThesisAnalyzerV1.Status,

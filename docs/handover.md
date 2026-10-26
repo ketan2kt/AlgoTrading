@@ -22,9 +22,14 @@ strategy entries and all risk/exit behavior are unchanged. Added regression test
 red-candle bullish rejection, fresh bullish/bearish continuation confirmation, and the
 paper entry policy.
 
-Verification is incomplete: `git diff --check` passed, but the focused backend test
-could not start because only .NET SDK 6.0.402 is installed while `global.json` requires
-10.0.302. Changes are not committed or deployed; user has not yet requested deployment.
+Initial verification: `git diff --check` passed, but local backend tests could not start
+because only .NET SDK 6.0.402 is installed while `global.json` requires 10.0.302. Commit
+`fbcd2fd` was deployed through run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40276896129; CI compiled the code
+but found two failing synthetic unit fixtures (323 other unit tests, all contracts and
+architecture tests passed; three opt-in database tests skipped). The fixtures are now
+being corrected; do not treat this deployment as successful or verified. Preserve the
+unrelated user changes and dispatch a new deployment only after the targeted CI tests pass.
 
 ## Daily Analysis session report
 
