@@ -332,7 +332,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
     }
 
     private static ProfitPath CalculatePositionPath(MarketPaperPosition position,
-        IReadOnlyList<PaperTradePricePoint> samples, DateTimeOffset exitAtUtc)
+        PaperTradePricePoint[] samples, DateTimeOffset exitAtUtc)
     {
         var points = samples.Where(value => value.ObservedAtUtc >= position.OpenedAtUtc &&
                 value.ObservedAtUtc <= exitAtUtc)
@@ -340,11 +340,11 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             .Append(new PaperTradePricePoint(exitAtUtc, position.CurrentPrice))
             .ToArray();
         return CalculateExcursionPath(position.EntryPrice, position.Quantity, position.Direction,
-            points, samples.Count > 0 ? "Historical sampled path; legacy cadence" : "Entry/exit only");
+            points, samples.Length > 0 ? "Historical sampled path; legacy cadence" : "Entry/exit only");
     }
 
     private static ProfitPath CalculateExcursionPath(decimal entryPrice, int quantity,
-        Direction direction, IReadOnlyList<PaperTradePricePoint> points, string coverage)
+        Direction direction, PaperTradePricePoint[] points, string coverage)
     {
         var multiplier = direction == Direction.Buy ? 1m : -1m;
         var path = points.Where(value => value.Price > 0)
@@ -353,7 +353,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         var favourable = path.MaxBy(value => value.Pnl);
         var adverse = path.MinBy(value => value.Pnl);
         return new ProfitPath(Math.Max(0m, favourable.Pnl), favourable.ObservedAtUtc,
-            Math.Max(0m, -adverse.Pnl), adverse.ObservedAtUtc, coverage, points.Count);
+            Math.Max(0m, -adverse.Pnl), adverse.ObservedAtUtc, coverage, points.Length);
     }
 
     private sealed record ProfitPath(

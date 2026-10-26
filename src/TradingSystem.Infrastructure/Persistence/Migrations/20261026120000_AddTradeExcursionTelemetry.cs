@@ -1,3 +1,4 @@
+#pragma warning disable CA1861 // EF migration APIs use inline column arrays.
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
@@ -44,3 +45,4 @@ public sealed class AddTradeExcursionTelemetry : Migration
             table: "market_paper_positions");
     }
 }
+#pragma warning restore CA1861
