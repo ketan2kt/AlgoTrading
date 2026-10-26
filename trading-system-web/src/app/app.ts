@@ -469,7 +469,7 @@ export class App implements OnInit, OnDestroy {
     const p = this.dailyAnalysis;
     return `Review the ${p.tradingDate} IST session using the attached production-backed Daily Analysis. Validate observations against the trade IDs, stop/target outcomes and telemetry. Separate confirmed defects from normal losing trades or missing evidence. Propose narrowly scoped corrections and regression tests; do not edit strategy or deploy until I approve.\n\n`+
       `Closed legs: ${p.summary.completedTradeCount}; wins ${p.summary.wins}; losses ${p.summary.losses}; gross ₹${p.summary.grossPnl.toFixed(2)}; charges ₹${p.summary.costs.toFixed(2)}; net ₹${p.summary.netRealisedPnl.toFixed(2)}. Decisions ${p.summary.decisionCount} (${p.summary.acceptedDecisionCount} accepted, ${p.summary.rejectedDecisionCount} rejected).\n`+
-      p.trades.map(t => `${t.market} ${t.symbol} ${t.openedAtUtc}→${t.closedAtUtc ?? 'open'}: ${t.exitReason ?? 'open'}, net ₹${t.netRealisedPnl.toFixed(2)}; sampled MFE ${t.maximumFavourableExcursion ?? 'unavailable'}, MAE ${t.maximumAdverseExcursion ?? 'unavailable'} [${t.tradeId}]`).join('\n')+
+      p.trades.map(t => `${t.market} ${t.symbol} ${t.openedAtUtc}→${t.closedAtUtc ?? 'open'}: ${t.exitReason ?? 'open'}, net ₹${t.netRealisedPnl.toFixed(2)}; peak ₹${t.maximumFavourableExcursion ?? 'unavailable'} at ${t.maximumFavourableExcursionAtUtc ?? 'time unavailable'}, adverse ₹${t.maximumAdverseExcursion ?? 'unavailable'} at ${t.maximumAdverseExcursionAtUtc ?? 'time unavailable'}; ${t.excursionCoverage ?? 'coverage unavailable'} (${t.excursionSampleCount ?? 0} observations) [${t.tradeId}]`).join('\n')+
       `\nDecision outcomes: ${JSON.stringify(p.summary.outcomes)}\n`+
       `\n\nTelemetry limitations: ${p.telemetryWarnings.join(' | ') || 'none reported'}`;
   }
@@ -483,8 +483,9 @@ export class App implements OnInit, OnDestroy {
     }
     if (a.summary.costs > 0) flags.push(`Recorded charges were ₹${a.summary.costs.toFixed(2)}; compare gross and net results because costs can erase a small gross edge.`);
     const withMfe = a.trades.filter(t => t.maximumFavourableExcursion !== null);
-    const missingMfe = a.summary.completedTradeCount - withMfe.length;
-    if (missingMfe > 0) flags.push(`Peak-profit telemetry is missing for ${missingMfe} of ${a.summary.completedTradeCount} completed trades, so giveback cannot be assessed for those trades.`);
+    const incompletePath = a.trades.filter(t => t.closedAtUtc &&
+      (t.excursionCoverage?.includes('unavailable') || t.excursionCoverage?.includes('earlier path unavailable')));
+    if (incompletePath.length > 0) flags.push(`Intratrade peak/adverse coverage is incomplete for ${incompletePath.length} trade(s); displayed values use only the available samples and cannot reconstruct unsampled history.`);
     const givebacks = withMfe.filter(t => t.maximumFavourableExcursion! > Math.max(0, t.grossPnl));
     if (givebacks.length) flags.push(`${givebacks.length} trade(s) exited below their recorded peak favourable excursion; review the trade rows and linked decision trail to distinguish ordinary pullback from thesis failure.`);
     if (a.trades.some(t => !t.signalId)) flags.push('At least one trade has no linked signal ID; research-candidate linkage is incomplete for those rows.');

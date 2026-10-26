@@ -92,13 +92,13 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       :host,
       .chart-shell {
         display: block;
-        min-height: clamp(378px, calc(90vh - 99px), 612px);
+        min-height: clamp(340px, calc(70vh - 110px), 520px);
       }
-      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#0d1512; }
-      .chart-stage { position:relative; min-width:0; min-height:clamp(378px,calc(90vh - 99px),612px); }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#f8fcf7; }
+      .chart-stage { position:relative; min-width:0; min-height:clamp(340px,calc(70vh - 110px),520px); }
       .chart {
         width: 100%;
-        height: clamp(378px, calc(90vh - 99px), 612px);
+        height: clamp(340px, calc(70vh - 110px), 520px);
       }
       .chart-empty {
         position: absolute;
@@ -107,43 +107,43 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         place-content: center;
         gap: 0.5rem;
         text-align: center;
-        color: #91a39a;
+        color: #557460;
         pointer-events: none;
       }
       .chart-empty strong {
-        color: #e9f2ed;
+        color: #173f2d;
         font-size: 1.05rem;
       }
       .volume-label {
         position: absolute;
         left: 10px;
         bottom: 25px;
-        color: #789087;
+        color: #557460;
         font-size: 0.62rem;
         letter-spacing: 0.08em;
         pointer-events: none;
       }
       .overlay-controls { position:absolute; z-index:2; top:7px; left:8px; display:flex; flex-wrap:wrap; gap:4px; max-width:calc(100% - 110px); }
-      .overlay-controls button { padding:3px 7px; border:1px solid #30433a; border-radius:4px; background:#0d1713dd; color:#82978c; font-size:.62rem; }
-      .overlay-controls button.active { border-color:#62ba91; color:#bce8d2; }
-      .overlay-controls span { align-self:center; padding:2px 6px; color:#b6c6be; font-size:.64rem; background:#0d1713dd; }
-      .decision-map { margin:0; border:0; border-bottom:1px solid #29443a; background:#0a1410; }
+      .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#f8fcf7ee; color:#315b43; font-size:.7rem; }
+      .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
+      .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#f8fcf7ee; }
+      .decision-map { margin:0; border:0; border-bottom:1px solid #c6dac5; background:#edf6eb; }
       .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
       .decision-map summary::-webkit-details-marker { display:none; }
-      .decision-map summary::after { content:'Details'; color:#74a28e; font-size:.55rem; letter-spacing:.08em; text-transform:uppercase; }
+      .decision-map summary::after { content:'Details'; color:#34734b; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; }
       .decision-map[open] summary::after { content:'Hide'; }
-      .decision-map summary span { color:#6f9182; font-size:.52rem; letter-spacing:.11em; }
-      .decision-map summary strong { overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
-      .decision-map summary small { overflow:hidden; color:#9eb3a8; font-size:.6rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map summary span { color:#557460; font-size:.62rem; letter-spacing:.11em; }
+      .decision-map summary strong { overflow:hidden; color:#173f2d; font-size:.76rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map summary small { overflow:hidden; color:#557460; font-size:.7rem; text-overflow:ellipsis; white-space:nowrap; }
       .decision-map__grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; padding:2px 8px 5px; }
       .decision-map__grid div { min-width:0; padding:3px 5px; }
-      .decision-map span { display:block; color:#6f9182; font-size:.52rem; letter-spacing:.09em; }
-      .decision-map strong { display:block; overflow:hidden; color:#d9eee4; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
+      .decision-map span { display:block; color:#557460; font-size:.62rem; letter-spacing:.09em; }
+      .decision-map strong { display:block; overflow:hidden; color:#173f2d; font-size:.76rem; text-overflow:ellipsis; white-space:nowrap; }
       .decision-map__frames { display:flex; gap:5px; padding:0 13px 5px; }
-      .decision-map__frames small { padding:2px 5px; border-radius:3px; background:#17251f; color:#a7bdb2; font-size:.58rem; }
-      .decision-map__frames small[data-direction='Bullish'] { color:#58dfa0; }
-      .decision-map__frames small[data-direction='Bearish'] { color:#ff7982; }
-      .decision-map p { margin:0; padding:2px 13px 7px; color:#9eb3a8; font-size:.6rem; }
+      .decision-map__frames small { padding:2px 5px; border-radius:4px; background:#dcebd9; color:#315b43; font-size:.66rem; }
+      .decision-map__frames small[data-direction='Bullish'] { color:#167143; }
+      .decision-map__frames small[data-direction='Bearish'] { color:#a9363e; }
+      .decision-map p { margin:0; padding:2px 13px 7px; color:#557460; font-size:.7rem; }
       @media (max-width: 900px) {
         .decision-map summary { grid-template-columns:auto minmax(120px,1fr); }
         .decision-map summary small { display:none; }
@@ -158,8 +158,8 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         display: none;
       }
       .trade-zone--reward {
-        background: #27d17f;
-        border: 1px solid #42e899;
+        background: #25834d;
+        border: 1px solid #176c3c;
       }
       .trade-zone--risk {
         background: #ff5d68;
@@ -195,17 +195,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: '#0d1512' }, textColor: '#9caea5' },
-      grid: { vertLines: { color: '#1c2924' }, horzLines: { color: '#1c2924' } },
-      rightPriceScale: { borderColor: '#2c3a34' },
+      layout: { background: { type: ColorType.Solid, color: '#f8fcf7' }, textColor: '#45644d' },
+      grid: { vertLines: { color: '#dce9db' }, horzLines: { color: '#dce9db' } },
+      rightPriceScale: { borderColor: '#b7cfba' },
       localization: { timeFormatter: formatCrosshairTimeIst },
       timeScale: {
-        borderColor: '#2c3a34',
+        borderColor: '#b7cfba',
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: formatChartTimeIst,
       },
-      crosshair: { vertLine: { color: '#658c7b' }, horzLine: { color: '#658c7b' } },
+      crosshair: { vertLine: { color: '#66876d' }, horzLine: { color: '#66876d' } },
       handleScroll: {
         mouseWheel: false,
         pressedMouseMove: true,
@@ -214,11 +214,11 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       },
     });
     this.series = this.chart.addSeries(CandlestickSeries, {
-      upColor: '#28d17c',
-      downColor: '#ff5d68',
+      upColor: '#25834d',
+      downColor: '#dc5961',
       borderVisible: false,
-      wickUpColor: '#28d17c',
-      wickDownColor: '#ff5d68',
+      wickUpColor: '#25834d',
+      wickDownColor: '#dc5961',
     });
     this.series.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.24 } });
     this.volumeSeries = this.chart.addSeries(HistogramSeries, {
@@ -227,8 +227,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    this.emaFastSeries = this.chart.addSeries(LineSeries, { title:'EMA9', color:'#68a7ff', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
-    this.emaSlowSeries = this.chart.addSeries(LineSeries, { title:'EMA21', color:'#b68cff', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
+    this.emaFastSeries = this.chart.addSeries(LineSeries, { title:'EMA9', color:'#54a86d', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
+    this.emaSlowSeries = this.chart.addSeries(LineSeries, { title:'EMA21', color:'#286f46', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
     this.vwapSeries = this.chart.addSeries(LineSeries, { title:'VWAP', color:'#f2c94c', lineWidth:2, lastValueVisible:true, priceLineVisible:false });
     this.chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
@@ -306,8 +306,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.priceLines.push(this.series!.createPriceLine({price,color,lineWidth:1,lineStyle:style,title}));
     };
     if(levels&&this.visibility.day){levelLine(levels.dayHigh,'DAY HIGH','#2ad18a');levelLine(levels.dayLow,'DAY LOW','#ff7380');}
-    if(levels&&this.visibility.previous){levelLine(levels.previousHigh,'PREV HIGH','#5f8fb5');levelLine(levels.previousLow,'PREV LOW','#5f8fb5');levelLine(levels.previousClose,'PREV CLOSE','#7f8d86',LineStyle.Dotted);}
-    if(levels&&this.visibility.openingRange){levelLine(levels.openingRangeHigh,'OR HIGH','#d49a4b');levelLine(levels.openingRangeLow,'OR LOW','#d49a4b');}
+    if(levels&&this.visibility.previous){levelLine(levels.previousHigh,'PREV HIGH','#679476');levelLine(levels.previousLow,'PREV LOW','#679476');levelLine(levels.previousClose,'PREV CLOSE','#879c89',LineStyle.Dotted);}
+    if(levels&&this.visibility.openingRange){levelLine(levels.openingRangeHigh,'OR HIGH','#ae8b35');levelLine(levels.openingRangeLow,'OR LOW','#ae8b35');}
     const overlay = this.latestOverlay();
     if (overlay) {
       const entry = overlay.entry;

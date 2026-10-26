@@ -13,7 +13,8 @@ html {
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  background: #0b1210;
+  color-scheme: light;
+  background: #eaf4e8;
 }
 
 body {
@@ -23,11 +24,13 @@ body {
 
 /* Trading desk shell: global so the visual layer stays separate from component logic. */
 app-root {
-  --desk-surface: #0c1512;
-  --desk-surface-raised: #101c18;
-  --desk-line: rgba(148, 181, 164, 0.16);
-  --desk-muted: #82988d;
-  --desk-accent: #71e0a9;
+  --desk-page: #eaf4e8;
+  --desk-surface: #f9fcf7;
+  --desk-surface-raised: #edf6eb;
+  --desk-line: #c6dac5;
+  --desk-ink: #173f2d;
+  --desk-muted: #557460;
+  --desk-accent: #25834d;
 }
 
 app-root .market-tabs {
@@ -41,10 +44,10 @@ app-root .market-tabs {
   min-height: 0;
   margin: 0;
   padding: 0.55rem;
-  background: rgba(8, 15, 12, 0.96);
+  background: #164b35;
   border-color: var(--desk-line);
   border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 4px 14px rgba(25, 74, 48, 0.12);
 }
 
 app-root .workspace-layout {
@@ -77,8 +80,8 @@ app-root .workspace-brand__mark {
   place-items: center;
   width: 29px;
   height: 29px;
-  color: #06100c;
-  background: linear-gradient(145deg, #9bf1c7, #55cc94);
+  color: #f7fff8;
+  background: linear-gradient(145deg, #4ca76d, #247d49);
   border-radius: 8px;
   font-weight: 900;
 }
@@ -101,15 +104,15 @@ app-root .workspace-nav-actions {
   border-top: 1px solid var(--desk-line);
 }
 app-root .workspace-nav-actions button { min-height: 29px; padding-inline: 0.55rem; font-size: 0.68rem; }
-app-root .workspace-nav-actions__primary { color: #07110c !important; background: var(--desk-accent) !important; }
+app-root .workspace-nav-actions__primary { color: #ffffff !important; background: var(--desk-accent) !important; }
 app-root .mute-alerts-button { min-width:78px; border-color:#6b7c74; }
-app-root .mute-alerts-button.muted { color:#07110c; border-color:#f2c94c; background:#f2c94c; }
+app-root .mute-alerts-button.muted { color:#503e10; border-color:#e0c574; background:#f4e7b7; }
 
 app-root .workspace-shell { gap: 0.55rem; }
 app-root .workspace-heading {
   min-height: 62px;
   padding: 0.65rem 0.85rem;
-  background: linear-gradient(105deg, rgba(16, 29, 24, 0.98), rgba(10, 18, 15, 0.98));
+  background: linear-gradient(105deg, #f9fcf7, #edf6eb);
   border-color: var(--desk-line);
   border-radius: 10px;
   box-shadow: none;
@@ -123,15 +126,15 @@ app-root .workspace-heading__metrics span {
   gap: 0.35rem;
   align-items: center;
   padding: 0.18rem 0.42rem;
-  color: #aebfb6;
-  background: rgba(255, 255, 255, 0.035);
+  color: #315b43;
+  background: #e3efe1;
   border: 1px solid var(--desk-line);
   border-radius: 999px;
   font-size: 0.6rem;
 }
 app-root .workspace-heading__metrics i { width: 6px; height: 6px; background: #ff6874; border-radius: 50%; }
 app-root .workspace-heading__metrics i.live { background: #4ad894; box-shadow: 0 0 8px rgba(74, 216, 148, 0.7); }
-app-root .scalp-lab-notice { margin:0; border-color:rgba(125,185,232,.38); color:#b9d9ef; background:rgba(28,57,78,.48); }
+app-root .scalp-lab-notice { margin:0; border-color:#c5dac7; color:#315b43; background:#edf6eb; }
 app-root .workspace-actions { gap: 0.3rem; }
 app-root .workspace-actions button { min-height: 30px; padding: 0.3rem 0.6rem; font-size: 0.68rem; }
 
@@ -140,7 +143,7 @@ app-root .chart-panel {
   background: var(--desk-surface);
   border-color: var(--desk-line);
   border-radius: 10px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 14px rgba(25, 74, 48, 0.09);
 }
 app-root .chart-panel > .panel-heading { min-height: 48px; padding: 0.5rem 0.72rem; border-bottom: 1px solid var(--desk-line); }
 app-root .chart-panel > .panel-heading strong { font-size: 0.82rem; }
@@ -151,9 +154,9 @@ app-root .chart-status-rail {
   background: var(--desk-line);
   border-bottom: 1px solid var(--desk-line);
 }
-app-root .chart-status-rail > div { display: grid; gap: 0.18rem; min-width: 0; padding: 0.42rem 0.7rem; background: #0d1814; }
+app-root .chart-status-rail > div { display: grid; gap: 0.12rem; min-width: 0; padding: 0.32rem 0.58rem; background: #f0f7ee; }
 app-root .chart-status-rail span { color: var(--desk-muted); font-size: 0.54rem; letter-spacing: 0.1em; text-transform: uppercase; }
-app-root .chart-status-rail strong { overflow: hidden; color: #dce9e2; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+app-root .chart-status-rail strong { overflow: hidden; color: #173f2d; font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
 app-root .chart-attribution { opacity: 0.55; }
 
 app-root .positions-panel,
@@ -181,11 +184,70 @@ app-root .logs-modal {
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
 }
 app-root .logs-modal > .panel-heading { position: sticky; top: 0; z-index: 2; background: rgba(12, 21, 18, 0.97); backdrop-filter: blur(10px); }
+app-root .daily-analysis-modal {
+  width: min(1480px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(132, 191, 162, .28);
+  border-radius: 16px;
+  background: #f9fcf7;
+}
+app-root .daily-analysis-header{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;border-bottom:1px solid #263a31;background:rgba(11,20,17,.97);backdrop-filter:blur(12px)}
+app-root .daily-analysis-header>div,.daily-analysis-session>div,.daily-analysis-section-heading>div{display:grid;gap:.2rem}
+app-root .daily-analysis-header span,.daily-analysis-section-heading>div>span,.daily-analysis-insight>span,.daily-analysis-session>div>span{color:#7eaa94;font-size:.66rem;font-weight:700;letter-spacing:.14em}
+app-root .daily-analysis-header h2{margin:0;color:#eef7f1;font-size:1.25rem;letter-spacing:-.02em}
+app-root .daily-analysis-header p{margin:0;color:#91a39a;font-size:.78rem}
+app-root .daily-analysis-close{width:2.2rem;height:2.2rem;padding:0;border-radius:50%;font-size:1.4rem;line-height:1}
+app-root .daily-analysis-controls{display:flex;align-items:center;gap:.65rem;padding:.65rem 1.25rem;border-bottom:1px solid #22352c;background:#0f1b16}
+app-root .daily-analysis-controls label{color:#b7c8be;font-size:.75rem;font-weight:600}
+app-root .daily-analysis-controls input{width:10.5rem;min-width:0;padding:.45rem .6rem;border:1px solid #344d40;border-radius:7px;background:#09120f;color:#eaf4ee}
+app-root .daily-analysis-controls button,app-root .daily-analysis-prompt button{min-height:2rem;padding:.4rem .75rem;border:1px solid #39785a;border-radius:7px;background:#153a29;color:#b8f1d0;font-size:.75rem;font-weight:700}
+app-root .daily-analysis-controls>span{margin-left:auto;color:#73897d;font-size:.7rem}
+app-root .daily-analysis-state{margin:1.5rem;padding:1.2rem;border:1px solid #2b4337;border-radius:10px;color:#b8c9bf;background:#101c16}
+app-root .daily-analysis-state--error{border-color:#7f3d43;color:#ffc1c4;background:#281416}
+app-root .daily-analysis-body{min-height:0;overflow:auto;padding:1rem 1.25rem 1.4rem}
+app-root .daily-analysis-session{display:flex;align-items:end;justify-content:space-between;margin:0 0 .75rem}
+app-root .daily-analysis-session strong{color:#eaf5ee;font-size:1.05rem}
+app-root .daily-analysis-session>small{color:#85988d;font-size:.72rem}
+app-root .daily-analysis-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.55rem;margin-bottom:1.15rem}
+app-root .daily-analysis-summary article{display:grid;gap:.28rem;min-width:0;padding:.75rem .85rem;border:1px solid #273b31;border-radius:10px;background:linear-gradient(145deg,#111f18,#0d1712)}
+app-root .daily-analysis-summary article>span{color:#8ca396;font-size:.66rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+app-root .daily-analysis-summary article>strong{color:#e8f4ed;font-size:1.08rem;font-variant-numeric:tabular-nums}
+app-root .daily-analysis-summary article>small{color:#82958a;font-size:.68rem}
+app-root .daily-analysis-section{margin:0 0 1rem;padding:.9rem;border:1px solid #273b31;border-radius:12px;background:#0e1914}
+app-root .daily-analysis-section-heading{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin-bottom:.7rem}
+app-root .daily-analysis-section-heading h3{margin:0;color:#e7f1eb;font-size:.98rem}
+app-root .daily-analysis-section-heading>small{color:#809488;font-size:.68rem;text-align:right}
+app-root .daily-analysis-table{overflow:auto;border:1px solid #30453a;border-radius:9px}
+app-root .daily-analysis-table table{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;font-size:.75rem}
+app-root .daily-analysis-table th{position:sticky;top:0;z-index:1;padding:.65rem .7rem;border-right:1px solid #2d4338;border-bottom:1px solid #3a5547;background:#17251e;color:#a9c2b3;font-size:.64rem;font-weight:700;letter-spacing:.07em;text-align:left;text-transform:uppercase;white-space:nowrap}
+app-root .daily-analysis-table td{min-width:90px;padding:.6rem .7rem;border-right:1px solid #24382e;border-bottom:1px solid #26372f;color:#c7d5cc;font-variant-numeric:tabular-nums;vertical-align:top}
+app-root .daily-analysis-table th:last-child,app-root .daily-analysis-table td:last-child{border-right:0}
+app-root .daily-analysis-table tbody tr:last-child td{border-bottom:0}
+app-root .daily-analysis-table tbody tr:nth-child(even){background:rgba(255,255,255,.018)}
+app-root .daily-analysis-table tbody tr:hover{background:rgba(112,212,157,.06)}
+app-root .daily-analysis-table td strong,app-root .daily-analysis-table td small{display:block}
+app-root .daily-analysis-table td strong{color:#e4efe8;font-weight:650}
+app-root .daily-analysis-table td small{margin-top:.2rem;color:#83968b;font-size:.66rem;line-height:1.35}
+app-root .daily-analysis-table .daily-analysis-peak{color:#75dfaa}
+app-root .daily-analysis-table .daily-analysis-adverse{color:#ff9a9d}
+app-root .daily-analysis-table .daily-analysis-coverage{max-width:155px;color:#b6a77c;white-space:normal}
+app-root .daily-analysis-insights{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:1rem}
+app-root .daily-analysis-insight{padding:.8rem .9rem;border:1px solid #283d32;border-radius:10px;background:#0e1914}
+app-root .daily-analysis-insight p{margin:.45rem 0 0;color:#b0c1b7;font-size:.78rem;line-height:1.55}
+app-root .daily-analysis-flags ul{margin:.4rem 0;padding-left:1.2rem;color:#b4c4ba;font-size:.75rem;line-height:1.55}
+app-root .daily-analysis-flags h4{margin:.8rem 0 .3rem;color:#d3b978;font-size:.75rem}
+app-root .daily-analysis-prompt p{margin:.3rem 0 .55rem;color:#84978c;font-size:.72rem}
+app-root .daily-analysis-prompt textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;border:1px solid #2c4237;border-radius:8px;background:#08110d;color:#b7c9be;font-size:.72rem;line-height:1.5}
+@media(max-width:800px){app-root .daily-analysis-summary{grid-template-columns:repeat(2,minmax(0,1fr))}app-root .daily-analysis-summary article:first-child{grid-column:1/-1}app-root .daily-analysis-insights{grid-template-columns:1fr}}
+@media(max-width:520px){app-root .daily-analysis-header,app-root .daily-analysis-body{padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-controls{flex-wrap:wrap;padding-left:.75rem;padding-right:.75rem}app-root .daily-analysis-controls>span{width:100%;margin-left:0}app-root .daily-analysis-controls input{flex:1}app-root .daily-analysis-section{padding:.65rem}app-root .daily-analysis-section-heading{align-items:start;flex-direction:column}app-root .daily-analysis-section-heading>small{text-align:left}}
 
-app-root .market-theme--sensex { --desk-accent: #78bbed; --desk-line: rgba(126, 181, 222, 0.19); }
-app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #a6d8fa, #68aee1); }
+app-root .market-theme--sensex { --desk-accent: #25834d; --desk-line: #c6dac5; }
+app-root .market-theme--sensex .workspace-brand__mark { background: linear-gradient(145deg, #4ca76d, #247d49); }
 
-app-root .narrator-button{border-color:#5a8dc1;color:#9dcbf3}
+app-root .narrator-button{border-color:#8ab99a;color:#315b43}
 app-root .narrator-modal { width:min(980px,96vw); }
 app-root .narrator-controls { display:grid; gap:.65rem; padding:.75rem; border-bottom:1px solid #24332c; background:#0c1813; }
 app-root .narrator-controls > p { margin:0; color:#8fa198; font-size:.75rem; line-height:1.5; }
@@ -273,4 +335,228 @@ app-root .narrator-toast--critical { border-left-color:#ff5d68; background:rgba(
   app-root .chart-status-rail { grid-template-columns: 1fr 1fr; }
   app-root .chart-status-rail > div:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   app-root .legend { display: none !important; }
+}
+
+/* Unified compact, light-green trading desk theme. Keep all workspaces visually consistent. */
+body { color: #173f2d; background: #eaf4e8; }
+app-root {
+  color: #173f2d;
+  background: #eaf4e8;
+  font-size: 15px;
+  line-height: 1.38;
+}
+app-root main {
+  width: min(1920px, calc(100% - .7rem));
+  padding: .32rem 0 .55rem;
+  color: #173f2d;
+  background: #eaf4e8;
+}
+app-root .market-theme--sensex,
+app-root .market-theme--gas { background: #eaf4e8; }
+app-root :is(.market-home, .login-layout, .prepared-workspace) { color: #173f2d; }
+app-root .market-tabs {
+  gap: .3rem;
+  padding: .38rem;
+  background: #164b35;
+  border: 1px solid #2c6e49;
+  border-radius: 11px;
+  box-shadow: 0 4px 14px rgba(25, 74, 48, .12);
+}
+app-root .market-tabs button { min-height: 34px; color: #eaf5ea; font-size: .84rem; }
+app-root .market-tabs button:hover { color: #fff; border-color: #74a982; background: #215d3e; }
+app-root .market-tabs .market-tab--active,
+app-root .market-theme--sensex .market-tabs .market-tab--active,
+app-root .market-theme--gas .market-tabs .market-tab--active {
+  color: #173f2d;
+  border-color: #d5ead3;
+  background: #d5ead3;
+}
+app-root .market-theme--sensex .market-tabs,
+app-root .market-theme--gas .market-tabs { border-color: #2c6e49; }
+app-root .workspace-layout { grid-template-columns: 136px minmax(0, 1fr); gap: .42rem; }
+app-root .workspace-shell { gap: .38rem; }
+app-root .workspace-brand { padding-bottom: .38rem; }
+app-root .workspace-brand strong { color: #fff; font-size: .9rem; }
+app-root .workspace-brand small { color: #c5ddc8; font-size: .66rem; }
+app-root .market-tab-group { gap: .14rem; }
+app-root .market-tab-group > button,
+app-root .workspace-nav-actions > button { padding: .36rem .48rem; font-size: .76rem; }
+app-root .workspace-nav-actions { gap: .14rem; padding-top: .35rem; }
+app-root .workspace-nav-actions__primary { color: #fff !important; background: #25834d !important; }
+app-root .workspace-nav-actions__primary:hover { background: #176c3c !important; }
+app-root .workspace-heading,
+app-root .chart-panel,
+app-root .positions-panel,
+app-root .safety-panel,
+app-root .login-card,
+app-root .logs-launch,
+app-root .evaluation-panel,
+app-root .market-card,
+app-root .prepared-chart,
+app-root .prepared-grid section,
+app-root .token-card,
+app-root .instrument-sync-card,
+app-root .control-center-card,
+app-root .daily-analysis-modal,
+app-root .logs-modal {
+  color: #173f2d !important;
+  background: #f9fcf7 !important;
+  border-color: #c6dac5 !important;
+  box-shadow: 0 3px 12px rgba(25, 74, 48, .08);
+}
+app-root .workspace-heading { min-height: 54px; padding: .48rem .68rem; }
+app-root .workspace-heading h1 { color: #173f2d; font-size: 1.12rem; }
+app-root .workspace-heading .eyebrow { color: #34734b; font-size: .68rem; }
+app-root .workspace-heading > div > p:last-of-type { color: #557460; font-size: .75rem; }
+app-root .workspace-heading__metrics { gap: .22rem; margin-top: .32rem; }
+app-root .workspace-heading__metrics span { padding: .16rem .4rem; color: #315b43; background: #edf6eb; font-size: .7rem; }
+app-root .workspace-actions { gap: .22rem; }
+app-root .workspace-actions button,
+app-root .workspace-nav-actions button { min-height: 31px; font-size: .76rem; }
+app-root :is(.market-card, .prepared-chart, .prepared-grid section, .market-strip article,
+  .readiness-grid article, .option-routing-panel > div, .hz-summary > div, .chart-status-rail > div,
+  .daily-analysis-summary article, .daily-analysis-section, .daily-analysis-insight,
+  .narrator-controls, .narrator-category-grid label, .narrator-toast) {
+  color: #173f2d;
+  background: #f2f8f0;
+  border-color: #c6dac5;
+}
+app-root :is(.market-strip, .readiness-grid, .option-routing-panel, .hz-summary, .narrator-category-grid) {
+  background: #c6dac5;
+  border-color: #c6dac5;
+}
+app-root :is(.market-strip article, .readiness-grid article, .option-routing-panel > div, .hz-summary > div) {
+  padding: .42rem .56rem;
+}
+app-root .chart-panel { border-radius: 11px; }
+app-root .chart-panel > .panel-heading { min-height: 42px; padding: .38rem .6rem; }
+app-root .chart-panel > .panel-heading strong { color: #173f2d; font-size: .9rem; }
+app-root .chart-status-rail { background: #c6dac5; border-color: #c6dac5; }
+app-root .chart-status-rail > div { gap: .08rem; padding: .29rem .55rem; background: #f2f8f0; }
+app-root .chart-status-rail span,
+app-root :is(.signal-row span, .evaluation-row span, .market-strip article > span,
+  .prepared-grid span, .prepared-chart span, .panel-heading span, .daily-analysis-section-heading > small,
+  .daily-analysis-table td small, .narrator-event > div, .narrator-toast span, .narrator-toast small) {
+  color: #557460;
+}
+app-root .chart-status-rail span { font-size: .62rem; }
+app-root .chart-status-rail strong { color: #173f2d; font-size: .8rem; }
+app-root .signal-row, app-root .evaluation-row { padding: .4rem .55rem; border-color: #d5e3d3; }
+app-root .signal-row strong, app-root .evaluation-row strong { color: #173f2d; font-size: .83rem; }
+app-root .market-strip article { padding: .4rem .55rem; }
+app-root .market-strip article small { color: #557460; font-size: .72rem; }
+app-root .panel-heading { border-color: #c6dac5; }
+app-root :is(.market-home__heading p:last-child, .login-copy p:last-child, .workspace-heading p,
+  .prepared-chart p, .prepared-grid p, .safety-panel p, .instrument-sync-card p,
+  .daily-analysis-insight p, .daily-analysis-flags ul, .daily-analysis-prompt p,
+  .narrator-controls > p, .narrator-event p) { color: #4f705a; }
+app-root :is(h1, h2, h3, h4, .market-card strong, .market-home h1, .login-card h2,
+  .panel-heading strong, .market-strip strong, .readiness-grid strong, .option-routing-panel strong,
+  .hz-summary strong, .evaluation-row strong, .signal-row strong, .daily-analysis-session strong,
+  .daily-analysis-summary article > strong, .daily-analysis-table td strong, .narrator-event strong,
+  .narrator-toast strong) { color: #173f2d; }
+app-root .eyebrow,
+app-root :is(.daily-analysis-header span, .daily-analysis-section-heading > div > span,
+  .daily-analysis-insight > span, .daily-analysis-session > div > span) { color: #34734b; }
+app-root :is(input, select, textarea, .timeframe-control select,
+  .daily-analysis-controls input, .daily-analysis-prompt textarea) {
+  color: #173f2d;
+  background: #ffffff;
+  border-color: #a9c6ad;
+}
+app-root input::placeholder, app-root textarea::placeholder { color: #718d77; }
+app-root :is(input, select, textarea, button, a, summary):focus-visible {
+  outline: 3px solid rgba(37, 131, 77, .32);
+  outline-offset: 2px;
+}
+app-root button { color: #fff; background: #25834d; }
+app-root button:hover:not(:disabled) { background: #176c3c; }
+app-root .secondary-button,
+app-root .market-tabs button,
+app-root .daily-analysis-close,
+app-root .narrator-toast button {
+  color: #24583a;
+  background: #e5f1e3;
+  border: 1px solid #bdd5bf;
+}
+app-root .secondary-button:hover:not(:disabled) { color: #173f2d; background: #d5ead3; }
+app-root .workspace-nav-actions__primary,
+app-root .workspace-nav-actions__primary:hover:not(:disabled) { color: #fff; }
+app-root .mute-alerts-button.muted { color: #563e08; background: #f4e7b7; border-color: #dfc875; }
+app-root :is(.good, .readiness-pass > span, .daily-analysis-table .daily-analysis-peak,
+  .narrator-event--opportunity, .narrator-toast--opportunity) { color: #167143 !important; }
+app-root :is(.bad, .form-error, .daily-analysis-table .daily-analysis-adverse,
+  .narrator-event--critical, .narrator-toast--critical) { color: #a9363e !important; }
+app-root .alert-strip, app-root .feed-notice--warning,
+app-root .daily-analysis-flags h4, app-root .readiness-grid article:not(.readiness-pass) > span {
+  color: #73540e;
+  background: #fbf3d9;
+  border-color: #e2d29a;
+}
+app-root .risk-override-button--active,
+app-root .narrator-event--critical, app-root .narrator-toast--critical { background: #fbe8e6; }
+app-root .logs-backdrop { background: rgba(18, 53, 35, .34); backdrop-filter: blur(3px); }
+app-root .logs-modal, app-root .daily-analysis-modal { border-radius: 14px; }
+app-root .logs-modal .panel-heading,
+app-root .daily-analysis-header,
+app-root .daily-analysis-controls,
+app-root .report-tools,
+app-root .narrator-controls { background: #edf6eb; border-color: #c6dac5; }
+app-root .daily-analysis-header h2 { color: #173f2d; }
+app-root .daily-analysis-header p,
+app-root .daily-analysis-session > small,
+app-root .daily-analysis-controls > span { color: #557460; }
+app-root .daily-analysis-controls label { color: #315b43; }
+app-root .daily-analysis-summary article { padding: .58rem .68rem; background: #f2f8f0; }
+app-root .daily-analysis-summary article > span,
+app-root .daily-analysis-summary article > small { color: #557460; }
+app-root .daily-analysis-summary article > strong { color: #173f2d; font-size: 1.15rem; }
+app-root .daily-analysis-section { padding: .68rem; background: #f7fbf5; }
+app-root .daily-analysis-section-heading h3 { color: #173f2d; }
+app-root .daily-analysis-table { border-color: #bdd5bf; }
+app-root .daily-analysis-table th { color: #244f36; background: #dcebd9; border-color: #bdd5bf; }
+app-root .daily-analysis-table td { color: #294c35; border-color: #d4e2d1; }
+app-root .daily-analysis-table td strong { color: #173f2d; }
+app-root .daily-analysis-table td small { color: #557460; }
+app-root .daily-analysis-table tbody tr:nth-child(even) { background: #f0f7ee; }
+app-root .daily-analysis-table tbody tr:hover { background: #e4f1e1; }
+app-root .daily-analysis-table .daily-analysis-coverage { color: #73540e; }
+app-root .daily-analysis-insight { background: #f2f8f0; border-color: #c6dac5; }
+app-root .daily-analysis-insight p,
+app-root .daily-analysis-flags ul,
+app-root .daily-analysis-prompt p { color: #4f705a; }
+app-root .daily-analysis-state { color: #315b43; background: #edf6eb; border-color: #bdd5bf; }
+app-root .daily-analysis-state--error { color: #8d3037; background: #fbe8e6; border-color: #dfa6a3; }
+app-root .daily-analysis-controls button, app-root .daily-analysis-prompt button,
+app-root .narrator-mode button.active { color: #fff; background: #25834d; border-color: #25834d; }
+app-root .narrator-voice-row label { color: #315b43; }
+app-root .narrator-category-grid { background: #c6dac5; }
+app-root .narrator-category-grid label { color: #557460; background: #f7fbf5; }
+app-root .narrator-category-grid label.enabled { color: #173f2d; background: #e2f0df; }
+app-root .narrator-event { border-top-color: #d5e3d3; border-left-color: #88a990; }
+app-root .narrator-event > div { color: #557460; }
+app-root .narrator-toast { color: #173f2d; background: #f9fcf7; border-color: #bdd5bf; box-shadow: 0 .5rem 1.4rem rgba(25, 74, 48, .16); }
+app-root .narrator-toast span, app-root .narrator-toast small { color: #557460; }
+app-root .narrator-toast strong { color: #173f2d; }
+app-root .narrator-toast--critical { background: #fbe8e6; }
+app-root .narrator-toast--warning { background: #fbf3d9; }
+app-root .chart-attribution { color: #718d77; }
+app-root .market-card { min-height: 170px; padding: 1.1rem; }
+app-root .market-card--sensex, app-root .market-card--gas {
+  color: #173f2d;
+  background: linear-gradient(145deg, #f9fcf7, #e7f2e5);
+  border-color: #c6dac5;
+}
+app-root .workspace-brand__mark { color: #fff; }
+@media (max-width: 1250px) {
+  app-root .workspace-layout { grid-template-columns: 124px minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  app-root .market-tabs { background: #164b35; }
+  app-root .workspace-heading { padding: .48rem .58rem; }
+}
+@media (max-width: 560px) {
+  app-root main { width: calc(100% - .45rem); }
+  app-root .market-tabs { padding: .25rem; }
+  app-root .market-tab-group > button { min-height: 32px; }
 }
