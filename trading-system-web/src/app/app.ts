@@ -13,7 +13,7 @@ import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMar
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
-import { PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
+import { DailyDiagnostics, PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
 import { TradingLotConfiguration, TradingLotsService } from './trading-lots.service';
@@ -84,6 +84,12 @@ export class App implements OnInit, OnDestroy {
   protected reportLoading = false;
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
+  protected dailyAnalysisOpen = false;
+  protected dailyAnalysisLoading = false;
+  protected dailyAnalysisError = '';
+  protected dailyAnalysis: DailyDiagnostics | null = null;
+  protected dailyAnalysisDate = this.isoDateDaysAgo(0);
+  protected dailyAnalysisPromptCopied = false;
   protected pnlReportOpen = false;
   protected pnlReportLoading = false;
   protected pnlReportError = '';
@@ -447,6 +453,50 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected closeReport():void { this.reportOpen=false; }
+  protected openDailyAnalysis(): void {
+    this.dailyAnalysisOpen = true; this.dailyAnalysisLoading = true;
+    this.dailyAnalysisError = ''; this.dailyAnalysis = null;
+    this.subscriptions.add(this.paperReportService.getDaily(this.dailyAnalysisDate).subscribe({
+      next: value => { this.dailyAnalysis = value; this.dailyAnalysisLoading = false; this.refreshView(); },
+      error: error => { this.dailyAnalysisLoading = false;
+        this.dailyAnalysisError = error.status === 409 ? error.error?.message ?? "Today's analysis is available after 3:45 PM IST." : 'Unable to load the session analysis. Try refreshing the report.';
+        this.refreshView(); },
+    }));
+  }
+  protected closeDailyAnalysis(): void { this.dailyAnalysisOpen = false; }
+  protected dailyAnalysisPrompt(): string {
+    if (!this.dailyAnalysis) return '';
+    const p = this.dailyAnalysis;
+    return `Review the ${p.tradingDate} IST session using the attached production-backed Daily Analysis. Validate observations against the trade IDs, stop/target outcomes and telemetry. Separate confirmed defects from normal losing trades or missing evidence. Propose narrowly scoped corrections and regression tests; do not edit strategy or deploy until I approve.\n\n`+
+      `Closed legs: ${p.summary.completedTradeCount}; wins ${p.summary.wins}; losses ${p.summary.losses}; gross ₹${p.summary.grossPnl.toFixed(2)}; charges ₹${p.summary.costs.toFixed(2)}; net ₹${p.summary.netRealisedPnl.toFixed(2)}. Decisions ${p.summary.decisionCount} (${p.summary.acceptedDecisionCount} accepted, ${p.summary.rejectedDecisionCount} rejected).\n`+
+      p.trades.map(t => `${t.market} ${t.symbol} ${t.openedAtUtc}→${t.closedAtUtc ?? 'open'}: ${t.exitReason ?? 'open'}, net ₹${t.netRealisedPnl.toFixed(2)}; sampled MFE ${t.maximumFavourableExcursion ?? 'unavailable'}, MAE ${t.maximumAdverseExcursion ?? 'unavailable'} [${t.tradeId}]`).join('\n')+
+      `\nDecision outcomes: ${JSON.stringify(p.summary.outcomes)}\n`+
+      `\n\nTelemetry limitations: ${p.telemetryWarnings.join(' | ') || 'none reported'}`;
+  }
+  protected dailyAnalysisFlags(a: DailyDiagnostics): string[] {
+    const flags: string[] = [];
+    if (a.summary.completedTradeCount === 0) flags.push('No completed trades were persisted for this date; inspect the decision funnel and feed status before concluding the strategy missed a move.');
+    if (a.summary.decisionCount === 0) flags.push('No persisted strategy decisions were found. This can indicate missing decision telemetry or an inactive evaluation loop.');
+    if (a.summary.rejectedDecisionCount > 0) {
+      const leading = Object.entries(a.summary.outcomes).sort((left, right) => right[1] - left[1]).slice(0, 3);
+      flags.push(`Decision funnel: ${a.summary.acceptedDecisionCount} accepted / ${a.summary.rejectedDecisionCount} rejected. Most common recorded outcomes: ${leading.map(([name, count]) => `${name} (${count})`).join(', ') || 'not available'}.`);
+    }
+    if (a.summary.costs > 0) flags.push(`Recorded charges were ₹${a.summary.costs.toFixed(2)}; compare gross and net results because costs can erase a small gross edge.`);
+    const withMfe = a.trades.filter(t => t.maximumFavourableExcursion !== null);
+    const missingMfe = a.summary.completedTradeCount - withMfe.length;
+    if (missingMfe > 0) flags.push(`Peak-profit telemetry is missing for ${missingMfe} of ${a.summary.completedTradeCount} completed trades, so giveback cannot be assessed for those trades.`);
+    const givebacks = withMfe.filter(t => t.maximumFavourableExcursion! > Math.max(0, t.grossPnl));
+    if (givebacks.length) flags.push(`${givebacks.length} trade(s) exited below their recorded peak favourable excursion; review the trade rows and linked decision trail to distinguish ordinary pullback from thesis failure.`);
+    if (a.trades.some(t => !t.signalId)) flags.push('At least one trade has no linked signal ID; research-candidate linkage is incomplete for those rows.');
+    if (a.feeds.some(feed => !feed.isAvailable)) flags.push(`At least one recorded feed is unavailable (${a.feeds.filter(feed => !feed.isAvailable).map(feed => feed.provider).join(', ')}).`);
+    if (a.summary.lastCandleAtUtc) flags.push(`Last recorded candle: ${new Date(a.summary.lastCandleAtUtc).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST; compare against the expected session close.`);
+    return flags.length ? flags : ['No obvious data-quality or outcome flags detected in the fields returned. This is not a strategy-performance certification.'];
+  }
+  protected async copyDailyAnalysisPrompt(): Promise<void> {
+    await navigator.clipboard.writeText(this.dailyAnalysisPrompt());
+    this.dailyAnalysisPromptCopied = true;
+    setTimeout(() => { this.dailyAnalysisPromptCopied = false; this.refreshView(); }, 2500);
+  }
   protected openPnlReport():void { this.controlsOpen=false; this.pnlReportOpen=true; }
   protected closePnlReport():void { this.pnlReportOpen=false; }
   protected searchPnl():void {

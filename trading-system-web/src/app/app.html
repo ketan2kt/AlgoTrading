@@ -75,6 +75,7 @@
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
+          <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           <button type="button" (click)="openReport()">Performance</button>
           <button type="button" (click)="openPnlReport()">P&amp;L</button>
           <button type="button" (click)="openLogs()">Research</button>
@@ -889,6 +890,28 @@
                   <article class="evaluation-row"><div><span>Contract</span><strong>{{trade.contract}}</strong></div><div><span>Entry / exit</span><strong>{{trade.entryPrice|number:'1.2-2'}} / {{trade.exitPrice|number:'1.2-2'}}</strong></div><div><span>Quantity</span><strong>{{trade.quantity}}</strong></div><div><span>Result</span><strong>{{trade.exitReason}}</strong></div><div><span>P&amp;L</span><strong [class.good]="trade.realisedPnl>=0" [class.bad]="trade.realisedPnl<0">₹{{trade.realisedPnl|number:'1.2-2'}}</strong></div><div><span>Exited IST</span><strong>{{trade.exitTimeUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</strong></div></article>
                 }
               </div>
+            }
+          </section>
+        </div>
+        }
+
+        @if (dailyAnalysisOpen) {
+        <div class="logs-backdrop" (click)="closeDailyAnalysis()">
+          <section class="evaluation-panel logs-modal daily-analysis-modal" role="dialog" aria-modal="true" aria-label="Daily trading analysis" (click)="$event.stopPropagation()">
+            <div class="panel-heading"><div><span>SESSION REVIEW</span><strong>Daily Analysis</strong></div><button type="button" (click)="closeDailyAnalysis()">Close</button></div>
+            <div class="daily-analysis-controls"><label>Session date <input type="date" [(ngModel)]="dailyAnalysisDate" /></label><button type="button" (click)="openDailyAnalysis()">Load analysis</button></div>
+            @if (dailyAnalysisLoading) { <p class="empty-copy">Loading trade and decision evidence…</p> }
+            @else if (dailyAnalysisError) { <p class="form-error" role="alert">{{dailyAnalysisError}}</p> }
+            @else if (dailyAnalysis; as a) {
+              <p class="empty-copy">{{a.tradingDate}} · Generated {{a.generatedAtUtc | date:'short'}}</p>
+              <div class="daily-analysis-summary"><div><span>Closed legs</span><strong>{{a.summary.completedTradeCount}}</strong></div><div><span>Wins / losses</span><strong>{{a.summary.wins}} / {{a.summary.losses}}</strong></div><div><span>Gross</span><strong>₹{{a.summary.grossPnl|number:'1.2-2'}}</strong></div><div><span>Charges</span><strong>₹{{a.summary.costs|number:'1.2-2'}}</strong></div><div><span>Net realised</span><strong [class.good]="a.summary.netRealisedPnl>0" [class.bad]="a.summary.netRealisedPnl<0">₹{{a.summary.netRealisedPnl|number:'1.2-2'}}</strong></div><div><span>Decisions</span><strong>{{a.summary.acceptedDecisionCount}} / {{a.summary.rejectedDecisionCount}} accepted / rejected</strong></div></div>
+              <h3>Trade by trade</h3><div class="daily-analysis-table"><table><thead><tr><th>Market / contract</th><th>Entry → exit (IST)</th><th>Reason</th><th>Gross</th><th>Charges</th><th>Net</th><th>Peak / adverse</th></tr></thead><tbody>@for (t of a.trades; track t.tradeId) { <tr><td>{{t.market}} · {{t.symbol}}<small>{{t.strategy}} · {{t.direction}} · qty {{t.quantity}}</small></td><td>{{t.openedAtUtc|date:'HH:mm:ss':'Asia/Kolkata'}} → {{t.closedAtUtc ? (t.closedAtUtc|date:'HH:mm:ss':'Asia/Kolkata') : 'Open'}}</td><td>{{t.exitReason ?? 'Open'}}</td><td>₹{{t.grossPnl|number:'1.0-0'}}</td><td>₹{{t.costs|number:'1.0-0'}}</td><td [class.good]="t.netRealisedPnl>0" [class.bad]="t.netRealisedPnl<0">₹{{t.netRealisedPnl|number:'1.0-0'}}</td><td>₹{{t.maximumFavourableExcursion===null?'n/a':(t.maximumFavourableExcursion|number:'1.0-0')}} / ₹{{t.maximumAdverseExcursion===null?'n/a':(t.maximumAdverseExcursion|number:'1.0-0')}}</td></tr> }</tbody></table></div>
+              <h3>What went right</h3>@if (a.summary.wins===0) { <p>No profitable closed trades recorded.</p> } @else { <p>{{a.summary.wins}} closed legs finished profitable after costs. Review the winners above for strategy, timing and exit context.</p> }
+              <h3>What went wrong / needs review</h3>@if (a.summary.losses===0 && a.summary.netRealisedPnl>=0) { <p>No realised losing legs are recorded. Check the decision trail and telemetry flags for process issues that P&amp;L alone may not show.</p> } @else { <p>{{a.summary.losses}} closed legs lost money; session net was ₹{{a.summary.netRealisedPnl|number:'1.2-2'}} after ₹{{a.summary.costs|number:'1.2-2'}} in recorded charges. The evidence below highlights what can be verified and what still needs review.</p> }
+              <h3>Review flags—not automatic diagnoses</h3><ul>@for (flag of dailyAnalysisFlags(a); track flag) { <li>{{flag}}</li> }</ul>
+              @if (a.decisions.length) { <h3>Decision trail</h3><div class="daily-analysis-table"><table><thead><tr><th>Time (IST)</th><th>Market / source</th><th>Outcome</th><th>Regime / bias</th><th>Evidence</th></tr></thead><tbody>@for (d of a.decisions; track d.candleTimeUtc + d.source + d.outcome) { <tr><td>{{d.candleTimeUtc|date:'HH:mm:ss':'Asia/Kolkata'}}</td><td>{{d.market}} / {{d.source}}</td><td>{{d.outcome}}</td><td>{{d.regime ?? 'n/a'}} / {{d.bias ?? 'n/a'}}</td><td>{{d.evidenceJson}}</td></tr> }</tbody></table></div> }
+              @if (a.telemetryWarnings.length) { <h3>Data limitations</h3><ul>@for (warning of a.telemetryWarnings; track warning) { <li>{{warning}}</li> }</ul> }
+              <h3>Correction prompt</h3><p class="empty-copy">Copy this into Codex to review the evidence and propose changes. It explicitly asks for evidence and tests before changes.</p><textarea readonly rows="8" [value]="dailyAnalysisPrompt()"></textarea><button type="button" (click)="copyDailyAnalysisPrompt()">{{dailyAnalysisPromptCopied?'Copied':'Copy correction prompt'}}</button>
             }
           </section>
         </div>

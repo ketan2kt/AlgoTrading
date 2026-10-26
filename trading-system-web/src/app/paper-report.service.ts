@@ -18,10 +18,13 @@ export interface PaperStrategyReplayReport { sourceTrades:number; tradesWithPric
 export interface PaperTradingReport { daily:DailyPaperPerformance[]; trades:PaperTradeHistoryItem[]; breakdown:StrategyPerformanceBreakdown[]; decisionFunnel:StrategyDecisionFunnel[]; recommendations:ResearchRecommendation[]; research:PaperResearchSummary; shadowStructure:ShadowStructurePerformance[]; replay:PaperStrategyReplayReport; observedAtUtc:string; }
 export interface PaperMarketPnl { market:string; trades:number; wins:number; losses:number; grossProfit:number; grossLoss:number; charges:number; netPnl:number; }
 export interface PaperPnlSummary { from:string; to:string; market:string; markets:PaperMarketPnl[]; totalTrades:number; totalCharges:number; totalNetPnl:number; observedAtUtc:string; }
+export type DailyDiagnosticsTrade={market:string;tradeId:string;symbol:string;strategy:string;direction:string;quantity:number;entryPrice:number;exitOrCurrentPrice:number;openedAtUtc:string;closedAtUtc:string|null;exitReason:string|null;grossPnl:number;costs:number;netRealisedPnl:number;maximumFavourableExcursion:number|null;maximumAdverseExcursion:number|null;signalId:string|null};
+export type DailyDiagnostics={tradingDate:string;market:string;generatedAtUtc:string;summary:{decisionCount:number;acceptedDecisionCount:number;rejectedDecisionCount:number;completedTradeCount:number;openTradeCount:number;wins:number;losses:number;grossPnl:number;costs:number;netRealisedPnl:number;outcomes:Record<string,number>;lastCandleAtUtc:string|null};decisions:{market:string;source:string;candleTimeUtc:string;outcome:string;confidence:number;regime:string|null;bias:string|null;price:number|null;evidenceJson:string;signalId:string|null}[];trades:DailyDiagnosticsTrade[];systemEvents:{occurredAtUtc:string;severity:string;eventType:string;message:string;detailsJson:string|null}[];telemetryWarnings:string[];feeds:{provider:string;isAvailable:boolean;errorCode:string|null;lastSuccessAtUtc:string|null}[]};
 @Injectable({providedIn:'root'})
 export class PaperReportService {
   private readonly http=inject(HttpClient);
   get(){return this.http.get<PaperTradingReport>('/api/market-analysis?days=30');}
+  getDaily(date:string){return this.http.get<DailyDiagnostics>('/api/market-analysis/daily',{params:{date}});}
   getPnlSummary(from:string,to:string,market:string){
     return this.http.get<PaperPnlSummary>('/api/market-analysis/pnl-summary',{params:{from,to,market}});
   }

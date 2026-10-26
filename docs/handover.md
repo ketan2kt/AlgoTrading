@@ -1,6 +1,24 @@
 # Current handover
 
-Updated: 2026-10-24 (Asia/Calcutta).
+Updated: 2026-10-26 (Asia/Calcutta).
+
+## Daily Analysis session report
+
+Added an administrator-only `/api/market-analysis/daily` endpoint and workspace
+button. The button opens a date-selectable report with IST entry/exit times, gross,
+charges, net P&L, MFE/MAE, decision counts/outcomes, decision evidence, feed health,
+telemetry flags, and a copyable evidence-based correction prompt. Same-day data is
+available from 15:45 IST; earlier dates remain queryable. No trading logic or live
+execution controls changed.
+
+Frontend production build passed; frontend tests passed 39/39 when the runner's temp
+directory was redirected into the writable workspace. Angular reports existing bundle
+and stylesheet budget warnings. Backend check could not start because this machine has
+only .NET 6.0.402 while `global.json` requires 10.0.302; the deployment workflow's
+quality gate uses that pinned SDK and runs the complete backend suite before deployment.
+Deployment is pending; only the four Daily Analysis files plus this handover update
+should be committed. Do not stage the unrelated Groww, docs, README, angular config,
+or temporary files.
 
 ## 24 October entry quality, profit protection and expansion-pair corrections
 
@@ -28,6 +46,9 @@ and paired (not individual leg) expectancy. Preserve unrelated working-tree chan
 Verification: Release solution build and full backend suite passed: 324 unit,
 82 contract, 18 integration and two architecture tests; three opt-in PostgreSQL tests
 skipped. No frontend changes. Deployment authorized to main; dispatch once, no polling.
+Commit 40ef756 pushed; deployment dispatched:
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40096569561
+Completion is unverified.
 
 
 ## 23 October stop-loss incident
