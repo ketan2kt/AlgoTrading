@@ -20,8 +20,12 @@ public sealed class PersistentDirectionalThesisV1Tests
                 Math.Min(open, close) - .50m, close));
             price = close;
         }
-        // The last green candle is immediately sold, producing the current entry window.
-        bars.Add(Bar(15, price, price + .20m, price - .50m, price - .18m));
+        bars[^1] = bars[^1] with
+        {
+            Low = bars[^2].Low - .05m,
+            Close = bars[^2].Low - .05m
+        };
+        // The green pullback candle is immediately followed by a bearish range break.
 
         var result = PersistentDirectionalThesisAnalyzerV1.Analyze(
             bars, 100m, 101m, 99.5m);
@@ -33,6 +37,37 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.Equal(DirectionalThesisPhaseV1.EntryWindow, result.Phase);
         Assert.Equal("PaperEligible", result.Status);
         Assert.Equal(new DateOnly(2026, 10, 16), result.PaperEligibleFrom);
+    }
+
+    [Fact]
+    public void BullishPersistentThesisDoesNotEnterOnRedCandleAfterPullback()
+    {
+        var bars = Enumerable.Range(0, 15).Select(index =>
+        {
+            var open = 100m + index * .20m;
+            var close = open + .12m;
+            return Bar(index, open, close + .10m, open - .10m, close);
+        }).ToList();
+        bars[^2] = Bar(13, 102.6m, 102.7m, 102.1m, 102.2m);
+        bars[^1] = Bar(14, 102.2m, 102.5m, 101.8m, 101.9m);
+        var previous = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version, "PaperEligible",
+            new DateOnly(2026, 10, 26), Direction.Buy, .75m,
+            DirectionalThesisPhaseV1.Maintained, 9, 1, true, false, false, []);
+
+        var rejected = PersistentDirectionalThesisAnalyzerV1.Analyze(
+            bars, 101m, 102m, 99m, previous);
+
+        Assert.Equal(Direction.Buy, rejected.Direction);
+        Assert.False(rejected.WouldEnter);
+
+        // A completed bullish close that reclaims the pullback candle validates continuation.
+        bars[^1] = Bar(14, 102.2m, 103.0m, 102.1m, 102.9m);
+        var confirmed = PersistentDirectionalThesisAnalyzerV1.Analyze(
+            bars, 101m, 102m, 99m, previous);
+
+        Assert.True(confirmed.WouldEnter);
+        Assert.Equal(DirectionalThesisPhaseV1.EntryWindow, confirmed.Phase);
     }
 
     [Fact]
@@ -129,6 +164,8 @@ public sealed class PersistentDirectionalThesisV1Tests
             var close = open - .03m;
             return Bar(index, open, open + .10m, close - .10m, close);
         }).ToArray();
+        bars[^2] = Bar(13, 100.4m, 100.6m, 100.2m, 100.55m);
+        bars[^1] = Bar(14, 100.55m, 100.58m, 100.1m, 100.15m);
         var thesis = new PersistentDirectionalThesisV1(
             PersistentDirectionalThesisAnalyzerV1.Version,
             PersistentDirectionalThesisAnalyzerV1.Status,

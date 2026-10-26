@@ -56,6 +56,10 @@ public static class PersistentDirectionalPaperEntryPolicyV1
         if (source.Count < 15)
             return Reject("At least 15 completed candles are required.");
 
+        if (!PersistentDirectionalThesisAnalyzerV1.HasFreshFailedPullbackConfirmation(
+                source.TakeLast(10).ToArray(), thesis.Direction))
+            return Reject("The latest completed candle has not confirmed the pullback in the thesis direction.");
+
         var bars = source.TakeLast(15).ToArray();
         var recent = bars.TakeLast(5).ToArray();
         var latest = recent[^1];
@@ -178,7 +182,7 @@ public static class PersistentDirectionalThesisAnalyzerV1
             : direction == Direction.Buy && bullishOpeningBreak;
         var latest = recent[^1];
         var extensionFromFast = Math.Abs(latest.Close - fast) / atr;
-        var recentFailure = HasRecentFailedCounterTrendAttempt(recent, direction);
+        var recentFailure = HasFreshFailedPullbackConfirmation(recent, direction);
         var continuationResumption = direction is not null && rangeBreak &&
             confidence >= .68m && alignedBars >= 8 && extensionFromFast <= 1.75m &&
             HasControlledContinuationResumption(recent, direction.Value, atr);
@@ -264,11 +268,19 @@ public static class PersistentDirectionalThesisAnalyzerV1
         return count;
     }
 
-    private static bool HasRecentFailedCounterTrendAttempt(StrategyPriceBar[] bars,
+    public static bool HasFreshFailedPullbackConfirmation(StrategyPriceBar[] bars,
         Direction? direction)
     {
-        if (direction is null || bars.Length < 3) return false;
-        return FailedCounterTrendAttempts(bars.TakeLast(3).ToArray(), direction.Value) > 0;
+        if (direction is null || bars.Length < 2) return false;
+        var pullback = bars[^2];
+        var confirmation = bars[^1];
+        var countertrendPullback = direction == Direction.Buy
+            ? pullback.Close < pullback.Open
+            : pullback.Close > pullback.Open;
+        var confirmedInThesisDirection = direction == Direction.Buy
+            ? confirmation.Close > confirmation.Open && confirmation.Close > pullback.High
+            : confirmation.Close < confirmation.Open && confirmation.Close < pullback.Low;
+        return countertrendPullback && confirmedInThesisDirection;
     }
 
     private static bool HasControlledContinuationResumption(StrategyPriceBar[] bars,

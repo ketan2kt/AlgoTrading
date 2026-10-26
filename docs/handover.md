@@ -2,6 +2,30 @@
 
 Updated: 2026-10-26 (Asia/Calcutta).
 
+## Persistent-trend cooling-off entry correction (26 October)
+
+Production Nifty audit for 26 October showed a bullish persistent-thesis window at
+11:08 followed by a 11:09 CE entry even though the ordinary strategy snapshot had no
+confirmed VWAP/EMA pullback setup and showed zero room at the opening-range edge. The
+persistent fallback bypassed first-entry timing, market-location, and entry-quality
+checks. That 650-quantity NIFTY26OCT22600CE trade entered at 167.00, stopped at
+151.35, and realised -₹10,457.52 net including ₹285.02 costs. Persistent pullback
+evidence was allowed to remain valid for multiple candles, so a later countertrend
+candle could still inherit the entry window.
+
+Local changes now require the latest completed candle to close in the thesis direction
+beyond the immediately preceding countertrend candle's full range. This is symmetric
+for CE/PE and preserves the separate compact-base breakout route. Nifty persistent
+fallback entries also honor the existing first-entry timing, market-location, and
+entry-quality policies; Sensex persistent fallback honors market location. Regular
+strategy entries and all risk/exit behavior are unchanged. Added regression tests for
+red-candle bullish rejection, fresh bullish/bearish continuation confirmation, and the
+paper entry policy.
+
+Verification is incomplete: `git diff --check` passed, but the focused backend test
+could not start because only .NET SDK 6.0.402 is installed while `global.json` requires
+10.0.302. Changes are not committed or deployed; user has not yet requested deployment.
+
 ## Daily Analysis session report
 
 Added an administrator-only `/api/market-analysis/daily` endpoint and workspace

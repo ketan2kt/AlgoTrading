@@ -565,7 +565,7 @@ internal sealed partial class AutomatedPaperTradingService(
             PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix, StringComparison.Ordinal);
         var firstEntryTiming = FirstEntryTimingPolicy.Evaluate(strategyContext.RecentCandles,
             signal.Direction);
-        if (!firstEntryTiming.Permitted && !persistentDirectionalEntry)
+        if (!firstEntryTiming.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -616,7 +616,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
             strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
-        if (!location.Permitted && !persistentDirectionalEntry)
+        if (!location.Permitted && (!paperResearchEntry || persistentDirectionalEntry))
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -658,7 +658,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
             signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume);
-        if (!entryQuality.Permitted && !paperResearchEntry)
+        if (!entryQuality.Permitted && (!paperResearchEntry || persistentDirectionalEntry))
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,

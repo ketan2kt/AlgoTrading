@@ -336,7 +336,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
                 AverageTrueRange(candles.TakeLast(15).ToArray()),
                 openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
-            if (!location.Permitted && !paperResearchEntry)
+            if (!location.Permitted && (!paperResearchEntry || persistentDirectionalEntry))
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MarketLocationRejected", decision.Confidence,
