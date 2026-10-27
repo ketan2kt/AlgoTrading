@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using TradingSystem.Api.PublicContact;
 using TradingSystem.Domain.Trading;
 
@@ -29,12 +30,20 @@ public sealed class PublicContactTests
     }
 
     [Theory]
-    [InlineData(true, "sarthico.com", true)]
-    [InlineData(true, "attacker.example", false)]
-    [InlineData(false, "sarthico.com", false)]
-    public async Task CaptchaRequiresValidTokenAndExpectedHost(bool valid, string host, bool expected)
+    [InlineData(true, "sarthico.com", "CONTACT_SUBMIT", 0.9, true)]
+    [InlineData(true, "attacker.example", "CONTACT_SUBMIT", 0.9, false)]
+    [InlineData(false, "sarthico.com", "CONTACT_SUBMIT", 0.9, false)]
+    [InlineData(true, "sarthico.com", "OTHER_ACTION", 0.9, false)]
+    [InlineData(true, "sarthico.com", "CONTACT_SUBMIT", 0.2, false)]
+    public async Task CaptchaRequiresValidTokenExpectedHostActionAndScore(bool valid, string host, string action,
+        double score, bool expected)
     {
-        using var client = new HttpClient(new StubHandler($"{{\"tokenProperties\":{{\"valid\":{valid.ToString().ToLowerInvariant()},\"hostname\":\"{host}\"}}}}"));
+        var body = JsonSerializer.Serialize(new
+        {
+            tokenProperties = new { valid, hostname = host, action },
+            riskAnalysis = new { score }
+        });
+        using var client = new HttpClient(new StubHandler(body));
         var verifier = new RecaptchaVerifier(client, Ready);
         Assert.Equal(expected, await verifier.VerifyAsync("one-time-token", null, "Unit test", CancellationToken.None));
     }
@@ -55,15 +64,17 @@ public sealed class PublicContactTests
 
     private sealed class StubHandler(string body) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal("https://recaptchaenterprise.googleapis.com/v1/projects/test-project/assessments", request.RequestUri?.ToString());
             Assert.Equal("private-api-key", request.Headers.GetValues("X-Goog-Api-Key").Single());
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            using var requestBody = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            Assert.Equal("CONTACT_SUBMIT", requestBody.RootElement.GetProperty("event").GetProperty("expectedAction").GetString());
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 }

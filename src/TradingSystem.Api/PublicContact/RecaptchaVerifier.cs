@@ -5,6 +5,8 @@ namespace TradingSystem.Api.PublicContact;
 
 public sealed class RecaptchaVerifier(HttpClient httpClient, PublicContactOptions options)
 {
+    private const string ExpectedAction = "CONTACT_SUBMIT";
+
     public async Task<bool> VerifyAsync(string token, string? remoteIp, string? userAgent, CancellationToken cancellationToken)
     {
         if (!options.IsReady || string.IsNullOrWhiteSpace(token) || token.Length > 2048)
@@ -18,6 +20,7 @@ public sealed class RecaptchaVerifier(HttpClient httpClient, PublicContactOption
             {
                 token,
                 siteKey = options.RecaptchaSiteKey,
+                expectedAction = ExpectedAction,
                 userIpAddress = remoteIp,
                 userAgent
             }
@@ -30,6 +33,11 @@ public sealed class RecaptchaVerifier(HttpClient httpClient, PublicContactOption
         return result.TryGetProperty("tokenProperties", out var properties) &&
                properties.TryGetProperty("valid", out var valid) && valid.GetBoolean() &&
                properties.TryGetProperty("hostname", out var hostname) &&
-               string.Equals(hostname.GetString(), options.ExpectedHostname, StringComparison.OrdinalIgnoreCase);
+               string.Equals(hostname.GetString(), options.ExpectedHostname, StringComparison.OrdinalIgnoreCase) &&
+               properties.TryGetProperty("action", out var action) &&
+               string.Equals(action.GetString(), ExpectedAction, StringComparison.Ordinal) &&
+               result.TryGetProperty("riskAnalysis", out var risk) &&
+               risk.TryGetProperty("score", out var score) && score.TryGetDouble(out var value) &&
+               value >= options.RecaptchaMinimumScore;
     }
 }

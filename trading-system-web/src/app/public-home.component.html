@@ -46,10 +46,12 @@
             <div class="company-form-row"><label>Company <span>(optional)</span><input name="company" [(ngModel)]="fields.company" maxlength="120" autocomplete="organization" placeholder="Your organization"></label><label>What can we help with? <select name="service" [(ngModel)]="fields.service" required><option value="" disabled>Select a service</option><option>Web development</option><option>Application development</option><option>AI applications</option><option>Other</option></select></label></div>
             <label>Your message <textarea name="message" [(ngModel)]="fields.message" required minlength="10" maxlength="4000" rows="4" placeholder="A few lines about what you have in mind…"></textarea></label>
             <label class="company-honeypot" aria-hidden="true">Website<input name="website" [(ngModel)]="fields.website" tabindex="-1" autocomplete="off"></label>
-            <div id="sarthico-contact-captcha" class="company-captcha"></div>
+            @if (captchaLoading) { <p class="company-contact__privacy" role="status">Loading spam protection…</p> }
+            @if (captchaReady) { <p class="company-contact__privacy" role="status">Spam protection runs automatically when you send.</p> }
+            @if (captchaError) { <p class="company-form-error" role="alert">{{ captchaError }}</p> }
             @if (error) { <p class="company-form-error" role="alert">{{ error }}</p> }
             @if (feedback) { <p class="company-form-success" role="status">{{ feedback }}</p> }
-            <button class="company-button company-button--primary" type="submit" [disabled]="!config?.enabled || contactForm.invalid || !captchaToken || busy">{{ busy ? 'Sending…' : 'Send enquiry' }} <span aria-hidden="true">↗</span></button>
+            <button class="company-button company-button--primary" type="submit" [disabled]="!config?.enabled || contactForm.invalid || !captchaReady || busy">{{ busy ? 'Sending…' : 'Send enquiry' }} <span aria-hidden="true">↗</span></button>
             <p class="company-contact__privacy">Protected by Google reCAPTCHA. Your message is used only to reply to you.</p>
           </form>
       </div>

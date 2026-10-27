@@ -4,13 +4,14 @@ The new Sarthico homepage is public at `/`; `/nifty` and `/sensex` retain their 
 
 ## Google reCAPTCHA
 
-Use the Google Cloud Fraud Defense console under the Google account chosen for Sarthico. Create a web **Challenge (v2) / checkbox** key limited to `sarthico.com` (and `www.sarthico.com` only if that host is actually used). Choose the Essentials tier if its allowance suits expected traffic. Create a separate Google Cloud API key in the same project, restricted to the reCAPTCHA Enterprise API. The backend sends the token to `projects.assessments.create`, checks validity and exact hostname, and never sends the API key to the browser. Google currently provides 10,000 free assessments per organization per month; without billing, further Essentials assessments receive a quota error until reset. Do not enable billing without reviewing that choice.
+Use the Google Cloud Fraud Defense console under the Google account chosen for Sarthico. The configured web key is a **score-based (v3) key**, limited to `sarthico.com` (and `www.sarthico.com` only if that host is actually used). The browser requests a `CONTACT_SUBMIT` token only when the visitor submits the form; no checkbox is shown. Create a separate Google Cloud API key in the same project, restricted to the reCAPTCHA Enterprise API. The backend creates an assessment and checks token validity, exact hostname, expected action, and a minimum score (default `0.5`). The API key is never sent to the browser. Google currently provides 10,000 free assessments per organization per month; without billing, further Essentials assessments receive a quota error until reset. Do not enable billing without reviewing that choice.
 
 Set these Azure App Service application settings (or local user secrets for development):
 
 | Setting | Value |
 | --- | --- |
-| `PublicContact__RecaptchaSiteKey` | Public site key / key ID of the checkbox widget |
+| `PublicContact__RecaptchaSiteKey` | Public site key / key ID for the score-based v3 integration |
+| `PublicContact__RecaptchaMinimumScore` | Optional risk threshold from `0` to `1`; defaults to `0.5` |
 | `PublicContact__RecaptchaProjectId` | Google Cloud project ID |
 | `PublicContact__RecaptchaApiKey` | Server API key, restricted to the reCAPTCHA Enterprise API |
 | `PublicContact__ExpectedHostname` | `sarthico.com` (default) |
