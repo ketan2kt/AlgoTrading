@@ -49,6 +49,21 @@ public sealed class PublicContactTests
     }
 
     [Fact]
+    public async Task CaptchaAcceptsV3TokensLongerThanTheOldCheckboxLimitWithinTheBound()
+    {
+        const int tokenLength = 3_000;
+        var body = JsonSerializer.Serialize(new
+        {
+            tokenProperties = new { valid = true, hostname = "sarthico.com", action = "CONTACT_SUBMIT" },
+            riskAnalysis = new { score = 0.9 }
+        });
+        using var client = new HttpClient(new StubHandler(body, tokenLength));
+        var verifier = new RecaptchaVerifier(client, Ready);
+
+        Assert.True(await verifier.VerifyAsync(new string('x', tokenLength), null, "Unit test", CancellationToken.None));
+    }
+
+    [Fact]
     public void EnquiryRecordsDeliveryLifecycleWithoutStoringCaptchaToken()
     {
         var now = DateTimeOffset.UtcNow;
@@ -62,7 +77,7 @@ public sealed class PublicContactTests
         Assert.Equal("Delivered", inquiry.DeliveryStatus);
     }
 
-    private sealed class StubHandler(string body) : HttpMessageHandler
+    private sealed class StubHandler(string body, int expectedTokenLength = 14) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -71,6 +86,7 @@ public sealed class PublicContactTests
             Assert.Equal("private-api-key", request.Headers.GetValues("X-Goog-Api-Key").Single());
             using var requestBody = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             Assert.Equal("CONTACT_SUBMIT", requestBody.RootElement.GetProperty("event").GetProperty("expectedAction").GetString());
+            Assert.Equal(expectedTokenLength, requestBody.RootElement.GetProperty("event").GetProperty("token").GetString()?.Length);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")

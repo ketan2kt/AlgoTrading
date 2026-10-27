@@ -23,7 +23,7 @@ public sealed class PublicContactController(
 
     [HttpPost]
     [EnableRateLimiting("public-contact")]
-    [RequestSizeLimit(12_000)]
+    [RequestSizeLimit(16_000)]
     public async Task<IActionResult> Submit([FromBody] ContactRequest request, CancellationToken cancellationToken)
     {
         if (!options.IsReady) return StatusCode(StatusCodes.Status503ServiceUnavailable,
@@ -58,7 +58,8 @@ public sealed class PublicContactController(
         (request.Company is null || request.Company.Length <= 120) &&
         request.Service is "Web development" or "Application development" or "AI applications" or "Other" &&
         !string.IsNullOrWhiteSpace(request.Message) && request.Message.Trim().Length is >= 10 and <= 4000 &&
-        !string.IsNullOrWhiteSpace(request.RecaptchaToken) && request.RecaptchaToken.Length <= 2048;
+        !string.IsNullOrWhiteSpace(request.RecaptchaToken) &&
+        request.RecaptchaToken.Length <= PublicContactOptions.MaximumRecaptchaTokenLength;
 
     public sealed record ContactRequest(string Name, string Email, string? Company, string Service,
         string Message, string RecaptchaToken, string? Website);

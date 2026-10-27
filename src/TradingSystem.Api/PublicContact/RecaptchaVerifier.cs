@@ -9,7 +9,7 @@ public sealed class RecaptchaVerifier(HttpClient httpClient, PublicContactOption
 
     public async Task<bool> VerifyAsync(string token, string? remoteIp, string? userAgent, CancellationToken cancellationToken)
     {
-        if (!options.IsReady || string.IsNullOrWhiteSpace(token) || token.Length > 2048)
+        if (!options.IsReady || string.IsNullOrWhiteSpace(token) || token.Length > PublicContactOptions.MaximumRecaptchaTokenLength)
             return false;
         var url = $"https://recaptchaenterprise.googleapis.com/v1/projects/{Uri.EscapeDataString(options.RecaptchaProjectId)}/assessments";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);

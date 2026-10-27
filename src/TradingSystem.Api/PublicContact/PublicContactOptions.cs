@@ -2,6 +2,8 @@ namespace TradingSystem.Api.PublicContact;
 
 public sealed class PublicContactOptions
 {
+    public const int MaximumRecaptchaTokenLength = 8_000;
+
     public string RecaptchaSiteKey { get; init; } = string.Empty;
     public string RecaptchaProjectId { get; init; } = string.Empty;
     public string RecaptchaApiKey { get; init; } = string.Empty;
