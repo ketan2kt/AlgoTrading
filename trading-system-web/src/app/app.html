@@ -61,6 +61,7 @@
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
+          <button type="button" (click)="preSessionOpen = true">Pre-Session</button>
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           <button type="button" (click)="openReport()">Performance</button>
           <button type="button" (click)="openPnlReport()">P&amp;L</button>
@@ -881,6 +882,7 @@
         </div>
         }
 
+        @if (preSessionOpen) { <app-pre-session-brief (closed)="preSessionOpen = false" /> }
         @if (dailyAnalysisOpen) {
         <div class="logs-backdrop" (click)="closeDailyAnalysis()">
           <section class="evaluation-panel logs-modal daily-analysis-modal" role="dialog" aria-modal="true" aria-label="Daily trading analysis" (click)="$event.stopPropagation()">

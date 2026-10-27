@@ -45,6 +45,7 @@ public sealed class TradingDbContext(
     public DbSet<PaperBrokerEvent> PaperBrokerEvents => Set<PaperBrokerEvent>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<ContactInquiry> ContactInquiries => Set<ContactInquiry>();
+    public DbSet<PreSessionBriefSnapshot> PreSessionBriefSnapshots => Set<PreSessionBriefSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -102,6 +103,15 @@ public sealed class TradingDbContext(
 
     private static void ConfigureTradingModel(ModelBuilder builder)
     {
+        builder.Entity<PreSessionBriefSnapshot>(entity =>
+        {
+            ConfigureAppendOnly(entity, "pre_session_brief_snapshots");
+            entity.Property(value => value.Market).HasMaxLength(40);
+            entity.Property(value => value.Stage).HasMaxLength(40);
+            entity.Property(value => value.PayloadJson).HasColumnType("jsonb");
+            entity.HasIndex(value => new { value.SessionDate, value.Market, value.Stage }).IsUnique();
+        });
+
         builder.Entity<ContactInquiry>(entity =>
         {
             ConfigureMutable(entity, "contact_inquiries");

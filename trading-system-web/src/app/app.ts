@@ -6,6 +6,7 @@ import { catchError, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { PublicHomeComponent } from './public-home.component';
+import { PreSessionBriefComponent } from './pre-session-brief.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
@@ -29,7 +30,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, RouterOutlet],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, PreSessionBriefComponent, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -86,6 +87,7 @@ export class App implements OnInit, OnDestroy {
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
   protected dailyAnalysisOpen = false;
+  protected preSessionOpen = false;
   protected dailyAnalysisLoading = false;
   protected dailyAnalysisError = '';
   protected dailyAnalysis: DailyDiagnostics | null = null;

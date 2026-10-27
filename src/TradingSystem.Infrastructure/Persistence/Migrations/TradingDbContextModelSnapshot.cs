@@ -811,6 +811,40 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.ToTable("market_regime_snapshots", "trading");
                 });
 
+            modelBuilder.Entity("TradingSystem.Domain.Trading.PreSessionBriefSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CapturedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateOnly>("SessionDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionDate", "Market", "Stage")
+                        .IsUnique();
+
+                    b.ToTable("pre_session_brief_snapshots", "trading");
+                });
+
             modelBuilder.Entity("TradingSystem.Domain.Trading.MarketStrategyAudit", b =>
                 {
                     b.Property<Guid>("Id")

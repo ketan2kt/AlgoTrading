@@ -1,6 +1,47 @@
 # Current handover
 
-Updated: 2026-10-26 (Asia/Calcutta).
+Updated: 2026-10-27 (Asia/Calcutta).
+
+## Pre-Session Brief (local implementation, not deployed)
+
+Added a read-only administrator Pre-Session dialog for Nifty and Sensex, a
+protected report endpoint, and immutable 08:45/09:12 IST morning snapshots.
+Prior recorded Groww index candles and same-prior-session option-chain samples
+provide timestamped levels and sampled OI context. Each market now stores a
+low-confidence provisional directional judgement (or `Unclear`) before the
+session. An immutable 15:45–16:30 IST outcome snapshot records observed
+direction, coverage and a correct/incorrect/unscored verdict; the dialog shows
+a rolling 60-day scorecard. The original morning judgement cannot be revised
+after seeing the session. Missed slots are reported, never backfilled. Global
+inputs, FII/DII, GIFT Nifty and verified pre-open prices remain explicitly
+unavailable until an authorized source exists; no values are fabricated.
+No trading decisions, risk rules, lot sizes, broker polling cadence, live
+controls, or orders were changed. See `docs/pre-session-brief.md`. Frontend
+build and all 43 frontend tests passed, including the missed-morning outcome
+regression. Existing bundle/style budget warnings remain.
+Backend check could not run locally because the repository pins .NET SDK
+10.0.302 and the machine has only 6.0.402. Backend compilation/tests and
+Postgres migration need CI verification before any deployment. No deployment
+requested or dispatched for this feature. Preserve unrelated dirty files.
+
+## Public Sarthico homepage and contact flow (deployment dispatched)
+
+Implemented a one-page software-development homepage at `/` with services, approach and contact section. Existing `/nifty` and `/sensex` workspaces remain sign-in protected. Contact submissions use Google reCAPTCHA checkbox with server-side Google Cloud assessment and hostname validation, bounded input/rate limits, PostgreSQL persistence, and retryable Gmail-compatible SMTP notification. User selected the same Gmail address for sender and recipient. See `docs/public-contact.md`. The reCAPTCHA site key, project ID, restricted API key and Gmail SMTP settings, including the user-entered app password, were saved in Azure App Service settings without revealing values or putting secrets in source. Scoped commit `445315d` was pushed to `main`; one deployment was dispatched at https://github.com/ketan2kt/AlgoTrading/actions/runs/40370746031 . Completion is unverified. The workflow runs backend checks, deploys, migrates and verifies health; do not poll unless the user asks. Backend suite previously passed (82 contract, 339 unit, 2 architecture, 23 integration; 3 PostgreSQL integration skipped). The pinned .NET 10 SDK is unavailable locally, so the workflow backend quality gate is authoritative for this release. Frontend production build and 41 tests passed on 26 October; existing bundle/style budget warnings remain. Local visual preview was inaccessible; visual QA and end-to-end email delivery remain unverified. No trading logic or live controls were changed. Preserve unrelated dirty files.
+
+## Unified green dialogs and richer desk palette (26 October)
+
+Frontend changes give Controls, P&L, Performance, Research Logs,
+Groww Positions, Hero Zero and Market Narrator the Daily Analysis-style title bar,
+bordered compact data cards and consistent close controls. Controls now uses a
+responsive two-column card layout; all control actions and trading logic are unchanged.
+The desk and chart near-white surfaces are visibly greener, with dark text and adjusted
+small-label contrast. Changed `app.html`, `styles.scss` and `nifty-chart.component.ts`.
+Frontend production build and all 40 tests passed using a workspace-local test temp
+directory; existing Angular bundle/style budget warnings remain. The Codex in-app
+browser timed out reaching the local preview, so rendered-page visual QA remains
+unverified. Scoped commit `5575d28` was pushed to `main`; deployment was dispatched
+once at https://github.com/ketan2kt/AlgoTrading/actions/runs/40325826643 .
+Completion is unverified; do not poll unless the user asks. Preserve other local edits.
 
 ## Portal-wide green UI refresh (26 October)
 
@@ -14,8 +55,11 @@ existing Angular bundle and component stylesheet budget warnings remain. The in-
 browser could not reach the local loopback preview, so rendered-page visual verification
 was unavailable. Isolated UI commit `2ee4cc2` was pushed to `main` and deployment run
 [40312839020](https://github.com/ketan2kt/AlgoTrading/actions/runs/40312839020) was
-accepted; completion is unverified. Other pending backend, strategy and telemetry edits
-were not included.
+accepted; completion is unverified. A follow-up combined release includes the Daily
+Analysis telemetry backend/migration and Groww diagnostics in commit `c52c82f`; run
+[40314289399](https://github.com/ketan2kt/AlgoTrading/actions/runs/40314289399) was
+accepted and completion remains unverified. The earlier UI run cannot be retroactively
+amended, so the combined run is the final complete release attempt.
 
 ## Daily Analysis excursion telemetry and UI follow-up (26 October)
 
@@ -32,10 +76,12 @@ timestamps and per-trade telemetry coverage.
 
 Frontend production build and 39/39 tests passed after redirecting Vitest's temporary
 files into the repository; existing bundle and stylesheet budget warnings remain.
-Backend test/build was blocked because the machine only has .NET SDK 6.0.402 while
-global.json pins 10.0.302. Changes are local and uncommitted; no deployment was
-dispatched. Historical trades without stored intra-trade samples can only show
-entry/exit-derived bounds and are flagged as incomplete. Preserve unrelated user edits.
+The machine lacks the pinned .NET SDK 10.0.302, so local backend tests could not run;
+the Azure release quality gate runs the backend suite before deployment. Main CI also
+reported an existing frontend dependency-audit failure; the Angular build and tests
+passed, but npm audit must be handled separately. Historical trades without stored
+intra-trade samples can only show entry/exit-derived bounds and are flagged as
+incomplete. Preserve local-only logs and settings.
 
 ## Shared index session maturity, re-entry and profit protection (26 October)
 

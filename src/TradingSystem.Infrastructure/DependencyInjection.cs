@@ -202,6 +202,9 @@ public static class DependencyInjection
         services.AddSingleton<HeroZeroMonitorState>();
         services.AddSingleton<IHeroZeroMonitorReader>(provider => provider.GetRequiredService<HeroZeroMonitorState>());
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
+        services.AddScoped<EfPreSessionBriefReader>();
+        services.AddScoped<IPreSessionBriefReader>(provider => provider.GetRequiredService<EfPreSessionBriefReader>());
+        services.AddHostedService<PreSessionBriefCaptureService>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
