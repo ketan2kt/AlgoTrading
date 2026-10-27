@@ -2,6 +2,26 @@
 
 Updated: 2026-10-27 (Asia/Calcutta).
 
+## Trade timeline and Hero Zero P&L inclusion (27 October; deployment requested)
+
+Workspace trade overlays now combine ordinary Nifty signals and Hero Zero
+positions in newest-first entry-time order, so a late-day HZ pair is no longer
+appended after the morning's trades. Daily Analysis already includes every
+`MarketPaperPosition` leg in its entry-time timeline and calculates closed-leg
+net P&L, win/loss counts, charges and gross from persisted position values. The
+P&L summary and performance history also include those position rows. Corrected
+their gross/charge derivation to use persisted `CostsPaid` (and gross = net +
+costs), rather than estimating from the last quote times original quantity;
+that estimate was wrong for partial exits. Added a regression for both HZ legs,
+their wins/losses, combined net, charges, and gross.
+
+Local backend verification was attempted but the bundled .NET invocation failed
+without diagnostics during restore/build (`Build FAILED`, zero reported errors);
+CI for the pushed exact commit is therefore the required validation before the
+single requested deployment. No strategy, trade, order, or live setting changes.
+Preserve unrelated untracked files. Deployment remains gated by successful push
+CI and must be dispatched once via `scripts/tasks.ps1`.
+
 ## Pre-Session Brief (repaired deployment dispatched)
 
 Added a read-only administrator Pre-Session dialog for Nifty and Sensex, a

@@ -291,7 +291,8 @@ internal sealed class EfTradingWorkspaceReader(
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
-                value.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal))).ToArray()
+                value.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal)))
+                .OrderByDescending(value => value.SignalTimeUtc).ToArray()
             : marketOverlays;
         if (market != "nifty")
         {

@@ -26,4 +26,24 @@ public sealed class PaperPnlSummaryCalculatorTests
         Assert.Equal(150m, nifty.Charges);
         Assert.Equal(1250m, result.Sum(value => value.NetPnl));
     }
+
+    [Fact]
+    public void CountsHeroZeroLegsAsTradesAndKeepsTheirCombinedNetResult()
+    {
+        PaperPnlObservation[] rows =
+        [
+            new("nifty", 27279.08m, 120.92m),
+            new("nifty", -6095.85m, 94.15m)
+        ];
+
+        var nifty = Assert.Single(PaperPnlSummaryCalculator.Summarise(rows));
+
+        Assert.Equal(2, nifty.Trades);
+        Assert.Equal(1, nifty.Wins);
+        Assert.Equal(1, nifty.Losses);
+        Assert.Equal(27400m, nifty.GrossProfit);
+        Assert.Equal(-6001.70m, nifty.GrossLoss);
+        Assert.Equal(215.07m, nifty.Charges);
+        Assert.Equal(21183.23m, nifty.NetPnl);
+    }
 }

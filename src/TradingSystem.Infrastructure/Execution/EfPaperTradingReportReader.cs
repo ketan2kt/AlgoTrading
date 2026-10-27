@@ -33,19 +33,11 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             .Where(value => value.ClosedAtUtc != null && value.ClosedAtUtc >= startUtc &&
                             value.ClosedAtUtc < endUtc &&
                             (market == "all" || value.Market == market))
-            .Select(value => new { value.Market, value.Direction, value.EntryPrice,
-                value.CurrentPrice, value.Quantity, value.RealisedPnl })
+            .Select(value => new { value.Market, value.RealisedPnl, value.CostsPaid })
             .ToListAsync(cancellationToken);
         observations.AddRange(marketPositions
             .Where(value => value.Market is "nifty" or "sensex" or "natural-gas")
-            .Select(value =>
-            {
-                var gross = (value.Direction == TradingSystem.Domain.Trading.Direction.Buy
-                    ? value.CurrentPrice - value.EntryPrice
-                    : value.EntryPrice - value.CurrentPrice) * value.Quantity;
-                return new PaperPnlObservation(value.Market, value.RealisedPnl,
-                    Math.Max(0m, gross - value.RealisedPnl));
-            }));
+            .Select(value => new PaperPnlObservation(value.Market, value.RealisedPnl, value.CostsPaid)));
 
         var summaries = PaperPnlSummaryCalculator.Summarise(observations);
         return new PaperPnlSummary(fromDate, toDate, market, summaries, summaries.Sum(value => value.Trades),
@@ -134,10 +126,8 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             .GroupBy(x => x.PositionId).ToDictionary(x => x.Key, x => x.Select(v => v.Value).ToArray());
         rows.AddRange(marketRows.Select(x =>
         {
-            var gross = (x.Position.Direction == TradingSystem.Domain.Trading.Direction.Buy
-                ? x.Position.CurrentPrice - x.Position.EntryPrice
-                : x.Position.EntryPrice - x.Position.CurrentPrice) * x.Position.Quantity;
-            var costs = Math.Max(0m, gross - x.Position.RealisedPnl);
+            var costs = x.Position.CostsPaid;
+            var gross = x.Position.RealisedPnl + costs;
             var costBreakdown = new PaperTradingCostBreakdown("paper-multi-market-estimate",
                 0m, 0m, 0m, 0m, 0m, 0m, 0m, costs);
             return new PaperTradeHistoryItem(x.Position.Id, x.TradingSymbol,

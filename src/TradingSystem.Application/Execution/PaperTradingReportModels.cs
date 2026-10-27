@@ -74,8 +74,10 @@ public static class PaperPnlSummaryCalculator
             .OrderBy(group => Array.IndexOf(MarketOrder, group.Key.ToLowerInvariant()))
             .Select(group => new PaperMarketPnl(group.Key.ToLowerInvariant(), group.Count(),
                 group.Count(value => value.NetPnl > 0), group.Count(value => value.NetPnl < 0),
-                group.Where(value => value.NetPnl > 0).Sum(value => value.NetPnl),
-                group.Where(value => value.NetPnl < 0).Sum(value => value.NetPnl),
+                group.Where(value => value.NetPnl + value.Charges > 0)
+                    .Sum(value => value.NetPnl + value.Charges),
+                group.Where(value => value.NetPnl + value.Charges < 0)
+                    .Sum(value => value.NetPnl + value.Charges),
                 group.Sum(value => value.Charges), group.Sum(value => value.NetPnl)))
             .ToArray();
 }
