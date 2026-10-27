@@ -335,6 +335,20 @@ internal sealed partial class MultiMarketPaperTradingService(
                 .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                     value.Open, value.High, value.Low, value.Close)).ToArray();
             var openingBars = candles.Take(Math.Min(3, candles.Count)).ToArray();
+            var structureAtr = AverageTrueRange(candles.TakeLast(15).ToArray());
+            var structure = MarketStructureQualityAnalyzer.Analyze(completedSessionBars,
+                decision.Direction.Value, latest.Close, sensexVwap,
+                latest.Close <= 0m ? 0m : structureAtr / latest.Close * 100m,
+                openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
+            var middayChop = MiddayChopConfirmationPolicy.Evaluate(localTime,
+                completedSessionBars, decision.Direction.Value, structure, interval);
+            if (!middayChop.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "MiddayChopConfirmationRejected", decision.Confidence,
+                    middayChop.Reasons, cancellationToken);
+                return;
+            }
             var location = MarketLocationPolicy.Evaluate(
                 completedSessionBars,
                 previousSession.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,

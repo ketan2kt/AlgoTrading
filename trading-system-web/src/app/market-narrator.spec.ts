@@ -81,6 +81,22 @@ describe('market narrator', () => {
     expect(events.some((event) => event.message.includes('target or profit objective reached'))).toBe(true);
   });
 
+  it.each([
+    ['NIFTY26OCT25000CE', 'CallOption', 'bullish call-side'],
+    ['SENSEX26OCT73500PE', 'PutOption', 'bearish put-side'],
+  ])('narrates %s using option bias rather than Buy transaction side', (contract, type, expectedBias) => {
+    const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
+    const trade = { signalId: 'option-side', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,
+      entry: 100, stopLoss: 95, target: 110, status: 'Active', quantity: 5, fillPrice: 100,
+      executionInstrument: contract, executionInstrumentType: type, executionExpiry: null,
+      executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
+      executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
+      executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 102,
+      exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null };
+    const events = buildMarketNarratorEvents('sensex', snapshot(bars), snapshot(bars, { overlays: [trade] }));
+    expect(events.find(event => event.key.includes('entry:'))?.message).toContain(expectedBias);
+  });
+
   it('does not narrate every trailing-stop adjustment after profit is protected', () => {
     const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
     const trade = { signalId: 's1', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,

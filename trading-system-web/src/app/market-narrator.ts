@@ -157,7 +157,7 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
     const before = old.get(trade.signalId);
     if (trade.fillPrice !== null && (!before || before.fillPrice === null)) {
       add('trade', 'critical', `entry:${trade.signalId}:${trade.entryTimeUtc ?? trade.signalTimeUtc}`,
-        `${name} ${spokenDirection(trade.direction)} entry. ${spokenContract(trade.executionInstrument)}. Entry ${price(trade.fillPrice)}. Stop loss ${price(trade.executionStopLoss ?? trade.stopLoss)}.`,
+        `${name} ${spokenTradeBias(trade.executionInstrument, trade.executionInstrumentType, trade.direction)} entry. ${spokenContract(trade.executionInstrument)}. Entry ${price(trade.fillPrice)}. Stop loss ${price(trade.executionStopLoss ?? trade.stopLoss)}.`,
         `${trade.strategy}; quantity ${trade.quantity ?? 'unavailable'}`, trade.entryTimeUtc ?? trade.signalTimeUtc);
     }
     if (before && before.lifecycleStatus !== trade.lifecycleStatus && isClosedStatus(trade.lifecycleStatus)) {
@@ -597,6 +597,14 @@ function spokenDirection(direction: string): string {
   const value = direction.toLowerCase();
   if (value.includes('sell') || value.includes('bear') || value.includes('put')) return 'bearish or put-side';
   return 'bullish or call-side';
+}
+
+function spokenTradeBias(contract: string | null, instrumentType: string | null, transactionDirection: string): string {
+  const normalizedContract = (contract ?? '').toUpperCase();
+  const normalizedType = (instrumentType ?? '').toLowerCase();
+  if (normalizedType.includes('put') || normalizedContract.endsWith('PE')) return 'bearish put-side';
+  if (normalizedType.includes('call') || normalizedContract.endsWith('CE')) return 'bullish call-side';
+  return spokenDirection(transactionDirection);
 }
 
 function spokenContract(contract: string | null): string {

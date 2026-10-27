@@ -1,5 +1,17 @@
 namespace TradingSystem.Application.Diagnostics;
 
+public static class DailyAnalysisAvailabilityPolicy
+{
+    public static TimeOnly AvailableAt { get; } = new(15, 15);
+
+    public static DateTimeOffset AvailableAtUtc(DateOnly tradingDate) =>
+        new DateTimeOffset(tradingDate.ToDateTime(AvailableAt), TimeSpan.FromHours(5.5))
+            .ToUniversalTime();
+
+    public static bool IsAvailable(DateOnly requestedDate, DateOnly today, DateTimeOffset nowUtc) =>
+        requestedDate < today || nowUtc >= AvailableAtUtc(today);
+}
+
 public interface IDailyTradingDiagnosticsReader
 {
     Task<DailyTradingDiagnosticsReport> ReadAsync(

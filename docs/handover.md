@@ -2,7 +2,7 @@
 
 Updated: 2026-10-27 (Asia/Calcutta).
 
-## Pre-Session Brief (deployment dispatched)
+## Pre-Session Brief (repaired deployment dispatched)
 
 Added a read-only administrator Pre-Session dialog for Nifty and Sensex, a
 protected report endpoint, and immutable 08:45/09:12 IST morning snapshots.
@@ -37,8 +37,45 @@ SDK 10.0.302. Full backend build and tests now pass locally (82 contract,
 An isolated clean npm install found zero vulnerabilities; production build
 and 43/43 frontend tests passed. The normal workspace `npm ci` could not
 replace an `esbuild.exe` held by the running local dev server, which was left
-untouched. Database migration still needs production workflow verification.
-Preserve unrelated dirty files.
+untouched. Scoped commit `f8d67d9` was pushed to `main`; its full push CI
+run https://github.com/ketan2kt/AlgoTrading/actions/runs/40452200842 passed
+backend, frontend, and dependency-audit checks. The new preflight accepted
+that exact commit and one deployment was dispatched at
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40452376237 . Completion
+and database migration are unverified; do not poll production unless the user
+asks. This latest handover update is local only. Preserve unrelated dirty files.
+
+## Midday chop, option-side narration and quote-age follow-up (27 October; local only)
+
+User authorized code changes but explicitly said not to deploy. Entry narration now
+derives directional bias from the option type/symbol (a purchased PE is bearish; a
+purchased CE is bullish), with regression cases. A shared midday confirmation policy
+applies from 11:00–13:30 IST only when structure is classified as noisy chop/range or
+a sufficiently choppy transition. In that conditional window it waits for three
+continuous completed five-minute bars and a direction-aligned structure break or
+pullback resumption. It is wired into both Nifty automated entries and Sensex
+multi-market entries, including research-origin candidates; clean trend entries and
+outside-window entries are unchanged. No profit-protection/exit logic was changed.
+
+The chart now displays age of the latest market-feed timestamp, refreshed locally
+each second and marked stale above the existing five-second freshness threshold.
+No provider polling frequency or Groww API request rate changed.
+
+Backend unit-test project build passed (zero warnings/errors), including the new
+policy and tests compiling. Test execution did not complete because VSTest could not
+connect to its child testhost, including after a 180-second connection timeout.
+Frontend checks could not run: repository dependencies were incomplete and `npm ci`
+failed to unlink the existing locked `node_modules/@esbuild/win32-x64/esbuild.exe`.
+`git diff --check` passed. No commit, push, deployment, strategy exit change, or live
+control change was made. Keep this work local until frontend checks can run; the user
+explicitly withheld deployment authorization.
+
+Follow-up: the user requested same-day Daily Analysis availability at 15:15 IST.
+Entry cutoffs are 15:00 IST for regular index and Hero Zero entries; regular positions
+may be force-closed at 15:15 and Hero Zero at 15:20. The API gate now opens at 15:15,
+with the report still representing any position not yet closed as open; the UI fallback
+message matches. Added an availability-boundary unit test. Full Release solution build
+passed (zero warnings/errors). No deployment was requested or dispatched.
 
 ## Public Sarthico homepage and contact flow (deployment dispatched)
 

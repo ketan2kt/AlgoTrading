@@ -618,6 +618,21 @@ internal sealed partial class AutomatedPaperTradingService(
             .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= now)
             .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                 value.Open, value.High, value.Low, value.Close)).ToArray();
+        var middayChop = MiddayChopConfirmationPolicy.Evaluate(
+            TimeOnly.FromDateTime(indiaNow.DateTime), fullSessionBars, signal.Direction,
+            shadowStructure, marketOptions.Value.CandleIntervalSeconds);
+        if (!middayChop.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "MiddayChopConfirmationRejected", middayChop.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("MiddayChopConfirmationRejected", true,
+                string.Join(" ", middayChop.Reasons), tradeState.TradesToday,
+                tradeState.RealisedPnl, signalId: signal.SignalId,
+                direction: signal.Direction.ToString());
+            return;
+        }
         var location = MarketLocationPolicy.Evaluate(fullSessionBars,
             previousSessionCandles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                 value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,

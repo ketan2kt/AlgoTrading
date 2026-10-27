@@ -20,8 +20,8 @@ public sealed class DailyAnalysisController(IDailyTradingDiagnosticsReader reade
         var today = DateOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
         var requested = date ?? today;
         if (requested > today || requested < today.AddDays(-366)) return BadRequest("Invalid session date.");
-        if (requested == today && now < new DateTimeOffset(today.ToDateTime(new TimeOnly(15, 45)), TimeSpan.FromHours(5.5)))
-            return Conflict(new { message = "Today's analysis is available from 3:45 PM IST." });
+        if (!DailyAnalysisAvailabilityPolicy.IsAvailable(requested, today, now))
+            return Conflict(new { message = "Today's analysis is available from 3:15 PM IST." });
         return Ok(await reader.ReadAsync(requested, "all", cancellationToken));
     }
 }

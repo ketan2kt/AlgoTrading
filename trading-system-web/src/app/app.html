@@ -358,6 +358,12 @@
             }}</strong>
           </article>
           <article>
+            <span>Quote age</span>
+            <strong [class.bad]="!view.isFresh || (marketDataAgeSeconds(view) ?? 999) > 5">
+              {{ marketDataAgeLabel(view) }}{{ view.isFresh && (marketDataAgeSeconds(view) ?? 999) <= 5 ? ' · Fresh' : ' · Stale' }}
+            </strong>
+          </article>
+          <article>
             <span>Timeframe</span><strong>{{ view.timeframe }}</strong>
           </article>
         </section>

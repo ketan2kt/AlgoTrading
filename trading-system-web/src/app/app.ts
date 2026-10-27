@@ -108,6 +108,8 @@ export class App implements OnInit, OnDestroy {
   protected heroZeroError = '';
   protected heroZero: HeroZeroMonitor | null = null;
   private heroZeroPollTimer: ReturnType<typeof setInterval> | null = null;
+  private marketClockTimer: ReturnType<typeof setInterval> | null = null;
+  protected marketClockNow = Date.now();
   protected controlsOpen = false;
   protected liveExecution: LiveExecutionStatus | null = null;
   protected liveExecutionBusy = false;
@@ -171,6 +173,10 @@ export class App implements OnInit, OnDestroy {
   );
 
   ngOnInit(): void {
+    this.marketClockTimer = setInterval(() => {
+      this.marketClockNow = Date.now();
+      this.refreshView();
+    }, 1000);
     this.ensureTradeAlertsReady();
     document.addEventListener('pointerdown', this.armTradeAlerts, { once: true, capture: true });
     document.addEventListener('keydown', this.armTradeAlerts, { once: true, capture: true });
@@ -200,6 +206,7 @@ export class App implements OnInit, OnDestroy {
     this.marketTabAlertTimers.forEach((timer) => clearTimeout(timer));
     this.narratorToastTimers.forEach((timer) => clearTimeout(timer));
     if (this.heroZeroPollTimer) clearInterval(this.heroZeroPollTimer);
+    if (this.marketClockTimer) clearInterval(this.marketClockTimer);
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     void this.workspaceService.disconnect();
   }
@@ -462,7 +469,7 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.add(this.paperReportService.getDaily(this.dailyAnalysisDate).subscribe({
       next: value => { this.dailyAnalysis = value; this.dailyAnalysisLoading = false; this.refreshView(); },
       error: error => { this.dailyAnalysisLoading = false;
-        this.dailyAnalysisError = error.status === 409 ? error.error?.message ?? "Today's analysis is available after 3:45 PM IST." : 'Unable to load the session analysis. Try refreshing the report.';
+        this.dailyAnalysisError = error.status === 409 ? error.error?.message ?? "Today's analysis is available after 3:15 PM IST." : 'Unable to load the session analysis. Try refreshing the report.';
         this.refreshView(); },
     }));
   }
@@ -766,6 +773,17 @@ export class App implements OnInit, OnDestroy {
 
   protected marketTabAlert(market: TradingMarketCode): TradeAlertKind | null {
     return this.marketTabAlerts.get(market) ?? null;
+  }
+
+  protected marketDataAgeSeconds(view: TradingWorkspaceSnapshot): number | null {
+    if (!view.lastMarketTimestampUtc) return null;
+    return Math.max(0, Math.floor((this.marketClockNow - Date.parse(view.lastMarketTimestampUtc)) / 1000));
+  }
+
+  protected marketDataAgeLabel(view: TradingWorkspaceSnapshot): string {
+    const seconds = this.marketDataAgeSeconds(view);
+    if (seconds === null || !Number.isFinite(seconds)) return 'Unavailable';
+    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
   }
 
   private detectTradeAlerts(market: TradingMarketCode, snapshot: TradingWorkspaceSnapshot): void {
