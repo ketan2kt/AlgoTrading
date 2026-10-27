@@ -1,10 +1,38 @@
 using TradingSystem.Application.Execution;
 using TradingSystem.Application.Strategies;
+using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.UnitTests;
 
 public sealed class IntradayExpansionPairPolicyTests
 {
+    [Fact]
+    public void OneRupeeLegExitKeepsRealisedProceedsAndOtherLegOpen()
+    {
+        var now = new DateTimeOffset(2026, 10, 28, 9, 0, 0, TimeSpan.Zero);
+        var call = new MarketPaperPosition(Guid.NewGuid(), "NIFTY", Guid.NewGuid(),
+            Guid.NewGuid(), "Expansion Pair|test|CE", Direction.Buy, 100,
+            50m, ExpansionPairExitPolicy.LegFloorStop, 500m, now);
+        var put = new MarketPaperPosition(Guid.NewGuid(), "NIFTY", Guid.NewGuid(),
+            Guid.NewGuid(), "Expansion Pair|test|PE", Direction.Buy, 100,
+            50m, ExpansionPairExitPolicy.LegFloorStop, 500m, now);
+
+        call.Mark(1m, call.StopLoss, now.AddMinutes(1));
+        Assert.True(ExpansionPairExitPolicy.ShouldStopLeg(call));
+        call.Close(1m, 5m, "ExpansionPairLegStop", now.AddMinutes(1));
+        Assert.Equal(5_100m, ExpansionPairExitPolicy.MarkedBasketValue([call, put]));
+        Assert.Equal(ExpansionPairExitAction.StopBasket,
+            ExpansionPairExitPolicy.Evaluate(10_000m, 5_100m, 10_000m,
+                TimeSpan.FromMinutes(1), new TimeOnly(11, 0), false,
+                .28m, .10m, .25m, new TimeOnly(15, 10)));
+        put.Mark(140m, put.StopLoss, now.AddMinutes(1));
+
+        Assert.False(ExpansionPairExitPolicy.ShouldStopLeg(call));
+        Assert.False(ExpansionPairExitPolicy.ShouldStopLeg(put));
+        Assert.Equal(14_100m, ExpansionPairExitPolicy.MarkedBasketValue([call, put]));
+        Assert.Equal("Active", put.Status);
+    }
+
     [Fact]
     public void AggregationExcludesIncompleteAndMissingMinuteBuckets()
     {

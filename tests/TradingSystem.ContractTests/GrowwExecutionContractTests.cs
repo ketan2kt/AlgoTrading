@@ -8,6 +8,12 @@ namespace TradingSystem.ContractTests;
 
 public sealed class GrowwExecutionContractTests
 {
+    [Fact]
+    public void OneRupeeExpansionLegHasAValidLowerBrokerLimit()
+    {
+        Assert.Equal(.95m, GrowwBrokerGateway.ProtectiveLimit(1m));
+    }
+
     [Theory]
     [InlineData(true, 401)]
     [InlineData(false, 401)]

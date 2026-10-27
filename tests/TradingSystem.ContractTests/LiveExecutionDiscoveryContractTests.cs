@@ -99,12 +99,12 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
-    public void ExpansionPairIsExplicitlyBlockedWhenBrokerStopCannotMatchPaperFloor()
+    public void ExpansionPairNeedsBrokerCompatibleFloorAndOneRupeeIsEligible()
     {
         Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
             "Expansion Pair|pair-id|CE", .05m));
-        Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
-            "Expansion Pair|pair-id|PE", .10m));
+        Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Expansion Pair|pair-id|PE", 1m));
         Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
             "Hero Zero|pair-id|CE", 10m));
         Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
@@ -112,15 +112,18 @@ public sealed class LiveExecutionDiscoveryContractTests
     }
 
     [Fact]
-    public void HeroZeroLegRequiresItsOppositePaperLeg()
+    public void PairedLegRequiresItsOppositePaperLeg()
     {
-        Assert.True(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+        Assert.True(AutomaticLiveExecutionService.TryOtherPairedLeg(
             "Hero Zero|pair-id|CE", out var put));
         Assert.Equal("Hero Zero|pair-id|PE", put);
-        Assert.True(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+        Assert.True(AutomaticLiveExecutionService.TryOtherPairedLeg(
             "Hero Zero|pair-id|PE", out var call));
         Assert.Equal("Hero Zero|pair-id|CE", call);
-        Assert.False(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+        Assert.True(AutomaticLiveExecutionService.TryOtherPairedLeg(
+            "Expansion Pair|pair-id|CE", out var expansionPut));
+        Assert.Equal("Expansion Pair|pair-id|PE", expansionPut);
+        Assert.False(AutomaticLiveExecutionService.TryOtherPairedLeg(
             "Regular Sensex", out _));
     }
 

@@ -1,4 +1,5 @@
 using TradingSystem.Application.Strategies;
+using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Application.Execution;
 
@@ -141,6 +142,16 @@ public enum ExpansionPairExitAction
 
 public static class ExpansionPairExitPolicy
 {
+    public const decimal LegFloorStop = 1m;
+
+    public static bool ShouldStopLeg(MarketPaperPosition leg) =>
+        leg.Status == "Active" && leg.CurrentPrice <= leg.StopLoss;
+
+    public static decimal MarkedBasketValue(IEnumerable<MarketPaperPosition> legs) =>
+        legs.Sum(leg => leg.CurrentPrice * leg.RemainingQuantity +
+            leg.EntryPrice * (leg.Quantity - leg.RemainingQuantity) +
+            leg.RealisedPnl + leg.CostsPaid);
+
     public static ExpansionPairExitAction Evaluate(decimal entryValue, decimal currentValue,
         decimal peakValue, TimeSpan age, TimeOnly localTime, bool recoveryTaken,
         decimal stopPercent, decimal minimumExpansionPercent, decimal runnerTrailFraction,

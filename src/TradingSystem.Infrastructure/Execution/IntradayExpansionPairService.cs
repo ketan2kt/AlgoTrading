@@ -210,7 +210,8 @@ internal sealed partial class IntradayExpansionPairService(
             var quantity = checked(candidate.LotSize * lots);
             db.MarketPaperPositions.Add(new(Guid.NewGuid(), market.Code, underlyingId,
                 candidate.InstrumentId, $"{StrategyPrefix}{pairId}|{candidate.OptionType}", Direction.Buy,
-                quantity, candidate.Premium, .05m, candidate.Premium * 10m, now));
+                quantity, candidate.Premium, ExpansionPairExitPolicy.LegFloorStop,
+                candidate.Premium * 10m, now));
         }
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlyingId, decisionTime,
             "ExpansionPair:Opened", entryDecision.Confidence, JsonSerializer.Serialize(new
@@ -239,15 +240,27 @@ internal sealed partial class IntradayExpansionPairService(
             var instrument = instruments[leg.ExecutionInstrumentId];
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
-            if (quote.LastPrice > 0m) leg.Mark(quote.LastPrice, leg.StopLoss, now);
+            if (quote.LastPrice <= 0m) continue;
+            leg.Mark(quote.LastPrice, leg.StopLoss, now);
+            if (ExpansionPairExitPolicy.ShouldStopLeg(leg))
+                leg.Close(quote.LastPrice, Charges(leg, quote.LastPrice, leg.RemainingQuantity),
+                    "ExpansionPairLegStop", now);
         }
 
         var key = market.Code + ":" + pairPrefix;
+        if (legs.All(value => value.Status != "Active"))
+        {
+            _peakValues.TryRemove(key, out _);
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
         var entryValue = legs.Sum(value => value.EntryPrice * value.Quantity);
-        var currentValue = legs.Where(value => value.Status == "Active")
-            .Sum(value => value.CurrentPrice * value.RemainingQuantity);
         var recoveryTaken = legs.Any(value => value.PartialExitQuantity > 0 ||
             value.Status == "ExpansionPairRecovery");
+        var currentValue = recoveryTaken
+            ? legs.Where(value => value.Status == "Active")
+                .Sum(value => value.CurrentPrice * value.RemainingQuantity)
+            : ExpansionPairExitPolicy.MarkedBasketValue(legs);
         var peak = _peakValues.AddOrUpdate(key, currentValue, (_, prior) => Math.Max(prior, currentValue));
         var action = ExpansionPairExitPolicy.Evaluate(entryValue, currentValue, peak,
             now - legs.Min(value => value.OpenedAtUtc), localTime, recoveryTaken,

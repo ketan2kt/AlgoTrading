@@ -160,14 +160,14 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (intent.SourceType != "MARKET_POSITION" || intent.Status != "Protected") return;
         var source = await db.MarketPaperPositions.AsNoTracking().SingleAsync(value =>
             value.Id == intent.SourceId, cancellationToken);
-        if (!TryOtherHeroZeroLeg(source.Strategy, out _)) return;
+        if (!TryOtherPairedLeg(source.Strategy, out _)) return;
         try
         {
             await MirrorFinalExitAsync(db, intent, source.CurrentPrice, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            intent.RequireReconciliation("A partially filled Hero Zero leg could not be flattened safely.");
+            intent.RequireReconciliation("A partially filled paired leg could not be flattened safely.");
             await db.SaveChangesAsync(cancellationToken);
             throw;
         }
@@ -179,7 +179,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (uncertain.SourceType != "MARKET_POSITION") return;
         var source = await db.MarketPaperPositions.AsNoTracking().SingleAsync(value =>
             value.Id == uncertain.SourceId, cancellationToken);
-        if (!TryOtherHeroZeroLeg(source.Strategy, out var otherStrategy)) return;
+        if (!TryOtherPairedLeg(source.Strategy, out var otherStrategy)) return;
         var otherId = await db.MarketPaperPositions.AsNoTracking().Where(value =>
                 value.Market == source.Market && value.Strategy == otherStrategy &&
                 value.OpenedAtUtc == source.OpenedAtUtc)
@@ -189,7 +189,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             value.SourceType == "MARKET_POSITION" && value.SourceId == otherId &&
             value.Status == "Protected", cancellationToken);
         if (openLeg is null) return;
-        openLeg.RequireReconciliation("Hero Zero counterpart has an uncertain broker outcome; reconcile both legs.");
+        openLeg.RequireReconciliation("Paired counterpart has an uncertain broker outcome; reconcile both legs.");
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -199,7 +199,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (rejected.SourceType != "MARKET_POSITION") return;
         var source = await db.MarketPaperPositions.AsNoTracking().SingleAsync(value =>
             value.Id == rejected.SourceId, cancellationToken);
-        if (!TryOtherHeroZeroLeg(source.Strategy, out var otherStrategy)) return;
+        if (!TryOtherPairedLeg(source.Strategy, out var otherStrategy)) return;
         var other = await db.MarketPaperPositions.AsNoTracking().SingleOrDefaultAsync(value =>
             value.Market == source.Market && value.Strategy == otherStrategy &&
             value.OpenedAtUtc == source.OpenedAtUtc, cancellationToken);
@@ -214,7 +214,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            openLeg.RequireReconciliation("One Hero Zero leg was rejected; the other live leg needs broker reconciliation.");
+            openLeg.RequireReconciliation("One paired leg was rejected; the other live leg needs broker reconciliation.");
             await db.SaveChangesAsync(cancellationToken);
             throw;
         }
@@ -724,7 +724,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 }
                 continue;
             }
-            if (TryOtherHeroZeroLeg(source.Strategy, out var otherStrategy))
+            if (TryOtherPairedLeg(source.Strategy, out var otherStrategy))
             {
                 var other = await db.MarketPaperPositions.AsNoTracking()
                     .SingleOrDefaultAsync(value => value.Market == market &&
@@ -774,15 +774,20 @@ internal sealed partial class AutomaticLiveExecutionService(
          error.Contains("returned 422", StringComparison.Ordinal));
 
     internal static bool IsLiveBrokerProtectable(string strategy, decimal stopLoss) =>
-        !strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
-            StringComparison.Ordinal) && stopLoss > .05m;
+        stopLoss > .05m;
 
-    internal static bool TryOtherHeroZeroLeg(string strategy, out string otherStrategy)
+    internal static bool TryOtherPairedLeg(string strategy, out string otherStrategy)
     {
         otherStrategy = string.Empty;
-        if (!strategy.StartsWith("Hero Zero|", StringComparison.Ordinal)) return false;
+        var prefix = strategy.StartsWith("Hero Zero|", StringComparison.Ordinal)
+            ? "Hero Zero|"
+            : strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
+                StringComparison.Ordinal)
+                ? IntradayExpansionPairService.StrategyPrefix
+                : null;
+        if (prefix is null) return false;
         var suffix = strategy.LastIndexOf('|');
-        if (suffix < "Hero Zero|".Length) return false;
+        if (suffix < prefix.Length) return false;
         var side = strategy[(suffix + 1)..];
         if (side is not ("CE" or "PE")) return false;
         otherStrategy = strategy[..(suffix + 1)] + (side == "CE" ? "PE" : "CE");
