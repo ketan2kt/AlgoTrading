@@ -1,7 +1,8 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
-import { Component, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { timeout } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 
 interface AdminPage<T> { total: number; items: T[] }
@@ -38,6 +39,7 @@ type AdminSection = 'overview' | 'inquiries' | 'users';
 export class AdminPanelComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
+  private readonly view = inject(ChangeDetectorRef);
 
   protected user: CurrentUser | null = null;
   protected checking = true;
@@ -65,17 +67,19 @@ export class AdminPanelComponent implements OnInit {
   protected logoutBusy = false;
 
   ngOnInit(): void {
-    this.auth.currentUser().subscribe({
+    this.auth.currentUser().pipe(timeout({ first: 10_000 })).subscribe({
       next: user => {
         this.user = user;
         this.checking = false;
         if (user) this.loadAll();
+        this.view.markForCheck();
       },
       error: response => {
         this.checking = false;
         this.loginError = response.status === 403
           ? 'This account does not have administrator access.'
           : 'We could not verify the administrator session. Please refresh and try again.';
+        this.view.markForCheck();
       },
     });
   }
@@ -90,11 +94,13 @@ export class AdminPanelComponent implements OnInit {
         this.password = '';
         this.loginBusy = false;
         this.loadAll();
+        this.view.markForCheck();
       },
       error: () => {
         this.password = '';
         this.loginBusy = false;
         this.loginError = 'Sign-in failed. Check your administrator credentials or account lockout status.';
+        this.view.markForCheck();
       },
     });
   }
@@ -108,10 +114,12 @@ export class AdminPanelComponent implements OnInit {
         this.users = [];
         this.inquiries = [];
         this.logoutBusy = false;
+        this.view.markForCheck();
       },
       error: () => {
         this.logoutBusy = false;
         this.notice = 'Sign out could not be confirmed. Refresh the page to check the session.';
+        this.view.markForCheck();
       },
     });
   }
@@ -146,17 +154,20 @@ export class AdminPanelComponent implements OnInit {
           this.showAddUser = false;
           this.userSaveBusy = false;
           this.notice = 'User added as pending. Sign-in remains disabled until access is separately approved.';
+          this.view.markForCheck();
         },
         error: (response: HttpErrorResponse) => {
           this.userSaveBusy = false;
           this.userSaveError = response.status === 409
             ? 'An account with that email already exists.'
             : response.error?.message ?? 'The pending account could not be created.';
+          this.view.markForCheck();
         },
       }),
       error: () => {
         this.userSaveBusy = false;
         this.userSaveError = 'We could not prepare a secure request. Refresh and try again.';
+        this.view.markForCheck();
       },
     });
   }
@@ -187,8 +198,8 @@ export class AdminPanelComponent implements OnInit {
     this.usersError = '';
     const skip = append ? this.users.length : 0;
     this.http.get<AdminUsersPage>('/api/admin/users', { params: { skip, take: 100 } }).subscribe({
-      next: page => { this.users = append ? [...this.users, ...page.items] : page.items; this.userTotal = page.total; this.pendingUserTotal = page.pending; this.usersLoading = false; },
-      error: () => { this.usersError = 'User accounts could not be loaded.'; this.usersLoading = false; },
+      next: page => { this.users = append ? [...this.users, ...page.items] : page.items; this.userTotal = page.total; this.pendingUserTotal = page.pending; this.usersLoading = false; this.view.markForCheck(); },
+      error: () => { this.usersError = 'User accounts could not be loaded.'; this.usersLoading = false; this.view.markForCheck(); },
     });
   }
 
@@ -197,8 +208,8 @@ export class AdminPanelComponent implements OnInit {
     this.inquiriesError = '';
     const skip = append ? this.inquiries.length : 0;
     this.http.get<AdminPage<ContactInquiry>>('/api/admin/contact-inquiries', { params: { skip, take: 100 } }).subscribe({
-      next: page => { this.inquiries = append ? [...this.inquiries, ...page.items] : page.items; this.inquiryTotal = page.total; this.inquiriesLoading = false; },
-      error: () => { this.inquiriesError = 'Contact enquiries could not be loaded.'; this.inquiriesLoading = false; },
+      next: page => { this.inquiries = append ? [...this.inquiries, ...page.items] : page.items; this.inquiryTotal = page.total; this.inquiriesLoading = false; this.view.markForCheck(); },
+      error: () => { this.inquiriesError = 'Contact enquiries could not be loaded.'; this.inquiriesLoading = false; this.view.markForCheck(); },
     });
   }
 }
