@@ -34,4 +34,14 @@ export class AuthService {
       switchMap(() => this.http.get<CurrentUser>('/api/auth/me')),
     );
   }
+
+  logout(): Observable<void> {
+    return this.http.get<{ token: string }>('/api/security/antiforgery-token').pipe(
+      switchMap(({ token }) =>
+        this.http.post<void>('/api/auth/logout', null, {
+          headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }),
+        }),
+      ),
+    );
+  }
 }

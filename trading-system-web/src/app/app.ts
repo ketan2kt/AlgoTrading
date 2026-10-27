@@ -6,6 +6,7 @@ import { catchError, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { PublicHomeComponent } from './public-home.component';
+import { AdminPanelComponent } from './admin-panel.component';
 import { PreSessionBriefComponent } from './pre-session-brief.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
@@ -30,7 +31,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, PreSessionBriefComponent, RouterOutlet],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, PreSessionBriefComponent, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -138,9 +139,16 @@ export class App implements OnInit, OnDestroy {
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
   protected selectedMarket: TradingMarketCode | null = this.marketFromPath();
+  protected isAdminRoute = this.adminPath();
   private readonly marketNavigation = (): void => {
     const market = this.marketFromPath();
-    if (market === this.selectedMarket) return;
+    const adminRoute = this.adminPath();
+    const routeChanged = adminRoute !== this.isAdminRoute;
+    this.isAdminRoute = adminRoute;
+    if (market === this.selectedMarket) {
+      if (routeChanged) this.refreshView();
+      return;
+    }
     this.selectedMarket = market;
     this.workspace = null;
     if (market !== null) {
@@ -378,6 +386,10 @@ export class App implements OnInit, OnDestroy {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
       path === '/natural-gas' ? 'natural-gas' : null;
+  }
+
+  private adminPath(): boolean {
+    return window.location.pathname.toLowerCase().replace(/\/$/, '') === '/admin';
   }
 
   protected setChartTimeframe(value: number): void {

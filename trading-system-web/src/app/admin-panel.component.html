@@ -1,0 +1,123 @@
+<div class="admin-site">
+  <header class="admin-topbar">
+    <a class="admin-brand" href="/" aria-label="Sarthico home">
+      <span class="admin-brand__mark">S<span>.</span></span>
+      <span>Sarthico <small>ADMIN</small></span>
+    </a>
+    @if (user) {
+      <div class="admin-topbar__user">
+        <span class="admin-avatar" aria-hidden="true">{{ user.username.charAt(0).toUpperCase() }}</span>
+        <span class="admin-topbar__identity"><strong>{{ user.username }}</strong><small>Administrator</small></span>
+        <button type="button" class="admin-button admin-button--quiet" (click)="signOut()" [disabled]="logoutBusy">
+          {{ logoutBusy ? 'Signing out…' : 'Sign out' }}
+        </button>
+      </div>
+    }
+  </header>
+
+  @if (checking) {
+    <main class="admin-centered"><span class="admin-spinner" aria-hidden="true"></span><p>Checking secure admin session…</p></main>
+  } @else if (!user) {
+    <main class="admin-login-layout">
+      <section class="admin-login-intro">
+        <p class="admin-eyebrow">SARTHICO / PRIVATE WORKSPACE</p>
+        <h1>Good software<br><em>starts with care.</em></h1>
+        <p>Manage enquiries and review account access from one secure place.</p>
+        <div class="admin-login-note"><span aria-hidden="true">✳</span><span>Protected by your existing Sarthico administrator account.</span></div>
+      </section>
+      <form class="admin-login-card" (ngSubmit)="signIn()">
+        <p class="admin-eyebrow">ADMIN ACCESS</p>
+        <h2>Sign in to Sarthico</h2>
+        <label>Email or username<input name="username" [(ngModel)]="username" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" [(ngModel)]="password" autocomplete="current-password" required></label>
+        @if (loginError) { <p class="admin-alert admin-alert--error" role="alert">{{ loginError }}</p> }
+        <button class="admin-button admin-button--primary admin-button--wide" type="submit" [disabled]="loginBusy">
+          {{ loginBusy ? 'Verifying…' : 'Open admin panel' }} <span aria-hidden="true">↗</span>
+        </button>
+        <a class="admin-back-link" href="/">Back to Sarthico.com</a>
+      </form>
+    </main>
+  } @else {
+    <div class="admin-layout">
+      <aside class="admin-sidebar" aria-label="Admin navigation">
+        <p class="admin-sidebar__label">WORKSPACE</p>
+        <button type="button" [class.active]="section === 'overview'" [attr.aria-current]="section === 'overview' ? 'page' : null" (click)="selectSection('overview')"><span>⌂</span>Overview</button>
+        <button type="button" [class.active]="section === 'inquiries'" [attr.aria-current]="section === 'inquiries' ? 'page' : null" (click)="selectSection('inquiries')"><span>✉</span>Contact enquiries <small>{{ inquiryTotal }}</small></button>
+        <button type="button" [class.active]="section === 'users'" [attr.aria-current]="section === 'users' ? 'page' : null" (click)="selectSection('users')"><span>◎</span>Users <small>{{ userTotal }}</small></button>
+        <div class="admin-sidebar__footer"><span class="admin-live-dot"></span>Private admin session</div>
+      </aside>
+
+      <main class="admin-main">
+        <header class="admin-page-heading">
+          <div><p class="admin-eyebrow">SARTHICO / ADMINISTRATION</p>
+            <h1>{{ section === 'overview' ? 'Overview' : section === 'inquiries' ? 'Contact enquiries' : 'User accounts' }}</h1>
+            <p>{{ section === 'overview' ? 'A concise view of incoming interest and account access.' : section === 'inquiries' ? 'Messages submitted through the public contact form.' : 'Review existing accounts and add pending users.' }}</p>
+          </div>
+          <button type="button" class="admin-button admin-button--quiet" (click)="refresh()" aria-label="Refresh admin data">↻ <span>Refresh</span></button>
+        </header>
+
+        @if (notice) { <p class="admin-alert admin-alert--success" role="status">{{ notice }}</p> }
+
+        @if (section === 'overview') {
+          <section class="admin-metrics" aria-label="Admin summary">
+            <article class="admin-metric"><span>ALL ENQUIRIES</span><strong>{{ inquiryTotal }}</strong><small>Submitted through Sarthico.com</small></article>
+            <article class="admin-metric"><span>USER ACCOUNTS</span><strong>{{ userTotal }}</strong><small>Existing and pending identities</small></article>
+            <article class="admin-metric admin-metric--pending"><span>PENDING ACCESS</span><strong>{{ pendingUserTotal }}</strong><small>Disabled until separately approved</small></article>
+          </section>
+          <section class="admin-card">
+            <header class="admin-card__heading"><div><p class="admin-eyebrow">LATEST</p><h2>Recent enquiries</h2></div><button type="button" class="admin-text-button" (click)="selectSection('inquiries')">View all ↗</button></header>
+            @if (inquiriesLoading) { <p class="admin-empty">Loading enquiries…</p> }
+            @else if (inquiriesError) { <p class="admin-alert admin-alert--error" role="alert">{{ inquiriesError }}</p> }
+            @else if (inquiries.length === 0) { <p class="admin-empty">No enquiries have been submitted yet.</p> }
+            @else {
+              <div class="admin-recent-list">
+                @for (item of inquiries.slice(0, 5); track item.id) {
+                  <article><span class="admin-recent-list__icon">{{ item.name.charAt(0).toUpperCase() }}</span><div><strong>{{ item.name }}</strong><small>{{ item.service }} · {{ item.email }}</small></div><time>{{ item.createdAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata' }}</time></article>
+                }
+              </div>
+            }
+          </section>
+          <section class="admin-card admin-security-note"><span aria-hidden="true">✳</span><div><strong>Account access stays deliberate</strong><p>New accounts are recorded as pending and cannot sign in. This first admin release does not grant customer or trading access.</p></div></section>
+        }
+
+        @if (section === 'inquiries') {
+          <section class="admin-card">
+            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">INBOX / {{ inquiryTotal }} TOTAL</p><h2>Every enquiry, in one place.</h2></div><label class="admin-search"><span aria-hidden="true">⌕</span><input name="inquirySearch" [(ngModel)]="inquirySearch" placeholder="Search name, email, message…" aria-label="Search enquiries"></label></header>
+            @if (inquiriesLoading) { <p class="admin-empty">Loading enquiries…</p> }
+            @else if (inquiriesError) { <p class="admin-alert admin-alert--error" role="alert">{{ inquiriesError }}</p> }
+            @else if (visibleInquiries.length === 0) { <p class="admin-empty">{{ inquiries.length ? 'No enquiries match this search.' : 'No enquiries have been submitted yet.' }}</p> }
+            @else {
+              <div class="admin-table-scroll"><table class="admin-table"><thead><tr><th>Contact</th><th>Service</th><th>Received</th><th>Email status</th><th>Message</th></tr></thead><tbody>
+                @for (item of visibleInquiries; track item.id) {
+                  <tr><td><strong>{{ item.name }}</strong><small>{{ item.email }}</small>@if (item.company) { <small>{{ item.company }}</small> }</td><td>{{ item.service }}</td><td>{{ item.createdAtUtc | date:'dd MMM yyyy, HH:mm':'Asia/Kolkata' }} IST</td><td><span class="admin-status" [class.admin-status--good]="item.deliveryStatus === 'Delivered'">{{ item.deliveryStatus }}</span><small>{{ item.deliveryAttempts }} attempt{{ item.deliveryAttempts === 1 ? '' : 's' }}</small></td><td class="admin-message"><details><summary>Read message</summary><p>{{ item.message }}</p></details></td></tr>
+                }
+              </tbody></table></div>
+              @if (inquiryTotal > inquiries.length) { <div class="admin-table-footnote"><span>Showing {{ inquiries.length }} of {{ inquiryTotal }} enquiries.</span><button type="button" class="admin-text-button" (click)="loadMoreInquiries()" [disabled]="inquiriesLoading">{{ inquiriesLoading ? 'Loading…' : 'Load older enquiries ↓' }}</button></div> }
+            }
+          </section>
+        }
+
+        @if (section === 'users') {
+          <section class="admin-card">
+            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">IDENTITIES / {{ userTotal }} TOTAL</p><h2>Registered accounts.</h2></div><div class="admin-card__actions"><label class="admin-search"><span aria-hidden="true">⌕</span><input name="userSearch" [(ngModel)]="userSearch" placeholder="Search accounts…" aria-label="Search user accounts"></label><button class="admin-button admin-button--primary" type="button" (click)="showAddUser = !showAddUser">{{ showAddUser ? 'Cancel' : 'Add user' }} <span aria-hidden="true">{{ showAddUser ? '−' : '+' }}</span></button></div></header>
+            @if (showAddUser) {
+              <form class="admin-add-user" (ngSubmit)="createPendingUser()"><div><p class="admin-eyebrow">NEW ACCOUNT</p><h3>Add a pending user</h3><p>This creates a disabled account only—no password, invite, role or trading access is granted.</p></div><label>Email address<input name="newUserEmail" type="email" [(ngModel)]="newUserEmail" autocomplete="email" maxlength="254" required placeholder="person@example.com"></label><button class="admin-button admin-button--primary" type="submit" [disabled]="userSaveBusy || !newUserEmail">{{ userSaveBusy ? 'Adding…' : 'Add pending user' }}</button></form>
+              @if (userSaveError) { <p class="admin-alert admin-alert--error" role="alert">{{ userSaveError }}</p> }
+            }
+            @if (usersLoading) { <p class="admin-empty">Loading accounts…</p> }
+            @else if (usersError) { <p class="admin-alert admin-alert--error" role="alert">{{ usersError }}</p> }
+            @else if (visibleUsers.length === 0) { <p class="admin-empty">{{ users.length ? 'No accounts match this search.' : 'No accounts are registered.' }}</p> }
+            @else {
+              <div class="admin-table-scroll"><table class="admin-table"><thead><tr><th>Account</th><th>Role</th><th>Created</th><th>Access</th><th>Email</th></tr></thead><tbody>
+                @for (item of visibleUsers; track item.id) {
+                  <tr><td><strong>{{ item.username }}</strong><small>{{ item.email }}</small></td><td><span class="admin-role-list">@for (role of item.roles; track role) { <span class="admin-role">{{ role }}</span> } @if (!item.roles.length) { <span class="admin-muted">No role</span> }</span></td><td>{{ item.createdAtUtc | date:'dd MMM yyyy':'Asia/Kolkata' }}</td><td><span class="admin-status" [class.admin-status--good]="item.isActive && item.emailConfirmed">{{ item.isActive && item.emailConfirmed ? 'Active' : 'Pending / disabled' }}</span></td><td>{{ item.emailConfirmed ? 'Confirmed' : 'Unconfirmed' }}</td></tr>
+                }
+              </tbody></table></div>
+              @if (userTotal > users.length) { <div class="admin-table-footnote"><span>Showing {{ users.length }} of {{ userTotal }} accounts.</span><button type="button" class="admin-text-button" (click)="loadMoreUsers()" [disabled]="usersLoading">{{ usersLoading ? 'Loading…' : 'Load more users ↓' }}</button></div> }
+            }
+          </section>
+        }
+      </main>
+    </div>
+  }
+</div>

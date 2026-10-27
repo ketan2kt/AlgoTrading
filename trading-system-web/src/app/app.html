@@ -1,4 +1,6 @@
-@if (selectedMarket === null) {
+@if (isAdminRoute) {
+  <app-admin-panel />
+} @else if (selectedMarket === null) {
   <app-public-home />
 } @else if (status$ | async; as status) {
   @if (user) {

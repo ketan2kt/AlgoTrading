@@ -25,7 +25,7 @@ public sealed class AuthenticationController(
         var user = loginName.Contains('@', StringComparison.Ordinal)
             ? await userManager.FindByEmailAsync(loginName)
             : await userManager.FindByNameAsync(loginName);
-        if (user?.UserName is null)
+        if (user?.UserName is null || !user.IsActive || !user.EmailConfirmed)
         {
             return Unauthorized();
         }
