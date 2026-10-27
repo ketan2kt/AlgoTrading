@@ -67,6 +67,14 @@ After the desired commit has been pushed and deployment authorized:
 ./scripts/tasks.ps1 deploy -Ref main
 ```
 
+`deploy` now resolves the remote ref to its exact commit and requires a completed,
+successful push CI run for that commit before either the dry run or dispatch can
+proceed. If CI is pending, missing, or failed, it stops without sending a deployment.
+Fix the reported CI issue, push a new commit, and retry only after that commit's
+full backend, frontend, and dependency-audit checks pass. This preflight prevents
+known build/test failures from consuming a deployment run; the deployment workflow
+still performs its own independent quality gate.
+
 Requires an authenticated GitHub CLI with workflow dispatch access. This invokes
 the existing `azure-deploy.yml` with its required `deploy=DEPLOY-LIVE` input.
 It deploys the selected remote ref, not uncommitted or unpushed local work.

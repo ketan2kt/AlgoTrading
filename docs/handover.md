@@ -2,7 +2,7 @@
 
 Updated: 2026-10-27 (Asia/Calcutta).
 
-## Pre-Session Brief (local implementation, not deployed)
+## Pre-Session Brief (deployment dispatched)
 
 Added a read-only administrator Pre-Session dialog for Nifty and Sensex, a
 protected report endpoint, and immutable 08:45/09:12 IST morning snapshots.
@@ -20,9 +20,22 @@ controls, or orders were changed. See `docs/pre-session-brief.md`. Frontend
 build and all 43 frontend tests passed, including the missed-morning outcome
 regression. Existing bundle/style budget warnings remain.
 Backend check could not run locally because the repository pins .NET SDK
-10.0.302 and the machine has only 6.0.402. Backend compilation/tests and
-Postgres migration need CI verification before any deployment. No deployment
-requested or dispatched for this feature. Preserve unrelated dirty files.
+10.0.302 and the machine has only 6.0.402. Scoped commit `af5fee7` was pushed
+to `main`; deployment run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40450796872 failed in
+the backend quality gate before deployment because three decimal format calls
+omitted an explicit culture (CA1305). The exact-commit push CI had already
+failed the same backend build; its frontend build/tests passed, but its npm
+dependency audit also failed. The local follow-up fixes the three format calls,
+updates Angular/Vitest/transitive packages to an audit-clean lockfile, and
+changes `scripts/tasks.ps1 deploy` to require a successful full push CI run
+for the exact remote commit before dispatch. The new gate was confirmed to
+refuse the failed `af5fee7` run. An isolated clean npm install found zero
+vulnerabilities; production build and 43/43 frontend tests passed. The normal
+workspace `npm ci` could not replace an `esbuild.exe` held by the running local
+dev server, which was left untouched. Backend compilation, migration and the
+new CI gate's green path still require remote CI verification. No retry has
+been dispatched yet. Preserve unrelated dirty files.
 
 ## Public Sarthico homepage and contact flow (deployment dispatched)
 

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TradingSystem.Application.MarketData;
 
 public sealed record PreSessionSourceData(
@@ -95,13 +97,13 @@ public static class PreSessionBriefBuilder
                 hasLevels ? "Completed previous session only; not today's price." : "No complete recorded prior session."),
             new("Option OI concentration", data.OptionOiAtUtc is not null ? "PreviousSession" : "Unavailable",
                 data.OptionOiAtUtc is not null
-                    ? $"Call {data.CallOiStrike?.ToString("0.##") ?? "—"}; put {data.PutOiStrike?.ToString("0.##") ?? "—"}; expiry {data.OptionExpiry}"
+                    ? $"Call {data.CallOiStrike?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—"}; put {data.PutOiStrike?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—"}; expiry {data.OptionExpiry}"
                     : null,
                 data.OptionOiAtUtc is not null ? "Groww recorded option-chain sample" : null,
                 data.OptionOiAtUtc,
                 "Sampled strikes from the last recorded chain; this is not current-session OI buildup."),
             new("Indian pre-open", hasIndicative ? "Indicative" : "Unavailable",
-                hasIndicative ? data.IndicativePrice?.ToString("0.##") : null,
+                hasIndicative ? data.IndicativePrice?.ToString("0.##", CultureInfo.InvariantCulture) : null,
                 hasIndicative ? "Authorized pre-open feed" : null, data.IndicativePriceAtUtc,
                 hasIndicative ? "Indicative auction value; confirm after the continuous market opens."
                     : "No verified pre-open feed is connected."),
