@@ -140,10 +140,8 @@ public static class DependencyInjection
         services.AddSingleton<GrowwBrokerGateway>();
         services.AddOptions<LiveExecutionOptions>()
             .Bind(configuration.GetSection(LiveExecutionOptions.SectionName))
-            .Validate(value => value.MaximumLotsPerOrder == 5,
-                "Restricted live operation is configured for exactly five lots per order.")
-            .Validate(value => value.ControlledTestLotsPerOrder == value.MaximumLotsPerOrder,
-                "Controlled broker validation must use the configured five-lot order size.")
+            .Validate(value => value.PaperParityMode == "PaperFillAndLifecycle",
+                "Live execution must mirror paper quantity and lifecycle rather than use an independent trading policy.")
             .Validate(value => value.PollIntervalSeconds is >= 1 and <= 30 &&
                                value.SignalMaximumAgeSeconds is >= 30 and <= 300,
                 "Live execution polling and signal freshness settings are invalid.")
@@ -152,6 +150,7 @@ public static class DependencyInjection
                 "Only NIFTY and SENSEX may be enabled for controlled live testing.")
             .ValidateOnStart();
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
+        services.AddSingleton<LiveExecutionWakeSignal>();
         services.AddHostedService<AutomaticLiveExecutionService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
         {

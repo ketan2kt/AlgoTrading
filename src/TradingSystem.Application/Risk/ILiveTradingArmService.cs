@@ -11,7 +11,7 @@ public sealed record LiveTradingArmStatus(
     bool BuildEnabled,
     bool Armed,
     DateOnly? ArmedForTradingDate,
-    int MaximumLotsPerOrder,
+    bool MirrorsPaperQuantity,
     bool ControlledBrokerTestCompleted,
     string[] AllowedMarkets,
     DateTimeOffset? ChangedAtUtc,

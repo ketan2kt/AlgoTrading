@@ -33,17 +33,26 @@ public sealed class LiveExecutionIntent : MutableEntity
     public Direction Direction { get; private init; }
     public int Quantity { get; private init; }
     public decimal RequestedEntry { get; private init; }
-    public decimal StopLoss { get; private init; }
+    public decimal StopLoss { get; private set; }
     public decimal Target { get; private init; }
     public string ClientReference { get; private init; }
     public string Status { get; private set; } = "Pending";
     public string? BrokerOrderId { get; private set; }
     public string? ProtectionId { get; private set; }
     public int FilledQuantity { get; private set; }
+    public int MirroredAddOnQuantity { get; private set; }
+    public int MirroredPartialExitQuantity { get; private set; }
     public decimal? AverageFillPrice { get; private set; }
     public string? LastError { get; private set; }
     public DateTimeOffset? SubmittedAtUtc { get; private set; }
     public DateTimeOffset? ProtectedAtUtc { get; private set; }
+
+    public void BeginEntrySubmission()
+    {
+        if (Status != "Pending")
+            throw new InvalidOperationException("Only a pending live intent can begin broker submission.");
+        Status = "EntrySubmitting";
+    }
 
     public void Submitted(string brokerOrderId, DateTimeOffset atUtc)
     {
@@ -69,6 +78,34 @@ public sealed class LiveExecutionIntent : MutableEntity
         LastError = null;
     }
 
+    public void AdjustProtectedExposure(int remainingQuantity, decimal paperStopLoss,
+        DateTimeOffset atUtc)
+    {
+        if (Status != "Protected" || remainingQuantity <= 0 || paperStopLoss <= 0)
+            throw new InvalidOperationException("Only an open protected position can be adjusted.");
+        FilledQuantity = remainingQuantity;
+        StopLoss = paperStopLoss;
+        MarkUpdated(atUtc.ToUniversalTime());
+    }
+
+    public void RecordAddOn(int quantity, DateTimeOffset atUtc)
+    {
+        if (Status != "Protected" || quantity <= 0)
+            throw new InvalidOperationException("A live add-on requires an open protected position.");
+        FilledQuantity = checked(FilledQuantity + quantity);
+        MirroredAddOnQuantity = checked(MirroredAddOnQuantity + quantity);
+        MarkUpdated(atUtc.ToUniversalTime());
+    }
+
+    public void RecordPartialExit(int quantity, DateTimeOffset atUtc)
+    {
+        if (Status != "Protected" || quantity <= 0 || quantity >= FilledQuantity)
+            throw new InvalidOperationException("A partial exit must leave a protected position.");
+        FilledQuantity -= quantity;
+        MirroredPartialExitQuantity = checked(MirroredPartialExitQuantity + quantity);
+        MarkUpdated(atUtc.ToUniversalTime());
+    }
+
     public void BeginProtection()
     {
         if (FilledQuantity <= 0) throw new InvalidOperationException("An unfilled order cannot be protected.");
@@ -78,6 +115,13 @@ public sealed class LiveExecutionIntent : MutableEntity
     public void RequireReconciliation(string reason)
     {
         Status = "ReconciliationRequired";
+        LastError = reason;
+    }
+
+    public void FlagParityMismatch(string reason)
+    {
+        if (Status != "Protected" || string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Only a protected live position can report a parity mismatch.");
         LastError = reason;
     }
 
@@ -93,6 +137,7 @@ public sealed class LiveExecutionIntent : MutableEntity
     public void Closed(DateTimeOffset atUtc)
     {
         Status = "Closed";
+        FilledQuantity = 0;
         LastError = null;
         MarkUpdated(atUtc.ToUniversalTime());
     }

@@ -614,7 +614,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 reasoning, professionalPlan,
                 adaptiveSetup,
                 paperResearchEntry,
-                liveEligible = !paperResearchEntry,
+                liveMirrorCandidate = market == TradingMarketCatalog.Sensex && stop > .05m,
                 underlyingDirection = decision.Direction.ToString(),
                 quoteSnapshot = market == TradingMarketCatalog.Sensex ? quote : null,
                 direction = executionDirection.ToString(),
@@ -671,6 +671,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                 })));
         }
         await db.SaveChangesAsync(cancellationToken);
+        if (market == TradingMarketCatalog.Sensex)
+            scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
     }
 
     private async Task ManagePositionsAsync(TradingDbContext db, TradingMarketDefinition market,
@@ -834,7 +836,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                         JsonSerializer.Serialize(new { parentPositionId = position.Id,
                             addOnPositionId = addOn.Id, price, addOnStop, addOnTarget,
                             quantity = instrument.LotSize, addOnDecision.Reasons,
-                            liveEligible = false })));
+                            liveMirrorCandidate = addOnStop > .05m &&
+                                !position.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
+                                    StringComparison.Ordinal) })));
                 }
             }
             var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);

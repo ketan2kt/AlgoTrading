@@ -118,59 +118,60 @@ public sealed class GrowwBrokerGateway(
         BrokerProtectionRequest request, CancellationToken cancellationToken)
     {
         ValidateReference(request.ClientReference);
-        if (string.IsNullOrWhiteSpace(request.TradingSymbol) ||
+        if (request.InstrumentId == Guid.Empty || string.IsNullOrWhiteSpace(request.TradingSymbol) ||
             request.Exchange is not ("NSE" or "BSE") || request.Quantity <= 0 ||
-            request.NetPositionQuantity == 0 || request.Quantity > Math.Abs(request.NetPositionQuantity) ||
-            request.Target <= 0 || request.StopLoss <= 0)
-            throw new ArgumentException("Groww OCO protection fields are invalid.", nameof(request));
-        var transaction = request.NetPositionQuantity > 0 ? "SELL" : "BUY";
-        var payload = await SendAsync<SmartOrderPayload>(HttpMethod.Post, "/v1/order-advance/create",
-            new
-            {
-                reference_id = request.ClientReference,
-                smart_order_type = "OCO",
-                segment = "FNO",
-                trading_symbol = request.TradingSymbol,
-                quantity = request.Quantity,
-                net_position_quantity = request.NetPositionQuantity,
-                transaction_type = transaction,
-                target = new { trigger_price = FormatPrice(request.Target), order_type = "LIMIT", price = FormatPrice(request.Target) },
-                stop_loss = new { trigger_price = FormatPrice(request.StopLoss), order_type = "SL_M", price = (string?)null },
-                product_type = "NRML",
-                exchange = request.Exchange,
-                duration = "DAY"
-            }, cancellationToken);
-        return MapProtection(request.ClientReference, payload, request.Quantity, request.Target,
-            request.StopLoss);
+            request.StopLoss <= .05m)
+            throw new ArgumentException("Groww stop protection fields are invalid.", nameof(request));
+        // A DAY stop-limit order is a broker-side safety net. Paper decisions remain
+        // authoritative for profit targets, partial exits and final exits. An OCO
+        // target would close runners independently of the paper strategy.
+        var order = await SubmitAsync(new BrokerOrderRequest(request.ClientReference,
+            request.InstrumentId, Direction.Sell, request.Quantity,
+            ProtectiveLimit(request.StopLoss), TradingSymbol: request.TradingSymbol,
+            Exchange: request.Exchange, Segment: "FNO", Product: "NRML",
+            OrderType: "SL", TriggerPrice: request.StopLoss), cancellationToken);
+        if (order.State != OrderState.BrokerAcknowledged || order.FilledQuantity != 0)
+            throw new BrokerOrderOutcomeUnknownException(request.ClientReference);
+        return new BrokerProtectionSnapshot(request.ClientReference, order.BrokerOrderId,
+            order.State.ToString(), request.Quantity, request.StopLoss, timeProvider.GetUtcNow());
     }
 
     public async Task<BrokerProtectionSnapshot> ModifyProtectionAsync(string brokerProtectionId,
-        int quantity, decimal target, decimal stopLoss, CancellationToken cancellationToken)
+        int quantity, decimal stopLoss, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(brokerProtectionId) || quantity <= 0 || target <= 0 || stopLoss <= 0)
-            throw new ArgumentException("Groww OCO modification fields are invalid.");
-        var payload = await SendAsync<SmartOrderPayload>(HttpMethod.Put,
-            $"/v1/order-advance/modify/{Uri.EscapeDataString(brokerProtectionId)}", new
-            {
-                smart_order_type = "OCO",
-                segment = "FNO",
-                duration = "DAY",
-                quantity,
-                product_type = "NRML",
-                target = new { trigger_price = FormatPrice(target) },
-                stop_loss = new { trigger_price = FormatPrice(stopLoss) }
-            }, cancellationToken);
-        return MapProtection(string.Empty, payload, quantity, target, stopLoss);
+        if (string.IsNullOrWhiteSpace(brokerProtectionId) || quantity <= 0 || stopLoss <= .05m)
+            throw new ArgumentException("Groww stop modification fields are invalid.");
+        var payload = await SendAsync<CreatePayload>(HttpMethod.Post, "/v1/order/modify", new
+        {
+            groww_order_id = brokerProtectionId,
+            segment = "FNO",
+            quantity,
+            order_type = "SL",
+            trigger_price = stopLoss,
+            price = ProtectiveLimit(stopLoss)
+        }, cancellationToken);
+        if (string.IsNullOrWhiteSpace(payload.OrderStatus) ||
+            payload.OrderStatus.Equals("REJECTED", StringComparison.OrdinalIgnoreCase) ||
+            payload.OrderStatus.Equals("FAILED", StringComparison.OrdinalIgnoreCase) ||
+            payload.OrderStatus.Equals("CANCELLED", StringComparison.OrdinalIgnoreCase) ||
+            payload.OrderStatus.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase) ||
+            payload.OrderStatus.Equals("EXECUTED", StringComparison.OrdinalIgnoreCase))
+            throw new BrokerOrderOutcomeUnknownException(brokerProtectionId);
+        return new BrokerProtectionSnapshot(string.Empty,
+            payload.GrowwOrderId ?? brokerProtectionId, payload.OrderStatus ?? "UNKNOWN",
+            quantity, stopLoss, timeProvider.GetUtcNow());
     }
 
     public async Task CancelProtectionAsync(string brokerProtectionId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(brokerProtectionId))
-            throw new ArgumentException("Groww OCO identifier is required.", nameof(brokerProtectionId));
-        _ = await SendAsync<SmartOrderPayload>(HttpMethod.Post,
-            $"/v1/order-advance/cancel/FNO/OCO/{Uri.EscapeDataString(brokerProtectionId)}", null,
-            cancellationToken);
+            throw new ArgumentException("Groww stop order identifier is required.", nameof(brokerProtectionId));
+        var payload = await SendAsync<CreatePayload>(HttpMethod.Post, "/v1/order/cancel",
+            new { segment = "FNO", groww_order_id = brokerProtectionId }, cancellationToken);
+        if (payload.OrderStatus is not null &&
+            !payload.OrderStatus.Equals("CANCELLED", StringComparison.OrdinalIgnoreCase))
+            throw new BrokerOrderOutcomeUnknownException(brokerProtectionId);
     }
 
     public async Task<IReadOnlyList<BrokerPositionSnapshot>> GetPositionsAsync(
@@ -257,15 +258,24 @@ public sealed class GrowwBrokerGateway(
         return envelope.Payload;
     }
 
-    private async Task<decimal?> GetAverageFillPriceAsync(string? orderId, CancellationToken cancellationToken)
+    internal async Task<decimal?> GetAverageFillPriceAsync(string? orderId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(orderId)) return null;
-        var payload = await SendAsync<TradesPayload>(HttpMethod.Get,
-            $"/v1/order/trades/{Uri.EscapeDataString(orderId)}?segment=FNO&page=0&page_size=50", null,
-            cancellationToken);
-        var trades = payload.TradeList ?? [];
-        var quantity = trades.Sum(x => x.Quantity);
-        return quantity == 0 ? null : trades.Sum(x => x.Price * x.Quantity) / quantity;
+        try
+        {
+            var payload = await SendAsync<TradesPayload>(HttpMethod.Get,
+                $"/v1/order/trades/{Uri.EscapeDataString(orderId)}?segment=FNO&page=0&page_size=50", null,
+                cancellationToken);
+            var trades = payload.TradeList ?? [];
+            var quantity = trades.Sum(x => x.Quantity);
+            return quantity == 0 ? null : trades.Sum(x => x.Price * x.Quantity) / quantity;
+        }
+        catch (GrowwApiException exception) when (exception.StatusCode == 404)
+        {
+            // An accepted but unfilled order can have no trade history yet. Do
+            // not turn that into a missing order and accidentally submit twice.
+            return null;
+        }
     }
 
     private async Task<LocalOrderContext?> ResolveOrderContextAsync(string clientReference,
@@ -273,11 +283,16 @@ public sealed class GrowwBrokerGateway(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
-        return await (from order in db.Orders.AsNoTracking()
+        var recorded = await (from order in db.Orders.AsNoTracking()
                 join risk in db.RiskDecisions.AsNoTracking() on order.RiskDecisionId equals risk.Id
                 join signal in db.Signals.AsNoTracking() on risk.SignalId equals signal.Id
                 where order.Mode == TradingMode.Live && order.ClientReference == clientReference
                 select new LocalOrderContext(signal.InstrumentId, signal.Direction, order.RequestedQuantity))
+            .SingleOrDefaultAsync(cancellationToken);
+        if (recorded is not null) return recorded;
+        return await db.LiveExecutionIntents.AsNoTracking()
+            .Where(value => value.ClientReference == clientReference)
+            .Select(value => new LocalOrderContext(value.InstrumentId, value.Direction, value.Quantity))
             .SingleOrDefaultAsync(cancellationToken);
     }
 
@@ -313,10 +328,12 @@ public sealed class GrowwBrokerGateway(
         _ => OrderState.ReconciliationRequired
     };
 
-    private BrokerProtectionSnapshot MapProtection(string reference, SmartOrderPayload payload,
-        int quantity, decimal target, decimal stopLoss) => new(reference,
-        Required(payload.SmartOrderId), payload.Status ?? "UNKNOWN", quantity, target, stopLoss,
-        timeProvider.GetUtcNow());
+    internal static decimal ProtectiveLimit(decimal stopLoss)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(stopLoss, .05m);
+        var desired = stopLoss - Math.Max(.05m, stopLoss * .02m);
+        return Math.Max(.05m, Math.Floor(desired / .05m) * .05m);
+    }
 
     private static string FormatPrice(decimal value) =>
         value.ToString("0.00##", System.Globalization.CultureInfo.InvariantCulture);
@@ -336,7 +353,4 @@ public sealed class GrowwBrokerGateway(
         [property: JsonPropertyName("quantity")] int Quantity,
         [property: JsonPropertyName("net_price")] decimal NetPrice);
     private sealed record LocalOrderContext(Guid InstrumentId, Direction Direction, int RequestedQuantity);
-    private sealed record SmartOrderPayload(
-        [property: JsonPropertyName("smart_order_id")] string? SmartOrderId,
-        [property: JsonPropertyName("status")] string? Status);
 }

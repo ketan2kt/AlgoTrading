@@ -64,7 +64,7 @@ internal sealed class EfLiveTradingArmService(
     }
 
     private LiveTradingArmStatus ToStatus(ArmValue? value, bool tested, LiveExecutionIntent? latestIntent) => new(options.Value.BuildEnabled,
-        value?.Armed == true, value?.TradingDate, options.Value.MaximumLotsPerOrder, tested,
+        value?.Armed == true, value?.TradingDate, true, tested,
         options.Value.AllowedMarkets, value?.ChangedAtUtc, value?.ChangedBy,
         latestIntent?.Market, latestIntent?.Status, latestIntent?.LastError,
         latestIntent?.CreatedAtUtc);

@@ -8,30 +8,38 @@ namespace TradingSystem.ContractTests;
 public sealed class LiveExecutionDiscoveryContractTests
 {
     [Fact]
-    public void PaperPromotionIsRequiredUnlessExplicitlyDisabled()
+    public async Task PaperEntryWakeSignalsAreCoalescedWithoutLosingTheNextCycle()
     {
-        Assert.True(new LiveExecutionOptions().RequirePaperPromotion);
-    }
+        using var wake = new LiveExecutionWakeSignal();
+        wake.Notify();
+        wake.Notify();
 
-    [Theory]
-    [InlineData("nifty")]
-    [InlineData("sensex")]
-    public async Task DisabledPromotionDoesNotRequireAResearchReport(string market)
-    {
-        // A null database proves the override does not read or require research data.
-        Assert.True(await AutomaticLiveExecutionService.IsPaperPromotionSatisfiedAsync(
-            null!, market, false, CancellationToken.None));
+        Assert.True(await wake.WaitAsync(TimeSpan.Zero, CancellationToken.None));
+        Assert.False(await wake.WaitAsync(TimeSpan.Zero, CancellationToken.None));
     }
 
     [Fact]
-    public void ConfiguredMarketLotsDetermineLiveQuantity()
+    public void OnlyAnExactlyFilledFinalOrderCanRecoverAClosedLeg()
     {
-        Assert.Equal(750, AutomaticLiveExecutionService.Quantity(75, 10));
-        Assert.Equal(300, AutomaticLiveExecutionService.Quantity(20, 15));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            AutomaticLiveExecutionService.Quantity(75, 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            AutomaticLiveExecutionService.Quantity(75, 51));
+        var order = new BrokerOrderSnapshot("LX1234567890", "broker-exit", Guid.NewGuid(),
+            Direction.Sell, 100, 100, 95m, OrderState.Filled, DateTimeOffset.UtcNow);
+
+        Assert.True(AutomaticLiveExecutionService.IsConfirmedFinalFill(order, 100));
+        Assert.False(AutomaticLiveExecutionService.IsConfirmedFinalFill(order with
+        { FilledQuantity = 50, State = OrderState.PartiallyFilled }, 100));
+        Assert.False(AutomaticLiveExecutionService.IsConfirmedFinalFill(order, 125));
+        Assert.False(AutomaticLiveExecutionService.IsConfirmedFinalFill(null, 100));
+        var stop = order with { ClientReference = "LP1234567890", FilledQuantity = 10 };
+        Assert.True(AutomaticLiveExecutionService.HasConflictingExitFills(order, stop));
+        Assert.False(AutomaticLiveExecutionService.HasConflictingExitFills(null, stop));
+        Assert.False(AutomaticLiveExecutionService.HasConflictingExitFills(order,
+            stop with { FilledQuantity = 0 }));
+    }
+
+    [Fact]
+    public void LiveExecutionHasOneRequiredPaperParityMode()
+    {
+        Assert.Equal("PaperFillAndLifecycle", new LiveExecutionOptions().PaperParityMode);
     }
 
     [Fact]
@@ -70,47 +78,92 @@ public sealed class LiveExecutionDiscoveryContractTests
         Assert.Equal(110.25m, proposal.Target);
     }
 
-    [Fact]
-    public void SensexDiscoveryUsesCanonicalCaseSensitiveMarketCode()
+    [Theory]
+    [InlineData("{\"cumulativeFilledQuantity\":250}", 250)]
+    [InlineData("{\"cumulativeFilledQuantity\":75}", 75)]
+    public void LiveQuantityCanBeTakenFromTheActualPaperFill(string json, int expected)
     {
-        Assert.True(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active"));
-        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("SENSEX", "Active"));
-        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "StopLossHit"));
-        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active",
-            "Research|Index momentum breakout"));
-        Assert.True(AutomaticLiveExecutionService.IsSensexPaperSource("sensex", "Active",
-            "Research|Index momentum breakout", allowResearchSources: true));
+        Assert.True(AutomaticLiveExecutionService.TryReadPaperFilledQuantity(json, out var quantity));
+        Assert.Equal(expected, quantity);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"cumulativeFilledQuantity\":0}")]
+    [InlineData("{\"cumulativeFilledQuantity\":-1}")]
+    [InlineData("not-json")]
+    public void InvalidPaperFillQuantityIsNeverEligibleForLive(string json)
+    {
+        Assert.False(AutomaticLiveExecutionService.TryReadPaperFilledQuantity(json, out var quantity));
+        Assert.Equal(0, quantity);
     }
 
     [Fact]
-    public void NiftyResearchSignalsCanNeverEnterLiveDiscovery()
+    public void ExpansionPairIsExplicitlyBlockedWhenBrokerStopCannotMatchPaperFloor()
     {
-        Assert.True(AutomaticLiveExecutionService.IsNiftyPaperSource("ema-pullback"));
-        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(
-            "Research|nifty-structure-retest"));
-        Assert.True(AutomaticLiveExecutionService.IsNiftyPaperSource(
-            "Research|nifty-structure-retest", allowResearchSources: true));
-        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(null));
+        Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Expansion Pair|pair-id|CE", .05m));
+        Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Expansion Pair|pair-id|PE", .10m));
+        Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Hero Zero|pair-id|CE", 10m));
+        Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Regular Sensex", 90m));
     }
 
     [Fact]
-    public void PersistentDirectionalPaperSourcesAreNeverLiveEligible()
+    public void HeroZeroLegRequiresItsOppositePaperLeg()
     {
-        const string source = "PaperOnly|persistent-directional-thesis-v1|nifty";
-
-        Assert.False(AutomaticLiveExecutionService.IsNiftyPaperSource(
-            source, allowResearchSources: true));
-        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource(
-            "sensex", "Active", source, allowResearchSources: true));
+        Assert.True(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+            "Hero Zero|pair-id|CE", out var put));
+        Assert.Equal("Hero Zero|pair-id|PE", put);
+        Assert.True(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+            "Hero Zero|pair-id|PE", out var call));
+        Assert.Equal("Hero Zero|pair-id|CE", call);
+        Assert.False(AutomaticLiveExecutionService.TryOtherHeroZeroLeg(
+            "Regular Sensex", out _));
     }
 
     [Fact]
-    public void ExpansionPairSourcesAreNeverDiscoveredAsSingleLegLiveOrders()
+    public void PaperLifecycleActionsKeepLiveExposureAndCountersConsistent()
     {
-        const string source = "Expansion Pair|pair-id|CE";
+        var now = DateTimeOffset.UtcNow;
+        var intent = new LiveExecutionIntent(Guid.NewGuid(), "NIFTY", Guid.NewGuid(),
+            "NIFTY", Guid.NewGuid(), Direction.Buy, 100, 100m, 90m, 150m,
+            "LE1234567890", now);
+        intent.BeginEntrySubmission();
+        Assert.Equal("EntrySubmitting", intent.Status);
+        intent.Submitted("entry-1", now);
+        intent.Filled(100, 100m);
+        intent.Protected("stop-1", now);
 
-        Assert.False(AutomaticLiveExecutionService.IsSensexPaperSource(
-            "sensex", "Active", source, allowResearchSources: true));
+        intent.RecordAddOn(25, now);
+        intent.RecordPartialExit(50, now);
+        intent.AdjustProtectedExposure(75, 105m, now);
+
+        Assert.Equal(75, intent.FilledQuantity);
+        Assert.Equal(25, intent.MirroredAddOnQuantity);
+        Assert.Equal(50, intent.MirroredPartialExitQuantity);
+        Assert.Equal(105m, intent.StopLoss);
+        intent.FlagParityMismatch("Broker filled fewer units than paper.");
+        Assert.NotNull(intent.LastError);
+        intent.Closed(now);
+        Assert.Equal(0, intent.FilledQuantity);
+        Assert.Null(intent.LastError);
+    }
+
+    [Fact]
+    public void PaperActionAndStopSnapshotsCanBeReadWithoutRecalculatingStrategy()
+    {
+        Assert.True(AutomaticLiveExecutionService.TryReadPaperAction(
+            "{\"cumulativeFilledQuantity\":50,\"averageFillPrice\":123.45}", out var action));
+        Assert.Equal(50, action.Quantity);
+        Assert.Equal(123.45m, action.Price);
+        Assert.True(AutomaticLiveExecutionService.TryReadDesiredStop(
+            "{\"effectiveStop\":101.25}", out var stop));
+        Assert.Equal(101.25m, stop);
+        Assert.False(AutomaticLiveExecutionService.TryReadPaperAction("{}", out _));
+        Assert.False(AutomaticLiveExecutionService.TryReadDesiredStop("{}", out _));
     }
 
     [Fact]
@@ -137,6 +190,22 @@ public sealed class LiveExecutionDiscoveryContractTests
 
         Assert.False(result.TradingPermitted);
         Assert.Single(result.Mismatches);
+    }
+
+    [Fact]
+    public void NewLiveEntryRejectsUnmanagedSameContractExposureButNotOtherContracts()
+    {
+        var instrument = Guid.NewGuid();
+        var otherInstrument = Guid.NewGuid();
+        var managed = new[] { new ExpectedBrokerPosition(instrument, Direction.Buy, 100) };
+        Assert.True(AutomaticLiveExecutionService.HasOnlyManagedExposure(instrument, managed,
+            [new BrokerPositionSnapshot(instrument, Direction.Buy, 100, 90m),
+                new BrokerPositionSnapshot(otherInstrument, Direction.Buy, 50, 70m)]));
+        Assert.False(AutomaticLiveExecutionService.HasOnlyManagedExposure(instrument, managed,
+            [new BrokerPositionSnapshot(instrument, Direction.Buy, 150, 90m)]));
+        Assert.False(AutomaticLiveExecutionService.HasOnlyManagedExposure(instrument, managed,
+            [new BrokerPositionSnapshot(instrument, Direction.Buy, 100, 90m),
+                new BrokerPositionSnapshot(instrument, Direction.Sell, 25, 90m)]));
     }
 
     [Fact]

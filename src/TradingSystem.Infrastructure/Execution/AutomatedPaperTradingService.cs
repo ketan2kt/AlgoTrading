@@ -975,6 +975,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var entry = await paperControl.ProcessNextFillAsync(entryReference, cancellationToken);
         if (entry.State != OrderState.Filled)
             throw new InvalidOperationException($"Paper option entry ended in state {entry.State}.");
+        scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
 
         await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
             latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -1128,6 +1129,9 @@ internal sealed partial class AutomatedPaperTradingService(
             };
         }
 
+        await PersistLiveProtectionDesiredAsync(researchDb, open.Signal.SignalId,
+            underlyingInstrumentId, effectiveStop, cancellationToken);
+
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
                                  exitPlan.ExtendTarget &&
                                  !invalidation.ShouldExit &&
@@ -1153,10 +1157,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 var addOn = await paperControl.ProcessNextFillAsync(addOnReference, cancellationToken);
                 await services.GetRequiredService<IAuditWriter>().WriteAsync(new AuditEntry(
                     "paper-automation", "WinnerAddOn", "Signal", open.Signal.SignalId.ToString("N"),
-                    "One paper-only winner add-on was filled after 1R and confirmed continuation.",
+                    "One winner add-on was filled after 1R and confirmed continuation; live mirroring depends on broker execution.",
                     "{}", JsonSerializer.Serialize(new { price, effectiveStop,
                         quantity = optionInstrument.LotSize, addOnDecision.Reasons,
-                        liveEligible = false }), open.Signal.SignalId.ToString("N"),
+                        liveMirrorCandidate = effectiveStop > .05m }), open.Signal.SignalId.ToString("N"),
                     timeProvider.GetUtcNow()), cancellationToken);
                 state.Record("PositionOpen", false,
                     $"Directional winner add-on filled: {addOn.FilledQuantity} units; no losing position was averaged down.",
@@ -1414,6 +1418,23 @@ internal sealed partial class AutomatedPaperTradingService(
                 grossProfitGiveback = Math.Max(0m, peakGrossPnl - currentGrossPnl),
                 observedAtUtc = now
             })));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task PersistLiveProtectionDesiredAsync(TradingDbContext db, Guid signalId,
+        Guid underlyingInstrumentId, decimal effectiveStop, CancellationToken cancellationToken)
+    {
+        var outcome = $"LiveProtectionDesired:{signalId:N}";
+        var previous = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
+                value.Market == TradingMarketCatalog.Nifty.Code && value.Outcome == outcome)
+            .OrderByDescending(value => value.CandleTimeUtc)
+            .Select(value => value.ReasonsJson).FirstOrDefaultAsync(cancellationToken);
+        if (AutomaticLiveExecutionService.TryReadDesiredStop(previous, out var priorStop) &&
+            priorStop == effectiveStop) return;
+        var now = timeProvider.GetUtcNow();
+        db.MarketStrategyAudits.Add(new MarketStrategyAudit(Guid.NewGuid(),
+            TradingMarketCatalog.Nifty.Code, underlyingInstrumentId, now, outcome, 0m,
+            JsonSerializer.Serialize(new { signalId, effectiveStop, observedAtUtc = now })));
         await db.SaveChangesAsync(cancellationToken);
     }
 

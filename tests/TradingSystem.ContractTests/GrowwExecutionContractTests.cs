@@ -91,6 +91,14 @@ public sealed class GrowwExecutionContractTests
     }
 
     [Fact]
+    public async Task EmptyTradeHistoryDoesNotMakeAnAcceptedOrderDisappear()
+    {
+        var gateway = CreateGateway(_ => Task.FromResult(Json(HttpStatusCode.NotFound, "{}")));
+
+        Assert.Null(await gateway.GetAverageFillPriceAsync("GROW-1", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task InvalidLiveOrderIsRejectedBeforeNetworkAccess()
     {
         var calls = 0;
@@ -107,29 +115,78 @@ public sealed class GrowwExecutionContractTests
     }
 
     [Fact]
-    public async Task ProtectionUsesOfficialFnoOcoContract()
+    public async Task ProtectionUsesDayStopLimitWithoutAnIndependentProfitTarget()
     {
-        HttpRequestMessage? captured = null;
-        string? body = null;
+        var requests = new List<(HttpMethod Method, string Path, string? Body)>();
         var gateway = CreateGateway(async request =>
         {
-            captured = request;
-            body = await request.Content!.ReadAsStringAsync();
+            requests.Add((request.Method, request.RequestUri!.AbsolutePath,
+                request.Content is null ? null : await request.Content.ReadAsStringAsync()));
+            if (request.Method == HttpMethod.Get)
+                return Json(HttpStatusCode.NotFound, "{}");
             return Json(HttpStatusCode.Created,
-                """{"status":"SUCCESS","payload":{"smart_order_id":"oco-123","smart_order_type":"OCO","status":"ACTIVE"}}""");
+                """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"OPEN"}}""");
         });
 
         var result = await gateway.CreateProtectionAsync(new BrokerProtectionRequest(
-            "OCO-00001", "NIFTY26SEP24500CE", "NSE", 65, 65, 120m, 95m),
+            "STOP-00001", Guid.NewGuid(), "NIFTY26SEP24500CE", "NSE", 65, 95m),
             CancellationToken.None);
 
-        Assert.Equal("oco-123", result.BrokerProtectionId);
-        Assert.Equal("/v1/order-advance/create", captured!.RequestUri!.AbsolutePath);
-        Assert.Contains("\"smart_order_type\":\"OCO\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"net_position_quantity\":65", body, StringComparison.Ordinal);
-        Assert.Contains("\"transaction_type\":\"SELL\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"order_type\":\"SL_M\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"product_type\":\"NRML\"", body, StringComparison.Ordinal);
+        Assert.Equal("STOP-123", result.BrokerProtectionId);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal("/v1/order/create", requests[1].Path);
+        Assert.Contains("\"transaction_type\":\"SELL\"", requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("\"order_type\":\"SL\"", requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("\"trigger_price\":95", requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("\"price\":93.1", requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("\"validity\":\"DAY\"", requests[1].Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("target", requests[1].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StopModificationUsesOfficialFnoOrderContract()
+    {
+        string? body = null;
+        var gateway = CreateGateway(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Json(HttpStatusCode.OK,
+                """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"OPEN"}}""");
+        });
+
+        var result = await gateway.ModifyProtectionAsync("STOP-123", 40, 97.50m,
+            CancellationToken.None);
+
+        Assert.Equal(40, result.Quantity);
+        Assert.Equal(97.50m, result.StopLoss);
+        Assert.Contains("\"groww_order_id\":\"STOP-123\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"order_type\":\"SL\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"quantity\":40", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("REJECTED")]
+    [InlineData("COMPLETED")]
+    [InlineData("CANCELLED")]
+    public async Task StopModificationDoesNotAcceptADeadBrokerOrder(string status)
+    {
+        var gateway = CreateGateway(_ => Task.FromResult(Json(HttpStatusCode.OK,
+            $"{{\"status\":\"SUCCESS\",\"payload\":{{\"groww_order_id\":\"STOP-123\",\"order_status\":\"{status}\"}}}}")));
+
+        await Assert.ThrowsAsync<BrokerOrderOutcomeUnknownException>(() =>
+            gateway.ModifyProtectionAsync("STOP-123", 40, 97.50m, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("OPEN")]
+    [InlineData("REJECTED")]
+    public async Task StopCancellationDoesNotClaimSuccessWhileBrokerStillHasAnOrder(string status)
+    {
+        var gateway = CreateGateway(_ => Task.FromResult(Json(HttpStatusCode.OK,
+            $"{{\"status\":\"SUCCESS\",\"payload\":{{\"groww_order_id\":\"STOP-123\",\"order_status\":\"{status}\"}}}}")));
+
+        await Assert.ThrowsAsync<BrokerOrderOutcomeUnknownException>(() =>
+            gateway.CancelProtectionAsync("STOP-123", CancellationToken.None));
     }
 
     private static GrowwBrokerGateway CreateGateway(

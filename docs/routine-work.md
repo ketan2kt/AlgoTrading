@@ -52,13 +52,15 @@ commit and working-tree state. It never reads credentials.
 
 ## Deployment
 
-The deployment workflow currently sets `LiveExecution__RequirePaperPromotion=false`
-at the user's request (13 October 2026). This temporarily bypasses only the historical
-paper-performance gate for Nifty and Sensex. Restore it to `true` to re-enable that
-gate; the code defaults to requiring promotion when the setting is absent.
-Daily arming, reconciliation, fresh eligible non-research signals, duplicate-order
-prevention and broker protection still apply. Existing closed paper trades are not
-replayed. Broker acceptance is not guaranteed by this switch.
+The live execution worker uses persisted paper fills and position lifecycle events
+for quantities and exits. It does not apply a separate research-promotion gate or
+five-lot size. The deployment workflow sets and verifies
+`LiveExecution__PaperParityMode=PaperFillAndLifecycle`; server startup rejects a
+different mode. Live entry still requires daily arming, and broker reconciliation
+and duplicate-order protections remain. Closed paper trades are not replayed.
+Expansion-pair legs remain explicitly blocked from live execution because their
+₹0.05 floor stop cannot be protected by the current Groww stop-limit order. Do
+not present local tests or broker acceptance as guaranteed live parity.
 
 After the desired commit has been pushed and deployment authorized:
 

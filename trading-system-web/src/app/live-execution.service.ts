@@ -6,7 +6,7 @@ export interface LiveExecutionStatus {
   buildEnabled: boolean;
   armed: boolean;
   armedForTradingDate: string | null;
-  maximumLotsPerOrder: number;
+  mirrorsPaperQuantity: boolean;
   controlledBrokerTestCompleted: boolean;
   allowedMarkets: string[];
   changedAtUtc: string | null;

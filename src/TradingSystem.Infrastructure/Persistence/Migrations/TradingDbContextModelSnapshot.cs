@@ -386,22 +386,64 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.ContactInquiry", b =>
                 {
-                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
-                    b.Property<string>("Company").HasMaxLength(120).HasColumnType("character varying(120)");
-                    b.Property<Guid>("ConcurrencyToken").IsConcurrencyToken().HasColumnType("uuid");
-                    b.Property<DateTimeOffset>("CreatedAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<int>("DeliveryAttempts").HasColumnType("integer");
-                    b.Property<string>("DeliveryStatus").IsRequired().HasMaxLength(20).HasColumnType("character varying(20)");
-                    b.Property<DateTimeOffset?>("DeliveredAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<string>("Email").IsRequired().HasMaxLength(254).HasColumnType("character varying(254)");
-                    b.Property<string>("Message").IsRequired().HasMaxLength(4000).HasColumnType("character varying(4000)");
-                    b.Property<string>("Name").IsRequired().HasMaxLength(120).HasColumnType("character varying(120)");
-                    b.Property<DateTimeOffset>("NextDeliveryAtUtc").HasColumnType("timestamp with time zone");
-                    b.Property<string>("Service").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
-                    b.Property<DateTimeOffset>("UpdatedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Company")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DeliveryAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeliveryStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("NextDeliveryAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Service")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
+
                     b.HasIndex("CreatedAtUtc");
+
                     b.HasIndex("DeliveryStatus", "NextDeliveryAtUtc");
+
                     b.ToTable("contact_inquiries", "trading");
                 });
 
@@ -607,6 +649,12 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<int>("MirroredAddOnQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MirroredPartialExitQuantity")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("ProtectedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -674,6 +722,10 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("CostsPaid")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -681,36 +733,18 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
-                    b.Property<decimal>("CostsPaid")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("numeric(18,4)");
-
-                    b.Property<decimal?>("MaximumFavourablePnl")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("numeric(18,4)");
-
-                    b.Property<DateTimeOffset?>("MaximumFavourableAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal?>("MaximumAdversePnl")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("numeric(18,4)");
-
-                    b.Property<DateTimeOffset?>("MaximumAdverseAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("ExcursionSampleCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<int>("Direction")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("EntryPrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ExcursionSampleCount")
+                        .HasColumnType("integer");
 
                     b.Property<Guid>("ExecutionInstrumentId")
                         .HasColumnType("uuid");
@@ -720,18 +754,32 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
-                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                    b.Property<DateTimeOffset?>("MaximumAdverseAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer");
+                    b.Property<decimal?>("MaximumAdversePnl")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
 
-                    b.Property<int>("PartialExitQuantity")
-                        .HasColumnType("integer");
+                    b.Property<DateTimeOffset?>("MaximumFavourableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("MaximumFavourablePnl")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal?>("PartialExitPrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
+
+                    b.Property<int>("PartialExitQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
 
                     b.Property<decimal>("RealisedPnl")
                         .HasPrecision(18, 4)
@@ -809,40 +857,6 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("TradingSessionId", "ObservedAtUtc");
 
                     b.ToTable("market_regime_snapshots", "trading");
-                });
-
-            modelBuilder.Entity("TradingSystem.Domain.Trading.PreSessionBriefSnapshot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CapturedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Market")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<DateOnly>("SessionDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("Stage")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SessionDate", "Market", "Stage")
-                        .IsUnique();
-
-                    b.ToTable("pre_session_brief_snapshots", "trading");
                 });
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.MarketStrategyAudit", b =>
@@ -1007,8 +1021,8 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("ObservedBucketUtc")
-                        .HasColumnName("ObservedMinuteUtc")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ObservedMinuteUtc");
 
                     b.Property<decimal>("OptionPrice")
                         .HasPrecision(18, 4)
@@ -1022,8 +1036,8 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("InstrumentId", "ObservedAtUtc");
 
                     b.HasIndex("SignalId", "ObservedBucketUtc")
-                        .HasDatabaseName("IX_paper_trade_price_samples_SignalId_ObservedMinuteUtc")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_paper_trade_price_samples_SignalId_ObservedMinuteUtc");
 
                     b.HasIndex("SignalId", "OptionPrice");
 
@@ -1215,6 +1229,40 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("PositionId", "OccurredAtUtc");
 
                     b.ToTable("position_events", "trading");
+                });
+
+            modelBuilder.Entity("TradingSystem.Domain.Trading.PreSessionBriefSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CapturedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateOnly>("SessionDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionDate", "Market", "Stage")
+                        .IsUnique();
+
+                    b.ToTable("pre_session_brief_snapshots", "trading");
                 });
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.ProviderHealth", b =>

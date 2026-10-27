@@ -123,6 +123,7 @@ internal sealed partial class HeroZeroPaperTradingService(
         {
             await OpenPairAsync(db, market, underlying.Id, call!, put!, configuredLots, now,
                 cancellationToken);
+            scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
             status = "Pair opened";
             explanation = "Liquidity-qualified CE and PE opened after confirmed expiry expansion.";
         }

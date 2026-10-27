@@ -21,7 +21,7 @@ describe('LiveExecutionService', () => {
       armed: true, reason: 'Controlled live activation.', password: 'admin-password',
     });
     request.flush({ buildEnabled: true, armed: true, armedForTradingDate: '2026-09-01',
-      maximumLotsPerOrder: 5, controlledBrokerTestCompleted: false,
+      mirrorsPaperQuantity: true, controlledBrokerTestCompleted: false,
       allowedMarkets: ['NIFTY', 'SENSEX'], changedAtUtc: null, changedBy: null });
     http.verify();
   });
