@@ -12,8 +12,8 @@ Run from the repository root in PowerShell. Commands fail on a nonzero tool exit
 
 Backend checks build and test in Release. Frontend checks run the production build
 and non-watching tests. Add `-Install` to install frontend dependencies on first use
-or after the lockfile changes. The helper uses the pinned Node runtime in `.tools`
-when present, otherwise Node/npm must be on PATH. .NET follows `global.json`.
+or after the lockfile changes. The helper uses the pinned Node and .NET runtimes
+in `.tools` when present; otherwise they must be on PATH. .NET follows `global.json`.
 PostgreSQL integration tests require Docker and `RUN_POSTGRES_TESTS=true`.
 CI retains its full checks and dependency audits; the helper does not replace CI.
 

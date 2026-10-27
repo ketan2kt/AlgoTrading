@@ -98,6 +98,10 @@ try {
     if (Test-Path (Join-Path $nodeDirectory 'node.exe')) {
         $env:PATH = "$nodeDirectory;$env:PATH"
     }
+    $dotnetDirectory = Join-Path $root '.tools/dotnet'
+    if (Test-Path (Join-Path $dotnetDirectory 'dotnet.exe')) {
+        $env:PATH = "$dotnetDirectory;$env:PATH"
+    }
     switch ($Task) {
         'status' {
             Invoke-Checked git @('status', '--short', '--branch')

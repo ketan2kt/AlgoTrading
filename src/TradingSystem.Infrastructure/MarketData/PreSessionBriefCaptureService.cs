@@ -8,6 +8,11 @@ internal sealed class PreSessionBriefCaptureService(
     IServiceScopeFactory scopeFactory, TimeProvider clock,
     ILogger<PreSessionBriefCaptureService> logger) : BackgroundService
 {
+    private static readonly Action<ILogger, string, Exception?> LogCaptureFailure =
+        LoggerMessage.Define<string>(LogLevel.Error,
+            new EventId(1, "PreSessionBriefCaptureFailure"),
+            "Pre-session {Stage} snapshot capture failed.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await CaptureIfDueAsync(stoppingToken);
@@ -36,7 +41,7 @@ internal sealed class PreSessionBriefCaptureService(
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Pre-session {Stage} snapshot capture failed.", slot.Stage);
+                LogCaptureFailure(logger, slot.Stage, exception);
             }
         }
     }

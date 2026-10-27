@@ -19,23 +19,26 @@ No trading decisions, risk rules, lot sizes, broker polling cadence, live
 controls, or orders were changed. See `docs/pre-session-brief.md`. Frontend
 build and all 43 frontend tests passed, including the missed-morning outcome
 regression. Existing bundle/style budget warnings remain.
-Backend check could not run locally because the repository pins .NET SDK
-10.0.302 and the machine has only 6.0.402. Scoped commit `af5fee7` was pushed
-to `main`; deployment run
+Scoped commit `af5fee7` was pushed to `main`; deployment run
 https://github.com/ketan2kt/AlgoTrading/actions/runs/40450796872 failed in
 the backend quality gate before deployment because three decimal format calls
 omitted an explicit culture (CA1305). The exact-commit push CI had already
 failed the same backend build; its frontend build/tests passed, but its npm
-dependency audit also failed. The local follow-up fixes the three format calls,
-updates Angular/Vitest/transitive packages to an audit-clean lockfile, and
-changes `scripts/tasks.ps1 deploy` to require a successful full push CI run
-for the exact remote commit before dispatch. The new gate was confirmed to
-refuse the failed `af5fee7` run. An isolated clean npm install found zero
-vulnerabilities; production build and 43/43 frontend tests passed. The normal
-workspace `npm ci` could not replace an `esbuild.exe` held by the running local
-dev server, which was left untouched. Backend compilation, migration and the
-new CI gate's green path still require remote CI verification. No retry has
-been dispatched yet. Preserve unrelated dirty files.
+dependency audit also failed. Commit `934f144` fixed CA1305, updated
+Angular/Vitest/transitive packages to an audit-clean lockfile, and added an
+exact-commit successful push-CI preflight to `scripts/tasks.ps1 deploy`. That
+gate refused the failed `af5fee7` run. The new push CI run
+https://github.com/ketan2kt/AlgoTrading/actions/runs/40451837537 had a green
+frontend job, including audit, but caught CA1848 in the new capture service.
+No second deployment was dispatched. The local follow-up fixes CA1848 and
+updates `tasks.ps1 check` to use the repository's existing `.tools/dotnet`
+SDK 10.0.302. Full backend build and tests now pass locally (82 contract,
+346 unit, 2 architecture, 23 integration; 3 PostgreSQL integration skipped).
+An isolated clean npm install found zero vulnerabilities; production build
+and 43/43 frontend tests passed. The normal workspace `npm ci` could not
+replace an `esbuild.exe` held by the running local dev server, which was left
+untouched. Database migration still needs production workflow verification.
+Preserve unrelated dirty files.
 
 ## Public Sarthico homepage and contact flow (deployment dispatched)
 
