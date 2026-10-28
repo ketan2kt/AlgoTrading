@@ -234,7 +234,7 @@ internal sealed class EfTradingWorkspaceReader(
             var excursion = CalculateObservedExcursion(
                 result?.EntryPrice ?? order?.FillPrice,
                 result?.Quantity ?? order?.Quantity ?? decision?.ApprovedQuantity,
-                value.Direction, extremes?.MinimumPrice, extremes?.MaximumPrice,
+                extremes?.MinimumPrice, extremes?.MaximumPrice,
                 result?.ExitPrice ?? (isActive ? positionMark!.CurrentPrice : null));
             var lifecycleStatus = result is not null ? FormatExitStatus(result.ExitReason) :
                 isActive ? (positionMark!.QuoteAvailable ? "Active" : "Active · quote unavailable") :
@@ -620,7 +620,7 @@ internal sealed class EfTradingWorkspaceReader(
         value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.GetRawText();
 
     internal static (decimal? MaximumProfit, decimal? MaximumLoss) CalculateObservedExcursion(
-        decimal? entryPrice, int? quantity, Direction direction, decimal? minimumSamplePrice,
+        decimal? entryPrice, int? quantity, decimal? minimumSamplePrice,
         decimal? maximumSamplePrice, decimal? currentOrExitPrice)
     {
         if (entryPrice is not > 0 || quantity is not > 0 ||
@@ -629,8 +629,10 @@ internal sealed class EfTradingWorkspaceReader(
 
         var observedPrices = new[] { entryPrice, minimumSamplePrice, maximumSamplePrice, currentOrExitPrice }
             .Where(price => price is > 0).Select(price => price!.Value);
+        // The signal direction describes the underlying thesis (Sell for a PE),
+        // while Nifty paper execution buys the option in either direction.
         var observedPnl = observedPrices.Select(price =>
-            (direction == Direction.Buy ? price - entryPrice.Value : entryPrice.Value - price) * quantity.Value);
+            (price - entryPrice.Value) * quantity.Value);
         return (Math.Max(0m, observedPnl.Max()), Math.Max(0m, -observedPnl.Min()));
     }
 

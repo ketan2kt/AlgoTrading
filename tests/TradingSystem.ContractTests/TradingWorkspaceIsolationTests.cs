@@ -1,4 +1,5 @@
 using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Infrastructure.Diagnostics;
 using TradingSystem.Domain.Trading;
 using System.Globalization;
 
@@ -10,7 +11,7 @@ public sealed class TradingWorkspaceIsolationTests
     public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
     {
         var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
-            100m, 50, Direction.Buy, 90m, 120m, 110m);
+            100m, 50, 90m, 120m, 110m);
 
         Assert.Equal(1000m, excursion.MaximumProfit);
         Assert.Equal(500m, excursion.MaximumLoss);
@@ -20,7 +21,7 @@ public sealed class TradingWorkspaceIsolationTests
     public void ObservedExcursionUsesExitWhenEarlierSamplesAreMissing()
     {
         var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
-            100m, 50, Direction.Buy, null, null, 110m);
+            100m, 50, null, null, 110m);
 
         Assert.Equal(500m, excursion.MaximumProfit);
         Assert.Equal(0m, excursion.MaximumLoss);
@@ -30,10 +31,35 @@ public sealed class TradingWorkspaceIsolationTests
     public void ObservedExcursionDoesNotInventValuesForUnfilledTrade()
     {
         var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
-            null, 50, Direction.Buy, 90m, 120m, null);
+            null, 50, 90m, 120m, null);
 
         Assert.Null(excursion.MaximumProfit);
         Assert.Null(excursion.MaximumLoss);
+    }
+
+    [Fact]
+    public void BoughtPutExcursionsFollowOptionPricesNotBearishSignalDirection()
+    {
+        var opened = new DateTimeOffset(2026, 10, 28, 8, 23, 6, TimeSpan.Zero);
+        var signalId = Guid.NewGuid();
+        var instrumentId = Guid.NewGuid();
+        var samples = new[]
+        {
+            new PaperTradePriceSample(Guid.NewGuid(), signalId, instrumentId, 160.95m,
+                opened.AddMinutes(4)),
+            new PaperTradePriceSample(Guid.NewGuid(), signalId, instrumentId, 178m,
+                opened.AddMinutes(10))
+        };
+
+        var daily = EfDailyTradingDiagnosticsReader.CalculateBoughtOptionExcursionPath(
+            167m, 325, opened, 171.75m, opened.AddMinutes(12), samples);
+        var workspace = EfTradingWorkspaceReader.CalculateObservedExcursion(
+            167m, 325, 160.95m, 178m, 171.75m);
+
+        Assert.Equal(3575m, daily.MaximumFavourableExcursion);
+        Assert.Equal(1966.25m, daily.MaximumAdverseExcursion);
+        Assert.Equal(daily.MaximumFavourableExcursion, workspace.MaximumProfit);
+        Assert.Equal(daily.MaximumAdverseExcursion, workspace.MaximumLoss);
     }
 
     [Fact]

@@ -118,8 +118,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         foreach (var row in paperRows)
         {
             samplesBySignal.TryGetValue(row.Result.SignalId, out var tradeSamples);
-            var path = CalculateExcursionPath(row.Result.EntryPrice, row.Result.Quantity,
-                row.Signal.Direction, row.Signal.MarketDataTimestampUtc, row.Result.ExitPrice,
+            var path = CalculateBoughtOptionExcursionPath(row.Result.EntryPrice, row.Result.Quantity,
+                row.Signal.MarketDataTimestampUtc, row.Result.ExitPrice,
                 row.Result.ClosedAtUtc, tradeSamples ?? []);
             trades.Add(new DailyTradingTrade(
                 MarketFromSymbol(row.Instrument.TradingSymbol),
@@ -312,10 +312,9 @@ internal sealed class EfDailyTradingDiagnosticsReader(
 
     private static string Limit(string value) => value.Length <= 4000 ? value : value[..4000];
 
-    private static ProfitPath CalculateExcursionPath(
+    internal static ProfitPath CalculateBoughtOptionExcursionPath(
         decimal entryPrice,
         int quantity,
-        Direction direction,
         DateTimeOffset openedAtUtc,
         decimal exitPrice,
         DateTimeOffset closedAtUtc,
@@ -327,7 +326,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             .Append(new PaperTradePricePoint(closedAtUtc, exitPrice))
             .Append(new PaperTradePricePoint(openedAtUtc, entryPrice))
             .Where(value => value.Price > 0).ToArray();
-        return CalculateExcursionPath(entryPrice, quantity, direction, points,
+        // Nifty's Sell signal buys a PE; the option price path is long, not short.
+        return CalculateExcursionPath(entryPrice, quantity, Direction.Buy, points,
             eligible.Length > 0 ? "Sampled price path; historical cadence" : "Entry/exit only");
     }
 
@@ -356,7 +356,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             Math.Max(0m, -adverse.Pnl), adverse.ObservedAtUtc, coverage, points.Length);
     }
 
-    private sealed record ProfitPath(
+    internal sealed record ProfitPath(
         decimal MaximumFavourableExcursion,
         DateTimeOffset MaximumFavourableExcursionAtUtc,
         decimal MaximumAdverseExcursion,
