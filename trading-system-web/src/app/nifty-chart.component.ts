@@ -25,7 +25,8 @@ import {
   LineStyle,
   Time,
 } from 'lightweight-charts';
-import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { TradingWorkspaceSnapshot, WorkspaceCandle, WorkspaceTradeOverlay } from './trading-workspace';
+import { compactContractName } from './contract-name';
 import {
   aggregateCandles,
   aggregateVolumeBars,
@@ -78,22 +79,6 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
-        @if (visibility.tradePlan && activeTradePlans.length) {
-          <aside class="trade-plan" aria-label="Active option trade plan overlays">
-            <div class="trade-plan__heading">OPTION PREMIUM <small>Illustrative · not index scale</small></div>
-            @for (trade of activeTradePlans; track trade.signalId) {
-              <div class="trade-plan__card">
-                <strong class="trade-plan__contract" [title]="trade.executionInstrument || ''">{{ trade.executionInstrument || 'Option trade' }}</strong>
-                <div class="trade-plan__band trade-plan__band--reward"><span>Target</span><strong>{{ formatPremium(trade.executionTarget) }}</strong></div>
-                <div class="trade-plan__mid"><span>Entry {{ formatPremium(trade.fillPrice) }}</span><strong>Now {{ formatPremium(trade.currentOptionPrice) }}</strong></div>
-                <div class="trade-plan__band trade-plan__band--risk"><span>Plan stop</span><strong>{{ formatPremium(trade.executionStopLoss) }}</strong></div>
-              </div>
-            }
-            @if (activeTradePlanCount > activeTradePlans.length) {
-              <small class="trade-plan__more">+{{ activeTradePlanCount - activeTradePlans.length }} more active trades below</small>
-            }
-          </aside>
-        }
         <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
         @if (!snapshot?.candles?.length) {
           <div class="chart-empty">
@@ -101,8 +86,11 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
             <span>{{ snapshot?.statusMessage || 'The chart starts only after verified live data arrives.' }}</span>
           </div>
         }
-        <div #rewardZone class="trade-zone trade-zone--reward"></div>
-        <div #riskZone class="trade-zone trade-zone--risk"></div>
+        <div #rewardZone class="trade-zone trade-zone--reward" [class.trade-zone--below]="!rewardAbove"><span>Target {{ formatPremium(zoneTrade?.executionTarget ?? null) }}</span></div>
+        <div #riskZone class="trade-zone trade-zone--risk" [class.trade-zone--above]="!rewardAbove"><span>{{ stopIsProtected ? 'Protected stop' : 'Stop loss' }} {{ formatPremium(zoneTrade?.executionStopLoss ?? null) }}</span></div>
+        <div #entryLine class="trade-entry-line"><span>{{ zoneContractName }} · Entry {{ formatPremium(zoneTrade?.fillPrice ?? null) }} @if (stopIsProtected) { · Protected stop {{ formatPremium(zoneTrade?.executionStopLoss ?? null) }} }</span></div>
+        <div #pnlBadge class="trade-pnl" [class.trade-pnl--gain]="zonePnl !== null && zonePnl >= 0" [class.trade-pnl--loss]="zonePnl !== null && zonePnl < 0">{{ zoneTrade?.exitTimeUtc ? 'Booked' : 'Live' }} {{ formatPnl(zonePnl) }}</div>
+        @if (visibility.tradePlan && zoneTrade) { <small class="trade-zone-note">Illustrative option-premium zones · not index-price levels</small> }
       </div>
     </div>
   `,
@@ -146,17 +134,6 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#e6f2e2ee; color:#315b43; font-size:.7rem; }
       .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
-      .trade-plan { position:absolute; z-index:2; top:37px; right:65px; width:min(205px,38%); max-height:55%; overflow:auto; padding:6px; border:1px solid #a9c6ad; border-radius:8px; background:#f2f8f0ed; box-shadow:0 5px 14px #173f2d25; pointer-events:auto; }
-      .trade-plan__heading { display:flex; justify-content:space-between; gap:4px; margin:0 2px 5px; color:#315b43; font-size:.6rem; font-weight:800; letter-spacing:.04em; }
-      .trade-plan__heading small { color:#557460; font-size:.55rem; font-weight:500; letter-spacing:0; text-align:right; }
-      .trade-plan__card { overflow:hidden; margin-top:4px; border:1px solid #c6dac5; border-radius:5px; background:#fff; }
-      .trade-plan__contract { display:block; overflow:hidden; padding:4px 6px; color:#173f2d; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
-      .trade-plan__band,.trade-plan__mid { display:flex; justify-content:space-between; gap:5px; align-items:center; padding:3px 6px; font-size:.65rem; }
-      .trade-plan__band--reward { color:#176c3c; background:#d8f0dc; }
-      .trade-plan__band--risk { color:#9d3039; background:#f9dedf; }
-      .trade-plan__mid { color:#315b43; background:#edf6eb; }
-      .trade-plan__more { display:block; padding:5px 2px 1px; color:#557460; font-size:.6rem; }
-      @media (max-width: 580px) { .trade-plan { top:70px; right:54px; width:min(175px,48%); } }
       .decision-map { margin:0; border:0; border-bottom:1px solid #c6dac5; background:#edf6eb; }
       .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
       .decision-map summary::-webkit-details-marker { display:none; }
@@ -181,20 +158,28 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       }
       .trade-zone {
         position: absolute;
-        right: 64px;
-        width: 24%;
+        z-index: 1;
         pointer-events: none;
-        opacity: 0.15;
         display: none;
       }
       .trade-zone--reward {
-        background: #25834d;
-        border: 1px solid #176c3c;
+        background: #25834d35;
+        border-top: 2px dashed #176c3c;
       }
       .trade-zone--risk {
-        background: #ff5d68;
-        border: 1px solid #ff7881;
+        background: #dc59613b;
+        border-bottom: 2px dashed #b63b45;
       }
+      .trade-zone--reward.trade-zone--below { border-top:0; border-bottom:2px dashed #176c3c; }
+      .trade-zone--risk.trade-zone--above { border-bottom:0; border-top:2px dashed #b63b45; }
+      .trade-zone span { position:absolute; left:50%; top:4px; transform:translateX(-50%); max-width:95%; overflow:hidden; padding:2px 5px; border-radius:4px; background:#e6f2e2ed; color:#176c3c; font-size:.67rem; font-weight:750; text-overflow:ellipsis; white-space:nowrap; }
+      .trade-zone--risk span { color:#9d3039; }
+      .trade-entry-line { position:absolute; z-index:2; height:0; border-top:2px dashed #466856; pointer-events:none; display:none; }
+      .trade-entry-line span { position:absolute; left:6px; top:-25px; max-width:95%; overflow:hidden; padding:3px 6px; border-radius:4px; background:#e6f2e2f5; color:#173f2d; font-size:.68rem; font-weight:750; text-overflow:ellipsis; white-space:nowrap; }
+      .trade-pnl { position:absolute; z-index:3; min-width:85px; padding:4px 6px; border:1px solid #a9c6ad; border-radius:5px; background:#edf6ebf5; color:#315b43; font-size:.7rem; font-weight:800; pointer-events:none; display:none; }
+      .trade-pnl--gain { border-color:#25834d; color:#176c3c; }
+      .trade-pnl--loss { border-color:#dc5961; color:#9d3039; }
+      .trade-zone-note { position:absolute; z-index:2; left:9px; bottom:43px; padding:2px 5px; border-radius:4px; background:#e6f2e2dd; color:#315b43; font-size:.62rem; pointer-events:none; }
     `,
   ],
 })
@@ -204,6 +189,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   @ViewChild('chart', { static: true }) chartElement!: ElementRef<HTMLDivElement>;
   @ViewChild('rewardZone', { static: true }) rewardZone!: ElementRef<HTMLDivElement>;
   @ViewChild('riskZone', { static: true }) riskZone!: ElementRef<HTMLDivElement>;
+  @ViewChild('entryLine', { static: true }) entryLine!: ElementRef<HTMLDivElement>;
+  @ViewChild('pnlBadge', { static: true }) pnlBadge!: ElementRef<HTMLDivElement>;
 
   private chart: IChartApi | null = null;
   private series: ISeriesApi<'Candlestick'> | null = null;
@@ -218,9 +205,15 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private renderedTimeframeMinutes = 0;
   private renderedInstrument = '';
   private renderedSessionDate: string | null = null;
+  private displayedCandles: WorkspaceCandle[] = [];
   protected rangeText = '';
   protected decisionMap: DecisionMapView | null = null;
   protected visibility = this.readVisibility();
+  protected zoneTrade: WorkspaceTradeOverlay | null = null;
+  protected zonePnl: number | null = null;
+  protected zoneContractName = '';
+  protected rewardAbove = true;
+  protected stopIsProtected = false;
 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
@@ -290,6 +283,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.renderedSessionDate = null;
     }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
+    this.displayedCandles = displayCandles;
     const latestSessionDate = latestIstSessionDate(displayCandles);
     const candles: CandlestickData<Time>[] = displayCandles.map((value) => ({
       time: Math.floor(new Date(value.openTimeUtc).getTime() / 1000) as Time,
@@ -426,46 +420,109 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     try{return {...defaults,...JSON.parse(localStorage.getItem('sarthi.chartOverlays')||'{}')};}catch{return defaults;}
   }
 
-  protected get activeTradePlanCount(): number { return this.activeTradeRows().length; }
-
-  protected get activeTradePlans(): WorkspaceTradeOverlay[] { return this.activeTradeRows().slice(0, 2); }
-
-  private activeTradeRows(): WorkspaceTradeOverlay[] {
-    if (this.snapshot?.exchange === 'MCX') return [];
-    return this.snapshot?.overlays?.filter(trade =>
-      trade.entryTimeUtc !== null && trade.exitTimeUtc === null &&
-      (trade.lifecycleStatus.startsWith('Active') || trade.lifecycleStatus === 'Entry filled')) ?? [];
-  }
-
   protected formatPremium(value: number | null): string {
     return value === null || !Number.isFinite(value) ? '—' : `₹${value.toFixed(2)}`;
   }
 
+  protected formatPnl(value: number | null): string {
+    if (value === null || !Number.isFinite(value)) return 'P&L —';
+    const amount = Math.abs(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return `${value < 0 ? '-' : '+'}₹${amount}`;
+  }
+
   private latestOverlay(): WorkspaceTradeOverlay | null {
-    return this.snapshot?.overlays?.[0] ?? null;
+    if (this.snapshot?.exchange === 'MCX') return null;
+    return this.snapshot?.overlays?.find(trade => trade.fillPrice !== null &&
+      (trade.executionInstrument?.endsWith('CE') || trade.executionInstrument?.endsWith('PE') ||
+        trade.executionInstrumentType?.includes('Option'))) ?? null;
   }
 
   private positionZones(overlay: WorkspaceTradeOverlay | null): void {
-    if (!this.series || !overlay) {
-      this.rewardZone.nativeElement.style.display = 'none';
-      this.riskZone.nativeElement.style.display = 'none';
+    if (!this.series || !this.chart || !this.visibility.tradePlan || !overlay ||
+      overlay.fillPrice === null || overlay.executionTarget === null ||
+      overlay.executionStopLoss === null || !this.displayedCandles.length) {
+      this.hideTradeZones();
       return;
     }
-    const entry = overlay.entry;
-    this.setZone(this.rewardZone.nativeElement, entry, overlay.target);
-    this.setZone(this.riskZone.nativeElement, entry, overlay.stopLoss);
+    const entryTime = Date.parse(overlay.entryTimeUtc ?? overlay.signalTimeUtc);
+    if (!Number.isFinite(entryTime)) { this.hideTradeZones(); return; }
+    let startIndex = -1;
+    let endIndex = -1;
+    let closestEntryDistance = Number.POSITIVE_INFINITY;
+    const exitTime = overlay.exitTimeUtc ? Date.parse(overlay.exitTimeUtc) : Number.POSITIVE_INFINITY;
+    for (let index = 0; index < this.displayedCandles.length; index++) {
+      const candleTime = Date.parse(this.displayedCandles[index].openTimeUtc);
+      const distance = Math.abs(candleTime - entryTime);
+      if (distance < closestEntryDistance) { startIndex = index; closestEntryDistance = distance; }
+      if (candleTime <= exitTime) endIndex = index;
+    }
+    if (startIndex < 0 || endIndex < startIndex ||
+      closestEntryDistance > Math.max(90_000, this.timeframeMinutes * 60_000)) {
+      this.hideTradeZones(); return;
+    }
+    const entryCandle = this.displayedCandles[startIndex];
+    const endCandle = this.displayedCandles[endIndex];
+    const chartTime = (candle: WorkspaceCandle): Time =>
+      Math.floor(Date.parse(candle.openTimeUtc) / 1000) as Time;
+    const startX = this.chart.timeScale().timeToCoordinate(chartTime(entryCandle));
+    const endX = this.chart.timeScale().timeToCoordinate(chartTime(endCandle));
+    const entryY = this.series.priceToCoordinate(entryCandle.close);
+    if (startX === null || endX === null || entryY === null) { this.hideTradeZones(); return; }
+    const chartWidth = this.chartElement.nativeElement.clientWidth;
+    const chartHeight = this.chartElement.nativeElement.clientHeight;
+    const plotRight = chartWidth - 64;
+    if (startX > plotRight || endX < 0 || plotRight < 40) { this.hideTradeZones(); return; }
+    const left = Math.max(0, Math.min(startX, plotRight - 28));
+    const right = Math.max(left + 28, Math.min(plotRight, endX + 10));
+    const width = right - left;
+    const rewardDistance = Math.max(0, overlay.executionTarget - overlay.fillPrice);
+    const riskDistance = Math.max(0, overlay.fillPrice - overlay.executionStopLoss);
+    const scale = Math.min(2, 100 / Math.max(rewardDistance, riskDistance, 1));
+    const targetHeight = Math.max(18, Math.min(110, rewardDistance * scale));
+    const riskHeight = Math.max(18, Math.min(110, riskDistance * scale));
+    this.rewardAbove = !(overlay.executionInstrument?.endsWith('PE') ||
+      overlay.executionInstrumentType === 'PutOption');
+    this.stopIsProtected = overlay.executionStopLoss >= overlay.fillPrice;
+    const rewardAvailable = this.rewardAbove ? entryY - 35 : chartHeight - entryY - 35;
+    const lossAvailable = this.rewardAbove ? chartHeight - entryY - 35 : entryY - 35;
+    const shownRewardHeight = Math.max(2, Math.min(targetHeight, rewardAvailable));
+    const shownRiskHeight = Math.max(2, Math.min(riskHeight, lossAvailable));
+    this.setTradeZone(this.rewardZone.nativeElement, left, width,
+      this.rewardAbove ? entryY - shownRewardHeight : entryY, shownRewardHeight);
+    if (this.stopIsProtected) this.riskZone.nativeElement.style.display = 'none';
+    else this.setTradeZone(this.riskZone.nativeElement, left, width,
+      this.rewardAbove ? entryY : entryY - shownRiskHeight, shownRiskHeight);
+    const entryLine = this.entryLine.nativeElement;
+    entryLine.style.display = 'block';
+    entryLine.style.left = `${left}px`;
+    entryLine.style.width = `${width}px`;
+    entryLine.style.top = `${entryY}px`;
+    const currentY = this.series.priceToCoordinate(endCandle.close) ?? entryY;
+    const pnlBadge = this.pnlBadge.nativeElement;
+    pnlBadge.style.display = 'block';
+    pnlBadge.style.left = `${Math.max(0, Math.min(plotRight - 90, endX + 12))}px`;
+    pnlBadge.style.top = `${Math.max(38, Math.min(chartHeight - 32, currentY - 13))}px`;
+    this.zoneTrade = overlay;
+    this.zonePnl = overlay.exitTimeUtc ? overlay.realisedPnl : overlay.unrealisedPnl;
+    this.zoneContractName = compactContractName(overlay);
   }
 
-  private setZone(element: HTMLDivElement, first: number, second: number): void {
-    const firstY = this.series?.priceToCoordinate(first);
-    const secondY = this.series?.priceToCoordinate(second);
-    if (firstY == null || secondY == null) {
-      element.style.display = 'none';
-      return;
-    }
+  private setTradeZone(element: HTMLDivElement, left: number, width: number, top: number, height: number): void {
     element.style.display = 'block';
-    element.style.top = `${Math.min(firstY, secondY)}px`;
-    element.style.height = `${Math.max(2, Math.abs(firstY - secondY))}px`;
+    element.style.left = `${left}px`;
+    element.style.width = `${width}px`;
+    element.style.top = `${top}px`;
+    element.style.height = `${height}px`;
+  }
+
+  private hideTradeZones(): void {
+    for (const element of [this.rewardZone.nativeElement, this.riskZone.nativeElement,
+      this.entryLine.nativeElement, this.pnlBadge.nativeElement]) {
+      element.style.display = 'none';
+    }
+    this.zoneTrade = null;
+    this.zonePnl = null;
+    this.zoneContractName = '';
   }
 }
 
