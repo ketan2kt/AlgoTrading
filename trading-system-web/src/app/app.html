@@ -641,6 +641,7 @@
             <div class="panel-heading">
               <div><span>PAPER TRADES</span><strong>{{ selectedMarket === 'natural-gas' ? 'Natural Gas Mini futures calls and outcomes' : 'Option positions and outcomes' }}</strong></div>
             </div>
+            @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
               @for (overlay of executedTrades(view); track overlay.signalId) {
                 <div class="signal-row">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
@@ -659,6 +660,14 @@
                   <div><span>Max adverse loss</span><strong class="bad">@if (overlay.maximumAdverseLoss !== null) { ₹{{ overlay.maximumAdverseLoss | number: '1.2-2' }} } @else { — }</strong></div>
                   <div><span>Trade taken (IST)</span><strong>{{ overlay.entryTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata' }}</strong></div>
                   <div><span>Exited (IST)</span><strong>{{ overlay.exitTimeUtc ? (overlay.exitTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata') : 'Active' }}</strong></div>
+                  @if (selectedMarket !== 'natural-gas' && overlay.lifecycleStatus.startsWith('Active')) {
+                    <div class="trade-exit-action">
+                      <button type="button" (click)="requestTradeExit(overlay)"
+                        [disabled]="requestedTradeExits.has(selectedMarket + ':' + overlay.signalId)">
+                        {{ requestedTradeExits.has(selectedMarket + ':' + overlay.signalId) ? 'Exit requested' : 'Exit trade' }}
+                      </button>
+                    </div>
+                  }
                 </div>
               }
           </article>

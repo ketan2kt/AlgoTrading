@@ -235,6 +235,7 @@ internal sealed partial class IntradayExpansionPairService(
         var ids = legs.Select(value => value.ExecutionInstrumentId).ToArray();
         var instruments = await db.Instruments.AsNoTracking().Where(value => ids.Contains(value.Id))
             .ToDictionaryAsync(value => value.Id, cancellationToken);
+        var manuallyClosedLeg = false;
         foreach (var leg in legs.Where(value => value.Status == "Active"))
         {
             var instrument = instruments[leg.ExecutionInstrumentId];
@@ -242,9 +243,21 @@ internal sealed partial class IntradayExpansionPairService(
                 instrument.TradingSymbol), cancellationToken);
             if (quote.LastPrice <= 0m) continue;
             leg.Mark(quote.LastPrice, leg.StopLoss, now);
-            if (ExpansionPairExitPolicy.ShouldStopLeg(leg))
+            if (await ManualTradeExitRequest.ExistsAsync(db, market.Code, leg.Id, cancellationToken))
+            {
+                leg.Close(quote.LastPrice, Charges(leg, quote.LastPrice, leg.RemainingQuantity),
+                    "ManualExit", now);
+                manuallyClosedLeg = true;
+            }
+            else if (ExpansionPairExitPolicy.ShouldStopLeg(leg))
                 leg.Close(quote.LastPrice, Charges(leg, quote.LastPrice, leg.RemainingQuantity),
                     "ExpansionPairLegStop", now);
+        }
+
+        if (manuallyClosedLeg)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return;
         }
 
         var key = market.Code + ":" + pairPrefix;

@@ -1055,6 +1055,8 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var researchDb = services.GetRequiredService<TradingDbContext>();
+        var manualExitRequested = await ManualTradeExitRequest.ExistsAsync(researchDb, "nifty",
+            open.Signal.SignalId, cancellationToken);
         await PersistTradePriceSampleAsync(researchDb, open.Signal.SignalId,
             optionInstrument.Id, price, cancellationToken);
 
@@ -1149,7 +1151,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 initialRiskPerUnit <= 0m ? 0m : favourableMove / initialRiskPerUnit,
                 true, false, initialRiskPerUnit * open.Entry.FilledQuantity,
                 addOnRiskPerUnit * optionInstrument.LotSize);
-            if (addOnDecision.Permitted)
+            if (addOnDecision.Permitted && !manualExitRequested)
             {
                 var addOnReference = $"{open.Signal.SignalId:N}-ADDON";
                 await broker.SubmitAsync(new(addOnReference, open.Entry.InstrumentId,
@@ -1176,7 +1178,9 @@ internal sealed partial class AutomatedPaperTradingService(
             effectiveStop, open.Target,
             TimeOnly.FromTimeSpan(indiaTime), ParseTime(options.Value.ForcedExit), fresh,
             targetExitEnabled: !extendBeyondTarget);
-        if (killSwitchActive && fresh) exitReason = PaperExitReason.EmergencyKillSwitch;
+        if (manualExitRequested) exitReason = PaperExitReason.ManualExit;
+        if (killSwitchActive && fresh && !manualExitRequested)
+            exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
         if (exitReason == PaperExitReason.ForcedIntradayExit && options.Value.WeeklyCarryForwardEnabled)

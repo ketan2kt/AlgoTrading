@@ -1,7 +1,7 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
-import { Observable, Subject } from 'rxjs';
+import { Observable, Subject, switchMap } from 'rxjs';
 import { TradingWorkspaceSnapshot } from './trading-workspace';
 
 @Injectable({ providedIn: 'root' })
@@ -15,6 +15,14 @@ export class TradingWorkspaceService {
 
   getMarket(market: string): Observable<TradingWorkspaceSnapshot> {
     return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=7000`);
+  }
+
+  requestTradeExit(market: string, tradeId: string): Observable<{ status: string }> {
+    return this.http.get<{ token: string }>('/api/security/antiforgery-token').pipe(
+      switchMap(({ token }) => this.http.post<{ status: string }>(
+        `/api/paper/trades/${encodeURIComponent(market)}/${encodeURIComponent(tradeId)}/exit`, {},
+        { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
+    );
   }
 
   updates$(): Observable<TradingWorkspaceSnapshot> {

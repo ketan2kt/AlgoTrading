@@ -705,6 +705,8 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
             var price = quote.LastPrice;
             if (price <= 0) continue;
+            var manualExitRequested = await ManualTradeExitRequest.ExistsAsync(db, market.Code,
+                position.Id, cancellationToken);
             var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas
                 ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
@@ -805,7 +807,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                                         exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
-            if (market == TradingMarketCatalog.Sensex && continuationConfirmed &&
+            if (!manualExitRequested && market == TradingMarketCatalog.Sensex && continuationConfirmed &&
                 positionRegime == ProfessionalTradeRegime.Directional &&
                 !position.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal))
             {
@@ -849,7 +851,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
             var partialReached = position.Direction == Direction.Buy
                 ? price >= partialThreshold : price <= partialThreshold;
-            if (!stopHit && market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
+            if (!manualExitRequested && !stopHit && market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
             {
                 var totalLots = Math.Max(1, position.RemainingQuantity / instrument.LotSize);
@@ -866,14 +868,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                         remainingQuantity = position.RemainingQuantity, partialCosts,
                         triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
             }
-            if (stopHit || (targetHit && !continuationConfirmed) || forced)
+            if (manualExitRequested || stopHit || (targetHit && !continuationConfirmed) || forced)
             {
                 var costs = market.ExecuteOptions
                     ? PaperTradingCostModel.CalculateOptionCharges([
                         new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
                         new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
-                position.Close(price, costs, stopHit ? "StopLossHit" : targetHit ? "TargetHit" : "TimeExit", now);
+                position.Close(price, costs, manualExitRequested ? "ManualExit" : stopHit ? "StopLossHit" :
+                    targetHit ? "TargetHit" : "TimeExit", now);
                 favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,

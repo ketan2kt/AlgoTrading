@@ -57,6 +57,8 @@ export class App implements OnInit, OnDestroy {
   protected password = '';
   protected workspace: TradingWorkspaceSnapshot | null = null;
   protected workspaceError = '';
+  protected tradeExitError = '';
+  protected readonly requestedTradeExits = new Set<string>();
   protected tokenStatus: GrowwTokenStatus = {
     isConfigured: false,
     isExpired: false,
@@ -400,6 +402,26 @@ export class App implements OnInit, OnDestroy {
 
   protected executedTrades(view: TradingWorkspaceSnapshot): WorkspaceTradeOverlay[] {
     return view.overlays.filter((overlay) => overlay.fillPrice !== null);
+  }
+
+  protected requestTradeExit(overlay: WorkspaceTradeOverlay): void {
+    if (this.selectedMarket === null || !overlay.lifecycleStatus.startsWith('Active')) return;
+    const market = this.selectedMarket;
+    const key = `${market}:${overlay.signalId}`;
+    if (this.requestedTradeExits.has(key)) return;
+    if (!window.confirm(`Exit ${compactContractName(overlay)}? This also requests the live exit if the position was mirrored.`)) return;
+    this.tradeExitError = '';
+    this.requestedTradeExits.add(key);
+    this.refreshView();
+    this.subscriptions.add(this.workspaceService.requestTradeExit(market, overlay.signalId).subscribe({
+      next: () => this.loadWorkspace(),
+      error: () => {
+        this.requestedTradeExits.delete(key);
+        this.tradeExitError = 'Exit request failed. Check the trade status before trying again.';
+        this.loadWorkspace();
+        this.refreshView();
+      },
+    }));
   }
 
   protected compactOptionName(overlay: WorkspaceTradeOverlay): string {

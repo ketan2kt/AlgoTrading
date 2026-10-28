@@ -9,7 +9,8 @@ public enum PaperExitReason
     Target = 2,
     ForcedIntradayExit = 3,
     EmergencyKillSwitch = 4,
-    UnderlyingTrendInvalidated = 5
+    UnderlyingTrendInvalidated = 5,
+    ManualExit = 6
 }
 
 public sealed class PaperPositionExitPolicy

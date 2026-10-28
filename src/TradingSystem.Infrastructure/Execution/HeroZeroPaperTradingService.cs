@@ -71,15 +71,6 @@ internal sealed partial class HeroZeroPaperTradingService(
                 (value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption) &&
                 value.TradingSymbol.StartsWith(market.ExecutionUnderlying))
             .MinAsync(value => value.ExpiryDate, cancellationToken);
-        if (expiry is null || expiry != today)
-        {
-            state.Set(new(market.Code, false, expiry, "Watching next expiry",
-                expiry is null ? "No eligible weekly option expiry is synchronised." :
-                    $"Next synchronised expiry is {expiry:dd MMM}; no Hero Zero entry today.",
-                now, null, null, null, [], 0m, 0m, 0m));
-            return;
-        }
-
         var active = await db.MarketPaperPositions.Where(value => value.Market == market.Code &&
             value.Status == "Active" && value.Strategy.StartsWith("Hero Zero|")).ToListAsync(cancellationToken);
         if (active.Count > 0)
@@ -87,7 +78,19 @@ internal sealed partial class HeroZeroPaperTradingService(
             var pairPrefix = string.Join('|', active[0].Strategy.Split('|').Take(2)) + "|";
             var pair = await db.MarketPaperPositions.Where(value => value.Market == market.Code &&
                 value.Strategy.StartsWith(pairPrefix)).ToListAsync(cancellationToken);
-            await ManagePairAsync(db, market, expiry.Value, underlying.Id, pair, now, localTime, cancellationToken);
+            var pairExpiry = await db.Instruments.AsNoTracking().Where(value =>
+                value.Id == active[0].ExecutionInstrumentId).Select(value => value.ExpiryDate)
+                .SingleAsync(cancellationToken);
+            await ManagePairAsync(db, market, pairExpiry ?? today, underlying.Id, pair, now,
+                localTime, cancellationToken);
+            return;
+        }
+        if (expiry is null || expiry != today)
+        {
+            state.Set(new(market.Code, false, expiry, "Watching next expiry",
+                expiry is null ? "No eligible weekly option expiry is synchronised." :
+                    $"Next synchronised expiry is {expiry:dd MMM}; no Hero Zero entry today.",
+                now, null, null, null, [], 0m, 0m, 0m));
             return;
         }
 
@@ -208,7 +211,12 @@ internal sealed partial class HeroZeroPaperTradingService(
             var instrument = instruments[leg.ExecutionInstrumentId];
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
-            if (quote.LastPrice > 0) leg.Mark(quote.LastPrice, leg.StopLoss, now);
+            if (quote.LastPrice > 0)
+            {
+                leg.Mark(quote.LastPrice, leg.StopLoss, now);
+                if (await ManualTradeExitRequest.ExistsAsync(db, market.Code, leg.Id, cancellationToken))
+                    Close(leg, "ManualExit");
+            }
         }
         var entryCost = legs.Sum(value => value.EntryPrice * value.Quantity);
         var currentValue = legs.Sum(value => value.CurrentPrice * value.Quantity);

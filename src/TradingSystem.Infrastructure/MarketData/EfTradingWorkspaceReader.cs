@@ -497,6 +497,7 @@ internal sealed class EfTradingWorkspaceReader(
         "ForcedIntradayExit" => "Time exit",
         "EmergencyKillSwitch" => "Emergency exit",
         "UnderlyingTrendInvalidated" => "Trend reversal exit",
+        "ManualExit" => "Manual exit",
         _ => "Closed"
     };
 
