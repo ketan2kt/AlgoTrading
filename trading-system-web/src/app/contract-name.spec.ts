@@ -12,6 +12,7 @@ function overlay(symbol: string, type = 'Future', strike: number | null = null):
     executionTarget: 270, executionRiskAmount: null, executionCapitalExposure: null,
     rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 262,
     exitPrice: null, realisedPnl: null, unrealisedPnl: 2000, entryTimeUtc: null, exitTimeUtc: null,
+    maximumFavourablePnl: null, maximumAdverseLoss: null,
   };
 }
 

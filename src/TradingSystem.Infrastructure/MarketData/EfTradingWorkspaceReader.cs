@@ -205,6 +205,18 @@ internal sealed class EfTradingWorkspaceReader(
         var tradeResults = await dbContext.PaperTradeResults.AsNoTracking()
             .Where(value => signalIds.Contains(value.SignalId))
             .ToDictionaryAsync(value => value.SignalId, cancellationToken);
+        // Aggregate in PostgreSQL: reading every two-second quote into each workspace
+        // refresh would make the chart increasingly slow as the session progresses.
+        var sampledExtremes = await dbContext.PaperTradePriceSamples.AsNoTracking()
+            .Where(value => signalIds.Contains(value.SignalId))
+            .GroupBy(value => value.SignalId)
+            .Select(group => new
+            {
+                SignalId = group.Key,
+                MinimumPrice = group.Min(value => value.OptionPrice),
+                MaximumPrice = group.Max(value => value.OptionPrice)
+            })
+            .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var automation = paperAutomation.GetCurrent();
         var legacyOverlays = signalRows.Select(value =>
         {
@@ -218,6 +230,12 @@ internal sealed class EfTradingWorkspaceReader(
             var positionMark = automation.ActivePositionMarks?
                 .FirstOrDefault(mark => mark.SignalId == value.Id);
             var isActive = result is null && positionMark is not null;
+            sampledExtremes.TryGetValue(value.Id, out var extremes);
+            var excursion = CalculateObservedExcursion(
+                result?.EntryPrice ?? order?.FillPrice,
+                result?.Quantity ?? order?.Quantity ?? decision?.ApprovedQuantity,
+                value.Direction, extremes?.MinimumPrice, extremes?.MaximumPrice,
+                result?.ExitPrice ?? (isActive ? positionMark!.CurrentPrice : null));
             var lifecycleStatus = result is not null ? FormatExitStatus(result.ExitReason) :
                 isActive ? (positionMark!.QuoteAvailable ? "Active" : "Active · quote unavailable") :
                 order?.FillPrice is not null ? "Entry filled" : decision is null
@@ -258,7 +276,9 @@ internal sealed class EfTradingWorkspaceReader(
                 result?.RealisedPnl,
                 isActive ? positionMark!.UnrealisedPnl : null,
                 order?.FillTimeUtc,
-                result?.ClosedAtUtc);
+                result?.ClosedAtUtc,
+                excursion.MaximumProfit,
+                excursion.MaximumLoss);
         }).ToArray();
         var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
@@ -287,7 +307,11 @@ internal sealed class EfTradingWorkspaceReader(
                 isActive ? null : value.CurrentPrice, isActive ? null : value.RealisedPnl,
                 isActive ? (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
                     value.EntryPrice - value.CurrentPrice) * value.Quantity : null,
-                value.OpenedAtUtc, value.ClosedAtUtc);
+                value.OpenedAtUtc, value.ClosedAtUtc,
+                value.MaximumFavourablePnl is { } peak && value.ExcursionSampleCount > 1
+                    ? Math.Max(0m, peak) : null,
+                value.MaximumAdversePnl is { } trough && value.ExcursionSampleCount > 1
+                    ? Math.Max(0m, -trough) : null);
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
@@ -594,6 +618,21 @@ internal sealed class EfTradingWorkspaceReader(
 
     private static string FormatReasonValue(JsonElement value) =>
         value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.GetRawText();
+
+    internal static (decimal? MaximumProfit, decimal? MaximumLoss) CalculateObservedExcursion(
+        decimal? entryPrice, int? quantity, Direction direction, decimal? minimumSamplePrice,
+        decimal? maximumSamplePrice, decimal? currentOrExitPrice)
+    {
+        if (entryPrice is not > 0 || quantity is not > 0 ||
+            (minimumSamplePrice is null && maximumSamplePrice is null && currentOrExitPrice is null))
+            return (null, null);
+
+        var observedPrices = new[] { entryPrice, minimumSamplePrice, maximumSamplePrice, currentOrExitPrice }
+            .Where(price => price is > 0).Select(price => price!.Value);
+        var observedPnl = observedPrices.Select(price =>
+            (direction == Direction.Buy ? price - entryPrice.Value : entryPrice.Value - price) * quantity.Value);
+        return (Math.Max(0m, observedPnl.Max()), Math.Max(0m, -observedPnl.Min()));
+    }
 
     private sealed record PaperBrokerEventProjection(string ClientReference, string EventType,
         string PayloadJson, DateTimeOffset OccurredAtUtc);

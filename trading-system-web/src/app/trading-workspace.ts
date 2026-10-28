@@ -46,6 +46,8 @@ export interface WorkspaceTradeOverlay {
   unrealisedPnl: number | null;
   entryTimeUtc: string | null;
   exitTimeUtc: string | null;
+  maximumFavourablePnl: number | null;
+  maximumAdverseLoss: number | null;
 }
 
 export interface TradingWorkspaceSnapshot {

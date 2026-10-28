@@ -48,7 +48,9 @@ public sealed record WorkspaceTradeOverlay(
     decimal? RealisedPnl,
     decimal? UnrealisedPnl,
     DateTimeOffset? EntryTimeUtc,
-    DateTimeOffset? ExitTimeUtc);
+    DateTimeOffset? ExitTimeUtc,
+    decimal? MaximumFavourablePnl,
+    decimal? MaximumAdverseLoss);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,

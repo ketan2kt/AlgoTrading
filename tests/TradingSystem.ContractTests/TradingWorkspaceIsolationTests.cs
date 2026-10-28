@@ -7,6 +7,36 @@ namespace TradingSystem.ContractTests;
 public sealed class TradingWorkspaceIsolationTests
 {
     [Fact]
+    public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
+    {
+        var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
+            100m, 50, Direction.Buy, 90m, 120m, 110m);
+
+        Assert.Equal(1000m, excursion.MaximumProfit);
+        Assert.Equal(500m, excursion.MaximumLoss);
+    }
+
+    [Fact]
+    public void ObservedExcursionUsesExitWhenEarlierSamplesAreMissing()
+    {
+        var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
+            100m, 50, Direction.Buy, null, null, 110m);
+
+        Assert.Equal(500m, excursion.MaximumProfit);
+        Assert.Equal(0m, excursion.MaximumLoss);
+    }
+
+    [Fact]
+    public void ObservedExcursionDoesNotInventValuesForUnfilledTrade()
+    {
+        var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(
+            null, 50, Direction.Buy, 90m, 120m, null);
+
+        Assert.Null(excursion.MaximumProfit);
+        Assert.Null(excursion.MaximumLoss);
+    }
+
+    [Fact]
     public void SensexInstrumentLookupExcludesDuplicateSymbolsFromOtherSegments()
     {
         var now = DateTimeOffset.UtcNow;
