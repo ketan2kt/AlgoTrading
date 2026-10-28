@@ -89,7 +89,7 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
         <div #rewardZone class="trade-zone trade-zone--reward" [class.trade-zone--below]="!rewardAbove" [class.trade-zone--compact]="zoneCompact"><span>Target {{ formatPremium(zoneTrade?.executionTarget ?? null) }}</span></div>
         <div #riskZone class="trade-zone trade-zone--risk" [class.trade-zone--above]="!rewardAbove" [class.trade-zone--compact]="zoneCompact"><span>Stop loss {{ formatPremium(zoneTrade?.executionStopLoss ?? null) }}</span></div>
         <div #entryLine class="trade-entry-line"><span>{{ zoneContractName }} · Entry {{ formatPremium(zoneTrade?.fillPrice ?? null) }} @if (stopIsProtected) { · Protected stop {{ formatPremium(zoneTrade?.executionStopLoss ?? null) }} }</span></div>
-        <div #pnlBadge class="trade-pnl" [class.trade-pnl--gain]="zonePnl !== null && zonePnl >= 0" [class.trade-pnl--loss]="zonePnl !== null && zonePnl < 0">{{ zoneTrade?.exitTimeUtc ? 'Booked' : 'Live' }} {{ formatPnl(zonePnl) }}</div>
+        <div #pnlBadge class="trade-pnl" [class.trade-pnl--gain]="zonePnl !== null && zonePnl >= 0" [class.trade-pnl--loss]="zonePnl !== null && zonePnl < 0">Live {{ formatPnl(zonePnl) }}</div>
         @if (visibility.tradePlan && zoneTrade) { <small class="trade-zone-note">Illustrative option-premium zones · not index-price levels</small> }
       </div>
     </div>
@@ -362,7 +362,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
         }),
       );
     }
-    const tradeMarkers = this.snapshot.overlays.filter(value => value.status !== 'RiskRejected').map(value => ({
+    const activeTrades = this.snapshot.overlays.filter(value => this.isActiveOptionTrade(value));
+    const activeTradeIds = new Set(activeTrades.map(value => value.signalId));
+    const tradeMarkers = activeTrades.map(value => ({
       time: Math.floor(new Date(value.signalTimeUtc).getTime() / 1000) as Time,
       position: (value.direction === 'Buy' ? 'belowBar' : 'aboveBar') as 'belowBar'|'aboveBar',
       color: '#f2c94c',
@@ -370,7 +372,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       text: entryExplanation(value,this.snapshot!.evaluations),
     }));
     const acceptedMarkers = this.snapshot.evaluations.filter(value =>
-      value.outcome === 'PaperPositionOpened').slice(0,5).map(value => ({
+      value.outcome === 'PaperPositionOpened' && value.signalId !== null &&
+      activeTradeIds.has(value.signalId)).slice(0,5).map(value => ({
       time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
       position: 'aboveBar' as const,
       color: '#28d17c',
@@ -437,13 +440,19 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private latestOverlay(): WorkspaceTradeOverlay | null {
     if (this.snapshot?.exchange === 'MCX') return null;
-    return this.snapshot?.overlays?.find(trade => trade.fillPrice !== null &&
+    return this.snapshot?.overlays?.find(trade => this.isActiveOptionTrade(trade)) ?? null;
+  }
+
+  private isActiveOptionTrade(trade: WorkspaceTradeOverlay): boolean {
+    return trade.fillPrice !== null && trade.exitTimeUtc === null &&
+      (trade.lifecycleStatus.startsWith('Active') || trade.lifecycleStatus === 'Entry filled') &&
       (trade.executionInstrument?.endsWith('CE') || trade.executionInstrument?.endsWith('PE') ||
-        trade.executionInstrumentType?.includes('Option'))) ?? null;
+        trade.executionInstrumentType?.includes('Option')) === true;
   }
 
   private positionZones(overlay: WorkspaceTradeOverlay | null): void {
     if (!this.series || !this.chart || !this.visibility.tradePlan || !overlay ||
+      overlay.exitTimeUtc !== null ||
       overlay.fillPrice === null || overlay.executionTarget === null ||
       overlay.executionStopLoss === null || !this.displayedCandles.length) {
       this.hideTradeZones();
@@ -454,12 +463,11 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     let startIndex = -1;
     let endIndex = -1;
     let closestEntryDistance = Number.POSITIVE_INFINITY;
-    const exitTime = overlay.exitTimeUtc ? Date.parse(overlay.exitTimeUtc) : Number.POSITIVE_INFINITY;
     for (let index = 0; index < this.displayedCandles.length; index++) {
       const candleTime = Date.parse(this.displayedCandles[index].openTimeUtc);
       const distance = Math.abs(candleTime - entryTime);
       if (distance < closestEntryDistance) { startIndex = index; closestEntryDistance = distance; }
-      if (candleTime <= exitTime) endIndex = index;
+      endIndex = index;
     }
     if (startIndex < 0 || endIndex < startIndex ||
       closestEntryDistance > Math.max(90_000, this.timeframeMinutes * 60_000)) {
@@ -513,7 +521,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     pnlBadge.style.top = `${Math.max(42, Math.min(chartHeight - 36,
       currentY + (this.rewardAbove ? 25 : -46)))}px`;
     this.zoneTrade = overlay;
-    this.zonePnl = overlay.exitTimeUtc ? overlay.realisedPnl : overlay.unrealisedPnl;
+    this.zonePnl = overlay.unrealisedPnl;
     this.zoneContractName = compactContractName(overlay);
   }
 
