@@ -72,9 +72,28 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
           <button type="button" [class.active]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
           <button type="button" [class.active]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
           <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
+          @if (snapshot?.exchange !== 'MCX') {
+            <button type="button" [class.active]="visibility.tradePlan" (click)="toggle('tradePlan')" aria-label="Toggle option trade plan">Trade plan</button>
+          }
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
+        @if (visibility.tradePlan && activeTradePlans.length) {
+          <aside class="trade-plan" aria-label="Active option trade plan overlays">
+            <div class="trade-plan__heading">OPTION PREMIUM <small>Illustrative · not index scale</small></div>
+            @for (trade of activeTradePlans; track trade.signalId) {
+              <div class="trade-plan__card">
+                <strong class="trade-plan__contract" [title]="trade.executionInstrument || ''">{{ trade.executionInstrument || 'Option trade' }}</strong>
+                <div class="trade-plan__band trade-plan__band--reward"><span>Target</span><strong>{{ formatPremium(trade.executionTarget) }}</strong></div>
+                <div class="trade-plan__mid"><span>Entry {{ formatPremium(trade.fillPrice) }}</span><strong>Now {{ formatPremium(trade.currentOptionPrice) }}</strong></div>
+                <div class="trade-plan__band trade-plan__band--risk"><span>Plan stop</span><strong>{{ formatPremium(trade.executionStopLoss) }}</strong></div>
+              </div>
+            }
+            @if (activeTradePlanCount > activeTradePlans.length) {
+              <small class="trade-plan__more">+{{ activeTradePlanCount - activeTradePlans.length }} more active trades below</small>
+            }
+          </aside>
+        }
         <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
         @if (!snapshot?.candles?.length) {
           <div class="chart-empty">
@@ -127,6 +146,17 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#e6f2e2ee; color:#315b43; font-size:.7rem; }
       .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
+      .trade-plan { position:absolute; z-index:2; top:37px; right:65px; width:min(205px,38%); max-height:55%; overflow:auto; padding:6px; border:1px solid #a9c6ad; border-radius:8px; background:#f2f8f0ed; box-shadow:0 5px 14px #173f2d25; pointer-events:auto; }
+      .trade-plan__heading { display:flex; justify-content:space-between; gap:4px; margin:0 2px 5px; color:#315b43; font-size:.6rem; font-weight:800; letter-spacing:.04em; }
+      .trade-plan__heading small { color:#557460; font-size:.55rem; font-weight:500; letter-spacing:0; text-align:right; }
+      .trade-plan__card { overflow:hidden; margin-top:4px; border:1px solid #c6dac5; border-radius:5px; background:#fff; }
+      .trade-plan__contract { display:block; overflow:hidden; padding:4px 6px; color:#173f2d; font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
+      .trade-plan__band,.trade-plan__mid { display:flex; justify-content:space-between; gap:5px; align-items:center; padding:3px 6px; font-size:.65rem; }
+      .trade-plan__band--reward { color:#176c3c; background:#d8f0dc; }
+      .trade-plan__band--risk { color:#9d3039; background:#f9dedf; }
+      .trade-plan__mid { color:#315b43; background:#edf6eb; }
+      .trade-plan__more { display:block; padding:5px 2px 1px; color:#557460; font-size:.6rem; }
+      @media (max-width: 580px) { .trade-plan { top:70px; right:54px; width:min(175px,48%); } }
       .decision-map { margin:0; border:0; border-bottom:1px solid #c6dac5; background:#edf6eb; }
       .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
       .decision-map summary::-webkit-details-marker { display:none; }
@@ -392,8 +422,23 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   }
 
   private readVisibility():ChartOverlayVisibility {
-    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true};
+    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true,tradePlan:true};
     try{return {...defaults,...JSON.parse(localStorage.getItem('sarthi.chartOverlays')||'{}')};}catch{return defaults;}
+  }
+
+  protected get activeTradePlanCount(): number { return this.activeTradeRows().length; }
+
+  protected get activeTradePlans(): WorkspaceTradeOverlay[] { return this.activeTradeRows().slice(0, 2); }
+
+  private activeTradeRows(): WorkspaceTradeOverlay[] {
+    if (this.snapshot?.exchange === 'MCX') return [];
+    return this.snapshot?.overlays?.filter(trade =>
+      trade.entryTimeUtc !== null && trade.exitTimeUtc === null &&
+      (trade.lifecycleStatus.startsWith('Active') || trade.lifecycleStatus === 'Entry filled')) ?? [];
+  }
+
+  protected formatPremium(value: number | null): string {
+    return value === null || !Number.isFinite(value) ? '—' : `₹${value.toFixed(2)}`;
   }
 
   private latestOverlay(): WorkspaceTradeOverlay | null {
@@ -424,4 +469,4 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   }
 }
 
-interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; }
+interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; tradePlan:boolean; }
