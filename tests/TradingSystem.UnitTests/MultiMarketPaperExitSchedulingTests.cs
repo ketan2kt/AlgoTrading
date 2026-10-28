@@ -14,7 +14,7 @@ public sealed class MultiMarketPaperExitSchedulingTests
     public void PartialDoesNotRaceAFullExitOnSameQuote(bool manual, bool stop,
         bool target, bool continuation, bool forced, bool expected)
     {
-        Assert.Equal(expected, MultiMarketPaperTradingService.ShouldTakePartial(
+        Assert.Equal(expected, MarketPaperExitSequencingPolicy.ShouldTakePartial(
             manual, stop, target, continuation, forced));
     }
 }

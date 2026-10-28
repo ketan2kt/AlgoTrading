@@ -888,7 +888,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                 : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
             var partialReached = position.Direction == Direction.Buy
                 ? price >= partialThreshold : price <= partialThreshold;
-            if (ShouldTakePartial(manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
+            if (MarketPaperExitSequencingPolicy.ShouldTakePartial(
+                    manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
                 market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
             {
@@ -930,10 +931,6 @@ internal sealed partial class MultiMarketPaperTradingService(
     private static decimal PeakFavourableForProtection(Direction direction, decimal entry,
         decimal favourablePrice) => direction == Direction.Buy
         ? favourablePrice - entry : entry - favourablePrice;
-
-    internal static bool ShouldTakePartial(bool manualExitRequested, bool stopHit,
-        bool targetHit, bool continuationConfirmed, bool forced) =>
-        !manualExitRequested && !stopHit && !forced && (!targetHit || continuationConfirmed);
 
     private async Task CaptureExitResearchAsync(TradingDbContext db, TradingMarketDefinition market,
         DateTimeOffset now, CancellationToken cancellationToken)
