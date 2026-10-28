@@ -150,6 +150,28 @@ public sealed class PreSessionBriefBuilderTests
         Assert.Equal("Unclear", brief.Bias);
     }
 
+    [Fact]
+    public void ExternalContextReplacesPlaceholdersWithoutChangingTradeJudgement()
+    {
+        var source = Source(indicative: null) with
+        {
+            ExternalEvidence =
+            [
+                new PreSessionEvidence("GIFT Nifty", "TimestampedQuote", "24000",
+                    "Upstox global market quote", Captured.AddMinutes(-2),
+                    "Context only")
+            ]
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Single(brief.Evidence, value => value.Name == "GIFT Nifty");
+        Assert.Contains(brief.Evidence, value => value.Name == "Scheduled events" &&
+            value.Status == "Unavailable");
+        Assert.Equal("Unclear", brief.Judgement);
+        Assert.Equal("Unclear", brief.Bias);
+    }
+
     private static PreSessionSourceData Source(decimal? indicative) => new(
         "nifty", Session, "Overnight", Captured, 101m, 105m, 110m, 100m,
         Captured.AddDays(-1), indicative,

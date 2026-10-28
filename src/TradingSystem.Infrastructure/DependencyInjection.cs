@@ -160,6 +160,8 @@ public static class DependencyInjection
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
         services.AddHttpClient(EfPreSessionBriefReader.OfficialFeedsClientName, client =>
             client.DefaultRequestHeaders.UserAgent.ParseAdd("SarthicoPreSession/1.0"));
+        services.AddHttpClient<UpstoxPreSessionSource>(client =>
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SarthicoPreSession/1.0"));
         services.AddScoped<IGrowwInstrumentSynchronizer, GrowwInstrumentSynchronizer>();
         services.AddHostedService<GrowwInstrumentSynchronizationService>();
         services.AddSingleton<MarketDataHealthMonitor>();

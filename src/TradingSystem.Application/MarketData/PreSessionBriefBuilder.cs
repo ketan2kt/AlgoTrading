@@ -23,7 +23,8 @@ public sealed record PreSessionSourceData(
     DateTimeOffset? PreOpenQuoteAtUtc = null,
     EcbUsdInrReference? UsdInrReference = null,
     TreasuryTenYearYield? UsTenYearYield = null,
-    FedMonetaryRelease? RecentFedRelease = null);
+    FedMonetaryRelease? RecentFedRelease = null,
+    IReadOnlyList<PreSessionEvidence>? ExternalEvidence = null);
 
 public sealed record PreSessionHistoricalSession(DateOnly Date, decimal Open,
     decimal High, decimal Low, decimal Close, int CandleCount);
@@ -164,9 +165,12 @@ public static class PreSessionBriefBuilder
                 fed.Title, "Federal Reserve monetary-policy RSS", fed.PublishedAtUtc,
                 "Official headline only; assess the full release separately before inferring market impact."));
         }
+        var external = data.ExternalEvidence ?? [];
+        evidence.AddRange(external);
         foreach (var name in new[] { "GIFT Nifty", "US and Asian markets", "Crude oil", "FII/DII prior-session flows", "Scheduled events" })
-            evidence.Add(new(name, "Unavailable", null, null, null,
-                "No authorized timestamped provider is connected; excluded from the directional assessment."));
+            if (!external.Any(value => value.Name == name))
+                evidence.Add(new(name, "Unavailable", null, null, null,
+                    "No authorized timestamped provider is connected; excluded from the directional assessment."));
 
         var limitations = new List<string>
         {

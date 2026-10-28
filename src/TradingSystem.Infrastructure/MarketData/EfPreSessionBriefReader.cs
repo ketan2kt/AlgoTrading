@@ -11,6 +11,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 
 internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeProvider clock,
     IGrowwReadOnlyGateway groww, IHttpClientFactory httpClientFactory,
+    UpstoxPreSessionSource upstox,
     ILogger<EfPreSessionBriefReader> logger)
     : IPreSessionBriefReader
 {
@@ -78,6 +79,19 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
         DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
     {
         if (!Stages.Any(value => value.Stage == stage)) throw new ArgumentOutOfRangeException(nameof(stage));
+        if (await db.PreSessionBriefSnapshots.AsNoTracking().CountAsync(value =>
+                value.SessionDate == sessionDate && value.Stage == stage &&
+                (value.Market == "nifty" || value.Market == "sensex"), cancellationToken) == Markets.Length)
+            return;
+        IReadOnlyList<PreSessionEvidence> externalEvidence = [];
+        if (stage != "Outcome")
+        {
+            var upstoxTask = upstox.ReadAsync(sessionDate, capturedAtUtc, cancellationToken);
+            var calendarTask = ReadFinanceCalendarAsync(sessionDate, capturedAtUtc, cancellationToken);
+            var collected = (await upstoxTask).ToList();
+            if (await calendarTask is { } calendar) collected.Add(calendar);
+            externalEvidence = collected;
+        }
         foreach (var market in Markets)
         {
             if (await db.PreSessionBriefSnapshots.AnyAsync(value => value.SessionDate == sessionDate &&
@@ -100,7 +114,8 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
             }
             else
             {
-                var source = await ReadSourceDataAsync(market, sessionDate, stage, capturedAtUtc, cancellationToken);
+                var source = await ReadSourceDataAsync(market, sessionDate, stage, capturedAtUtc,
+                    externalEvidence, cancellationToken);
                 payload = JsonSerializer.Serialize(PreSessionBriefBuilder.Build(source), JsonOptions);
             }
             var snapshot = new PreSessionBriefSnapshot(Guid.NewGuid(), market.Code, sessionDate,
@@ -117,7 +132,8 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
 
     private async Task<PreSessionSourceData> ReadSourceDataAsync(
         (string Code, string Exchange, string Symbol) market, DateOnly sessionDate,
-        string stage, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+        string stage, DateTimeOffset capturedAtUtc,
+        IReadOnlyList<PreSessionEvidence> externalEvidence, CancellationToken cancellationToken)
     {
         var startUtc = ToUtc(sessionDate, TimeOnly.MinValue);
         var instrumentId = await db.Instruments.AsNoTracking()
@@ -126,7 +142,8 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
             .Select(value => (Guid?)value.Id).FirstOrDefaultAsync(cancellationToken);
         if (instrumentId is null)
             return new(market.Code, sessionDate, stage, capturedAtUtc,
-                null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null,
+                ExternalEvidence: externalEvidence);
 
         var candles = await db.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == instrumentId.Value && value.Source == "Groww" &&
@@ -205,7 +222,7 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
             previous?.Max(value => value.High), previous?.Min(value => value.Low),
             lastCandle?.OpenTimeUtc, null, null, call, put, option?.ExpiryDate,
             option?.SourceTimestampUtc, recentSessions, preOpenQuote, preOpenQuoteAtUtc,
-            usdInrReference, usTenYearYield, recentFedRelease);
+            usdInrReference, usTenYearYield, recentFedRelease, externalEvidence);
     }
 
     private async Task<FedMonetaryRelease?> ReadFedReleaseAsync(
@@ -226,6 +243,34 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
         catch (Exception exception)
         {
             LogFedReleaseUnavailable(logger, exception);
+            return null;
+        }
+    }
+
+    private async Task<PreSessionEvidence?> ReadFinanceCalendarAsync(DateOnly sessionDate,
+        DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            var from = sessionDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var to = sessionDate.AddDays(1).ToString("yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture);
+            var url = "https://www.financecalendar.com/wp-json/fc/v1/calendar?" +
+                $"from={from}&to={to}&impact=high&limit=100";
+            using var response = await httpClientFactory.CreateClient(OfficialFeedsClientName).GetAsync(
+                url, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > 500_000) return null;
+            var json = await response.Content.ReadAsStringAsync(timeout.Token);
+            if (json.Length > 500_000) return null;
+            return FinanceCalendarParser.Parse(json, capturedAtUtc);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            LogFinanceCalendarUnavailable(logger, exception);
             return null;
         }
     }
@@ -300,6 +345,10 @@ internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeP
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Federal Reserve monetary release feed unavailable for pre-session brief")]
     private static partial void LogFedReleaseUnavailable(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Finance Calendar schedule unavailable for pre-session brief")]
+    private static partial void LogFinanceCalendarUnavailable(ILogger logger, Exception exception);
 
     private async Task<PreSessionObservedOutcome?> ReadOutcomeAsync(
         (string Code, string Exchange, string Symbol) market, DateOnly sessionDate,

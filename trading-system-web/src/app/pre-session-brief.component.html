@@ -44,6 +44,7 @@
                   <div class="brief-evidence-row"><span>{{ item.name }}</span>
                     <strong [class.brief-missing]="item.status === 'Unavailable'">{{ item.value ?? item.status }}</strong>
                     <small>{{ item.source ?? 'No connected source' }}@if (item.sourceAtUtc) { · {{ item.sourceAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata' }} IST }</small>
+                    @if (item.source === 'Finance Calendar') { <small><a href="https://www.financecalendar.com" target="_blank" rel="noopener noreferrer">Finance Calendar source</a></small> }
                     <small>{{ item.note }}</small></div>
                 }
               </div>
