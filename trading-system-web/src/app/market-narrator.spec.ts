@@ -73,7 +73,8 @@ describe('market narrator', () => {
       executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
       executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
       executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 102,
-      exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null };
+      exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null,
+      maximumFavourablePnl: null, maximumAdverseLoss: null };
     const exited = { ...active, lifecycleStatus: 'Target hit', exitPrice: 110, realisedPnl: 3750, unrealisedPnl: 0, exitTimeUtc: '2026-10-12T04:00:00Z' };
     const previous = snapshot(bars, { overlays: [active] });
     const current = snapshot(bars, { overlays: [exited] });
@@ -92,7 +93,8 @@ describe('market narrator', () => {
       executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
       executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
       executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 102,
-      exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null };
+      exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null,
+      maximumFavourablePnl: null, maximumAdverseLoss: null };
     const events = buildMarketNarratorEvents('sensex', snapshot(bars), snapshot(bars, { overlays: [trade] }));
     expect(events.find(event => event.key.includes('entry:'))?.message).toContain(expectedBias);
   });
@@ -105,7 +107,8 @@ describe('market narrator', () => {
       executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
       executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
       executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 103,
-      exitPrice: null, realisedPnl: null, unrealisedPnl: 1000, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null };
+      exitPrice: null, realisedPnl: null, unrealisedPnl: 1000, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null,
+      maximumFavourablePnl: null, maximumAdverseLoss: null };
     const previous = snapshot(bars, { overlays: [{ ...trade, stopLoss: 100.5 }] });
     const current = snapshot(bars, { overlays: [trade] });
     expect(buildMarketNarratorEvents('nifty', previous, current).some((event) => event.key.includes('profit-lock'))).toBe(false);
