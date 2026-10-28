@@ -526,17 +526,6 @@ article > span,
   padding: 0.8rem 0;
   border-top: 1px solid #dfc6c3;
 }
-.trade-exit-action button {
-  border: 1px solid #9c342d;
-  border-radius: 0.5rem;
-  background: #fff1ee;
-  color: #7d251f;
-  padding: 0.45rem 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-.trade-exit-action button:disabled { opacity: 0.6; cursor: default; }
-.trade-exit-error { margin: 0.5rem 0.75rem; color: #9c342d; }
 .empty-copy {
   margin: 0;
   padding: 0.65rem 0.75rem;

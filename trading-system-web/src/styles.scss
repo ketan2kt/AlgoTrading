@@ -826,3 +826,14 @@ app-root :is(.chart-status-rail span, .signal-row span, .evaluation-row span,
   app-root .pnl-total { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   app-root .pnl-total > span { grid-column: 1 / -1; }
 }
+app-root .trade-exit-action button {
+  border: 1px solid #9c342d;
+  border-radius: .5rem;
+  background: #fff1ee;
+  color: #7d251f;
+  padding: .45rem .75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+app-root .trade-exit-action button:disabled { opacity: .6; cursor: default; }
+app-root .trade-exit-error { margin: .5rem .75rem; color: #9c342d; }
