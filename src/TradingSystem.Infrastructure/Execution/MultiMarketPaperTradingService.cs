@@ -430,6 +430,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
                 select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            if (persistentDirectionalEntry && !SensexMorningThesisReentryPolicy.AllowsEntry(
+                    localTime, persistentDirectionalEntry, priorSameDirectionExit))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "MorningPersistentThesisReentryDeferred", decision.Confidence,
+                    ["A same-direction position already exited this morning; persistent-thesis re-entry waits until 10:45 IST.",
+                     "Fresh first entries and other strategies remain eligible."], cancellationToken);
+                return;
+            }
             var persistentDirectionalContext = persistentDirectionalEntry || (marketStateV2 is not null &&
                 ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional);
             var reentry = StructuralReentryPolicy.Evaluate(priceBars

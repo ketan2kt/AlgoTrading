@@ -9,6 +9,39 @@ describe('Pre-session brief', () => {
     providers: [provideHttpClient(), provideHttpClientTesting()],
   }));
 
+  it('redraws the modal when the report request finishes', async () => {
+    const fixture = TestBed.createComponent(PreSessionBriefComponent);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent as string).toContain('Loading recorded morning snapshots');
+
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne(request => request.url === '/api/market-analysis/pre-session').flush({
+      sessionDate: '2026-10-28', generatedAtUtc: '2026-10-28T10:15:00Z',
+      briefs: [], missingStages: [], outcomes: [], scorecards: [],
+    });
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).not.toContain('Loading recorded morning snapshots');
+    expect(text).toContain('No as-of morning snapshot');
+    http.verify();
+  });
+
+  it('redraws an error and leaves the Load brief button available', async () => {
+    const fixture = TestBed.createComponent(PreSessionBriefComponent);
+    fixture.detectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne(request => request.url === '/api/market-analysis/pre-session')
+      .flush(null, { status: 503, statusText: 'Unavailable' });
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Pre-session evidence is unavailable');
+    expect(text).not.toContain('Loading recorded morning snapshots');
+    expect(fixture.nativeElement.querySelector('.brief-toolbar button').disabled).toBe(false);
+    http.verify();
+  });
+
   it('shows missing capture and unavailable external inputs without inventing a bias', async () => {
     const fixture = TestBed.createComponent(PreSessionBriefComponent);
     fixture.detectChanges();

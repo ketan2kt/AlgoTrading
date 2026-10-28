@@ -1,7 +1,8 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, EventEmitter, HostListener, inject, OnInit, Output } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, HostListener, inject, OnInit, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { timeout } from 'rxjs';
 
 export interface PreSessionEvidence {
   name: string;
@@ -82,6 +83,7 @@ export interface PreSessionObservedOutcome {
 })
 export class PreSessionBriefComponent implements OnInit {
   private readonly http = inject(HttpClient);
+  private readonly view = inject(ChangeDetectorRef);
   @Output() readonly closed = new EventEmitter<void>();
 
   protected sessionDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -99,9 +101,9 @@ export class PreSessionBriefComponent implements OnInit {
     this.error = '';
     this.report = null;
     this.http.get<PreSessionBriefReport>('/api/market-analysis/pre-session',
-      { params: { date: this.sessionDate } }).subscribe({
-      next: report => { this.report = report; this.loading = false; },
-      error: () => { this.error = 'Pre-session evidence is unavailable. Try refreshing the report.'; this.loading = false; },
+      { params: { date: this.sessionDate } }).pipe(timeout(15_000)).subscribe({
+      next: report => { this.report = report; this.loading = false; this.view.markForCheck(); },
+      error: () => { this.error = 'Pre-session evidence is unavailable. Try refreshing the report.'; this.loading = false; this.view.markForCheck(); },
     });
   }
 
