@@ -69,6 +69,87 @@ public sealed class PreSessionBriefBuilderTests
         Assert.Equal("Unclear", PreSessionBriefBuilder.Build(source).Judgement);
     }
 
+    [Fact]
+    public void RecentSessionContextUsesMeasuredHistoryWithoutInventingCurrentPrice()
+    {
+        var source = Source(indicative: null) with
+        {
+            RecentSessions =
+            [
+                new(Session.AddDays(-3), 100m, 110m, 95m, 105m, 375),
+                new(Session.AddDays(-2), 105m, 113m, 101m, 110m, 375),
+                new(Session.AddDays(-1), 110m, 119m, 108m, 115m, 375)
+            ]
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Contains(brief.Evidence, value => value.Name == "Recent index sessions" &&
+            value.Status == "PreviousSession" && value.Value!.Contains("9.52%"));
+        Assert.Equal("Unclear", brief.Bias);
+    }
+
+    [Fact]
+    public void TimestampedGrowwQuoteIsNotPromotedToIndicativeAuctionPrice()
+    {
+        var source = Source(indicative: null) with
+        {
+            PreOpenQuote = 111m,
+            PreOpenQuoteAtUtc = Captured.AddMinutes(27)
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Contains(brief.Evidence, value => value.Name == "Groww index quote before open" &&
+            value.Status == "TimestampedQuote" && value.Value == "111");
+        Assert.Null(brief.IndicativePrice);
+        Assert.Equal("Unclear", brief.Bias);
+    }
+
+    [Fact]
+    public void DatedEcbCrossIsAttributedAndNotCalledLive()
+    {
+        var source = Source(indicative: null) with
+        {
+            UsdInrReference = new(Session.AddDays(-1), 88.5m)
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Contains(brief.Evidence, value => value.Name == "USD/INR reference" &&
+            value.Value == "88.5" && value.Note.Contains("not a live tradable quote") &&
+            value.Note.Contains("Source: ECB statistics"));
+    }
+
+    [Fact]
+    public void UsTreasuryYieldIsDatedContextNotIndianBondData()
+    {
+        var source = Source(indicative: null) with
+        {
+            UsTenYearYield = new(Session.AddDays(-1), 4.99m, 4.91m)
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Contains(brief.Evidence, value => value.Name == "US 10-year Treasury yield" &&
+            value.Value!.Contains("+8 bp") && value.Note.Contains("not an Indian bond yield"));
+    }
+
+    [Fact]
+    public void RecentFedHeadlineIsEvidenceWithoutDirectionGuess()
+    {
+        var source = Source(indicative: null) with
+        {
+            RecentFedRelease = new("Federal Reserve issues FOMC statement", Captured.AddHours(-3))
+        };
+
+        var brief = PreSessionBriefBuilder.Build(source);
+
+        Assert.Contains(brief.Evidence, value => value.Name == "Recent Federal Reserve monetary release" &&
+            value.Value == "Federal Reserve issues FOMC statement");
+        Assert.Equal("Unclear", brief.Bias);
+    }
+
     private static PreSessionSourceData Source(decimal? indicative) => new(
         "nifty", Session, "Overnight", Captured, 101m, 105m, 110m, 100m,
         Captured.AddDays(-1), indicative,

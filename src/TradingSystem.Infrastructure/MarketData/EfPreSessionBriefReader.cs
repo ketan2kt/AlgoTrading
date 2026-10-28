@@ -1,16 +1,25 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Npgsql;
+using TradingSystem.Application.Broker;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
 
 namespace TradingSystem.Infrastructure.MarketData;
 
-internal sealed class EfPreSessionBriefReader(TradingDbContext db, TimeProvider clock)
+internal sealed partial class EfPreSessionBriefReader(TradingDbContext db, TimeProvider clock,
+    IGrowwReadOnlyGateway groww, IHttpClientFactory httpClientFactory,
+    ILogger<EfPreSessionBriefReader> logger)
     : IPreSessionBriefReader
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    internal const string OfficialFeedsClientName = "PreSessionOfficialFeeds";
+    private const string EcbDailyReferenceUrl =
+        "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+    private const string FedMonetaryRssUrl =
+        "https://www.federalreserve.gov/feeds/press_monetary.xml";
     private static readonly (string Code, string Exchange, string Symbol)[] Markets =
     [
         ("nifty", "NSE", "NIFTY"),
@@ -126,10 +135,18 @@ internal sealed class EfPreSessionBriefReader(TradingDbContext db, TimeProvider 
             .OrderByDescending(value => value.OpenTimeUtc).Take(5000)
             .Select(value => new { value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close })
             .ToListAsync(cancellationToken);
-        var previous = candles
+        var sessions = candles
             .Where(value => IsRegularSession(value.OpenTimeUtc))
             .GroupBy(value => DateOnly.FromDateTime(value.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).Date))
-            .OrderByDescending(group => group.Key).FirstOrDefault();
+            .OrderByDescending(group => group.Key).ToArray();
+        var previous = sessions.FirstOrDefault();
+        var recentSessions = sessions.Where(group => group.Count() >= 180).Take(5)
+            .Select(group => new PreSessionHistoricalSession(group.Key,
+                group.OrderBy(value => value.OpenTimeUtc).First().Open,
+                group.Max(value => value.High), group.Min(value => value.Low),
+                group.OrderByDescending(value => value.OpenTimeUtc).First().Close,
+                group.Count()))
+            .OrderBy(value => value.Date).ToArray();
         var lastCandle = previous?.OrderByDescending(value => value.OpenTimeUtc).FirstOrDefault();
         var firstCandle = previous?.OrderBy(value => value.OpenTimeUtc).FirstOrDefault();
 
@@ -139,6 +156,7 @@ internal sealed class EfPreSessionBriefReader(TradingDbContext db, TimeProvider 
             var previousStartUtc = ToUtc(previous.Key, TimeOnly.MinValue);
             option = await db.OptionChainSnapshots.AsNoTracking()
                 .Where(value => value.UnderlyingInstrumentId == instrumentId.Value &&
+                                value.ExpiryDate >= sessionDate &&
                                 value.SourceTimestampUtc >= previousStartUtc &&
                                 value.SourceTimestampUtc < startUtc)
                 .OrderByDescending(value => value.SourceTimestampUtc)
@@ -147,14 +165,141 @@ internal sealed class EfPreSessionBriefReader(TradingDbContext db, TimeProvider 
         (decimal? call, decimal? put) = option is null
             ? (null, null) : ParseOiStrikes(option.PayloadJson);
 
+        decimal? preOpenQuote = null;
+        DateTimeOffset? preOpenQuoteAtUtc = null;
+        if (stage == "PreOpen")
+        {
+            try
+            {
+                using var quoteTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                quoteTimeout.CancelAfter(TimeSpan.FromSeconds(6));
+                var quote = await groww.GetQuoteAsync(
+                    new GrowwQuoteRequest(market.Exchange, "CASH", market.Symbol), quoteTimeout.Token);
+                if (quote.LastPrice > 0 && quote.LastTradeTimeEpochMilliseconds is > 0)
+                {
+                    var quoteAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(
+                        quote.LastTradeTimeEpochMilliseconds.Value);
+                    if (quoteAtUtc >= ToUtc(sessionDate, new TimeOnly(9, 0)) &&
+                        quoteAtUtc <= capturedAtUtc.AddMinutes(1))
+                    {
+                        preOpenQuote = quote.LastPrice;
+                        preOpenQuoteAtUtc = quoteAtUtc;
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                LogGrowwPreOpenQuoteUnavailable(logger, market.Code, exception);
+            }
+        }
+
+        var usdInrReference = await ReadUsdInrReferenceAsync(sessionDate, cancellationToken);
+        var usTenYearYield = await ReadUsTenYearYieldAsync(sessionDate, cancellationToken);
+        var recentFedRelease = await ReadFedReleaseAsync(capturedAtUtc, cancellationToken);
+
         // Existing Groww index/option polling starts at 9:15. Never relabel a previous
         // close as today's indicative auction price; a licensed pre-open feed is needed.
         return new(market.Code, sessionDate, stage, capturedAtUtc,
             firstCandle?.Open, lastCandle?.Close,
             previous?.Max(value => value.High), previous?.Min(value => value.Low),
             lastCandle?.OpenTimeUtc, null, null, call, put, option?.ExpiryDate,
-            option?.SourceTimestampUtc);
+            option?.SourceTimestampUtc, recentSessions, preOpenQuote, preOpenQuoteAtUtc,
+            usdInrReference, usTenYearYield, recentFedRelease);
     }
+
+    private async Task<FedMonetaryRelease?> ReadFedReleaseAsync(
+        DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            using var response = await httpClientFactory.CreateClient(OfficialFeedsClientName).GetAsync(
+                FedMonetaryRssUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > 200_000) return null;
+            var xml = await response.Content.ReadAsStringAsync(timeout.Token);
+            return FedMonetaryNewsParser.ParseLatest(xml, capturedAtUtc);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            LogFedReleaseUnavailable(logger, exception);
+            return null;
+        }
+    }
+
+    private async Task<TreasuryTenYearYield?> ReadUsTenYearYieldAsync(
+        DateOnly sessionDate, CancellationToken cancellationToken)
+    {
+        foreach (var month in new[] { sessionDate, sessionDate.AddMonths(-1) })
+        {
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(6));
+                var yearMonth = month.ToString("yyyyMM", System.Globalization.CultureInfo.InvariantCulture);
+                var url = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/" +
+                    $"daily-treasury-rates.csv/all/{yearMonth}?_format=csv&" +
+                    $"field_tdr_date_value_month={yearMonth}&page=&type=daily_treasury_yield_curve";
+                using var response = await httpClientFactory.CreateClient(OfficialFeedsClientName).GetAsync(
+                    url, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                if (response.Content.Headers.ContentLength is > 100_000) continue;
+                var csv = await response.Content.ReadAsStringAsync(timeout.Token);
+                var yield = TreasuryYieldParser.ParseLatestTenYear(csv, sessionDate);
+                if (yield is not null && yield.Date >= sessionDate.AddDays(-5)) return yield;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                LogUsTreasuryUnavailable(logger, exception);
+            }
+        }
+        return null;
+    }
+
+    private async Task<EcbUsdInrReference?> ReadUsdInrReferenceAsync(
+        DateOnly sessionDate, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            using var response = await httpClientFactory.CreateClient(OfficialFeedsClientName).GetAsync(
+                EcbDailyReferenceUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > 100_000) return null;
+            var xml = await response.Content.ReadAsStringAsync(timeout.Token);
+            var reference = EcbReferenceRateParser.ParseUsdInr(xml);
+            return reference is not null && reference.Date <= sessionDate &&
+                reference.Date >= sessionDate.AddDays(-5) ? reference : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            LogEcbReferenceUnavailable(logger, exception);
+            return null;
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Groww pre-open index quote unavailable for {Market}")]
+    private static partial void LogGrowwPreOpenQuoteUnavailable(
+        ILogger logger, string market, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "ECB reference rates unavailable for pre-session brief")]
+    private static partial void LogEcbReferenceUnavailable(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "US Treasury yield unavailable for pre-session brief")]
+    private static partial void LogUsTreasuryUnavailable(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Federal Reserve monetary release feed unavailable for pre-session brief")]
+    private static partial void LogFedReleaseUnavailable(ILogger logger, Exception exception);
 
     private async Task<PreSessionObservedOutcome?> ReadOutcomeAsync(
         (string Code, string Exchange, string Symbol) market, DateOnly sessionDate,

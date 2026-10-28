@@ -158,6 +158,8 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
+        services.AddHttpClient(EfPreSessionBriefReader.OfficialFeedsClientName, client =>
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SarthicoPreSession/1.0"));
         services.AddScoped<IGrowwInstrumentSynchronizer, GrowwInstrumentSynchronizer>();
         services.AddHostedService<GrowwInstrumentSynchronizationService>();
         services.AddSingleton<MarketDataHealthMonitor>();
