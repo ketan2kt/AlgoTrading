@@ -36,7 +36,7 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             .Select(value => new { value.Market, value.RealisedPnl, value.CostsPaid })
             .ToListAsync(cancellationToken);
         observations.AddRange(marketPositions
-            .Where(value => value.Market is "nifty" or "sensex" or "natural-gas")
+            .Where(value => value.Market is "nifty" or "sensex" or "bank-nifty" or "bankex" or "natural-gas")
             .Select(value => new PaperPnlObservation(value.Market, value.RealisedPnl, value.CostsPaid)));
 
         var summaries = PaperPnlSummaryCalculator.Summarise(observations);
@@ -112,7 +112,8 @@ internal sealed class EfPaperTradingReportReader(TradingDbContext db, TimeProvid
             select new { Position = position, instrument.TradingSymbol, instrument.ExpiryDate })
             .Take(500).ToListAsync(cancellationToken);
         var sensexAudits = await db.MarketStrategyAudits.AsNoTracking()
-            .Where(x => x.Market == "sensex" && x.CandleTimeUtc >= cutoff &&
+            .Where(x => (x.Market == "sensex" || x.Market == "bank-nifty" ||
+                         x.Market == "bankex") && x.CandleTimeUtc >= cutoff &&
                 (x.Outcome.StartsWith("PositionSample:") || x.Outcome.StartsWith("PostExit")))
             .Select(x => new { x.Outcome, x.ReasonsJson }).ToListAsync(cancellationToken);
         var sensexPrices = sensexAudits.Where(x => x.Outcome.StartsWith("PositionSample:", StringComparison.Ordinal))

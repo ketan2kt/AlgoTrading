@@ -1,4 +1,5 @@
 using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Infrastructure.Execution;
 using TradingSystem.Infrastructure.Diagnostics;
 using TradingSystem.Domain.Trading;
 using System.Globalization;
@@ -7,6 +8,20 @@ namespace TradingSystem.ContractTests;
 
 public sealed class TradingWorkspaceIsolationTests
 {
+    [Fact]
+    public void MonthlyBankOptionsRemainSelectableBeyondTenDays()
+    {
+        Assert.Equal(45, MultiMarketPaperTradingService.OptionExpiryHorizonDays(
+            TradingMarketCatalog.BankNifty));
+        Assert.Equal(45, MultiMarketPaperTradingService.OptionExpiryHorizonDays(
+            TradingMarketCatalog.Bankex));
+        Assert.Equal(10, MultiMarketPaperTradingService.OptionExpiryHorizonDays(
+            TradingMarketCatalog.Sensex));
+        Assert.Equal(new DateOnly(2026, 10, 30),
+            MultiMarketPaperTradingService.BankRegularOptionStartDate(
+                new DateOnly(2026, 10, 29)));
+    }
+
     [Fact]
     public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
     {
@@ -146,6 +161,8 @@ public sealed class TradingWorkspaceIsolationTests
 
     [Theory]
     [InlineData("sensex", "Sensex")]
+    [InlineData("bank-nifty", "Bank Nifty")]
+    [InlineData("bankex", "Bankex")]
     [InlineData("natural-gas", "Natural Gas Mini Futures")]
     public void UnavailableNonNiftyMarketNeverInheritsNiftyAutomation(
         string market,

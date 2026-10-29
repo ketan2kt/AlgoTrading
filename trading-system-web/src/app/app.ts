@@ -117,7 +117,8 @@ export class App implements OnInit, OnDestroy {
   protected liveExecutionPassword = '';
   protected liveExecutionReason = 'Daily automatic Nifty and Sensex live trading activation.';
   protected liveExecutionMessage = '';
-  protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10, updatedAtUtc: null };
+  protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10,
+    bankNiftyLots: 10, bankexLots: 10, updatedAtUtc: null };
   protected tradingLotsBusy = false;
   protected tradingLotsMessage = '';
   private tradeStates = new Map<string, string>();
@@ -327,18 +328,21 @@ export class App implements OnInit, OnDestroy {
   protected saveTradingLots(): void {
     const nifty = Number(this.tradingLots.niftyLots);
     const sensex = Number(this.tradingLots.sensexLots);
+    const bankNifty = Number(this.tradingLots.bankNiftyLots);
+    const bankex = Number(this.tradingLots.bankexLots);
     if (!Number.isInteger(nifty) || !Number.isInteger(sensex) ||
-        nifty < 1 || nifty > 50 || sensex < 1 || sensex > 50) {
+        !Number.isInteger(bankNifty) || !Number.isInteger(bankex) ||
+        [nifty, sensex, bankNifty, bankex].some(lots => lots < 1 || lots > 50)) {
       this.tradingLotsMessage = 'Enter whole lot values between 1 and 50.';
       return;
     }
     this.tradingLotsBusy = true;
     this.tradingLotsMessage = '';
-    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex).subscribe({
+    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex, bankNifty, bankex).subscribe({
       next: value => {
         this.tradingLots = value;
         this.tradingLotsBusy = false;
-        this.tradingLotsMessage = 'Saved. New Nifty and Sensex entries will use these lot sizes.';
+        this.tradingLotsMessage = 'Saved. New index entries will use these lot sizes.';
         this.refreshView();
       },
       error: () => {
@@ -374,17 +378,22 @@ export class App implements OnInit, OnDestroy {
 
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
-      this.selectedMarket === 'sensex' ? 'Sensex' : 'Natural Gas Mini Futures';
+      this.selectedMarket === 'sensex' ? 'Sensex' :
+      this.selectedMarket === 'bank-nifty' ? 'Bank Nifty' :
+      this.selectedMarket === 'bankex' ? 'Bankex' : 'Natural Gas Mini Futures';
   }
 
   protected preparedMarketVenue(): string {
     return this.selectedMarket === 'nifty' ? 'NSE index and options' :
-      this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
+      this.selectedMarket === 'bank-nifty' ? 'NSE banking index and options' :
+      this.selectedMarket === 'sensex' || this.selectedMarket === 'bankex'
+        ? 'BSE index and options' : 'MCX commodity futures';
   }
 
   private marketFromPath(): TradingMarketCode | null {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
+      path === '/bank-nifty' ? 'bank-nifty' : path === '/bankex' ? 'bankex' :
       path === '/natural-gas' ? 'natural-gas' : null;
   }
 
@@ -571,7 +580,8 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected marketReportName(market:string):string {
-    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' : 'Natural Gas';
+    return market==='nifty' ? 'Nifty' : market==='sensex' ? 'Sensex' :
+      market==='bank-nifty' ? 'Bank Nifty' : market==='bankex' ? 'Bankex' : 'Natural Gas';
   }
   private isoDateDaysAgo(days:number):string {
     const value=new Date(Date.now()-days*86400000);

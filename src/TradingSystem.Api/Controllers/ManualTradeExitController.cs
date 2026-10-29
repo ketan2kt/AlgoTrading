@@ -19,7 +19,7 @@ public sealed class ManualTradeExitController(TradingDbContext db, TimeProvider 
     public async Task<IActionResult> RequestExit(string market, Guid tradeId,
         CancellationToken cancellationToken)
     {
-        if (market is not ("nifty" or "sensex")) return NotFound();
+        if (market is not ("nifty" or "sensex" or "bank-nifty" or "bankex")) return NotFound();
         if (tradeId == Guid.Empty) return BadRequest();
         var position = await db.MarketPaperPositions.AsNoTracking().SingleOrDefaultAsync(
             value => value.Id == tradeId && value.Market == market, cancellationToken);

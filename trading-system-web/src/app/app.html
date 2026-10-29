@@ -61,6 +61,8 @@
         <div class="market-tab-group">
         <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'bank-nifty'" [class.market-tab--alert]="marketTabAlert('bank-nifty')" (click)="openMarket('bank-nifty')">Bank Nifty @if (marketTabAlert('bank-nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'bankex'" [class.market-tab--alert]="marketTabAlert('bankex')" (click)="openMarket('bankex')">Bankex @if (marketTabAlert('bankex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
@@ -258,12 +260,14 @@
               <button type="button" (click)="openPnlReport()">P&amp;L report</button>
               <button type="button" (click)="openLogs()">Research logs</button>
             </div>
-            @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
+            @if (selectedMarket !== 'natural-gas') {
               <section class="control-center-card trading-lots-card">
-                <div><span>TRADE SIZE</span><strong>Market lot controls</strong><p>Normal, Hero Zero, hedge/pair, paper and subsequent live entries use the saved market value exactly. A trade is rejected rather than silently reduced when risk approval cannot support it.</p></div>
+                <div><span>TRADE SIZE</span><strong>Market lot controls</strong><p>New regular index trades use the saved market lot value. Nifty and Sensex specialty strategies keep their existing lot controls.</p></div>
                 <div class="trading-lots-grid">
                   <label>Nifty lots<input name="niftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.niftyLots" /></label>
                   <label>Sensex lots<input name="sensexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.sensexLots" /></label>
+                  <label>Bank Nifty lots<input name="bankNiftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankNiftyLots" /></label>
+                  <label>Bankex lots<input name="bankexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankexLots" /></label>
                   <button type="button" [disabled]="tradingLotsBusy" (click)="saveTradingLots()">{{ tradingLotsBusy ? 'Saving…' : 'Save lot sizes' }}</button>
                 </div>
                 @if (tradingLotsMessage) { <p>{{ tradingLotsMessage }}</p> }
@@ -273,7 +277,7 @@
                 <strong [class.good]="liveExecution?.armed" [class.bad]="!liveExecution?.armed">
                   {{ liveExecution?.armed ? 'ARMED · automatic Groww orders enabled' : 'DISARMED · no live orders' }}
                 </strong>
-                <p>{{ liveExecution?.buildEnabled ? ('Automatic orders use the saved Nifty or Sensex lot value shown above.') : 'Live execution is disabled by server configuration.' }}</p>
+                <p>{{ liveExecution?.buildEnabled ? ('Automatic orders mirror the saved index lot value shown above.') : 'Live execution is disabled by server configuration.' }}</p>
                 @if (liveExecution?.latestIntentStatus) {
                   <p><strong>Latest live attempt:</strong> {{ liveExecution?.latestIntentMarket }} · {{ liveExecution?.latestIntentStatus }} · {{ liveExecution?.latestIntentAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata' }} IST</p>
                   @if (liveExecution?.latestIntentError) { <p class="bad">{{ liveExecution?.latestIntentError }}</p> }
@@ -320,7 +324,7 @@
             <form class="pnl-report-filter" (ngSubmit)="searchPnl()">
               <label>From<input name="pnlFrom" type="date" [(ngModel)]="pnlFrom" required /></label>
               <label>To<input name="pnlTo" type="date" [(ngModel)]="pnlTo" required /></label>
-              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option></select></label>
+              <label>Market<select name="pnlMarket" [(ngModel)]="pnlMarket"><option value="all">All</option><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="bank-nifty">Bank Nifty</option><option value="bankex">Bankex</option></select></label>
               <button type="submit" [disabled]="pnlReportLoading">{{pnlReportLoading ? 'Searching…' : 'Search'}}</button>
             </form>
             @if (pnlReportError) { <p class="form-error">{{pnlReportError}}</p> }

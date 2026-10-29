@@ -9,15 +9,19 @@ public sealed class TradingLotConfigurationContractTests
     {
         Assert.Equal(10, TradingLotConfiguration.Default.NiftyLots);
         Assert.Equal(10, TradingLotConfiguration.Default.SensexLots);
+        Assert.Equal(10, TradingLotConfiguration.Default.BankNiftyLots);
+        Assert.Equal(10, TradingLotConfiguration.Default.BankexLots);
     }
 
     [Theory]
     [InlineData("nifty", 12)]
     [InlineData("sensex", 17)]
     [InlineData("SENSEX", 17)]
+    [InlineData("bank-nifty", 19)]
+    [InlineData("bankex", 23)]
     public void ResolvesMarketSpecificLots(string market, int expected)
     {
-        var configuration = new TradingLotConfiguration(12, 17);
+        var configuration = new TradingLotConfiguration(12, 17, null, 19, 23);
 
         Assert.Equal(expected, configuration.ForMarket(market));
     }

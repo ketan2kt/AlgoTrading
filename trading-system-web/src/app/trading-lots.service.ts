@@ -5,6 +5,8 @@ import { Observable, switchMap } from 'rxjs';
 export interface TradingLotConfiguration {
   niftyLots: number;
   sensexLots: number;
+  bankNiftyLots: number;
+  bankexLots: number;
   updatedAtUtc: string | null;
 }
 
@@ -16,10 +18,12 @@ export class TradingLotsService {
     return this.http.get<TradingLotConfiguration>('/api/trading-lots');
   }
 
-  save(niftyLots: number, sensexLots: number): Observable<TradingLotConfiguration> {
+  save(niftyLots: number, sensexLots: number, bankNiftyLots: number,
+       bankexLots: number): Observable<TradingLotConfiguration> {
     return this.http.get<{ token: string }>('/api/security/antiforgery-token').pipe(
       switchMap(({ token }) => this.http.put<TradingLotConfiguration>('/api/trading-lots',
-        { niftyLots, sensexLots }, { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
+        { niftyLots, sensexLots, bankNiftyLots, bankexLots },
+        { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
     );
   }
 }

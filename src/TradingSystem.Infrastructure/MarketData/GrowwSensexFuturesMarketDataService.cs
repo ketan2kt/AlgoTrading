@@ -25,7 +25,8 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
     ILogger<GrowwSensexFuturesMarketDataService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
-    private DateTimeOffset? lastHistoryRefreshUtc;
+    private readonly Dictionary<string, DateTimeOffset> lastHistoryRefreshUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> lastBankQuoteUtc = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -35,7 +36,19 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
             try
             {
                 var now = timeProvider.GetUtcNow();
-                if (IsMarketWindow(now)) await ProcessAsync(now, stoppingToken);
+                if (IsMarketWindow(now))
+                {
+                    await ProcessAsync(TradingMarketCatalog.Sensex, now, stoppingToken);
+                    foreach (var bank in new[] { TradingMarketCatalog.BankNifty, TradingMarketCatalog.Bankex })
+                    {
+                        if (lastBankQuoteUtc.TryGetValue(bank.Code, out var last) &&
+                            now - last < TimeSpan.FromSeconds(30)) continue;
+                        try { await ProcessAsync(bank, now, stoppingToken); }
+                        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+                        catch (Exception exception) { LogPollingFailed(logger, exception); }
+                        lastBankQuoteUtc[bank.Code] = timeProvider.GetUtcNow();
+                    }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception) { LogPollingFailed(logger, exception); }
@@ -43,14 +56,16 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
         }
     }
 
-    private async Task ProcessAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task ProcessAsync(TradingMarketDefinition market, DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
         var india = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
         var today = DateOnly.FromDateTime(india.Date);
-        var future = await db.Instruments.Where(value => value.Exchange == "BSE" &&
-                value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith("SENSEX") &&
+        var future = await db.Instruments.Where(value => value.Exchange == market.Exchange &&
+                value.Type == InstrumentType.Future &&
+                value.TradingSymbol.StartsWith(market.ExecutionUnderlying) &&
                 value.ExpiryDate >= today && value.IsActive)
             .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
             .FirstOrDefaultAsync(cancellationToken);
@@ -59,16 +74,17 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
         var startIndia = india.Date.AddHours(9).AddMinutes(15);
         var start = new DateTimeOffset(startIndia,
             IndiaTimeZone.GetUtcOffset(startIndia)).ToUniversalTime();
-        if (lastHistoryRefreshUtc is null || now - lastHistoryRefreshUtc >= TimeSpan.FromSeconds(30))
+        if (!lastHistoryRefreshUtc.TryGetValue(market.Code, out var lastHistory) ||
+            now - lastHistory >= TimeSpan.FromSeconds(30))
         {
-            var history = await gateway.GetHistoricalCandlesAsync(new("BSE", "FNO",
+            var history = await gateway.GetHistoricalCandlesAsync(new(market.Exchange, "FNO",
                 future.GrowwSymbol, start, now, "1minute"), cancellationToken);
             await scope.ServiceProvider.GetRequiredService<GrowwHistoricalCandleImporter>()
                 .ImportAsync(future, history, now, cancellationToken);
-            lastHistoryRefreshUtc = now;
+            lastHistoryRefreshUtc[market.Code] = now;
         }
 
-        var quote = await gateway.GetQuoteAsync(new("BSE", "FNO", future.TradingSymbol),
+        var quote = await gateway.GetQuoteAsync(new(market.Exchange, "FNO", future.TradingSymbol),
             cancellationToken);
         var observation = normalizer.Normalize(future.Id, quote, now);
         await scope.ServiceProvider.GetRequiredService<MarketDataProcessor>()
