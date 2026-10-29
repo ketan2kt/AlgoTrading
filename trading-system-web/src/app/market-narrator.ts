@@ -56,7 +56,8 @@ export function buildMarketNarratorEvents(
   previous: TradingWorkspaceSnapshot,
   current: TradingWorkspaceSnapshot,
 ): MarketNarratorEvent[] {
-  const name = market === 'nifty' ? 'Nifty' : 'Sensex';
+  const name = market === 'nifty' ? 'Nifty' : market === 'sensex' ? 'Sensex' :
+    market === 'bank-nifty' ? 'Bank Nifty' : 'Bankex';
   const events: MarketNarratorEvent[] = [];
   const now = current.observedAtUtc;
   const add = (category: NarratorCategory, priority: NarratorPriority, code: string,

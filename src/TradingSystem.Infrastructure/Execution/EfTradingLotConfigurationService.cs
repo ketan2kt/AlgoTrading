@@ -21,8 +21,12 @@ internal sealed class EfTradingLotConfigurationService(
         {
             var stored = JsonSerializer.Deserialize<StoredLots>(setting.ValueJson);
             return stored is not null && TradingLotConfiguration.IsValid(stored.NiftyLots) &&
-                   TradingLotConfiguration.IsValid(stored.SensexLots)
-                ? new(stored.NiftyLots, stored.SensexLots, setting.UpdatedAtUtc)
+                   TradingLotConfiguration.IsValid(stored.SensexLots) &&
+                   TradingLotConfiguration.IsValid(stored.BankNiftyLots ?? TradingLotConfiguration.DefaultLots) &&
+                   TradingLotConfiguration.IsValid(stored.BankexLots ?? TradingLotConfiguration.DefaultLots)
+                ? new(stored.NiftyLots, stored.SensexLots, setting.UpdatedAtUtc,
+                    stored.BankNiftyLots ?? TradingLotConfiguration.DefaultLots,
+                    stored.BankexLots ?? TradingLotConfiguration.DefaultLots)
                 : TradingLotConfiguration.Default;
         }
         catch (JsonException)
@@ -34,12 +38,23 @@ internal sealed class EfTradingLotConfigurationService(
     public async Task<TradingLotConfiguration> SetAsync(int niftyLots, int sensexLots,
         string actor, CancellationToken cancellationToken)
     {
+        var current = await GetAsync(cancellationToken);
+        return await SetAsync(niftyLots, sensexLots, current.BankNiftyLots, current.BankexLots,
+            actor, cancellationToken);
+    }
+
+    public async Task<TradingLotConfiguration> SetAsync(int niftyLots, int sensexLots,
+        int bankNiftyLots, int bankexLots, string actor, CancellationToken cancellationToken)
+    {
         if (!TradingLotConfiguration.IsValid(niftyLots) ||
-            !TradingLotConfiguration.IsValid(sensexLots))
+            !TradingLotConfiguration.IsValid(sensexLots) ||
+            !TradingLotConfiguration.IsValid(bankNiftyLots) ||
+            !TradingLotConfiguration.IsValid(bankexLots))
             throw new ArgumentOutOfRangeException(nameof(niftyLots),
                 $"Lots must be between {TradingLotConfiguration.MinimumLots} and {TradingLotConfiguration.MaximumLots}.");
         var now = timeProvider.GetUtcNow();
-        var json = JsonSerializer.Serialize(new StoredLots(niftyLots, sensexLots));
+        var json = JsonSerializer.Serialize(new StoredLots(niftyLots, sensexLots,
+            bankNiftyLots, bankexLots));
         var setting = await db.ApplicationSettings.SingleOrDefaultAsync(value =>
             value.Mode == TradingMode.Paper && value.Key == Key, cancellationToken);
         var before = setting?.ValueJson ?? "null";
@@ -52,8 +67,9 @@ internal sealed class EfTradingLotConfigurationService(
             nameof(ApplicationSetting), Key, "Administrator changed index trade lots.",
             before, json, Guid.NewGuid().ToString("N"), now));
         await db.SaveChangesAsync(cancellationToken);
-        return new(niftyLots, sensexLots, now);
+        return new(niftyLots, sensexLots, now, bankNiftyLots, bankexLots);
     }
 
-    private sealed record StoredLots(int NiftyLots, int SensexLots);
+    private sealed record StoredLots(int NiftyLots, int SensexLots,
+        int? BankNiftyLots = null, int? BankexLots = null);
 }

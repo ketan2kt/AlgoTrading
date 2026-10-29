@@ -383,6 +383,14 @@ public sealed class GrowwReadOnlyContractTests
                 null, null, null, null, null, null, true, true),
             new GrowwInstrumentRecord("BSE", "2", "SENSEX26AUG80000CE", "BSE-SENSEX-26Aug26-80000-CE",
                 "CE", "FNO", null, "SENSEX", "2026-08-27", 80000m, 20, 0.05m, true, true),
+            new GrowwInstrumentRecord("NSE", "5", "BANKNIFTY", "NSE-BANKNIFTY", "IDX", "CASH",
+                null, null, null, null, null, null, true, true),
+            new GrowwInstrumentRecord("NSE", "6", "BANKNIFTY26NOV55000CE", "NSE-BANKNIFTY-24Nov26-55000-CE",
+                "CE", "FNO", null, "BANKNIFTY", "2026-11-24", 55000m, 30, .05m, true, true),
+            new GrowwInstrumentRecord("BSE", "7", "BANKEX", "BSE-BANKEX", "IDX", "CASH",
+                null, null, null, null, null, null, true, true),
+            new GrowwInstrumentRecord("BSE", "8", "BANKEX26NOV60000PE", "BSE-BANKEX-24Nov26-60000-PE",
+                "PE", "FNO", null, "BANKEX", "2026-11-24", 60000m, 30, .05m, true, true),
             new GrowwInstrumentRecord("MCX", "3", "NATGASMINI26AUG26FUT", "MCX-NATGASMINI-26Aug26-FUT",
                 "FUT", "COMMODITY", null, "NATGASMINI", "2026-08-26", null, 250, 10m, true, true),
             new GrowwInstrumentRecord("MCX", "4", "NATURALGAS26AUG26FUT", "MCX-NATURALGAS-26Aug26-FUT",
@@ -393,6 +401,8 @@ public sealed class GrowwReadOnlyContractTests
 
         Assert.Contains(selected, value => value.TradingSymbol == "SENSEX");
         Assert.Contains(selected, value => value.TradingSymbol == "SENSEX26AUG80000CE");
+        Assert.Contains(selected, value => value.TradingSymbol == "BANKNIFTY26NOV55000CE");
+        Assert.Contains(selected, value => value.TradingSymbol == "BANKEX26NOV60000PE");
         Assert.Contains(selected, value => value.TradingSymbol == "NATGASMINI26AUG26FUT" && value.LotSize == 250);
         Assert.DoesNotContain(selected, value => value.TradingSymbol == "NATURALGAS26AUG26FUT");
     }

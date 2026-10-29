@@ -86,12 +86,16 @@ internal sealed partial class AutomaticLiveExecutionService(
 
         // A Hero Zero pair is persisted together. Process multiple eligible paper
         // legs in the same cycle rather than imposing a polling interval per leg.
-        for (var entryIndex = 0; entryIndex < 4; entryIndex++)
+        for (var entryIndex = 0; entryIndex < 8; entryIndex++)
         {
             var intent = await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Nifty.Code,
                     arm.ChangedAtUtc.Value, cancellationToken)
                 ?? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
                 ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Sensex.Code,
+                    arm.ChangedAtUtc.Value, cancellationToken)
+                ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.BankNifty.Code,
+                    arm.ChangedAtUtc.Value, cancellationToken)
+                ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Bankex.Code,
                     arm.ChangedAtUtc.Value, cancellationToken);
             if (intent is null) return;
             db.LiveExecutionIntents.Add(intent);
@@ -125,7 +129,9 @@ internal sealed partial class AutomaticLiveExecutionService(
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var closed = await db.MarketPaperPositions.AsNoTracking().Where(value =>
                 (value.Market == TradingMarketCatalog.Nifty.Code ||
-                 value.Market == TradingMarketCatalog.Sensex.Code) &&
+                 value.Market == TradingMarketCatalog.Sensex.Code ||
+                 value.Market == TradingMarketCatalog.BankNifty.Code ||
+                 value.Market == TradingMarketCatalog.Bankex.Code) &&
                 value.Status != "Active" && value.OpenedAtUtc >= armedAtUtc &&
                 value.ClosedAtUtc >= cutoff)
             .OrderByDescending(value => value.ClosedAtUtc).Take(50)
@@ -696,6 +702,8 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task<LiveExecutionIntent?> DiscoverMarketPositionAsync(TradingDbContext db,
         string market, DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
     {
+        if (!options.Value.AllowedMarkets.Contains(market.ToUpperInvariant(),
+                StringComparer.OrdinalIgnoreCase)) return null;
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var sources = await db.MarketPaperPositions.AsNoTracking()
             .Where(value => value.Market == market && value.Status == "Active" &&
@@ -743,7 +751,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                     value.SourceId == source.Id, cancellationToken)) continue;
             var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.Id == source.ExecutionInstrumentId && value.IsActive, cancellationToken);
-            var expectedExchange = market == TradingMarketCatalog.Nifty.Code ? "NSE" : "BSE";
+            var expectedExchange = market is "nifty" or "bank-nifty" ? "NSE" : "BSE";
             if (instrument is null || instrument.Exchange != expectedExchange ||
                 source.Quantity <= 0 || instrument.LotSize <= 0) continue;
             if (source.Quantity % instrument.LotSize != 0) continue;

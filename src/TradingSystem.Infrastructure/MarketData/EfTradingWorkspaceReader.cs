@@ -445,7 +445,8 @@ internal sealed class EfTradingWorkspaceReader(
             automation,
             futuresVolume,
             research,
-            operationalReports);
+            operationalReports,
+            definition.Code);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,
@@ -463,7 +464,8 @@ internal sealed class EfTradingWorkspaceReader(
             [],
             market == TradingMarketCatalog.Nifty.Code
                 ? paperAutomation.GetCurrent()
-                : CreateUnavailableAutomation(definition, status, detail, now));
+                : CreateUnavailableAutomation(definition, status, detail, now),
+            MarketCode: definition.Code);
     }
 
     internal static PaperAutomationSnapshot CreateUnavailableAutomation(

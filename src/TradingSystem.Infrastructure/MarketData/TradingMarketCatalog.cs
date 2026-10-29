@@ -14,11 +14,15 @@ internal static class TradingMarketCatalog
         InstrumentSegment.Cash, InstrumentType.Index, "NIFTY", "FNO", true, new(9, 15), new(15, 30));
     public static readonly TradingMarketDefinition Sensex = new("sensex", "Sensex", "BSE", "CASH", "SENSEX",
         InstrumentSegment.Cash, InstrumentType.Index, "SENSEX", "FNO", true, new(9, 15), new(15, 30));
+    public static readonly TradingMarketDefinition BankNifty = new("bank-nifty", "Bank Nifty", "NSE", "CASH", "BANKNIFTY",
+        InstrumentSegment.Cash, InstrumentType.Index, "BANKNIFTY", "FNO", true, new(9, 15), new(15, 30));
+    public static readonly TradingMarketDefinition Bankex = new("bankex", "Bankex", "BSE", "CASH", "BANKEX",
+        InstrumentSegment.Cash, InstrumentType.Index, "BANKEX", "FNO", true, new(9, 15), new(15, 30));
     public static readonly TradingMarketDefinition NaturalGas = new("natural-gas", "Natural Gas Mini Futures", "MCX",
         "COMMODITY", "NATGASMINI", InstrumentSegment.Commodity, InstrumentType.Future, "NATGASMINI",
         "COMMODITY", false, new(9, 0), new(23, 30));
 
-    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, NaturalGas];
+    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, BankNifty, Bankex, NaturalGas];
     public static string FeedCode(string market) => market;
     public static TradingMarketDefinition Get(string code) => All.FirstOrDefault(value =>
         string.Equals(value.Code, code, StringComparison.OrdinalIgnoreCase)) ??

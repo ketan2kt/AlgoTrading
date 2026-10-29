@@ -21,9 +21,10 @@ internal sealed class EfDailyTradingDiagnosticsReader(
     {
         var normalizedMarket = NormalizeMarket(market);
         var selectedMarkets = normalizedMarket == "ALL"
-            ? new[] { "NIFTY", "SENSEX" }
+            ? new[] { "NIFTY", "SENSEX", "BANKNIFTY", "BANKEX" }
             : new[] { normalizedMarket };
-        var selectedMarketCodes = selectedMarkets.Select(value => value.ToLowerInvariant()).ToArray();
+        var selectedMarketCodes = selectedMarkets.Select(value => value == "BANKNIFTY"
+            ? "bank-nifty" : value.ToLowerInvariant()).ToArray();
         var startUtc = new DateTimeOffset(
             tradingDate.ToDateTime(TimeOnly.MinValue), IndiaOffset).ToUniversalTime();
         var endUtc = startUtc.AddDays(1);
@@ -34,7 +35,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             .Select(value => new { value.Id, value.TradingSymbol })
             .ToListAsync(cancellationToken);
         if (underlyings.Count == 0)
-            warnings.Add("No matching Nifty/Sensex underlying instrument was found.");
+            warnings.Add("No matching index underlying instrument was found.");
 
         var underlyingIds = underlyings.Select(value => value.Id).ToArray();
         var instrumentMarkets = underlyings.ToDictionary(
@@ -297,8 +298,10 @@ internal sealed class EfDailyTradingDiagnosticsReader(
     {
         "NIFTY" => "NIFTY",
         "SENSEX" => "SENSEX",
+        "BANKNIFTY" or "BANK-NIFTY" => "BANKNIFTY",
+        "BANKEX" => "BANKEX",
         "ALL" => "ALL",
-        _ => throw new ArgumentOutOfRangeException(nameof(market), "Market must be nifty, sensex or all.")
+        _ => throw new ArgumentOutOfRangeException(nameof(market), "Unsupported market.")
     };
 
     private static bool IsAccepted(string outcome) =>

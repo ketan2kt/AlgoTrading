@@ -1,7 +1,8 @@
 namespace TradingSystem.Application.Execution;
 
 public sealed record TradingLotConfiguration(int NiftyLots, int SensexLots,
-    DateTimeOffset? UpdatedAtUtc = null)
+    DateTimeOffset? UpdatedAtUtc = null, int BankNiftyLots = DefaultLots,
+    int BankexLots = DefaultLots)
 {
     public const int DefaultLots = 10;
     public const int MinimumLots = 1;
@@ -9,8 +10,14 @@ public sealed record TradingLotConfiguration(int NiftyLots, int SensexLots,
 
     public static TradingLotConfiguration Default { get; } = new(DefaultLots, DefaultLots);
 
-    public int ForMarket(string market) => market.Equals("sensex", StringComparison.OrdinalIgnoreCase)
-        ? SensexLots : NiftyLots;
+    public int ForMarket(string market) => market.ToLowerInvariant() switch
+    {
+        "nifty" => NiftyLots,
+        "sensex" => SensexLots,
+        "bank-nifty" => BankNiftyLots,
+        "bankex" => BankexLots,
+        _ => throw new ArgumentOutOfRangeException(nameof(market), market, "Unsupported index market.")
+    };
 
     public static bool IsValid(int lots) => lots is >= MinimumLots and <= MaximumLots;
 }
@@ -20,4 +27,6 @@ public interface ITradingLotConfigurationService
     Task<TradingLotConfiguration> GetAsync(CancellationToken cancellationToken);
     Task<TradingLotConfiguration> SetAsync(int niftyLots, int sensexLots, string actor,
         CancellationToken cancellationToken);
+    Task<TradingLotConfiguration> SetAsync(int niftyLots, int sensexLots,
+        int bankNiftyLots, int bankexLots, string actor, CancellationToken cancellationToken);
 }

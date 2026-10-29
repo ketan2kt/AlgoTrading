@@ -20,6 +20,7 @@ internal sealed partial class MultiMarketPaperTradingService(
     IOptions<AutomatedPaperTradingOptions> options,
     IOptions<MarketDataOptions> marketOptions,
     TimeProvider timeProvider,
+    LiveExecutionWakeSignal liveWakeSignal,
     ILogger<MultiMarketPaperTradingService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
@@ -37,8 +38,10 @@ internal sealed partial class MultiMarketPaperTradingService(
         while (!stoppingToken.IsCancellationRequested)
         {
             var markets = options.Value.NaturalGasEnabled
-                ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.NaturalGas }
-                : [TradingMarketCatalog.Sensex];
+                ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
+                    TradingMarketCatalog.Bankex, TradingMarketCatalog.NaturalGas }
+                : [TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
+                    TradingMarketCatalog.Bankex];
             foreach (var market in markets)
             {
                 try { await RunMarketAsync(market, stoppingToken); }
@@ -55,8 +58,10 @@ internal sealed partial class MultiMarketPaperTradingService(
         while (!stoppingToken.IsCancellationRequested)
         {
             var markets = options.Value.NaturalGasEnabled
-                ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.NaturalGas }
-                : [TradingMarketCatalog.Sensex];
+                ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
+                    TradingMarketCatalog.Bankex, TradingMarketCatalog.NaturalGas }
+                : [TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
+                    TradingMarketCatalog.Bankex];
             foreach (var market in markets)
             {
                 try { await RunPositionCycleAsync(market, stoppingToken); }
@@ -106,13 +111,20 @@ internal sealed partial class MultiMarketPaperTradingService(
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
                 value.IntervalSeconds == interval && value.Source == "Groww" &&
-                (market != TradingMarketCatalog.Sensex || value.OpenTimeUtc >= sessionStartUtc))
-            .OrderByDescending(value => value.OpenTimeUtc).Take(market == TradingMarketCatalog.Sensex ? 600 : 90)
+                (market.InstrumentType != InstrumentType.Index || value.OpenTimeUtc >= sessionStartUtc))
+            .OrderByDescending(value => value.OpenTimeUtc).Take(market.InstrumentType == InstrumentType.Index ? 600 : 90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (candles.Count < (market == TradingMarketCatalog.Sensex ? 12 : 21)) return;
+        if (candles.Count < (market.InstrumentType == InstrumentType.Index ? 12 : 21)) return;
         var latest = candles[^1];
         if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc) return;
         lastEvaluated[market.Code] = latest.OpenTimeUtc;
+
+        if (market is { Code: "bank-nifty" or "bankex" })
+        {
+            await RunBankIndexEntryAsync(db, market, underlying, candles, lotConfiguration,
+                today, localTime, now, sessionStartUtc, cancellationToken);
+            return;
+        }
 
         var priceBars = candles.Select(x =>
             new StrategyPriceBar(x.OpenTimeUtc, x.Open, x.High, x.Low, x.Close)).ToArray();
@@ -730,6 +742,130 @@ internal sealed partial class MultiMarketPaperTradingService(
             scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
     }
 
+    private async Task RunBankIndexEntryAsync(TradingDbContext db, TradingMarketDefinition market,
+        Instrument underlying, IReadOnlyList<Candle> candles,
+        TradingLotConfiguration lotConfiguration, DateOnly today, TimeOnly localTime,
+        DateTimeOffset now, DateTimeOffset sessionStartUtc, CancellationToken cancellationToken)
+    {
+        if (!IndexEntryWindowPolicy.AllowsEntry(localTime,
+                TimeOnly.ParseExact(options.Value.EntryWindowStart, "HH:mm"),
+                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm"))) return;
+        var latest = candles[^1];
+        var interval = marketOptions.Value.CandleIntervalSeconds;
+        if (latest.OpenTimeUtc.AddSeconds(interval) > now ||
+            now - latest.OpenTimeUtc > TimeSpan.FromMinutes(3)) return;
+        var decision = Evaluate(candles);
+        if (decision.Direction is null)
+        {
+            await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                decision, cancellationToken);
+            return;
+        }
+        if (await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
+                value.Market == market.Code && value.Status == "Active", cancellationToken)) return;
+
+        var completed = candles.Where(value => value.OpenTimeUtc.AddSeconds(interval) <= now)
+            .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
+                value.High, value.Low, value.Close)).ToArray();
+        var atr = AverageTrueRange(candles.TakeLast(15).ToArray());
+        var previousCandles = await db.Candles.AsNoTracking().Where(value =>
+                value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
+                value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
+            .OrderByDescending(value => value.OpenTimeUtc).Take(390)
+            .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        var priorDate = previousCandles.Count == 0 ? (DateOnly?)null :
+            DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
+                previousCandles[^1].OpenTimeUtc, IndiaTimeZone).Date);
+        var previous = previousCandles.Where(value => priorDate is not null &&
+                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.OpenTimeUtc,
+                    IndiaTimeZone).Date) == priorDate)
+            .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
+                value.High, value.Low, value.Close)).ToArray();
+        var opening = candles.Take(3).ToArray();
+        var openingHigh = opening.Max(value => value.High);
+        var openingLow = opening.Min(value => value.Low);
+        var location = MarketLocationPolicy.Evaluate(completed, previous,
+            decision.Direction.Value, atr, openingHigh, openingLow);
+        if (!location.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "MarketLocationRejected", decision.Confidence, location.Reasons, cancellationToken);
+            return;
+        }
+        var move = SessionMoveQualityPolicy.Evaluate(completed, decision.Direction.Value, atr);
+        var mature = MatureEdgeEntryPolicy.Evaluate(move,
+            MultiTimeframeDecisionPolicy.Analyze(completed, decision.Direction,
+                openingHigh, openingLow), decision.Direction.Value);
+        if (!move.Permitted || !mature.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "SessionMoveQualityRejected", decision.Confidence,
+                [.. move.Reasons, .. mature.Reasons], cancellationToken);
+            return;
+        }
+        var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db,
+            underlying.Id, decision.Direction.Value, latest.Close, atr, now, cancellationToken);
+        if (!optionInterest.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "OptionOpenInterestBarrierRejected", decision.Confidence,
+                optionInterest.Reasons, cancellationToken);
+            return;
+        }
+        var execution = await SelectExecutionInstrumentAsync(db, market,
+            decision.Direction.Value, latest.Close, today, 0, cancellationToken);
+        if (execution is null)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "InstrumentUnavailable", decision.Confidence,
+                ["No current monthly option contract is synchronized."], cancellationToken);
+            return;
+        }
+        if (execution.ExpiryDate == today)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "RegularExpiryEntryRejected", decision.Confidence,
+                ["Regular banking-index entries are withheld on contract expiry day."],
+                cancellationToken);
+            return;
+        }
+        var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
+            execution.TradingSymbol), cancellationToken);
+        var entry = quote.OfferPrice ?? quote.LastPrice;
+        if (entry <= 0m || execution.LotSize <= 0) return;
+        if (quote.BidPrice is > 0m && quote.OfferPrice is > 0m &&
+            (quote.OfferPrice.Value - quote.BidPrice.Value) / quote.OfferPrice.Value > .015m)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "OptionSpreadRejected", decision.Confidence,
+                ["The selected option bid/ask spread exceeds the shared 1.5% quality limit."],
+                cancellationToken);
+            return;
+        }
+        var tick = execution.TickSize > 0m
+            ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize) : .05m;
+        var riskDistance = entry * options.Value.OptionStopLossPercent / 100m;
+        var stop = RoundToTick(entry - riskDistance, tick);
+        var target = RoundToTick(entry + riskDistance, tick);
+        if (!PaperPriceGeometryPolicy.IsValid(Direction.Buy, entry, stop, target)) return;
+        var quantity = checked(execution.LotSize * lotConfiguration.ForMarket(market.Code));
+        var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
+            execution.Id, "Bank index directional breakout", Direction.Buy,
+            quantity, entry, stop, target, now);
+        db.MarketPaperPositions.Add(position);
+        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
+            latest.OpenTimeUtc, "PaperPositionOpened", decision.Confidence,
+            JsonSerializer.Serialize(new { positionId = position.Id, strategy = position.Strategy,
+                underlyingDirection = decision.Direction.ToString(),
+                direction = Direction.Buy.ToString(), entry, initialStop = stop, target,
+                quantity, execution = execution.TradingSymbol, quoteSnapshot = quote,
+                evaluationStartedAtUtc = now, paperEntryRecordedAtUtc = timeProvider.GetUtcNow(),
+                reasons = decision.Reasons, location = location.Context,
+                optionInterest = optionInterest.Reasons })));
+        await db.SaveChangesAsync(cancellationToken);
+        liveWakeSignal.Notify();
+    }
+
     private async Task ManagePositionsAsync(TradingDbContext db, TradingMarketDefinition market,
         CancellationToken cancellationToken)
     {
@@ -865,7 +1001,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                                         exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
-            if (!manualExitRequested && market == TradingMarketCatalog.Sensex && continuationConfirmed &&
+            if (!manualExitRequested && market.ExecuteOptions && continuationConfirmed &&
                 positionRegime == ProfessionalTradeRegime.Directional &&
                 !position.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal))
             {
@@ -905,7 +1041,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
             var failedSetup = false;
-            if (market == TradingMarketCatalog.Sensex && !manualExitRequested && !stopHit &&
+            if (market.ExecuteOptions && !manualExitRequested && !stopHit &&
                 FailedSetupExitPolicy.IsAdverseCandidate(position.EntryPrice, price,
                     initialRisk, favourableExtreme, position.OpenedAtUtc, observedAt))
             {
@@ -949,7 +1085,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ? price >= partialThreshold : price <= partialThreshold;
             if (!failedSetup && MarketPaperExitSequencingPolicy.ShouldTakePartial(
                     manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
-                market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
+                market.ExecuteOptions && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
             {
                 var totalLots = Math.Max(1, position.RemainingQuantity / instrument.LotSize);
@@ -1132,19 +1268,25 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith(market.ExecutionUnderlying) &&
                     value.ExpiryDate >= today && value.IsActive)
                 .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
-        var strikeStep = market == TradingMarketCatalog.Sensex ? 100m : 50m;
+        var strikeStep = market == TradingMarketCatalog.Sensex ? 100m :
+            market == TradingMarketCatalog.Bankex ? 100m :
+            market == TradingMarketCatalog.BankNifty ? 100m : 50m;
         var desiredStrike = direction == Direction.Buy
             ? price - preferredInTheMoneySteps * strikeStep
             : price + preferredInTheMoneySteps * strikeStep;
+        var lastEligibleExpiry = today.AddDays(OptionExpiryHorizonDays(market));
         var instruments = await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
                 value.Segment == InstrumentSegment.FuturesAndOptions && value.IsActive && value.ExpiryDate >= today &&
-                value.ExpiryDate <= today.AddDays(10) && value.StrikePrice != null &&
+                value.ExpiryDate <= lastEligibleExpiry && value.StrikePrice != null &&
                 (direction == Direction.Buy ? value.Type == InstrumentType.CallOption : value.Type == InstrumentType.PutOption) &&
                 value.TradingSymbol.StartsWith(market.ExecutionUnderlying))
             .OrderBy(value => value.ExpiryDate).ThenBy(value => Math.Abs(value.StrikePrice!.Value - desiredStrike))
             .FirstOrDefaultAsync(cancellationToken);
         return instruments;
     }
+
+    internal static int OptionExpiryHorizonDays(TradingMarketDefinition market) =>
+        market is { Code: "bank-nifty" or "bankex" } ? 45 : 10;
 
     private static async Task<bool> HasActiveNiftyExposureAsync(TradingDbContext db,
         Direction direction, DateTimeOffset sessionStartUtc, CancellationToken cancellationToken)

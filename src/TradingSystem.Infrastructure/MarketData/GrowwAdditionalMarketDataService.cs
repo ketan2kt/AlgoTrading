@@ -22,6 +22,7 @@ internal sealed partial class GrowwAdditionalMarketDataService(
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private readonly Dictionary<string, DateOnly> bootstrappedSessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> lastBankPolls = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -29,12 +30,23 @@ internal sealed partial class GrowwAdditionalMarketDataService(
         while (!stoppingToken.IsCancellationRequested)
         {
             // Natural Gas is intentionally paused; keep its feed quiet even if its UI is hidden.
-            foreach (var market in new[] { TradingMarketCatalog.Sensex })
+            foreach (var market in new[] { TradingMarketCatalog.Sensex,
+                         TradingMarketCatalog.BankNifty, TradingMarketCatalog.Bankex })
             {
                 try
                 {
+                    var now = timeProvider.GetUtcNow();
+                    // Two more indices must not double the existing two-second quote load.
+                    // Position protection keeps its independent two-second cadence.
+                    if (market is { Code: "bank-nifty" or "bankex" } &&
+                        lastBankPolls.TryGetValue(market.Code, out var lastPoll) &&
+                        now - lastPoll < TimeSpan.FromSeconds(6)) continue;
                     if (IsMarketWindow(market, timeProvider.GetUtcNow()))
+                    {
                         await PollAsync(market, stoppingToken);
+                        if (market is { Code: "bank-nifty" or "bankex" })
+                            lastBankPolls[market.Code] = timeProvider.GetUtcNow();
+                    }
                     else
                         feedState.RecordStatus(market.Code, "MarketClosed", $"Waiting for the {market.Exchange} session.");
                 }
@@ -70,7 +82,7 @@ internal sealed partial class GrowwAdditionalMarketDataService(
             return;
         }
 
-        if (market == TradingMarketCatalog.Sensex && instrument.GrowwSymbol is not null &&
+        if (market.InstrumentType == InstrumentType.Index && instrument.GrowwSymbol is not null &&
             bootstrappedSessions.GetValueOrDefault(market.Code) != today)
         {
             var localStart = TimeZoneInfo.ConvertTime(now, IndiaTimeZone).Date.AddDays(-7).AddHours(9).AddMinutes(15);

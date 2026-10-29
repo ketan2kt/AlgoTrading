@@ -146,8 +146,8 @@ public static class DependencyInjection
                                value.SignalMaximumAgeSeconds is >= 30 and <= 300,
                 "Live execution polling and signal freshness settings are invalid.")
             .Validate(value => value.AllowedMarkets.Length > 0 && value.AllowedMarkets.All(market =>
-                    market is "NIFTY" or "SENSEX"),
-                "Only NIFTY and SENSEX may be enabled for controlled live testing.")
+                    market is "NIFTY" or "SENSEX" or "BANK-NIFTY" or "BANKEX"),
+                "Only supported index markets may be enabled for controlled live testing.")
             .ValidateOnStart();
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddSingleton<LiveExecutionWakeSignal>();

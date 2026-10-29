@@ -18,7 +18,9 @@ public sealed class GrowwReadOnlyGateway(
     internal const string ApiClientName = "GrowwReadOnlyApi";
     internal const string InstrumentClientName = "GrowwInstrumentMaster";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly TimeSpan MinimumApiRequestSpacing = TimeSpan.FromMilliseconds(150);
+    // Groww's Live Data tier is capped at 300 requests/minute across quote/LTP/OHLC.
+    // Leave headroom for timing jitter while four index workspaces are active.
+    private static readonly TimeSpan MinimumApiRequestSpacing = TimeSpan.FromMilliseconds(210);
     private static readonly TimeSpan QuoteCacheLifetime = TimeSpan.FromMilliseconds(750);
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim apiRequestGate = new(1, 1);

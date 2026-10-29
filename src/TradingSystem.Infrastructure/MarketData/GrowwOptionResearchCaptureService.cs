@@ -24,7 +24,9 @@ internal sealed partial class GrowwOptionResearchCaptureService(
     private static readonly Market[] Markets =
     [
         new("NIFTY", "NSE"),
-        new("SENSEX", "BSE")
+        new("SENSEX", "BSE"),
+        new("BANKNIFTY", "NSE"),
+        new("BANKEX", "BSE")
     ];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

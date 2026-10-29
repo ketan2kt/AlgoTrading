@@ -120,7 +120,22 @@ internal sealed class GrowwInstrumentSynchronizer(
         IReadOnlyList<GrowwInstrumentRecord> downloaded) =>
         SelectSupportedUniqueRecords(downloaded).Where(record =>
             IsRequiredNiftyInstrument(record) || IsRequiredSensexInstrument(record) ||
+            IsRequiredBankIndexInstrument(record, "NSE", "BANKNIFTY") ||
+            IsRequiredBankIndexInstrument(record, "BSE", "BANKEX") ||
             IsRequiredNaturalGasInstrument(record)).ToArray();
+
+    private static bool IsRequiredBankIndexInstrument(GrowwInstrumentRecord record,
+        string exchange, string underlying)
+    {
+        if (!string.Equals(record.Exchange, exchange, StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(record.Segment, "CASH", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(record.InstrumentType, "IDX", StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(record.TradingSymbol, underlying, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(record.Segment, "FNO", StringComparison.OrdinalIgnoreCase) &&
+               record.InstrumentType is "CE" or "PE" or "FUT" &&
+               string.Equals(record.UnderlyingSymbol, underlying, StringComparison.OrdinalIgnoreCase) &&
+               !string.IsNullOrWhiteSpace(record.ExpiryDate);
+    }
 
     private static bool IsRequiredNiftyInstrument(GrowwInstrumentRecord record)
     {
