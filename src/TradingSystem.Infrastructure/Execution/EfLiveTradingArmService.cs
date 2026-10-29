@@ -13,59 +13,60 @@ internal sealed class EfLiveTradingArmService(
     TradingDbContext db,
     IAuditWriter auditWriter,
     IOptions<LiveExecutionOptions> options,
+    LiveExecutionWakeSignal wakeSignal,
     TimeProvider timeProvider) : ILiveTradingArmService
 {
-    internal const string Key = "LiveExecutionArm";
-    private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
+    internal const string KeyPrefix = "LiveExecutionArm:";
 
     public async Task<LiveTradingArmStatus> GetAsync(CancellationToken cancellationToken)
     {
-        var setting = await db.ApplicationSettings.AsNoTracking().SingleOrDefaultAsync(value =>
-            value.Mode == TradingMode.Live && value.Key == Key, cancellationToken);
-        var value = Parse(setting?.ValueJson);
-        var today = IndiaDate(timeProvider.GetUtcNow());
+        var settings = await db.ApplicationSettings.AsNoTracking().Where(value =>
+            value.Mode == TradingMode.Live && value.Key.StartsWith(KeyPrefix))
+            .ToListAsync(cancellationToken);
+        var markets = options.Value.AllowedMarkets.Select(market =>
+        {
+            var value = Parse(settings.FirstOrDefault(item => item.Key == KeyPrefix + market)?.ValueJson);
+            return new LiveMarketArmStatus(market, value?.Armed == true,
+                value?.ChangedAtUtc, value?.ChangedBy);
+        }).ToArray();
         var tested = await db.ApplicationSettings.AsNoTracking().AnyAsync(item =>
             item.Mode == TradingMode.Live && item.Key == AutomaticLiveExecutionService.ControlledTestKey &&
             item.ValueJson == "true", cancellationToken);
         var latestIntent = await db.LiveExecutionIntents.AsNoTracking()
             .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
-        return ToStatus(value is { Armed: true } && value.TradingDate == today ? value : null,
+        return ToStatus(markets,
             tested, latestIntent);
     }
 
-    public async Task<LiveTradingArmStatus> SetAsync(bool armed, string reason, string actor,
+    public async Task<LiveTradingArmStatus> SetAsync(string market, bool armed, string actor,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 10)
-            throw new ArgumentException("A specific activation reason of at least 10 characters is required.", nameof(reason));
+        if (!options.Value.AllowedMarkets.Contains(market, StringComparer.Ordinal))
+            throw new ArgumentException("Market is not enabled for live execution.", nameof(market));
         if (armed && !options.Value.BuildEnabled)
             throw new InvalidOperationException("Live execution is disabled by server configuration.");
         var now = timeProvider.GetUtcNow();
-        var value = new ArmValue(armed, IndiaDate(now), now, actor);
+        var value = new ArmValue(armed, now, actor);
         var json = JsonSerializer.Serialize(value);
+        var key = KeyPrefix + market;
         var setting = await db.ApplicationSettings.SingleOrDefaultAsync(item =>
-            item.Mode == TradingMode.Live && item.Key == Key, cancellationToken);
+            item.Mode == TradingMode.Live && item.Key == key, cancellationToken);
         var before = setting?.ValueJson;
         if (setting is null)
-            db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live, Key, json, now));
+            db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live, key, json, now));
         else
             setting.ChangeValue(json, now);
         await db.SaveChangesAsync(cancellationToken);
         await auditWriter.WriteAsync(new AuditEntry(actor,
             armed ? "LiveExecutionArmed" : "LiveExecutionDisarmed",
-            nameof(ApplicationSetting), Key, reason.Trim(), before ?? "null", json,
+            nameof(ApplicationSetting), key, $"{market} live switch {(armed ? "ON" : "OFF")}", before ?? "null", json,
             Guid.NewGuid().ToString("N"), now), cancellationToken);
-        var tested = await db.ApplicationSettings.AsNoTracking().AnyAsync(item =>
-            item.Mode == TradingMode.Live && item.Key == AutomaticLiveExecutionService.ControlledTestKey &&
-            item.ValueJson == "true", cancellationToken);
-        var latestIntent = await db.LiveExecutionIntents.AsNoTracking()
-            .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
-        return ToStatus(value, tested, latestIntent);
+        wakeSignal.Notify();
+        return await GetAsync(cancellationToken);
     }
 
-    private LiveTradingArmStatus ToStatus(ArmValue? value, bool tested, LiveExecutionIntent? latestIntent) => new(options.Value.BuildEnabled,
-        value?.Armed == true, value?.TradingDate, true, tested,
-        options.Value.AllowedMarkets, value?.ChangedAtUtc, value?.ChangedBy,
+    private LiveTradingArmStatus ToStatus(IReadOnlyList<LiveMarketArmStatus> markets, bool tested, LiveExecutionIntent? latestIntent) => new(options.Value.BuildEnabled,
+        markets, true, tested, options.Value.AllowedMarkets,
         latestIntent?.Market, latestIntent?.Status, latestIntent?.LastError,
         latestIntent?.CreatedAtUtc);
 
@@ -76,16 +77,5 @@ internal sealed class EfLiveTradingArmService(
         catch (JsonException) { return null; }
     }
 
-    private static DateOnly IndiaDate(DateTimeOffset utc) =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utc, IndiaTimeZone).Date);
-
-    private static TimeZoneInfo FindIndiaTimeZone()
-    {
-        foreach (var id in new[] { "Asia/Kolkata", "India Standard Time" })
-            try { return TimeZoneInfo.FindSystemTimeZoneById(id); } catch (TimeZoneNotFoundException) { }
-        throw new InvalidOperationException("Asia/Kolkata timezone is unavailable.");
-    }
-
-    private sealed record ArmValue(bool Armed, DateOnly TradingDate,
-        DateTimeOffset ChangedAtUtc, string ChangedBy);
+    private sealed record ArmValue(bool Armed, DateTimeOffset ChangedAtUtc, string ChangedBy);
 }

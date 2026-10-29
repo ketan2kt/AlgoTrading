@@ -3,20 +3,24 @@ namespace TradingSystem.Application.Risk;
 public interface ILiveTradingArmService
 {
     Task<LiveTradingArmStatus> GetAsync(CancellationToken cancellationToken);
-    Task<LiveTradingArmStatus> SetAsync(bool armed, string reason, string actor,
+    Task<LiveTradingArmStatus> SetAsync(string market, bool armed, string actor,
         CancellationToken cancellationToken);
 }
 
+public sealed record LiveMarketArmStatus(string Market, bool Armed, DateTimeOffset? ChangedAtUtc,
+    string? ChangedBy);
+
 public sealed record LiveTradingArmStatus(
     bool BuildEnabled,
-    bool Armed,
-    DateOnly? ArmedForTradingDate,
+    IReadOnlyList<LiveMarketArmStatus> Markets,
     bool MirrorsPaperQuantity,
     bool ControlledBrokerTestCompleted,
     string[] AllowedMarkets,
-    DateTimeOffset? ChangedAtUtc,
-    string? ChangedBy,
     string? LatestIntentMarket,
     string? LatestIntentStatus,
     string? LatestIntentError,
-    DateTimeOffset? LatestIntentAtUtc);
+    DateTimeOffset? LatestIntentAtUtc)
+{
+    public LiveMarketArmStatus? ForMarket(string market) =>
+        Markets.FirstOrDefault(value => value.Market == market);
+}

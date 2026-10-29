@@ -8,19 +8,18 @@ describe('LiveExecutionService', () => {
     providers: [provideHttpClient(), provideHttpClientTesting()],
   }));
 
-  it('requires antiforgery protection when arming live execution', () => {
+  it('requires antiforgery protection when switching on one live market', () => {
     const service = TestBed.inject(LiveExecutionService);
     const http = TestBed.inject(HttpTestingController);
-    service.setArmed(true, 'Controlled live activation.', 'admin-password').subscribe();
+    service.setArmed('BANKEX', true).subscribe();
 
     http.expectOne('/api/security/antiforgery-token').flush({ token: 'csrf' });
-    const request = http.expectOne('/api/live-execution/arm');
+    const request = http.expectOne('/api/live-execution/markets/BANKEX/arm');
     expect(request.request.method).toBe('PUT');
     expect(request.request.headers.get('X-CSRF-TOKEN')).toBe('csrf');
-    expect(request.request.body).toEqual({
-      armed: true, reason: 'Controlled live activation.', password: 'admin-password',
-    });
-    request.flush({ buildEnabled: true, armed: true, armedForTradingDate: '2026-09-01',
+    expect(request.request.body).toEqual({ armed: true });
+    request.flush({ buildEnabled: true, markets: [{ market: 'BANKEX', armed: true,
+      changedAtUtc: null, changedBy: null }],
       mirrorsPaperQuantity: true, controlledBrokerTestCompleted: false,
       allowedMarkets: ['NIFTY', 'SENSEX'], changedAtUtc: null, changedBy: null });
     http.verify();

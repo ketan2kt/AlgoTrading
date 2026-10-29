@@ -41,8 +41,8 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task RunCycleAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var arm = await scope.ServiceProvider.GetRequiredService<ILiveTradingArmService>()
-            .GetAsync(cancellationToken);
+        var armService = scope.ServiceProvider.GetRequiredService<ILiveTradingArmService>();
+        var arm = await armService.GetAsync(cancellationToken);
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
 
         // Disarming prevents new entries, not the management of positions already
@@ -50,8 +50,9 @@ internal sealed partial class AutomaticLiveExecutionService(
         await SyncProtectedPositionsAsync(db, cancellationToken);
         await RecoverSubmittedEntryAsync(db, cancellationToken);
         await RecoverSubmittedProtectionAsync(db, cancellationToken);
-        if (arm.Armed && arm.ChangedAtUtc is not null)
-            await AuditMissedClosedPositionsAsync(db, arm.ChangedAtUtc.Value, cancellationToken);
+        foreach (var marketArm in arm.Markets.Where(value => value.Armed && value.ChangedAtUtc is not null))
+            await AuditMissedClosedPositionsAsync(db, marketArm.Market.ToLowerInvariant(),
+                marketArm.ChangedAtUtc!.Value, cancellationToken);
         if (!await ReconcileAsync(db, cancellationToken)) return;
 
         var blockers = await db.LiveExecutionIntents.Where(value =>
@@ -65,22 +66,27 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (blockers.Any(value => value.Status is "ReconciliationRequired" or "EntrySubmitting" or "ProtectionSubmitting" ||
                                   value.Status == "Protected" && value.LastError is not null))
             return;
-        if (!arm.Armed || arm.ChangedAtUtc is null)
+        var inFlight = await db.LiveExecutionIntents.FirstOrDefaultAsync(value =>
+            value.Status == "Submitted" || value.Status == "PartiallyFilled" ||
+            value.Status == "FilledUnprotected", cancellationToken);
+        if (inFlight is not null)
         {
-            var inFlight = await db.LiveExecutionIntents.FirstOrDefaultAsync(value =>
-                value.Status == "Submitted" || value.Status == "PartiallyFilled" ||
-                value.Status == "FilledUnprotected", cancellationToken);
-            if (inFlight is not null)
-                await SubmitAndProtectAsync(db, inFlight, cancellationToken);
+            await SubmitAndProtectAsync(db, inFlight, cancellationToken);
             return;
         }
-        var recoverable = await db.LiveExecutionIntents.FirstOrDefaultAsync(value =>
-            value.Status == "Pending" || value.Status == "Submitted" ||
-            value.Status == "PartiallyFilled" || value.Status == "FilledUnprotected",
-            cancellationToken);
+        var armedMarkets = arm.Markets.Where(value => value.Armed && value.ChangedAtUtc is not null)
+            .Select(value => value.Market).ToArray();
+        if (armedMarkets.Length == 0) return;
+        var pending = await db.LiveExecutionIntents.Where(value =>
+            value.Status == "Pending" && armedMarkets.Contains(value.Market))
+            .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
+        var recoverable = pending.FirstOrDefault(value =>
+            arm.ForMarket(value.Market)?.ChangedAtUtc <= value.CreatedAtUtc);
         if (recoverable is not null)
         {
-            await SubmitAndProtectAsync(db, recoverable, cancellationToken);
+            var current = await armService.GetAsync(cancellationToken);
+            if (current.ForMarket(recoverable.Market)?.Armed == true)
+                await SubmitAndProtectAsync(db, recoverable, cancellationToken);
             return;
         }
 
@@ -88,18 +94,20 @@ internal sealed partial class AutomaticLiveExecutionService(
         // legs in the same cycle rather than imposing a polling interval per leg.
         for (var entryIndex = 0; entryIndex < 8; entryIndex++)
         {
-            var intent = await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Nifty.Code,
-                    arm.ChangedAtUtc.Value, cancellationToken)
-                ?? await DiscoverNiftyAsync(db, arm.ChangedAtUtc.Value, cancellationToken)
-                ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Sensex.Code,
-                    arm.ChangedAtUtc.Value, cancellationToken)
-                ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.BankNifty.Code,
-                    arm.ChangedAtUtc.Value, cancellationToken)
-                ?? await DiscoverMarketPositionAsync(db, TradingMarketCatalog.Bankex.Code,
-                    arm.ChangedAtUtc.Value, cancellationToken);
+            LiveExecutionIntent? intent = null;
+            foreach (var marketArm in arm.Markets.Where(value => value.Armed && value.ChangedAtUtc is not null))
+            {
+                intent = await DiscoverMarketPositionAsync(db, marketArm.Market.ToLowerInvariant(),
+                    marketArm.ChangedAtUtc!.Value, cancellationToken);
+                if (intent is null && marketArm.Market == "NIFTY")
+                    intent = await DiscoverNiftyAsync(db, marketArm.ChangedAtUtc.Value, cancellationToken);
+                if (intent is not null) break;
+            }
             if (intent is null) return;
             db.LiveExecutionIntents.Add(intent);
             await db.SaveChangesAsync(cancellationToken); // durable idempotency boundary before broker I/O
+            var current = await armService.GetAsync(cancellationToken);
+            if (current.ForMarket(intent.Market)?.Armed != true) return;
             try
             {
                 await SubmitAndProtectAsync(db, intent, cancellationToken);
@@ -124,14 +132,11 @@ internal sealed partial class AutomaticLiveExecutionService(
     }
 
     private async Task AuditMissedClosedPositionsAsync(TradingDbContext db,
-        DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
+        string market, DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
     {
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);
         var closed = await db.MarketPaperPositions.AsNoTracking().Where(value =>
-                (value.Market == TradingMarketCatalog.Nifty.Code ||
-                 value.Market == TradingMarketCatalog.Sensex.Code ||
-                 value.Market == TradingMarketCatalog.BankNifty.Code ||
-                 value.Market == TradingMarketCatalog.Bankex.Code) &&
+                value.Market == market &&
                 value.Status != "Active" && value.OpenedAtUtc >= armedAtUtc &&
                 value.ClosedAtUtc >= cutoff)
             .OrderByDescending(value => value.ClosedAtUtc).Take(50)
