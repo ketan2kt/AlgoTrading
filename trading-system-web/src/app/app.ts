@@ -113,9 +113,7 @@ export class App implements OnInit, OnDestroy {
   protected marketClockNow = Date.now();
   protected controlsOpen = false;
   protected liveExecution: LiveExecutionStatus | null = null;
-  protected liveExecutionBusy = false;
-  protected liveExecutionPassword = '';
-  protected liveExecutionReason = 'Daily automatic index live trading activation.';
+  protected liveExecutionBusyMarket: string | null = null;
   protected liveExecutionMessage = '';
   protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10,
     bankNiftyLots: 10, bankexLots: 10, updatedAtUtc: null };
@@ -353,24 +351,25 @@ export class App implements OnInit, OnDestroy {
     }));
   }
 
-  protected setLiveExecution(armed: boolean): void {
-    if (!this.liveExecutionPassword || this.liveExecutionReason.trim().length < 10) return;
-    this.liveExecutionBusy = true;
+  protected isLiveArmed(market: string): boolean {
+    return this.liveExecution?.markets?.find(value => value.market === market)?.armed === true;
+  }
+
+  protected setLiveExecution(market: string): void {
+    if (!this.liveExecution || this.liveExecutionBusyMarket) return;
+    const armed = !this.isLiveArmed(market);
+    this.liveExecutionBusyMarket = market;
     this.liveExecutionMessage = '';
-    this.subscriptions.add(this.liveExecutionService.setArmed(armed,
-      this.liveExecutionReason.trim(), this.liveExecutionPassword).subscribe({
+    this.subscriptions.add(this.liveExecutionService.setArmed(market, armed).subscribe({
       next: status => {
         this.liveExecution = status;
-        this.liveExecutionPassword = '';
-        this.liveExecutionBusy = false;
-        this.liveExecutionMessage = armed ? 'Automatic live execution is armed for today.' :
-          'Automatic live execution is disarmed; no new live entries will be submitted.';
+        this.liveExecutionBusyMarket = null;
+        this.liveExecutionMessage = `${market} live entries ${armed ? 'ON' : 'OFF'}.`;
         this.refreshView();
       },
       error: () => {
-        this.liveExecutionPassword = '';
-        this.liveExecutionBusy = false;
-        this.liveExecutionMessage = 'Live execution change failed. Check the password and server readiness.';
+        this.liveExecutionBusyMarket = null;
+        this.liveExecutionMessage = `${market} live switch change failed. Refresh and check server readiness.`;
         this.refreshView();
       },
     }));

@@ -273,30 +273,23 @@
               <section class="control-center-card trading-lots-card">
                 <div><span>TRADE SIZE</span><strong>Market lot controls</strong><p>New regular index trades use the saved market lot value. Nifty and Sensex specialty strategies keep their existing lot controls.</p></div>
                 <div class="trading-lots-grid">
-                  <label>Nifty lots<input name="niftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.niftyLots" /></label>
-                  <label>Sensex lots<input name="sensexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.sensexLots" /></label>
-                  <label>Bank Nifty lots<input name="bankNiftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankNiftyLots" /></label>
-                  <label>Bankex lots<input name="bankexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankexLots" /></label>
-                  <button type="button" [disabled]="tradingLotsBusy" (click)="saveTradingLots()">{{ tradingLotsBusy ? 'Saving…' : 'Save lot sizes' }}</button>
+                  <div class="market-live-row"><label>Nifty lots<input name="niftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.niftyLots" /></label><button type="button" class="market-live-toggle" [class.is-on]="isLiveArmed('NIFTY')" [attr.aria-pressed]="isLiveArmed('NIFTY')" [disabled]="!liveExecution?.buildEnabled || !liveExecution?.allowedMarkets?.includes('NIFTY') || !!liveExecutionBusyMarket" (click)="setLiveExecution('NIFTY')">Live {{ isLiveArmed('NIFTY') ? 'ON' : 'OFF' }}</button></div>
+                  <div class="market-live-row"><label>Sensex lots<input name="sensexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.sensexLots" /></label><button type="button" class="market-live-toggle" [class.is-on]="isLiveArmed('SENSEX')" [attr.aria-pressed]="isLiveArmed('SENSEX')" [disabled]="!liveExecution?.buildEnabled || !liveExecution?.allowedMarkets?.includes('SENSEX') || !!liveExecutionBusyMarket" (click)="setLiveExecution('SENSEX')">Live {{ isLiveArmed('SENSEX') ? 'ON' : 'OFF' }}</button></div>
+                  <div class="market-live-row"><label>Bank Nifty lots<input name="bankNiftyLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankNiftyLots" /></label><button type="button" class="market-live-toggle" [class.is-on]="isLiveArmed('BANK-NIFTY')" [attr.aria-pressed]="isLiveArmed('BANK-NIFTY')" [disabled]="!liveExecution?.buildEnabled || !liveExecution?.allowedMarkets?.includes('BANK-NIFTY') || !!liveExecutionBusyMarket" (click)="setLiveExecution('BANK-NIFTY')">Live {{ isLiveArmed('BANK-NIFTY') ? 'ON' : 'OFF' }}</button></div>
+                  <div class="market-live-row"><label>Bankex lots<input name="bankexLots" type="number" min="1" max="50" step="1" [(ngModel)]="tradingLots.bankexLots" /></label><button type="button" class="market-live-toggle" [class.is-on]="isLiveArmed('BANKEX')" [attr.aria-pressed]="isLiveArmed('BANKEX')" [disabled]="!liveExecution?.buildEnabled || !liveExecution?.allowedMarkets?.includes('BANKEX') || !!liveExecutionBusyMarket" (click)="setLiveExecution('BANKEX')">Live {{ isLiveArmed('BANKEX') ? 'ON' : 'OFF' }}</button></div>
+                  <button type="button" class="save-lot-sizes" [disabled]="tradingLotsBusy" (click)="saveTradingLots()">{{ tradingLotsBusy ? 'Saving…' : 'Save lot sizes' }}</button>
                 </div>
                 @if (tradingLotsMessage) { <p>{{ tradingLotsMessage }}</p> }
+                @if (liveExecutionMessage) { <p role="status">{{ liveExecutionMessage }}</p> }
+                <p>Live switches stay on until switched off. Turning one off blocks new live entries for that market; existing live positions remain managed.</p>
               </section>
               <section class="safety-panel control-center-card live-execution-card">
                 <span>LIVE EXECUTION</span>
-                <strong [class.good]="liveExecution?.armed" [class.bad]="!liveExecution?.armed">
-                  {{ liveExecution?.armed ? 'ARMED · automatic Groww orders enabled' : 'DISARMED · no live orders' }}
-                </strong>
-                <p>{{ liveExecution?.buildEnabled ? ('Automatic orders mirror the saved index lot value shown above.') : 'Live execution is disabled by server configuration.' }}</p>
+                <p>{{ liveExecution?.buildEnabled ? 'Each market has its own live switch beside its lot setting above.' : 'Live execution is disabled by server configuration.' }}</p>
                 @if (liveExecution?.latestIntentStatus) {
                   <p><strong>Latest live attempt:</strong> {{ liveExecution?.latestIntentMarket }} · {{ liveExecution?.latestIntentStatus }} · {{ liveExecution?.latestIntentAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata' }} IST</p>
                   @if (liveExecution?.latestIntentError) { <p class="bad">{{ liveExecution?.latestIntentError }}</p> }
                 }
-                <label>Activation reason<input name="liveExecutionReason" [(ngModel)]="liveExecutionReason" minlength="10" maxlength="500" /></label>
-                <label>Administrator password<input name="liveExecutionPassword" type="password" autocomplete="current-password" [(ngModel)]="liveExecutionPassword" /></label>
-                <button type="button" [disabled]="liveExecutionBusy || !liveExecution?.buildEnabled" (click)="setLiveExecution(!liveExecution?.armed)">
-                  {{ liveExecutionBusy ? 'Applying…' : (liveExecution?.armed ? 'Emergency disarm' : 'Arm live trading for today') }}
-                </button>
-                @if (liveExecutionMessage) { <p>{{ liveExecutionMessage }}</p> }
               </section>
             }
             <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">

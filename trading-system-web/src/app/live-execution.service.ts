@@ -4,13 +4,10 @@ import { Observable, switchMap } from 'rxjs';
 
 export interface LiveExecutionStatus {
   buildEnabled: boolean;
-  armed: boolean;
-  armedForTradingDate: string | null;
+  markets: { market: string; armed: boolean; changedAtUtc: string | null; changedBy: string | null }[];
   mirrorsPaperQuantity: boolean;
   controlledBrokerTestCompleted: boolean;
   allowedMarkets: string[];
-  changedAtUtc: string | null;
-  changedBy: string | null;
   latestIntentMarket: string | null;
   latestIntentStatus: string | null;
   latestIntentError: string | null;
@@ -25,10 +22,10 @@ export class LiveExecutionService {
     return this.http.get<LiveExecutionStatus>('/api/live-execution/status');
   }
 
-  setArmed(armed: boolean, reason: string, password: string): Observable<LiveExecutionStatus> {
+  setArmed(market: string, armed: boolean): Observable<LiveExecutionStatus> {
     return this.http.get<{ token: string }>('/api/security/antiforgery-token').pipe(
-      switchMap(({ token }) => this.http.put<LiveExecutionStatus>('/api/live-execution/arm',
-        { armed, reason, password }, { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
+      switchMap(({ token }) => this.http.put<LiveExecutionStatus>(`/api/live-execution/markets/${market}/arm`,
+        { armed }, { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
     );
   }
 }

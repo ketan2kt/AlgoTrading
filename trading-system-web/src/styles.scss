@@ -753,7 +753,13 @@ app-root .trading-lots-card { display: grid; align-content: start; gap: .65rem; 
 app-root .trading-lots-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; align-items: end; }
 app-root .trading-lots-grid label { gap: .25rem; font-size: .74rem; font-weight: 650; }
 app-root .trading-lots-grid input { min-width: 0; padding: .55rem .65rem; font-size: .95rem; font-variant-numeric: tabular-nums; }
-app-root .trading-lots-grid button { grid-column: 1 / -1; justify-self: start; }
+app-root .trading-lots-grid .market-live-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .55rem; }
+app-root .trading-lots-grid .market-live-row label { min-width: 0; }
+app-root .trading-lots-grid .market-live-toggle { grid-column: auto; min-width: 5.4rem; padding: .55rem .65rem; white-space: nowrap; background: #e3ece5; border: 1px solid #8aa594; color: #214b34; }
+app-root .trading-lots-grid .market-live-toggle.is-on { background: #17633e; border-color: #17633e; color: #fff; }
+app-root .trading-lots-grid .market-live-toggle:disabled { opacity: .55; cursor: not-allowed; }
+app-root .trading-lots-grid .save-lot-sizes { grid-column: 1 / -1; justify-self: start; }
+@media (max-width: 560px) { app-root .trading-lots-grid { grid-template-columns: 1fr; } }
 app-root .live-execution-card { border-left: 4px solid #d19d56 !important; }
 app-root .live-execution-card label { gap: .25rem; font-size: .72rem; }
 app-root .live-execution-card input { padding: .48rem .6rem; }

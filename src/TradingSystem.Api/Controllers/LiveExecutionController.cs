@@ -1,10 +1,7 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using TradingSystem.Application.Risk;
-using TradingSystem.Infrastructure.Identity;
 
 namespace TradingSystem.Api.Controllers;
 
@@ -12,8 +9,7 @@ namespace TradingSystem.Api.Controllers;
 [ApiController]
 [Route("api/live-execution")]
 public sealed class LiveExecutionController(
-    ILiveTradingArmService armService,
-    UserManager<ApplicationUser> userManager) : ControllerBase
+    ILiveTradingArmService armService) : ControllerBase
 {
     [HttpGet("status")]
     public async Task<ActionResult<LiveTradingArmStatus>> Get(CancellationToken cancellationToken) =>
@@ -21,21 +17,18 @@ public sealed class LiveExecutionController(
 
     [EnableRateLimiting("authentication")]
     [ValidateAntiForgeryToken]
-    [HttpPut("arm")]
-    public async Task<ActionResult<LiveTradingArmStatus>> Arm(ArmLiveExecutionRequest request,
+    [HttpPut("markets/{market}/arm")]
+    public async Task<ActionResult<LiveTradingArmStatus>> Arm(string market, ArmLiveExecutionRequest request,
         CancellationToken cancellationToken)
     {
-        var user = await userManager.GetUserAsync(User);
-        if (user is null || !await userManager.CheckPasswordAsync(user, request.Password))
-            return Unauthorized();
-        return Ok(await armService.SetAsync(request.Armed, request.Reason,
-            user.UserName ?? "administrator", cancellationToken));
+        if (!(await armService.GetAsync(cancellationToken)).AllowedMarkets.Contains(market,
+            StringComparer.Ordinal)) return BadRequest("Unknown live market.");
+        return Ok(await armService.SetAsync(market, request.Armed,
+            User.Identity?.Name ?? "administrator", cancellationToken));
     }
 }
 
 public sealed class ArmLiveExecutionRequest
 {
     public bool Armed { get; init; }
-    [Required, StringLength(500, MinimumLength = 10)] public required string Reason { get; init; }
-    [Required, StringLength(256, MinimumLength = 1)] public required string Password { get; init; }
 }

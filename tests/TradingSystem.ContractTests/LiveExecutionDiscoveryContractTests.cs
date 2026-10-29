@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.Risk;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Execution;
 
@@ -7,6 +8,25 @@ namespace TradingSystem.ContractTests;
 
 public sealed class LiveExecutionDiscoveryContractTests
 {
+    [Fact]
+    public void MarketArmStatusIsIndependentAndOffByDefault()
+    {
+        var switchedAt = DateTimeOffset.UtcNow;
+        var status = new LiveTradingArmStatus(true,
+            [new("NIFTY", true, switchedAt, "admin"),
+             new("SENSEX", false, null, null),
+             new("BANK-NIFTY", false, null, null),
+             new("BANKEX", false, null, null)],
+            true, false, ["NIFTY", "SENSEX", "BANK-NIFTY", "BANKEX"],
+            null, null, null, null);
+
+        Assert.True(status.ForMarket("NIFTY")!.Armed);
+        Assert.False(status.ForMarket("SENSEX")!.Armed);
+        Assert.False(status.ForMarket("BANK-NIFTY")!.Armed);
+        Assert.False(status.ForMarket("BANKEX")!.Armed);
+        Assert.Null(status.ForMarket("UNKNOWN"));
+    }
+
     [Fact]
     public async Task PaperEntryWakeSignalsAreCoalescedWithoutLosingTheNextCycle()
     {
