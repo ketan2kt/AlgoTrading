@@ -67,7 +67,7 @@ public sealed record PaperPnlSummary(DateOnly From, DateOnly To, string Market,
 
 public static class PaperPnlSummaryCalculator
 {
-    private static readonly string[] MarketOrder = ["nifty", "sensex", "natural-gas"];
+    private static readonly string[] MarketOrder = ["nifty", "sensex", "bank-nifty", "bankex", "natural-gas"];
 
     public static IReadOnlyList<PaperMarketPnl> Summarise(IEnumerable<PaperPnlObservation> observations) =>
         observations.GroupBy(value => value.Market, StringComparer.OrdinalIgnoreCase)

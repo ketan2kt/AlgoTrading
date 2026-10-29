@@ -211,7 +211,7 @@
           <section class="evaluation-panel logs-modal narrator-modal" role="dialog" aria-modal="true"
             aria-label="Spoken market narrator" (click)="$event.stopPropagation()">
             <header class="panel-heading dialog-heading">
-              <div><span>MARKET NARRATOR</span><h2>Market narrator</h2><p>Spoken Nifty and Sensex market events</p></div>
+              <div><span>MARKET NARRATOR</span><h2>Market narrator</h2><p>Spoken index-market events</p></div>
               <button type="button" class="dialog-close" (click)="closeNarrator()" aria-label="Close market narrator">×</button>
             </header>
             <section class="narrator-controls">
@@ -916,7 +916,7 @@
         @if (dailyAnalysisOpen) {
         <div class="logs-backdrop" (click)="closeDailyAnalysis()">
           <section class="evaluation-panel logs-modal daily-analysis-modal" role="dialog" aria-modal="true" aria-label="Daily trading analysis" (click)="$event.stopPropagation()">
-            <header class="daily-analysis-header"><div><span>SESSION REVIEW</span><h2>Daily Analysis</h2><p>Nifty and Sensex · trade outcomes and observed price path</p></div><div class="daily-analysis-header-actions">@if (dailyAnalysisTradesCopied) { <span class="daily-analysis-copy-status" role="status" aria-live="polite">Trades copied</span> } @else if (dailyAnalysisTradesCopyError) { <span class="daily-analysis-copy-status daily-analysis-copy-status--error" role="status" aria-live="polite">Clipboard unavailable</span> }<button type="button" class="daily-analysis-copy" (click)="copyDailyAnalysisTrades()" [disabled]="dailyAnalysisLoading || !dailyAnalysis || dailyAnalysis.trades.length === 0" aria-label="Copy all trade table columns as tab-separated text">{{dailyAnalysisTradesCopied?'Copied':'Copy trades'}}</button><button type="button" class="daily-analysis-close" (click)="closeDailyAnalysis()" aria-label="Close daily analysis">×</button></div></header>
+            <header class="daily-analysis-header"><div><span>SESSION REVIEW</span><h2>Daily Analysis</h2><p>Nifty, Sensex, Bank Nifty and Bankex · trade outcomes and observed price paths</p></div><div class="daily-analysis-header-actions">@if (dailyAnalysisTradesCopied) { <span class="daily-analysis-copy-status" role="status" aria-live="polite">Trades copied</span> } @else if (dailyAnalysisTradesCopyError) { <span class="daily-analysis-copy-status daily-analysis-copy-status--error" role="status" aria-live="polite">Clipboard unavailable</span> }<button type="button" class="daily-analysis-copy" (click)="copyDailyAnalysisTrades()" [disabled]="dailyAnalysisLoading || !dailyAnalysis || dailyAnalysis.trades.length === 0" aria-label="Copy all trade table columns as tab-separated text">{{dailyAnalysisTradesCopied?'Copied':'Copy trades'}}</button><button type="button" class="daily-analysis-close" (click)="closeDailyAnalysis()" aria-label="Close daily analysis">×</button></div></header>
             <div class="daily-analysis-controls"><label for="daily-session-date">Session date</label><input id="daily-session-date" type="date" [(ngModel)]="dailyAnalysisDate" /><button type="button" (click)="openDailyAnalysis()">Load session</button><span>Times shown in IST</span></div>
             @if (dailyAnalysisLoading) { <div class="daily-analysis-state" role="status">Loading trade and decision evidence…</div> }
             @else if (dailyAnalysisError) { <div class="daily-analysis-state daily-analysis-state--error" role="alert">{{dailyAnalysisError}}</div> }

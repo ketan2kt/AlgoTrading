@@ -5,6 +5,26 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperPnlSummaryCalculatorTests
 {
     [Fact]
+    public void IncludesBothBankMarketsInAllMarketNetTotals()
+    {
+        PaperPnlObservation[] rows =
+        [
+            new("nifty", 900m, 20m),
+            new("sensex", -100m, 10m),
+            new("bank-nifty", 500m, 15m),
+            new("bankex", -200m, 5m)
+        ];
+
+        var result = PaperPnlSummaryCalculator.Summarise(rows);
+
+        Assert.Equal(["nifty", "sensex", "bank-nifty", "bankex"],
+            result.Select(value => value.Market));
+        Assert.Equal(4, result.Sum(value => value.Trades));
+        Assert.Equal(1100m, result.Sum(value => value.NetPnl));
+        Assert.Equal(50m, result.Sum(value => value.Charges));
+    }
+
+    [Fact]
     public void GroupsMarketsAndPreservesNetPnlIncludingCharges()
     {
         PaperPnlObservation[] rows =

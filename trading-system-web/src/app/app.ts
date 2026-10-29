@@ -115,7 +115,7 @@ export class App implements OnInit, OnDestroy {
   protected liveExecution: LiveExecutionStatus | null = null;
   protected liveExecutionBusy = false;
   protected liveExecutionPassword = '';
-  protected liveExecutionReason = 'Daily automatic Nifty and Sensex live trading activation.';
+  protected liveExecutionReason = 'Daily automatic index live trading activation.';
   protected liveExecutionMessage = '';
   protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10,
     bankNiftyLots: 10, bankexLots: 10, updatedAtUtc: null };
@@ -308,7 +308,7 @@ export class App implements OnInit, OnDestroy {
   }
   protected testNarratorVoice(): void {
     this.ensureTradeAlertsReady();
-    this.speakNarratorMessage('Sarthi market narrator is ready for Nifty and Sensex.');
+    this.speakNarratorMessage('Sarthi market narrator is ready for index markets.');
   }
 
   protected loadLiveExecution(): void {
