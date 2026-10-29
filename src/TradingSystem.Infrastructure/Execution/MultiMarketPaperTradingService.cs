@@ -407,6 +407,18 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
 
+            var matureEdge = MatureEdgeEntryPolicy.Evaluate(sessionMove,
+                MultiTimeframeDecisionPolicy.Analyze(completedSessionBars, decision.Direction,
+                    openingBars.Max(value => value.High), openingBars.Min(value => value.Low)),
+                decision.Direction.Value);
+            if (!matureEdge.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "MatureEdgeConfirmationRejected", decision.Confidence,
+                    matureEdge.Reasons, cancellationToken);
+                return;
+            }
+
             var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db,
                 underlying.Id, decision.Direction.Value, latest.Close,
                 AverageTrueRange(candles.TakeLast(15).ToArray()), now, cancellationToken);
@@ -892,12 +904,50 @@ internal sealed partial class MultiMarketPaperTradingService(
             var india = TimeZoneInfo.ConvertTime(observedAt, IndiaTimeZone);
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
+            var failedSetup = false;
+            if (market == TradingMarketCatalog.Sensex && !manualExitRequested && !stopHit &&
+                FailedSetupExitPolicy.IsAdverseCandidate(position.EntryPrice, price,
+                    initialRisk, favourableExtreme, position.OpenedAtUtc, observedAt))
+            {
+                var latestUnderlying = await db.MarketObservations.AsNoTracking()
+                    .Where(value => value.InstrumentId == position.UnderlyingInstrumentId &&
+                                    value.Source == "Groww")
+                    .OrderByDescending(value => value.ReceivedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (latestUnderlying is not null && observedAt - latestUnderlying.ReceivedAtUtc <=
+                    TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
+                {
+                    var intervalSeconds = marketOptions.Value.CandleIntervalSeconds;
+                    var sessionStart = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
+                    var recentCandles = await db.Candles.AsNoTracking()
+                        .Where(value => value.InstrumentId == position.UnderlyingInstrumentId &&
+                                        value.Source == "Groww" && value.IntervalSeconds == intervalSeconds &&
+                                        value.OpenTimeUtc >= sessionStart)
+                        .OrderByDescending(value => value.OpenTimeUtc).Take(30)
+                        .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+                    var completedBars = recentCandles
+                        .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= observedAt)
+                        .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+                            value.Open, value.High, value.Low, value.Close)).ToArray();
+                    var failedDecision = FailedSetupExitPolicy.Evaluate(expectedUnderlyingDirection,
+                        position.EntryPrice, price, initialRisk, favourableExtreme,
+                        position.OpenedAtUtc, observedAt, latestUnderlying.Price, completedBars);
+                    failedSetup = failedDecision.ShouldExit;
+                    if (failedSetup)
+                        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                            position.UnderlyingInstrumentId, observedAt,
+                            $"FailedSetupExit:{position.Id:N}", 0m,
+                            JsonSerializer.Serialize(new { positionId = position.Id,
+                                price, latestUnderlying.Price, failedDecision.AdverseR,
+                                failedDecision.Reasons })));
+                }
+            }
             var partialThreshold = position.Direction == Direction.Buy
                 ? position.EntryPrice + initialRisk * exitPlan.PartialProfitR
                 : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
             var partialReached = position.Direction == Direction.Buy
                 ? price >= partialThreshold : price <= partialThreshold;
-            if (MarketPaperExitSequencingPolicy.ShouldTakePartial(
+            if (!failedSetup && MarketPaperExitSequencingPolicy.ShouldTakePartial(
                     manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
                 market == TradingMarketCatalog.Sensex && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
@@ -916,7 +966,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                         remainingQuantity = position.RemainingQuantity, partialCosts,
                         triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
             }
-            if (manualExitRequested || stopHit || (targetHit && !continuationConfirmed) || forced)
+            if (manualExitRequested || stopHit || failedSetup ||
+                (targetHit && !continuationConfirmed) || forced)
             {
                 var costs = market.ExecuteOptions
                     ? PaperTradingCostModel.CalculateOptionCharges([
@@ -924,7 +975,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                         new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
                 position.Close(price, costs, manualExitRequested ? "ManualExit" : stopHit ? "StopLossHit" :
-                    targetHit ? "TargetHit" : "TimeExit", observedAt);
+                    failedSetup ? "FailedSetupExit" : targetHit ? "TargetHit" : "TimeExit", observedAt);
                 favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,

@@ -666,6 +666,20 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var matureEdge = MatureEdgeEntryPolicy.Evaluate(sessionMove, multiTimeframeV2,
+            signal.Direction);
+        if (!matureEdge.Permitted)
+        {
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "MatureEdgeConfirmationRejected", matureEdge.Reasons,
+                signal, null, null, cancellationToken, shadowStructure);
+            state.Record("MatureEdgeConfirmationRejected", true,
+                string.Join(" ", matureEdge.Reasons), tradeState.TradesToday, tradeState.RealisedPnl,
+                signalId: signal.SignalId, direction: signal.Direction.ToString());
+            return;
+        }
+
         var underlyingRiskDistance = Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss);
         if (underlyingRiskDistance <= 0m)
             underlyingRiskDistance = strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m;
@@ -1183,6 +1197,44 @@ internal sealed partial class AutomatedPaperTradingService(
             exitReason = PaperExitReason.EmergencyKillSwitch;
         if (exitReason == PaperExitReason.None && invalidation.ShouldExit)
             exitReason = PaperExitReason.UnderlyingTrendInvalidated;
+        if (exitReason == PaperExitReason.None && underlyingFresh &&
+            FailedSetupExitPolicy.IsAdverseCandidate(entryPrice, price,
+                initialRiskPerUnit, favourable, open.Signal.MarketDataTimestampUtc,
+                timeProvider.GetUtcNow()))
+        {
+            var latestUnderlying = await researchDb.MarketObservations.AsNoTracking()
+                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+                .OrderByDescending(value => value.ReceivedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            var intervalSeconds = marketOptions.Value.CandleIntervalSeconds;
+            var underlyingBars = await researchDb.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww" &&
+                                value.IntervalSeconds == intervalSeconds && value.OpenTimeUtc >= sessionStart &&
+                                value.OpenTimeUtc < sessionEnd)
+                .OrderByDescending(value => value.OpenTimeUtc).Take(30)
+                .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+            var observedAt = timeProvider.GetUtcNow();
+            if (latestUnderlying is not null && observedAt - latestUnderlying.ReceivedAtUtc <=
+                TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
+            {
+                var completedBars = underlyingBars
+                    .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= observedAt)
+                    .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
+                        value.Open, value.High, value.Low, value.Close)).ToArray();
+                var failedSetup = FailedSetupExitPolicy.Evaluate(open.Signal.Direction,
+                    entryPrice, price, initialRiskPerUnit, favourable,
+                    open.Signal.MarketDataTimestampUtc, observedAt,
+                    latestUnderlying.Price, completedBars);
+                if (failedSetup.ShouldExit)
+                {
+                    exitReason = PaperExitReason.FailedSetup;
+                    invalidation = invalidation with
+                    {
+                        SupportingEvidence = [.. invalidation.SupportingEvidence,
+                            .. failedSetup.Reasons]
+                    };
+                }
+            }
+        }
         if (exitReason == PaperExitReason.ForcedIntradayExit && options.Value.WeeklyCarryForwardEnabled)
         {
             var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
