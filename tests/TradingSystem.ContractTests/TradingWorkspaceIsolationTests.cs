@@ -23,6 +23,33 @@ public sealed class TradingWorkspaceIsolationTests
     }
 
     [Fact]
+    public void SensexRegularEntriesUseNextContractOnExpiryDay()
+    {
+        var session = new DateOnly(2026, 10, 29);
+        Assert.Equal(session.AddDays(1),
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Sensex, session, session));
+        Assert.Equal(session,
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Sensex, session, session.AddDays(7)));
+        Assert.Equal(session,
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Nifty, session, session));
+    }
+
+    [Theory]
+    [InlineData("all")]
+    [InlineData("nifty")]
+    [InlineData("sensex")]
+    [InlineData("bank-nifty")]
+    [InlineData("bankex")]
+    public void OperationalReportsAcceptEveryActiveWorkspace(string market)
+    {
+        Assert.True(EfOperationalAutomationReportReader.IsSupportedMarket(market));
+        Assert.False(EfOperationalAutomationReportReader.IsSupportedMarket("unknown"));
+    }
+
+    [Fact]
     public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
     {
         var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(

@@ -181,6 +181,15 @@
         </section>
       }
 
+      @if (!workspace && workspaceError) {
+        <div class="feed-notice feed-notice--warning" role="alert">
+          {{ workspaceError }}
+          <button type="button" class="secondary-button" (click)="refreshWorkspace()">Retry</button>
+        </div>
+      } @else if (!workspace) {
+        <div class="feed-notice" role="status">Loading {{ preparedMarketName() }} workspace…</div>
+      }
+
       @if (workspace; as view) {
         @if (narratorToasts.length) {
           <aside class="narrator-toast-stack" aria-live="assertive" aria-label="Live market alerts">
