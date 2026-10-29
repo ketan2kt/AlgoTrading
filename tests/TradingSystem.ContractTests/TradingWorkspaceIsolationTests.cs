@@ -17,6 +17,9 @@ public sealed class TradingWorkspaceIsolationTests
             TradingMarketCatalog.Bankex));
         Assert.Equal(10, MultiMarketPaperTradingService.OptionExpiryHorizonDays(
             TradingMarketCatalog.Sensex));
+        Assert.Equal(new DateOnly(2026, 10, 30),
+            MultiMarketPaperTradingService.BankRegularOptionStartDate(
+                new DateOnly(2026, 10, 29)));
     }
 
     [Fact]

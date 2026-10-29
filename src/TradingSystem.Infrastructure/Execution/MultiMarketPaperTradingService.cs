@@ -812,21 +812,16 @@ internal sealed partial class MultiMarketPaperTradingService(
                 optionInterest.Reasons, cancellationToken);
             return;
         }
+        // Regular banking-index entries use the next monthly contract on an expiry
+        // day. Selecting today's contract and rejecting it would strand the market.
         var execution = await SelectExecutionInstrumentAsync(db, market,
-            decision.Direction.Value, latest.Close, today, 0, cancellationToken);
+            decision.Direction.Value, latest.Close, BankRegularOptionStartDate(today), 0,
+            cancellationToken);
         if (execution is null)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                 "InstrumentUnavailable", decision.Confidence,
                 ["No current monthly option contract is synchronized."], cancellationToken);
-            return;
-        }
-        if (execution.ExpiryDate == today)
-        {
-            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                "RegularExpiryEntryRejected", decision.Confidence,
-                ["Regular banking-index entries are withheld on contract expiry day."],
-                cancellationToken);
             return;
         }
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
@@ -1287,6 +1282,9 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     internal static int OptionExpiryHorizonDays(TradingMarketDefinition market) =>
         market is { Code: "bank-nifty" or "bankex" } ? 45 : 10;
+
+    internal static DateOnly BankRegularOptionStartDate(DateOnly sessionDate) =>
+        sessionDate.AddDays(1);
 
     private static async Task<bool> HasActiveNiftyExposureAsync(TradingDbContext db,
         Direction direction, DateTimeOffset sessionStartUtc, CancellationToken cancellationToken)
