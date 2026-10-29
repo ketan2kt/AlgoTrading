@@ -236,11 +236,21 @@ internal sealed partial class IntradayExpansionPairService(
         var instruments = await db.Instruments.AsNoTracking().Where(value => ids.Contains(value.Id))
             .ToDictionaryAsync(value => value.Id, cancellationToken);
         var manuallyClosedLeg = false;
+        var quoteSamples = new List<object>();
+        var quoteObservedTimes = new List<DateTimeOffset>();
+        var quotesByLeg = new Dictionary<Guid, GrowwQuote>();
         foreach (var leg in legs.Where(value => value.Status == "Active"))
         {
             var instrument = instruments[leg.ExecutionInstrumentId];
             var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
                 instrument.TradingSymbol), cancellationToken);
+            var observedAt = timeProvider.GetUtcNow();
+            quoteObservedTimes.Add(observedAt);
+            quotesByLeg[leg.Id] = quote;
+            quoteSamples.Add(new { legId = leg.Id, instrument.TradingSymbol,
+                observedAtUtc = observedAt, quote.LastPrice, quote.BidPrice,
+                quote.OfferPrice, quote.LastTradeTimeEpochMilliseconds,
+                leg.EntryPrice, leg.RemainingQuantity });
             if (quote.LastPrice <= 0m) continue;
             leg.Mark(quote.LastPrice, leg.StopLoss, now);
             if (await ManualTradeExitRequest.ExistsAsync(db, market.Code, leg.Id, cancellationToken))
@@ -253,6 +263,17 @@ internal sealed partial class IntradayExpansionPairService(
                 leg.Close(quote.LastPrice, Charges(leg, quote.LastPrice, leg.RemainingQuantity),
                     "ExpansionPairLegStop", now);
         }
+
+        var estimatedNetLiquidationPnl = EstimateNetLiquidationPnl(legs, quotesByLeg);
+        await AuditAsync(db, market.Code, underlyingId, now, "ExpansionPair:Observation", 0m,
+            new { pairPrefix, observedAtUtc = timeProvider.GetUtcNow(),
+                quoteObservationSkewMilliseconds = quoteObservedTimes.Count < 2 ? 0d :
+                    (quoteObservedTimes.Max() - quoteObservedTimes.Min()).TotalMilliseconds,
+                estimatedNetLiquidationPnl, legs = quoteSamples,
+                closedLegs = legs.Where(value => value.Status != "Active")
+                    .Select(value => new { legId = value.Id, value.Status,
+                        value.RealisedPnl, value.CostsPaid }).ToArray() },
+            cancellationToken, save: false);
 
         if (manuallyClosedLeg)
         {
@@ -334,6 +355,26 @@ internal sealed partial class IntradayExpansionPairService(
         PaperTradingCostModel.CalculateOptionCharges([
             new(PaperOptionTransactionSide.Buy, leg.EntryPrice, quantity),
             new(PaperOptionTransactionSide.Sell, exitPrice, quantity)]).Total;
+
+    internal static decimal? EstimateNetLiquidationPnl(
+        IReadOnlyList<MarketPaperPosition> legs, IReadOnlyDictionary<Guid, GrowwQuote> quotesByLeg)
+    {
+        decimal net = 0m;
+        foreach (var leg in legs)
+        {
+            if (leg.Status != "Active")
+            {
+                net += leg.RealisedPnl;
+                continue;
+            }
+            if (!quotesByLeg.TryGetValue(leg.Id, out var quote) ||
+                quote.LastPrice <= 0m || quote.BidPrice is not > 0m)
+                return null;
+            net += leg.RealisedPnl + (quote.BidPrice.Value - leg.EntryPrice) *
+                leg.RemainingQuantity - Charges(leg, quote.BidPrice.Value, leg.RemainingQuantity);
+        }
+        return net;
+    }
 
     private static async Task AuditAsync(TradingDbContext db, string market, Guid underlyingId,
         DateTimeOffset candleTime, string outcome, decimal confidence, object details,

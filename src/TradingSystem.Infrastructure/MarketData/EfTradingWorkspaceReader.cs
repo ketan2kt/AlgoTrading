@@ -284,7 +284,7 @@ internal sealed class EfTradingWorkspaceReader(
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
             .Where(value => value.Market == definition.Code && value.OpenedAtUtc >= positionHistoryStartUtc &&
                             value.OpenedAtUtc < sessionEndUtc)
-            .OrderByDescending(value => value.OpenedAtUtc).Take(30).ToListAsync(cancellationToken);
+            .OrderByDescending(value => value.OpenedAtUtc).ToListAsync(cancellationToken);
         var marketExecutionIds = marketPositionRows.Select(value => value.ExecutionInstrumentId).Distinct().ToArray();
         var marketExecutionInstruments = await dbContext.Instruments.AsNoTracking()
             .Where(value => marketExecutionIds.Contains(value.Id)).ToDictionaryAsync(value => value.Id, cancellationToken);
@@ -315,7 +315,7 @@ internal sealed class EfTradingWorkspaceReader(
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
-                value.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal)))
+                IncludeNiftyMarketPosition(value.Strategy)))
                 .OrderByDescending(value => value.SignalTimeUtc).ToArray()
             : marketOverlays;
         if (market != "nifty")
@@ -506,6 +506,10 @@ internal sealed class EfTradingWorkspaceReader(
     internal static DateTimeOffset PositionHistoryStartUtc(
         TradingMarketDefinition definition,
         DateTimeOffset sessionStartUtc) => sessionStartUtc;
+
+    internal static bool IncludeNiftyMarketPosition(string strategy) =>
+        strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) ||
+        strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal);
 
     internal static bool IsTradableSessionTimestamp(
         DateTimeOffset timestampUtc,

@@ -67,7 +67,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 value.CurrentPrice,
                 Limit(value.FailedConditionsJson),
                 value.SignalId))
-            .Concat(audits.Select(value => new DailyTradingDecision(
+            .Concat(audits.Where(value => value.Outcome != "ExpansionPair:Observation")
+                .Select(value => new DailyTradingDecision(
                 value.Market.ToUpperInvariant(),
                 "MarketStrategyAudit",
                 value.CandleTimeUtc,
@@ -291,7 +292,14 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             decisions.TakeLast(MaximumDecisions).ToArray(),
             trades,
             events,
-            warnings);
+            warnings)
+        {
+            ExpansionPairObservations = audits
+                .Where(value => value.Outcome == "ExpansionPair:Observation")
+                .Select(value => new ExpansionPairObservation(value.Market.ToUpperInvariant(),
+                    value.CandleTimeUtc, value.ReasonsJson))
+                .ToArray()
+        };
     }
 
     internal static string NormalizeMarket(string market) => market.Trim().ToUpperInvariant() switch

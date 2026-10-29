@@ -29,7 +29,15 @@ public sealed record DailyTradingDiagnosticsReport(
     IReadOnlyList<DailyTradingDecision> Decisions,
     IReadOnlyList<DailyTradingTrade> Trades,
     IReadOnlyList<DailyTradingSystemEvent> SystemEvents,
-    IReadOnlyList<string> TelemetryWarnings);
+    IReadOnlyList<string> TelemetryWarnings)
+{
+    public IReadOnlyList<ExpansionPairObservation> ExpansionPairObservations { get; init; } = [];
+}
+
+public sealed record ExpansionPairObservation(
+    string Market,
+    DateTimeOffset ObservedAtUtc,
+    string EvidenceJson);
 
 public sealed record DailyTradingDiagnosticsSummary(
     int DecisionCount,

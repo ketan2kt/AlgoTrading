@@ -8,6 +8,17 @@ namespace TradingSystem.ContractTests;
 
 public sealed class TradingWorkspaceIsolationTests
 {
+    [Theory]
+    [InlineData("Hero Zero|pair|CE", true)]
+    [InlineData("Expansion Pair|pair|CE", true)]
+    [InlineData("Expansion Pair|pair|PE", true)]
+    [InlineData("NiftyAutomation", false)]
+    public void NiftyWorkspaceIncludesPairTradesWithoutDuplicatingLegacyTrades(
+        string strategy, bool expected)
+    {
+        Assert.Equal(expected, EfTradingWorkspaceReader.IncludeNiftyMarketPosition(strategy));
+    }
+
     [Fact]
     public void MonthlyBankOptionsRemainSelectableBeyondTenDays()
     {
