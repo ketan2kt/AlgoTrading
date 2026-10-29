@@ -1,8 +1,8 @@
 namespace TradingSystem.Application.Execution;
 
 public sealed record TradingLotConfiguration(int NiftyLots, int SensexLots,
-    DateTimeOffset? UpdatedAtUtc = null, int BankNiftyLots = DefaultLots,
-    int BankexLots = DefaultLots)
+    DateTimeOffset? UpdatedAtUtc = null, int BankNiftyLots = 10,
+    int BankexLots = 10)
 {
     public const int DefaultLots = 10;
     public const int MinimumLots = 1;
