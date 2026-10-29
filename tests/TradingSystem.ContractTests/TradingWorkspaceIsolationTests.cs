@@ -23,6 +23,21 @@ public sealed class TradingWorkspaceIsolationTests
     }
 
     [Fact]
+    public void SensexRegularEntriesUseNextContractOnExpiryDay()
+    {
+        var session = new DateOnly(2026, 10, 29);
+        Assert.Equal(session.AddDays(1),
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Sensex, session, session));
+        Assert.Equal(session,
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Sensex, session, session.AddDays(7)));
+        Assert.Equal(session,
+            MultiMarketPaperTradingService.RegularExecutionSearchDate(
+                TradingMarketCatalog.Nifty, session, session));
+    }
+
+    [Fact]
     public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
     {
         var excursion = EfTradingWorkspaceReader.CalculateObservedExcursion(

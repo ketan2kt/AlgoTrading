@@ -522,10 +522,24 @@ internal sealed partial class MultiMarketPaperTradingService(
                                       ProfessionalTradeRegime.Directional ? 1 : 0;
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
             latest.Close, today, preferredInTheMoneySteps, cancellationToken);
+        var nextSearchDate = RegularExecutionSearchDate(market, today, execution?.ExpiryDate);
+        var sensexExpiryRolled = nextSearchDate > today;
+        if (sensexExpiryRolled)
+        {
+            // Keep regular entries eligible on expiry day without forcing the
+            // regular strategy into same-day option decay. Hero Zero may still
+            // trade the expiring contract under its own entry rules.
+            execution = await SelectExecutionInstrumentAsync(db, market,
+                decision.Direction.Value, latest.Close, nextSearchDate,
+                preferredInTheMoneySteps, cancellationToken);
+        }
         if (execution is null)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "InstrumentUnavailable",
-                decision.Confidence, ["No eligible execution contract is synchronised."], cancellationToken);
+                decision.Confidence,
+                [sensexExpiryRolled
+                    ? "No eligible next-expiry Sensex option contract is synchronised."
+                    : "No eligible execution contract is synchronised."], cancellationToken);
             return;
         }
         if (market == TradingMarketCatalog.Sensex)
@@ -533,14 +547,6 @@ internal sealed partial class MultiMarketPaperTradingService(
             var daysToExpiry = execution.ExpiryDate is { } expiry
                 ? Math.Max(0, expiry.DayNumber - today.DayNumber)
                 : -1;
-            if (daysToExpiry == 0)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "RegularExpiryEntryRejected", decision.Confidence,
-                    ["Regular Sensex option entries are disabled on expiry day; Hero Zero is the dedicated expiry strategy."],
-                    cancellationToken);
-                return;
-            }
             var evidenceGate = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(
                 adaptiveSetup!, localTime, daysToExpiry, decision.Confidence);
             if (!evidenceGate.Permitted && !paperResearchEntry)
@@ -1282,6 +1288,11 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     internal static int OptionExpiryHorizonDays(TradingMarketDefinition market) =>
         market is { Code: "bank-nifty" or "bankex" } ? 45 : 10;
+
+    internal static DateOnly RegularExecutionSearchDate(TradingMarketDefinition market,
+        DateOnly sessionDate, DateOnly? selectedExpiry) =>
+        market == TradingMarketCatalog.Sensex && selectedExpiry == sessionDate
+            ? sessionDate.AddDays(1) : sessionDate;
 
     internal static DateOnly BankRegularOptionStartDate(DateOnly sessionDate) =>
         sessionDate.AddDays(1);
