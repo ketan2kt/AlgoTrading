@@ -37,6 +37,18 @@ public sealed class TradingWorkspaceIsolationTests
                 TradingMarketCatalog.Nifty, session, session));
     }
 
+    [Theory]
+    [InlineData("all")]
+    [InlineData("nifty")]
+    [InlineData("sensex")]
+    [InlineData("bank-nifty")]
+    [InlineData("bankex")]
+    public void OperationalReportsAcceptEveryActiveWorkspace(string market)
+    {
+        Assert.True(EfOperationalAutomationReportReader.IsSupportedMarket(market));
+        Assert.False(EfOperationalAutomationReportReader.IsSupportedMarket("unknown"));
+    }
+
     [Fact]
     public void ObservedExcursionIncludesKnownExitAlongsideIntratradeSamples()
     {

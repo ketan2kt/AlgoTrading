@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using TradingSystem.Application.Diagnostics;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
 
 namespace TradingSystem.Infrastructure.Diagnostics;
@@ -268,8 +269,8 @@ internal sealed class EfOperationalAutomationReportReader(TradingDbContext db)
         CancellationToken cancellationToken)
     {
         var normalized = market.Trim().ToLowerInvariant();
-        if (normalized is not ("all" or "nifty" or "sensex"))
-            throw new ArgumentOutOfRangeException(nameof(market), "Market must be nifty, sensex or all.");
+        if (!IsSupportedMarket(normalized))
+            throw new ArgumentOutOfRangeException(nameof(market), "Market must be a configured trading market or all.");
         var query = db.MarketStrategyAudits.AsNoTracking()
             .Where(value => value.Outcome.StartsWith(OperationalAutomationService.OutcomePrefix));
         if (normalized != "all") query = query.Where(value => value.Market == normalized);
@@ -294,4 +295,7 @@ internal sealed class EfOperationalAutomationReportReader(TradingDbContext db)
         try { return JsonSerializer.Deserialize<OperationalAutomationReport>(json); }
         catch (JsonException) { return null; }
     }
+
+    internal static bool IsSupportedMarket(string market) =>
+        market == "all" || TradingMarketCatalog.All.Any(value => value.Code == market);
 }
