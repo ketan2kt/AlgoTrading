@@ -64,12 +64,13 @@ public static class PaperProtectiveStopPolicy
         return resultForShort;
     }
 
-    // Scale protection with the size of the winning excursion, not a fixed currency
-    // threshold: retain at least 50% after activation, 65% from 1.5R, and 75% from 2.5R.
+    // Protect near-1R winners before a confirmed reversal while preserving room for
+    // early pullbacks. The same premium-based policy applies to both indices.
     public static decimal PeakProfitLockFraction(decimal peakR) => peakR switch
     {
         >= 2.5m => .75m,
-        >= 1.5m => .65m,
+        >= 1.5m => .70m,
+        >= .90m => .65m,
         _ => .50m
     };
 }

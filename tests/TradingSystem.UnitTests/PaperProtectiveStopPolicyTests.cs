@@ -7,9 +7,9 @@ public sealed class PaperProtectiveStopPolicyTests
 {
     [Theory]
     [InlineData(Direction.Buy, 90, 108, 104)]
-    [InlineData(Direction.Buy, 90, 116, 110.4)]
+    [InlineData(Direction.Buy, 90, 116, 111.2)]
     [InlineData(Direction.Sell, 110, 92, 96)]
-    public void ProgressiveLockRetainsHalfOfPeakAfterActivation(Direction direction,
+    public void ProgressiveLockScalesWithPeakAfterActivation(Direction direction,
         decimal initialStop, decimal extreme, decimal expected) =>
         Assert.Equal(expected, PaperProtectiveStopPolicy.Calculate(direction,
             100m, initialStop, extreme, .5m, 1.25m, .65m, .2m));
@@ -53,13 +53,26 @@ public sealed class PaperProtectiveStopPolicyTests
     {
         var cases = new (decimal PeakR, decimal LockedFraction)[]
         {
-            (1m, .50m),
-            (1.5m, .65m),
+            (.89m, .50m),
+            (.90m, .65m),
+            (1m, .65m),
+            (1.5m, .70m),
             (2.5m, .75m)
         };
 
         foreach (var (peakR, lockedFraction) in cases)
             Assert.Equal(lockedFraction, PaperProtectiveStopPolicy.PeakProfitLockFraction(peakR));
+    }
+
+    [Fact]
+    public void NearOneRWinnerProtectsSixtyFivePercentWithoutUsingCurrencyThreshold()
+    {
+        // 29 October Nifty example: entry 189.70, initial risk 19.00,
+        // observed peak 207.30 (0.926R). The same calculation applies to Sensex.
+        var stop = PaperProtectiveStopPolicy.Calculate(Direction.Buy,
+            189.70m, 170.70m, 207.30m, .50m, 1.25m, .65m, .20m);
+
+        Assert.Equal(201.14m, stop);
     }
 
     [Theory]
