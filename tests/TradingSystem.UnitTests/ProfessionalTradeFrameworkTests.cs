@@ -155,10 +155,28 @@ public sealed class ProfessionalTradeFrameworkTests
     public void DirectionalExitPlanProtectsProfitWithoutTightOneRChoking()
     {
         var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
-        Assert.Equal(.65m, plan.ProfitLockTriggerR);
+        Assert.Equal(.50m, plan.ProfitLockTriggerR);
         Assert.Equal(1.25m, plan.TrailDistanceR);
         Assert.Equal(.50m, plan.PartialExitFraction);
         Assert.True(plan.ExtendTarget);
+    }
+
+    [Fact]
+    public void DirectionalProfitLockActivatesAtHalfR()
+    {
+        var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
+        const decimal entry = 785m;
+        const decimal initialStop = 706.50m;
+
+        var justBefore = PaperProtectiveStopPolicy.Calculate(Direction.Buy, entry,
+            initialStop, 824.20m, plan.BreakEvenTriggerR, plan.TrailDistanceR,
+            plan.ProfitLockTriggerR, plan.ProfitLockR);
+        var after = PaperProtectiveStopPolicy.Calculate(Direction.Buy, entry,
+            initialStop, 828.95m, plan.BreakEvenTriggerR, plan.TrailDistanceR,
+            plan.ProfitLockTriggerR, plan.ProfitLockR);
+
+        Assert.Equal(initialStop, justBefore);
+        Assert.Equal(806.975m, after);
     }
 
     [Theory]
