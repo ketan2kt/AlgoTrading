@@ -18,8 +18,10 @@ public static class FailedSetupExitPolicy
         DateTimeOffset observedAt) =>
         entryOption > 0m && initialRisk > 0m && optionPrice > 0m &&
         observedAt - entryAt >= TimeSpan.FromMinutes(1) &&
-        observedAt - entryAt <= TimeSpan.FromMinutes(8) &&
-        Math.Max(0m, peakOption - entryOption) < initialRisk * .25m &&
+        // The old eight-minute cutoff missed later-confirmed failed openings.
+        // Keep the window bounded and require fresh underlying confirmation below.
+        observedAt - entryAt <= TimeSpan.FromMinutes(15) &&
+        Math.Max(0m, peakOption - entryOption) < initialRisk * .50m &&
         entryOption - optionPrice >= initialRisk * .35m;
 
     public static FailedSetupExitDecision Evaluate(Direction underlyingDirection,
@@ -58,7 +60,7 @@ public static class FailedSetupExitPolicy
               underlyingPrice > ema9 + atr * .10m;
         return failedResumption
             ? new(true, adverseR,
-                [$"Option lost {adverseR:F2}R without reaching +0.25R; the latest completed " +
+                [$"Option lost {adverseR:F2}R without reaching +0.50R; the latest completed " +
                  "underlying candle opposed the entry and a fresh quote broke beyond its close and EMA9."])
             : new(false, adverseR,
                 ["Option is adverse, but the underlying resumption has not failed."]);
