@@ -738,9 +738,11 @@ internal sealed partial class AutomaticLiveExecutionService(
             {
                 if (source.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
                         StringComparison.Ordinal) ||
-                    source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal))
+                    source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) ||
+                    source.Strategy.StartsWith("Research|", StringComparison.Ordinal))
                 {
-                    var researchOnly = source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal);
+                    var researchOnly = source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) ||
+                        source.Strategy.StartsWith("Research|", StringComparison.Ordinal);
                     var outcome = $"LiveParityException:{source.Id:N}";
                     if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
                             value.Market == market && value.Outcome == outcome, cancellationToken))
@@ -809,7 +811,8 @@ internal sealed partial class AutomaticLiveExecutionService(
          error.Contains("returned 422", StringComparison.Ordinal));
 
     internal static bool IsLiveBrokerProtectable(string strategy, decimal stopLoss) =>
-        !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) && stopLoss > .05m;
+        !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) &&
+        !strategy.StartsWith("Research|", StringComparison.Ordinal) && stopLoss > .05m;
 
     internal static bool TryOtherPairedLeg(string strategy, out string otherStrategy)
     {

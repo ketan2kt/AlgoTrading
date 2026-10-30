@@ -413,105 +413,13 @@ internal sealed partial class AutomatedPaperTradingService(
             strategyContext.OpeningRangeLow);
         var strategyEvaluation = strategy.EvaluateDetailed(strategyContext);
         var signal = strategyEvaluation.Signal;
-        var paperResearchEntry = false;
         var preEntryStateV2 = MarketStateRouterV2.Analyze(strategyContext.RecentCandles,
             vwap, fast, slow);
         // Observation-only challenger. It records a persistent multi-candle thesis but
         // cannot create or modify a StrategySignal, paper position, risk decision or order.
-        var persistentThesis = await DirectionalThesisShadowAudit.RecordAsync(db, "nifty", instrument.Id,
+        await DirectionalThesisShadowAudit.RecordAsync(db, "nifty", instrument.Id,
             candleDecisionTime, strategyContext.RecentCandles, vwap,
             openingRangeHigh, openingRangeLow, cancellationToken);
-        if (signal is null)
-        {
-            var challenger = StructuralTransitionResearchPolicy.Evaluate(
-                strategyContext.RecentCandles);
-            var researchEntriesToday = tradesByStrategy.Where(value =>
-                value.Key.StartsWith("Research|", StringComparison.Ordinal))
-                .Sum(value => value.Value);
-            if (challenger.Direction is not null &&
-                StructuralTransitionResearchPolicy.CanOpen(researchEntriesToday,
-                    tradeState.OpenPositions.Count > 0))
-            {
-                var direction = challenger.Direction.Value;
-                var risk = Math.Abs(latestCandle.Close - challenger.StructuralStop);
-                var atrPoints = latestCandle.Close * atr / 100m;
-                if (risk >= atrPoints * .15m && risk <= atrPoints * 1.25m)
-                {
-                    var target = direction == Direction.Buy
-                        ? latestCandle.Close + risk * 1.50m
-                        : latestCandle.Close - risk * 1.50m;
-                    signal = new StrategySignal(Guid.NewGuid(),
-                        StructuralTransitionResearchPolicy.StrategyCode,
-                        StructuralTransitionResearchPolicy.Version, instrument.Id, direction,
-                        SignalEntryType.Market, latestCandle.Close, challenger.StructuralStop,
-                        target, 1.50m, challenger.Confidence, regime.Regime,
-                        challenger.Reasons, [], candleDecisionTime,
-                        candleDecisionTime.AddSeconds(
-                            marketOptions.Value.CandleIntervalSeconds * 2));
-                    paperResearchEntry = true;
-                }
-            }
-            if (options.Value.EnableNiftyRangeResearchEntries && signal is null &&
-                researchEntriesToday < StructuralTransitionResearchPolicy.MaximumEntriesPerDay &&
-                tradeState.OpenPositions.Count == 0)
-            {
-                var range = RangePlaybookV2.Evaluate(strategyContext.RecentCandles,
-                    preEntryStateV2);
-                if (range.Direction is not null)
-                {
-                    var direction = range.Direction.Value;
-                    var risk = Math.Abs(latestCandle.Close - range.Stop);
-                    if (risk > 0m)
-                    {
-                        signal = new StrategySignal(Guid.NewGuid(),
-                            RangePlaybookV2.NiftyStrategyCode, RangePlaybookV2.Version,
-                            instrument.Id, direction, SignalEntryType.Market, latestCandle.Close,
-                            range.Stop, range.Target,
-                            Math.Abs(range.Target - latestCandle.Close) / risk,
-                            range.Confidence, regime.Regime, range.Reasons, [], candleDecisionTime,
-                            candleDecisionTime.AddSeconds(
-                                marketOptions.Value.CandleIntervalSeconds * 2));
-                        paperResearchEntry = true;
-                    }
-                }
-            }
-            if (signal is null && tradeState.OpenPositions.Count == 0)
-            {
-                var directional = DirectionalParticipationPolicy.Evaluate(
-                    strategyContext.RecentCandles, preEntryStateV2, vwap, fast, slow);
-                if (directional.Direction is not null)
-                {
-                    var risk = Math.Abs(latestCandle.Close - directional.StructuralStop);
-                    signal = new StrategySignal(Guid.NewGuid(),
-                        DirectionalParticipationPolicy.NiftyStrategy,
-                        DirectionalParticipationPolicy.Version, instrument.Id,
-                        directional.Direction.Value, SignalEntryType.Market, latestCandle.Close,
-                        directional.StructuralStop, directional.Target,
-                        risk <= 0m ? 0m : Math.Abs(directional.Target - latestCandle.Close) / risk,
-                        directional.Confidence, regime.Regime, directional.Reasons, [],
-                        candleDecisionTime, candleDecisionTime.AddSeconds(
-                            marketOptions.Value.CandleIntervalSeconds * 2));
-                    paperResearchEntry = true;
-                }
-            }
-        }
-        var persistentEntry = PersistentDirectionalPaperEntryPolicyV1.Evaluate(
-            strategyContext.RecentCandles, persistentThesis);
-        if (tradeState.OpenPositions.Count == 0 && persistentEntry.Direction is not null &&
-            (signal is null || signal.Direction == persistentEntry.Direction))
-        {
-            var risk = Math.Abs(latestCandle.Close - persistentEntry.StructuralStop);
-            signal = new StrategySignal(Guid.NewGuid(),
-                PersistentDirectionalPaperEntryPolicyV1.StrategyCode("nifty"),
-                PersistentDirectionalThesisAnalyzerV1.Version, instrument.Id,
-                persistentEntry.Direction.Value, SignalEntryType.Market, latestCandle.Close,
-                persistentEntry.StructuralStop, persistentEntry.Target,
-                risk <= 0m ? 0m : Math.Abs(persistentEntry.Target - latestCandle.Close) / risk,
-                persistentEntry.Confidence, regime.Regime, persistentEntry.Reasons, [],
-                candleDecisionTime, candleDecisionTime.AddSeconds(
-                    marketOptions.Value.CandleIntervalSeconds * 2));
-            paperResearchEntry = true;
-        }
         var marketStateV2 = preEntryStateV2;
         var multiTimeframeV2 = MultiTimeframeDecisionPolicy.Analyze(
             candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
@@ -526,7 +434,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 candleDecisionTime, latestCandle.Close,
                 signal?.StrategyId ?? strategy.StrategyId, signal?.Direction,
                 signal?.Confidence ?? 0m, marketStateV2,
-                signal is null ? "Scanning" : paperResearchEntry ? "ResearchEntryWindow" : "Candidate",
+                signal is null ? "Scanning" : "Candidate",
                 vwap, fast, slow, atr, relativeVolume, openingRangeHigh, openingRangeLow,
                 signal?.ProposedStopLoss, signal?.ProposedTarget,
                 [.. (signal?.SupportingReasons ?? []), .. multiTimeframeV2.Evidence],
@@ -564,8 +472,6 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
-        var persistentDirectionalEntry = signal.StrategyId.StartsWith(
-            PersistentDirectionalPaperEntryPolicyV1.StrategyPrefix, StringComparison.Ordinal);
         var firstEntryTiming = FirstEntryTimingPolicy.Evaluate(strategyContext.RecentCandles,
             signal.Direction);
         if (!firstEntryTiming.Permitted)
@@ -590,7 +496,7 @@ internal sealed partial class AutomatedPaperTradingService(
                   result.ClosedAtUtc >= sessionStart && result.ClosedAtUtc < sessionEnd
             orderby result.ClosedAtUtc descending
             select (DateTimeOffset?)result.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
-        var persistentDirectionalContext = persistentDirectionalEntry || ProfessionalTradeFramework.Map(marketStateV2) ==
+        var persistentDirectionalContext = ProfessionalTradeFramework.Map(marketStateV2) ==
                                            ProfessionalTradeRegime.Directional;
         var reentryDecision = StructuralReentryPolicy.Evaluate(strategyContext.RecentCandles
                 .Where(bar => bar.OpenTimeUtc.AddSeconds(marketOptions.Value.CandleIntervalSeconds) <= now).ToArray(),
@@ -638,7 +544,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
             strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
-        if (!location.Permitted && (!paperResearchEntry || persistentDirectionalEntry))
+        if (!location.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -709,7 +615,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
             signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume);
-        if (!entryQuality.Permitted && (!paperResearchEntry || persistentDirectionalEntry))
+        if (!entryQuality.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
@@ -724,7 +630,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var adaptiveDecision = AdaptivePaperTradePolicy.Evaluate(tradeState.TradesToday,
             int.MaxValue, tradeState.ConsecutiveLosses,
             int.MaxValue, tradeState.LastLossAtUtc, now,
-            0, persistentDirectionalEntry,
+            0, false,
             0);
         if (!adaptiveDecision.Permitted)
         {
@@ -891,15 +797,14 @@ internal sealed partial class AutomatedPaperTradingService(
                       : openInstrument.Type == InstrumentType.PutOption)
             select openPosition.Id).AnyAsync(cancellationToken);
         var professionalPlan = ProfessionalTradeFramework.Assess(new(
-            "nifty", persistentDirectionalEntry ? ProfessionalTradeRegime.Directional :
-                ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
+            "nifty", ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
             relativeVolume, shadowStructure.RoomToRiskRatio, spreadPercent,
             quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
             quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
             Math.Max(0, selectedOption.ExpiryDate.DayNumber - tradingDate.DayNumber),
             null, null, Math.Max(0m, (grossRewardPerLot - roundTripPerLot) / riskPerLot),
             hasCorrelatedSensexExposure, tradeState.ConsecutiveLosses,
-            reentryDecision.NewStructureObserved || paperResearchEntry));
+            reentryDecision.NewStructureObserved));
         if (!professionalPlan.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
