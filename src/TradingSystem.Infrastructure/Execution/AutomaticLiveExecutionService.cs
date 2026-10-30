@@ -143,9 +143,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             .ToListAsync(cancellationToken);
         foreach (var source in closed)
         {
-            if (!IsLiveBrokerProtectable(source.Strategy, source.StopLoss) &&
-                source.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
-                    StringComparison.Ordinal)) continue;
+            if (!IsLiveBrokerProtectable(source.Strategy, source.StopLoss)) continue;
             if (await db.LiveExecutionIntents.AsNoTracking().AnyAsync(value =>
                     value.SourceType == "MARKET_POSITION" && value.SourceId == source.Id,
                     cancellationToken)) continue;
@@ -255,6 +253,8 @@ internal sealed partial class AutomaticLiveExecutionService(
                 // position while the existing one needs operator reconciliation.
                 intent.RequireReconciliation("Paper/live lifecycle update needs broker reconciliation.");
                 await db.SaveChangesAsync(cancellationToken);
+                await TryRecordLiveEventAsync(db, intent, "ReconciliationRequired",
+                    new { errorType = exception.GetType().Name }, cancellationToken);
                 LogCycleFailed(logger, exception);
             }
         }
@@ -500,10 +500,16 @@ internal sealed partial class AutomaticLiveExecutionService(
         LiveExecutionIntent intent, decimal paperStop, CancellationToken cancellationToken)
     {
         if (paperStop <= .05m || paperStop == intent.StopLoss) return;
-        await broker.ModifyProtectionAsync(intent.ProtectionId!, intent.FilledQuantity,
+        var priorStop = intent.StopLoss;
+        var protection = await broker.ModifyProtectionAsync(intent.ProtectionId!, intent.FilledQuantity,
             paperStop, cancellationToken);
         intent.AdjustProtectedExposure(intent.FilledQuantity, paperStop, timeProvider.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
+        await TryRecordLiveEventAsync(db, intent, "StopModified",
+            new { priorStop, requestedStop = paperStop,
+                requestedLimit = GrowwBrokerGateway.ProtectiveLimit(paperStop),
+                protection.BrokerProtectionId, protection.Status, protection.UpdatedAtUtc },
+            cancellationToken);
     }
 
     private async Task MirrorFinalExitAsync(TradingDbContext db,
@@ -524,6 +530,9 @@ internal sealed partial class AutomaticLiveExecutionService(
             // instrument quantity, proves this leg was closed.
             intent.Closed(timeProvider.GetUtcNow());
             await db.SaveChangesAsync(cancellationToken);
+            await TryRecordLiveEventAsync(db, intent, "PaperExitRecovered",
+                new { priorExit!.BrokerOrderId, priorExit.FilledQuantity,
+                    priorExit.AverageFillPrice, priorExit.UpdatedAtUtc }, cancellationToken);
             return;
         }
         if (stop.FilledQuantity > 0)
@@ -533,6 +542,9 @@ internal sealed partial class AutomaticLiveExecutionService(
                     "Broker stop partially sold this position; reconcile before another sell.");
             intent.Closed(timeProvider.GetUtcNow());
             await db.SaveChangesAsync(cancellationToken);
+            await TryRecordLiveEventAsync(db, intent, "BrokerStopFilled",
+                new { stop.BrokerOrderId, stop.FilledQuantity,
+                    stop.AverageFillPrice, stop.UpdatedAtUtc }, cancellationToken);
             return;
         }
         var available = await AvailableManagedQuantityAsync(db, intent, cancellationToken);
@@ -559,6 +571,10 @@ internal sealed partial class AutomaticLiveExecutionService(
             throw new InvalidOperationException("Live final exit was not fully filled; reconcile the remaining unprotected exposure.");
         intent.Closed(timeProvider.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
+        await TryRecordLiveEventAsync(db, intent, "PaperExitFilled",
+            new { paperPrice, requestedLimit = DirectionalLimitPrice(Direction.Sell, paperPrice),
+                action.BrokerOrderId, action.FilledQuantity, action.AverageFillPrice,
+                action.UpdatedAtUtc }, cancellationToken);
     }
 
     internal static bool IsConfirmedFinalFill(BrokerOrderSnapshot? order, int expectedQuantity) =>
@@ -719,8 +735,10 @@ internal sealed partial class AutomaticLiveExecutionService(
             if (!IsLiveBrokerProtectable(source.Strategy, source.StopLoss))
             {
                 if (source.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix,
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal) ||
+                    source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal))
                 {
+                    var researchOnly = source.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal);
                     var outcome = $"LiveParityException:{source.Id:N}";
                     if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
                             value.Market == market && value.Outcome == outcome, cancellationToken))
@@ -730,7 +748,9 @@ internal sealed partial class AutomaticLiveExecutionService(
                             0m, JsonSerializer.Serialize(new
                             {
                                 sourcePositionId = source.Id,
-                                reason = "Expansion-pair floor stop cannot be broker-protected; live pair blocked by owner choice."
+                                reason = researchOnly
+                                    ? "Research-only strategy awaits explicit live promotion."
+                                    : "Expansion-pair floor stop cannot be broker-protected; live pair blocked by owner choice."
                             })));
                         await db.SaveChangesAsync(cancellationToken);
                     }
@@ -787,7 +807,7 @@ internal sealed partial class AutomaticLiveExecutionService(
          error.Contains("returned 422", StringComparison.Ordinal));
 
     internal static bool IsLiveBrokerProtectable(string strategy, decimal stopLoss) =>
-        stopLoss > .05m;
+        !strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) && stopLoss > .05m;
 
     internal static bool TryOtherPairedLeg(string strategy, out string otherStrategy)
     {
@@ -925,6 +945,12 @@ internal sealed partial class AutomaticLiveExecutionService(
                 intent.FlagParityMismatch("Broker entry only partially filled; paper quantity differs from live exposure.");
             await MarkControlledTestCompleteAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
+            await TryRecordLiveEventAsync(db, intent, "EntryFilledAndProtected",
+                new { order.BrokerOrderId, order.FilledQuantity,
+                    order.AverageFillPrice, entryObservedAtUtc = order.UpdatedAtUtc,
+                    protection.BrokerProtectionId, protection.StopLoss,
+                    protectiveLimit = GrowwBrokerGateway.ProtectiveLimit(protection.StopLoss),
+                    protectionObservedAtUtc = protection.UpdatedAtUtc }, cancellationToken);
             // The paper source may have closed while Groww filled and protected
             // the entry. Recheck its durable lifecycle without another poll delay.
             wakeSignal.Notify();
@@ -951,6 +977,36 @@ internal sealed partial class AutomaticLiveExecutionService(
                 value.Key == ControlledTestKey, cancellationToken)) return;
         db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live,
             ControlledTestKey, "true", timeProvider.GetUtcNow()));
+    }
+
+    private async Task TryRecordLiveEventAsync(TradingDbContext db,
+        LiveExecutionIntent intent, string eventName, object details,
+        CancellationToken cancellationToken)
+    {
+        var atUtc = timeProvider.GetUtcNow();
+        var audit = new MarketStrategyAudit(Guid.NewGuid(), intent.Market.ToLowerInvariant(),
+            intent.InstrumentId, atUtc, "LiveExecution:" + eventName, 0m,
+            JsonSerializer.Serialize(new
+            {
+                version = 1,
+                sourceIdCompact = intent.SourceId.ToString("N"),
+                intentId = intent.Id,
+                intent.SourceType,
+                intent.Market,
+                intent.Status,
+                observedAtUtc = atUtc,
+                details
+            }));
+        try
+        {
+            db.MarketStrategyAudits.Add(audit);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            db.Entry(audit).State = EntityState.Detached;
+            LogTelemetryPersistenceFailed(logger, exception, intent.Id);
+        }
     }
 
     private static string Reference(string prefix, Guid id) => prefix + id.ToString("N")[..16];
@@ -1048,4 +1104,8 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     [LoggerMessage(LogLevel.Critical, "Live broker reconciliation blocked entries: {mismatches}")]
     private static partial void LogReconciliationBlocked(ILogger logger, string mismatches);
+
+    [LoggerMessage(LogLevel.Warning, "Live execution telemetry persistence failed for intent {intentId}")]
+    private static partial void LogTelemetryPersistenceFailed(ILogger logger,
+        Exception exception, Guid intentId);
 }

@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.Diagnostics;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
@@ -278,6 +279,54 @@ public sealed class GrowwBrokerGateway(
         }
     }
 
+    public async Task<LiveBrokerOrderEvidence?> GetOrderEvidenceAsync(string role,
+        string clientReference, CancellationToken cancellationToken)
+    {
+        ValidateReference(clientReference);
+        StatusPayload status;
+        try
+        {
+            status = await SendAsync<StatusPayload>(HttpMethod.Get,
+                $"/v1/order/status/reference/{Uri.EscapeDataString(clientReference)}?segment=FNO",
+                null, cancellationToken);
+        }
+        catch (GrowwApiException exception) when (exception.StatusCode == 404)
+        {
+            return null;
+        }
+        var orderId = Required(status.GrowwOrderId);
+        OrderDetailPayload? detail = null;
+        try
+        {
+            detail = await SendAsync<OrderDetailPayload>(HttpMethod.Get,
+                $"/v1/order/detail/{Uri.EscapeDataString(orderId)}?segment=FNO",
+                null, cancellationToken);
+        }
+        catch (GrowwApiException exception) when (exception.StatusCode == 404) { }
+        TradesPayload? trades;
+        try
+        {
+            trades = await SendAsync<TradesPayload>(HttpMethod.Get,
+                $"/v1/order/trades/{Uri.EscapeDataString(orderId)}?segment=FNO&page=0&page_size=50",
+                null, cancellationToken);
+        }
+        catch (GrowwApiException exception) when (exception.StatusCode == 404)
+        {
+            trades = null;
+        }
+        var fills = (trades?.TradeList ?? []).Where(value => value.Quantity > 0)
+            .Select(value => new LiveBrokerFillEvidence(value.Quantity, value.Price,
+                value.TradeDateTime)).ToArray();
+        var totalQuantity = fills.Sum(value => value.Quantity);
+        decimal? averageFill = totalQuantity > 0
+            ? fills.Sum(value => value.Price * value.Quantity) / totalQuantity
+            : detail?.AverageFillPrice;
+        return new LiveBrokerOrderEvidence(role, clientReference, orderId,
+            detail?.OrderStatus ?? status.OrderStatus, detail?.OrderType,
+            detail?.Price, detail?.TriggerPrice, status.FilledQuantity, averageFill,
+            detail?.CreatedAt, detail?.ExchangeTime, timeProvider.GetUtcNow(), fills);
+    }
+
     private async Task<LocalOrderContext?> ResolveOrderContextAsync(string clientReference,
         CancellationToken cancellationToken)
     {
@@ -345,9 +394,18 @@ public sealed class GrowwBrokerGateway(
     private sealed record StatusPayload([property: JsonPropertyName("groww_order_id")] string? GrowwOrderId,
         [property: JsonPropertyName("order_status")] string? OrderStatus,
         [property: JsonPropertyName("filled_quantity")] int FilledQuantity);
+    private sealed record OrderDetailPayload(
+        [property: JsonPropertyName("order_status")] string? OrderStatus,
+        [property: JsonPropertyName("order_type")] string? OrderType,
+        [property: JsonPropertyName("price")] decimal? Price,
+        [property: JsonPropertyName("trigger_price")] decimal? TriggerPrice,
+        [property: JsonPropertyName("average_fill_price")] decimal? AverageFillPrice,
+        [property: JsonPropertyName("created_at")] string? CreatedAt,
+        [property: JsonPropertyName("exchange_time")] string? ExchangeTime);
     private sealed record TradesPayload([property: JsonPropertyName("trade_list")] TradePayload[]? TradeList);
     private sealed record TradePayload([property: JsonPropertyName("price")] decimal Price,
-        [property: JsonPropertyName("quantity")] int Quantity);
+        [property: JsonPropertyName("quantity")] int Quantity,
+        [property: JsonPropertyName("trade_date_time")] string? TradeDateTime = null);
     private sealed record PositionsPayload([property: JsonPropertyName("positions")] PositionPayload[]? Positions);
     private sealed record PositionPayload([property: JsonPropertyName("trading_symbol")] string? TradingSymbol,
         [property: JsonPropertyName("quantity")] int Quantity,
