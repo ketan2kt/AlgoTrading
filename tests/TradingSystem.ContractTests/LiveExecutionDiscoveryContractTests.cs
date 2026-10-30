@@ -132,6 +132,10 @@ public sealed class LiveExecutionDiscoveryContractTests
             "PaperOnly|persistent-directional-thesis-v1|sensex", 500m));
         Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
             "Research|Sensex range-edge rejection", 500m));
+        Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Sensex persistent directional thesis", 500m));
+        Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Sensex controlled early pullback", 500m));
     }
 
     [Fact]
