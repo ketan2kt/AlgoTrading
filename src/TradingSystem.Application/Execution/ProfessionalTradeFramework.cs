@@ -160,7 +160,7 @@ public static class ProfessionalExitPolicy
 {
     public static ProfessionalExitPlan For(ProfessionalTradeRegime regime) => regime switch
     {
-        ProfessionalTradeRegime.Directional => new(.50m, .65m, .20m, 1.25m, 1.25m, .50m, true),
+        ProfessionalTradeRegime.Directional => new(.50m, .50m, .20m, 1.25m, 1.25m, .50m, true),
         ProfessionalTradeRegime.Range => new(.40m, .55m, .25m, .65m, .75m, .50m, false),
         ProfessionalTradeRegime.Transition => new(.45m, .60m, .20m, .90m, 1m, .50m, false),
         _ => new(.50m, .65m, .20m, 1m, 1m, .50m, false)
