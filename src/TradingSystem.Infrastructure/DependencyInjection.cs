@@ -205,6 +205,7 @@ public static class DependencyInjection
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
+        services.AddScoped<ILiveTradeDiagnosticsReader, EfLiveTradeDiagnosticsReader>();
         services.AddScoped<IOperationalAutomationReportReader, EfOperationalAutomationReportReader>();
         services.AddOptions<OperationalAutomationOptions>()
             .Bind(configuration.GetSection(OperationalAutomationOptions.SectionName));

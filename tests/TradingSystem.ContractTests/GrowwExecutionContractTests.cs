@@ -105,6 +105,41 @@ public sealed class GrowwExecutionContractTests
     }
 
     [Fact]
+    public async Task ReadOnlyOrderEvidenceIncludesStopTermsAndExchangeFills()
+    {
+        var paths = new List<string>();
+        var gateway = CreateGateway(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            paths.Add(path);
+            var payload = path switch
+            {
+                "/v1/order/status/reference/STOP-00001" =>
+                    """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"COMPLETED","filled_quantity":65}}""",
+                "/v1/order/detail/STOP-123" =>
+                    """{"status":"SUCCESS","payload":{"order_status":"COMPLETED","order_type":"SL","price":145.90,"trigger_price":148.90,"average_fill_price":148.90,"created_at":"2026-10-30T11:07:10","exchange_time":"2026-10-30T11:07:11"}}""",
+                "/v1/order/trades/STOP-123" =>
+                    """{"status":"SUCCESS","payload":{"trade_list":[{"price":148.85,"quantity":20,"trade_date_time":"2026-10-30T05:38:29Z"},{"price":148.90,"quantity":45,"trade_date_time":"2026-10-30T05:38:30Z"}]}}""",
+                _ => throw new InvalidOperationException(path)
+            };
+            return Task.FromResult(Json(HttpStatusCode.OK, payload));
+        });
+
+        var evidence = await gateway.GetOrderEvidenceAsync("Protection", "STOP-00001",
+            CancellationToken.None);
+
+        Assert.NotNull(evidence);
+        Assert.Equal("SL", evidence.OrderType);
+        Assert.Equal(148.90m, evidence.TriggerPrice);
+        Assert.Equal(145.90m, evidence.LimitPrice);
+        Assert.Equal(65, evidence.FilledQuantity);
+        Assert.Equal(2, evidence.Fills.Count);
+        Assert.Equal("2026-10-30T05:38:29Z", evidence.Fills[0].TradeDateTime);
+        Assert.Equal((20 * 148.85m + 45 * 148.90m) / 65m, evidence.AverageFillPrice);
+        Assert.Equal(3, paths.Count);
+    }
+
+    [Fact]
     public async Task InvalidLiveOrderIsRejectedBeforeNetworkAccess()
     {
         var calls = 0;

@@ -129,6 +129,8 @@ public sealed class LiveExecutionDiscoveryContractTests
             "Hero Zero|pair-id|CE", 10m));
         Assert.True(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
             "Regular Sensex", 90m));
+        Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "PaperOnly|persistent-directional-thesis-v1|sensex", 500m));
     }
 
     [Fact]
