@@ -130,6 +130,8 @@ public sealed class LiveExecutionDiscoveryContractTests
             "Regular Sensex", 90m));
         Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
             "PaperOnly|persistent-directional-thesis-v1|sensex", 500m));
+        Assert.False(AutomaticLiveExecutionService.IsLiveBrokerProtectable(
+            "Research|Sensex range-edge rejection", 500m));
     }
 
     [Fact]
