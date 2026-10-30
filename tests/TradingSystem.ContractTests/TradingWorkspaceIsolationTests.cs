@@ -53,11 +53,18 @@ public sealed class TradingWorkspaceIsolationTests
     [InlineData("nifty")]
     [InlineData("sensex")]
     [InlineData("bank-nifty")]
-    [InlineData("bankex")]
     public void OperationalReportsAcceptEveryActiveWorkspace(string market)
     {
         Assert.True(EfOperationalAutomationReportReader.IsSupportedMarket(market));
         Assert.False(EfOperationalAutomationReportReader.IsSupportedMarket("unknown"));
+    }
+
+    [Fact]
+    public void RetiredBankexIsNotAnActiveWorkspace()
+    {
+        Assert.DoesNotContain(TradingMarketCatalog.All, market => market.Code == "bankex");
+        Assert.False(EfOperationalAutomationReportReader.IsSupportedMarket("bankex"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TradingMarketCatalog.Get("bankex"));
     }
 
     [Fact]
@@ -200,7 +207,6 @@ public sealed class TradingWorkspaceIsolationTests
     [Theory]
     [InlineData("sensex", "Sensex")]
     [InlineData("bank-nifty", "Bank Nifty")]
-    [InlineData("bankex", "Bankex")]
     [InlineData("natural-gas", "Natural Gas Mini Futures")]
     public void UnavailableNonNiftyMarketNeverInheritsNiftyAutomation(
         string market,

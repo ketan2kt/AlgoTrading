@@ -723,6 +723,8 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task<LiveExecutionIntent?> DiscoverMarketPositionAsync(TradingDbContext db,
         string market, DateTimeOffset armedAtUtc, CancellationToken cancellationToken)
     {
+        // Retired market: continue managing existing live intents, but never submit new Bankex entries.
+        if (market.Equals("bankex", StringComparison.OrdinalIgnoreCase)) return null;
         if (!options.Value.AllowedMarkets.Contains(market.ToUpperInvariant(),
                 StringComparer.OrdinalIgnoreCase)) return null;
         var cutoff = timeProvider.GetUtcNow().AddSeconds(-options.Value.SignalMaximumAgeSeconds);

@@ -6,7 +6,7 @@ import { TradingWorkspaceSnapshot } from './trading-workspace';
 
 @Injectable({ providedIn: 'root' })
 export class TradingWorkspaceService {
-  private static readonly markets = ['nifty', 'sensex', 'bank-nifty', 'bankex', 'natural-gas'];
+  private static readonly markets = ['nifty', 'sensex', 'bank-nifty', 'natural-gas'];
   private readonly http = inject(HttpClient);
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;

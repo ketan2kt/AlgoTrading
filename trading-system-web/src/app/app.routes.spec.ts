@@ -13,5 +13,6 @@ describe('market workspace routes', () => {
       'natural-gas',
       '**',
     ]);
+    expect(routes.find(route => route.path === 'bankex')?.redirectTo).toBe('bank-nifty');
   });
 });
