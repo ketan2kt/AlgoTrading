@@ -23,7 +23,9 @@ internal sealed class EfLiveTradingArmService(
         var settings = await db.ApplicationSettings.AsNoTracking().Where(value =>
             value.Mode == TradingMode.Live && value.Key.StartsWith(KeyPrefix))
             .ToListAsync(cancellationToken);
-        var markets = options.Value.AllowedMarkets.Select(market =>
+        var allowedMarkets = options.Value.AllowedMarkets
+            .Where(market => market != "BANKEX").ToArray();
+        var markets = allowedMarkets.Select(market =>
         {
             var value = Parse(settings.FirstOrDefault(item => item.Key == KeyPrefix + market)?.ValueJson);
             return new LiveMarketArmStatus(market, value?.Armed == true,
@@ -41,7 +43,8 @@ internal sealed class EfLiveTradingArmService(
     public async Task<LiveTradingArmStatus> SetAsync(string market, bool armed, string actor,
         CancellationToken cancellationToken)
     {
-        if (!options.Value.AllowedMarkets.Contains(market, StringComparer.Ordinal))
+        if (market == "BANKEX" ||
+            !options.Value.AllowedMarkets.Contains(market, StringComparer.Ordinal))
             throw new ArgumentException("Market is not enabled for live execution.", nameof(market));
         if (armed && !options.Value.BuildEnabled)
             throw new InvalidOperationException("Live execution is disabled by server configuration.");
@@ -66,7 +69,8 @@ internal sealed class EfLiveTradingArmService(
     }
 
     private LiveTradingArmStatus ToStatus(IReadOnlyList<LiveMarketArmStatus> markets, bool tested, LiveExecutionIntent? latestIntent) => new(options.Value.BuildEnabled,
-        markets, true, tested, options.Value.AllowedMarkets,
+        markets, true, tested,
+        options.Value.AllowedMarkets.Where(market => market != "BANKEX").ToArray(),
         latestIntent?.Market, latestIntent?.Status, latestIntent?.LastError,
         latestIntent?.CreatedAtUtc);
 

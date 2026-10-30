@@ -327,16 +327,16 @@ export class App implements OnInit, OnDestroy {
     const nifty = Number(this.tradingLots.niftyLots);
     const sensex = Number(this.tradingLots.sensexLots);
     const bankNifty = Number(this.tradingLots.bankNiftyLots);
-    const bankex = Number(this.tradingLots.bankexLots);
     if (!Number.isInteger(nifty) || !Number.isInteger(sensex) ||
-        !Number.isInteger(bankNifty) || !Number.isInteger(bankex) ||
-        [nifty, sensex, bankNifty, bankex].some(lots => lots < 1 || lots > 50)) {
+        !Number.isInteger(bankNifty) ||
+        [nifty, sensex, bankNifty].some(lots => lots < 1 || lots > 50)) {
       this.tradingLotsMessage = 'Enter whole lot values between 1 and 50.';
       return;
     }
     this.tradingLotsBusy = true;
     this.tradingLotsMessage = '';
-    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex, bankNifty, bankex).subscribe({
+    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex, bankNifty,
+      this.tradingLots.bankexLots).subscribe({
       next: value => {
         this.tradingLots = value;
         this.tradingLotsBusy = false;
@@ -378,21 +378,19 @@ export class App implements OnInit, OnDestroy {
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
       this.selectedMarket === 'sensex' ? 'Sensex' :
-      this.selectedMarket === 'bank-nifty' ? 'Bank Nifty' :
-      this.selectedMarket === 'bankex' ? 'Bankex' : 'Natural Gas Mini Futures';
+      this.selectedMarket === 'bank-nifty' ? 'Bank Nifty' : 'Natural Gas Mini Futures';
   }
 
   protected preparedMarketVenue(): string {
     return this.selectedMarket === 'nifty' ? 'NSE index and options' :
       this.selectedMarket === 'bank-nifty' ? 'NSE banking index and options' :
-      this.selectedMarket === 'sensex' || this.selectedMarket === 'bankex'
-        ? 'BSE index and options' : 'MCX commodity futures';
+      this.selectedMarket === 'sensex' ? 'BSE index and options' : 'MCX commodity futures';
   }
 
   private marketFromPath(): TradingMarketCode | null {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
-      path === '/bank-nifty' ? 'bank-nifty' : path === '/bankex' ? 'bankex' :
+      path === '/bank-nifty' ? 'bank-nifty' :
       path === '/natural-gas' ? 'natural-gas' : null;
   }
 

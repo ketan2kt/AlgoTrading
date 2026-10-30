@@ -39,9 +39,8 @@ internal sealed partial class MultiMarketPaperTradingService(
         {
             var markets = options.Value.NaturalGasEnabled
                 ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
-                    TradingMarketCatalog.Bankex, TradingMarketCatalog.NaturalGas }
-                : [TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
-                    TradingMarketCatalog.Bankex];
+                    TradingMarketCatalog.NaturalGas }
+                : [TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty];
             foreach (var market in markets)
             {
                 try { await RunMarketAsync(market, stoppingToken); }
@@ -57,6 +56,7 @@ internal sealed partial class MultiMarketPaperTradingService(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Retain management for legacy Bankex positions; no new Bankex entry is evaluated.
             var markets = options.Value.NaturalGasEnabled
                 ? new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty,
                     TradingMarketCatalog.Bankex, TradingMarketCatalog.NaturalGas }

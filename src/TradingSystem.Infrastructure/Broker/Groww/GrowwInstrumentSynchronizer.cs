@@ -121,7 +121,6 @@ internal sealed class GrowwInstrumentSynchronizer(
         SelectSupportedUniqueRecords(downloaded).Where(record =>
             IsRequiredNiftyInstrument(record) || IsRequiredSensexInstrument(record) ||
             IsRequiredBankIndexInstrument(record, "NSE", "BANKNIFTY") ||
-            IsRequiredBankIndexInstrument(record, "BSE", "BANKEX") ||
             IsRequiredNaturalGasInstrument(record)).ToArray();
 
     private static bool IsRequiredBankIndexInstrument(GrowwInstrumentRecord record,

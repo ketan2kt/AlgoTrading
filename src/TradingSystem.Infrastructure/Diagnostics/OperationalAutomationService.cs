@@ -102,7 +102,7 @@ internal sealed class OperationalAutomationService(
             }
         }
 
-        foreach (var market in new[] { "nifty", "sensex", "bank-nifty", "bankex" })
+        foreach (var market in new[] { "nifty", "sensex", "bank-nifty" })
         {
             if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
                     value.Market == market && value.Outcome == outcome &&
@@ -113,8 +113,7 @@ internal sealed class OperationalAutomationService(
             {
                 "nifty" => "NIFTY",
                 "sensex" => "SENSEX",
-                "bank-nifty" => "BANKNIFTY",
-                _ => "BANKEX"
+                _ => "BANKNIFTY"
             };
             var instrumentId = await db.Instruments.AsNoTracking()
                 .Where(value => value.TradingSymbol == underlyingSymbol)

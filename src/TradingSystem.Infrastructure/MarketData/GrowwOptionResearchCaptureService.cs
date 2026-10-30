@@ -25,8 +25,7 @@ internal sealed partial class GrowwOptionResearchCaptureService(
     [
         new("NIFTY", "NSE"),
         new("SENSEX", "BSE"),
-        new("BANKNIFTY", "NSE"),
-        new("BANKEX", "BSE")
+        new("BANKNIFTY", "NSE")
     ];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

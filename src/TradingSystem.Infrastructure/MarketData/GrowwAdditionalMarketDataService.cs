@@ -31,20 +31,20 @@ internal sealed partial class GrowwAdditionalMarketDataService(
         {
             // Natural Gas is intentionally paused; keep its feed quiet even if its UI is hidden.
             foreach (var market in new[] { TradingMarketCatalog.Sensex,
-                         TradingMarketCatalog.BankNifty, TradingMarketCatalog.Bankex })
+                         TradingMarketCatalog.BankNifty })
             {
                 try
                 {
                     var now = timeProvider.GetUtcNow();
-                    // Two more indices must not double the existing two-second quote load.
+                    // The bank index must not double the existing two-second quote load.
                     // Position protection keeps its independent two-second cadence.
-                    if (market is { Code: "bank-nifty" or "bankex" } &&
+                    if (market.Code == "bank-nifty" &&
                         lastBankPolls.TryGetValue(market.Code, out var lastPoll) &&
                         now - lastPoll < TimeSpan.FromSeconds(6)) continue;
                     if (IsMarketWindow(market, timeProvider.GetUtcNow()))
                     {
                         await PollAsync(market, stoppingToken);
-                        if (market is { Code: "bank-nifty" or "bankex" })
+                        if (market.Code == "bank-nifty")
                             lastBankPolls[market.Code] = timeProvider.GetUtcNow();
                     }
                     else

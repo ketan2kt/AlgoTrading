@@ -402,7 +402,7 @@ public sealed class GrowwReadOnlyContractTests
         Assert.Contains(selected, value => value.TradingSymbol == "SENSEX");
         Assert.Contains(selected, value => value.TradingSymbol == "SENSEX26AUG80000CE");
         Assert.Contains(selected, value => value.TradingSymbol == "BANKNIFTY26NOV40200CE");
-        Assert.Contains(selected, value => value.TradingSymbol == "BANKEX26NOV58700CE");
+        Assert.DoesNotContain(selected, value => value.TradingSymbol.StartsWith("BANKEX", StringComparison.Ordinal));
         Assert.Contains(selected, value => value.TradingSymbol == "NATGASMINI26AUG26FUT" && value.LotSize == 250);
         Assert.DoesNotContain(selected, value => value.TradingSymbol == "NATURALGAS26AUG26FUT");
     }

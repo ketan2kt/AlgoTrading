@@ -39,7 +39,7 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
                 if (IsMarketWindow(now))
                 {
                     await ProcessAsync(TradingMarketCatalog.Sensex, now, stoppingToken);
-                    foreach (var bank in new[] { TradingMarketCatalog.BankNifty, TradingMarketCatalog.Bankex })
+                    foreach (var bank in new[] { TradingMarketCatalog.BankNifty })
                     {
                         if (lastBankQuoteUtc.TryGetValue(bank.Code, out var last) &&
                             now - last < TimeSpan.FromSeconds(30)) continue;

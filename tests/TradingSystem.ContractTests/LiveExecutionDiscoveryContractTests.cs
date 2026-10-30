@@ -15,15 +15,14 @@ public sealed class LiveExecutionDiscoveryContractTests
         var status = new LiveTradingArmStatus(true,
             [new("NIFTY", true, switchedAt, "admin"),
              new("SENSEX", false, null, null),
-             new("BANK-NIFTY", false, null, null),
-             new("BANKEX", false, null, null)],
-            true, false, ["NIFTY", "SENSEX", "BANK-NIFTY", "BANKEX"],
+             new("BANK-NIFTY", false, null, null)],
+            true, false, ["NIFTY", "SENSEX", "BANK-NIFTY"],
             null, null, null, null);
 
         Assert.True(status.ForMarket("NIFTY")!.Armed);
         Assert.False(status.ForMarket("SENSEX")!.Armed);
         Assert.False(status.ForMarket("BANK-NIFTY")!.Armed);
-        Assert.False(status.ForMarket("BANKEX")!.Armed);
+        Assert.Null(status.ForMarket("BANKEX"));
         Assert.Null(status.ForMarket("UNKNOWN"));
     }
 

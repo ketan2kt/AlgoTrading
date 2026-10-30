@@ -22,7 +22,9 @@ internal static class TradingMarketCatalog
         "COMMODITY", "NATGASMINI", InstrumentSegment.Commodity, InstrumentType.Future, "NATGASMINI",
         "COMMODITY", false, new(9, 0), new(23, 30));
 
-    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, BankNifty, Bankex, NaturalGas];
+    // Keep the Bankex definition only for managing any pre-existing paper position.
+    // It is not an available workspace or a source of new entries.
+    public static IReadOnlyList<TradingMarketDefinition> All { get; } = [Nifty, Sensex, BankNifty, NaturalGas];
     public static string FeedCode(string market) => market;
     public static TradingMarketDefinition Get(string code) => All.FirstOrDefault(value =>
         string.Equals(value.Code, code, StringComparison.OrdinalIgnoreCase)) ??
