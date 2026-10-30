@@ -960,7 +960,34 @@ internal sealed partial class MultiMarketPaperTradingService(
                     ? Math.Max(position.StopLoss, trailing)
                     : Math.Min(position.StopLoss, trailing);
             }
+            var expectedUnderlyingDirection = market.ExecuteOptions
+                ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
+                : position.Direction;
+            var invalidation = market is { Code: "sensex" or "bank-nifty" } &&
+                               market.ExecuteOptions && !manualExitRequested &&
+                               options.Value.UnderlyingTrendInvalidationEnabled
+                ? await EvaluateUnderlyingInvalidationAsync(db, position.UnderlyingInstrumentId,
+                    expectedUnderlyingDirection, position.OpenedAtUtc, observedAt, cancellationToken)
+                : new UnderlyingTrendInvalidationResult(false, 0m, []);
+            var reversal = ConfirmedReversalResponse(market, invalidation, position.Direction,
+                position.EntryPrice, price, trailing,
+                options.Value.ProtectProfitableConfirmedReversals,
+                options.Value.ReversalProfitLockFraction,
+                instrument.TickSize > 0m
+                    ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(instrument.TickSize)
+                    : .05m);
+            var reversalExit = reversal.ShouldExit;
+            var reversalProtection = reversal.ProtectProfit;
+            trailing = reversal.Stop;
             position.Mark(price, trailing, observedAt);
+            if (reversalExit || reversalProtection && position.StopLoss != previousStop)
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, observedAt,
+                    $"ConfirmedReversal:{position.Id:N}", invalidation.EvidenceScore,
+                    JsonSerializer.Serialize(new { positionId = position.Id, price,
+                        action = reversalExit ? "Exit" : "ProtectProfit",
+                        previousStop, currentStop = position.StopLoss,
+                        invalidation.Behaviour, invalidation.SupportingEvidence })));
             var sampleMinute = new DateTimeOffset(observedAt.Year, observedAt.Month, observedAt.Day,
                 observedAt.Hour, observedAt.Minute,
                 0, TimeSpan.Zero);
@@ -994,11 +1021,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                         observedAtUtc = observedAt })));
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
-            var expectedUnderlyingDirection = market.ExecuteOptions
-                ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
-                : position.Direction;
             // A breached stop takes precedence over continuation, add-ons and partial exits.
-            var continuationConfirmed = !stopHit && targetHit && options.Value.TargetExtensionEnabled &&
+            var continuationConfirmed = !stopHit && !reversalExit && !reversalProtection &&
+                                        targetHit && options.Value.TargetExtensionEnabled &&
                                         exitPlan.ExtendTarget &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
@@ -1042,7 +1067,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
             var failedSetup = false;
-            if (market.ExecuteOptions && !manualExitRequested && !stopHit &&
+            if (market.ExecuteOptions && !manualExitRequested && !stopHit && !reversalExit &&
                 FailedSetupExitPolicy.IsAdverseCandidate(position.EntryPrice, price,
                     initialRisk, favourableExtreme, position.OpenedAtUtc, observedAt))
             {
@@ -1084,7 +1109,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
             var partialReached = position.Direction == Direction.Buy
                 ? price >= partialThreshold : price <= partialThreshold;
-            if (!failedSetup && MarketPaperExitSequencingPolicy.ShouldTakePartial(
+            if (!failedSetup && !reversalExit && MarketPaperExitSequencingPolicy.ShouldTakePartial(
                     manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
                 market.ExecuteOptions && options.Value.PartialProfitEnabled &&
                 position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
@@ -1103,7 +1128,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                         remainingQuantity = position.RemainingQuantity, partialCosts,
                         triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
             }
-            if (manualExitRequested || stopHit || failedSetup ||
+            if (manualExitRequested || stopHit || reversalExit || failedSetup ||
                 (targetHit && !continuationConfirmed) || forced)
             {
                 var costs = market.ExecuteOptions
@@ -1112,7 +1137,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                         new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
                 position.Close(price, costs, manualExitRequested ? "ManualExit" : stopHit ? "StopLossHit" :
-                    failedSetup ? "FailedSetupExit" : targetHit ? "TargetHit" : "TimeExit", observedAt);
+                    reversalExit ? "UnderlyingTrendInvalidated" : failedSetup ? "FailedSetupExit" :
+                    targetHit ? "TargetHit" : "TimeExit", observedAt);
                 favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
@@ -1128,6 +1154,29 @@ internal sealed partial class MultiMarketPaperTradingService(
     private static decimal PeakFavourableForProtection(Direction direction, decimal entry,
         decimal favourablePrice) => direction == Direction.Buy
         ? favourablePrice - entry : entry - favourablePrice;
+
+    internal static (bool ShouldExit, bool ProtectProfit, decimal Stop) ConfirmedReversalResponse(
+        TradingMarketDefinition market, UnderlyingTrendInvalidationResult invalidation,
+        Direction optionDirection, decimal entry, decimal current, decimal existingStop,
+        bool protectProfitable, decimal lockFraction, decimal tickSize = .05m)
+    {
+        if (market.Code is not ("sensex" or "bank-nifty") || !invalidation.ShouldExit)
+            return (false, false, existingStop);
+        var favourable = optionDirection == Direction.Buy ? current - entry : entry - current;
+        if (favourable > 0m && protectProfitable)
+        {
+            var protectedStop = PaperProtectiveStopPolicy.ProtectReversalProfit(
+                optionDirection, entry, current, existingStop, lockFraction);
+            // A broker stop trigger must be on the option contract's price tick.
+            var roundedStop = optionDirection == Direction.Buy
+                ? Math.Floor(protectedStop / tickSize) * tickSize
+                : Math.Ceiling(protectedStop / tickSize) * tickSize;
+            return (false, true, optionDirection == Direction.Buy
+                ? Math.Max(existingStop, roundedStop)
+                : Math.Min(existingStop, roundedStop));
+        }
+        return (true, false, existingStop);
+    }
 
     private async Task CaptureExitResearchAsync(TradingDbContext db, TradingMarketDefinition market,
         DateTimeOffset now, CancellationToken cancellationToken)
@@ -1191,21 +1240,40 @@ internal sealed partial class MultiMarketPaperTradingService(
             : fast < slow && latest.Close <= fast;
     }
 
-    private async Task<bool> HasConfirmedDirectionalInvalidationAsync(TradingDbContext db,
-        Guid underlyingInstrumentId, Direction originalDirection, DateTimeOffset openedAtUtc,
+    private async Task<UnderlyingTrendInvalidationResult> EvaluateUnderlyingInvalidationAsync(
+        TradingDbContext db, Guid underlyingInstrumentId, Direction originalDirection,
+        DateTimeOffset openedAtUtc, DateTimeOffset observedAtUtc,
         CancellationToken cancellationToken)
     {
+        var latestUnderlyingAtUtc = await db.MarketObservations.AsNoTracking()
+            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+            .OrderByDescending(value => value.ReceivedAtUtc)
+            .Select(value => (DateTimeOffset?)value.ReceivedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (latestUnderlyingAtUtc is null ||
+            observedAtUtc - latestUnderlyingAtUtc >
+                TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
+            return new(false, 0m, ["Fresh underlying data is unavailable; reversal exits fail closed."]);
+
+        var interval = marketOptions.Value.CandleIntervalSeconds;
+        var india = TimeZoneInfo.ConvertTime(observedAtUtc, IndiaTimeZone);
+        var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == underlyingInstrumentId &&
-                            value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
-                            value.Source == "Groww")
+                            value.IntervalSeconds == interval && value.Source == "Groww" &&
+                            value.OpenTimeUtc >= sessionStartUtc &&
+                            value.OpenTimeUtc <= observedAtUtc.AddSeconds(-interval))
             .OrderByDescending(value => value.OpenTimeUtc)
             .Take(30)
             .OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
-        if (candles.Count < 8 || candles.Count(value =>
-                value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) > openedAtUtc) < 2)
-            return false;
+        if (candles.Count < 21)
+            return new(false, 0m, ["At least 21 completed underlying candles are required."]);
+        if (candles.Count(value => value.OpenTimeUtc.AddSeconds(interval) > openedAtUtc) < 2)
+            return new(false, 0m, ["Waiting for two completed underlying candles after entry."]);
+        if (observedAtUtc - candles[^1].OpenTimeUtc.AddSeconds(interval) >
+            TimeSpan.FromSeconds(interval + marketOptions.Value.MaximumAgeSeconds))
+            return new(false, 0m, ["Completed underlying candles are stale."]);
         var closes = candles.Select(value => value.Close).ToArray();
         var bars = candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
             value.Open, value.High, value.Low, value.Close)).ToArray();
@@ -1213,7 +1281,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             TechnicalIndicators.ExponentialMovingAverage(closes, 9),
             TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length)),
             options.Value.MinimumReversalStructureStrength,
-            options.Value.RequiredReversalEvidenceCount).ShouldExit;
+            options.Value.RequiredReversalEvidenceCount);
     }
 
     private static MarketDecision Evaluate(IReadOnlyList<Candle> candles)

@@ -35,7 +35,7 @@ public static class UnderlyingTrendInvalidationPolicy
         if (requiredEvidenceCount is < 2 or > 4)
             throw new ArgumentOutOfRangeException(nameof(requiredEvidenceCount));
         if (completedBars.Count < 8 || fastEma <= 0 || slowEma <= 0)
-            return new(false, 0m, ["Insufficient completed Nifty candles for reversal confirmation."]);
+            return new(false, 0m, ["Insufficient completed underlying candles for reversal confirmation."]);
 
         var session = completedBars.ToArray();
         var recent = session.TakeLast(12).ToArray();
@@ -51,32 +51,32 @@ public static class UnderlyingTrendInvalidationPolicy
         if (originalUnderlyingDirection == Direction.Buy)
         {
             persistent = recent.TakeLast(3).All(bar => bar.Close < fastEma);
-            if (persistent) evidence.Add("Three completed Nifty candles remained below EMA 9.");
+            if (persistent) evidence.Add("Three completed underlying candles remained below EMA 9.");
             if (fastEma < slowEma)
                 evidence.Add("EMA 9 crossed below EMA 21.");
             oppositeStructure = structure.Direction == MarketStructureDirection.Bearish &&
                                 structure.Strength >= minimumStructureStrength;
             if (oppositeStructure &&
                 structure.Strength >= minimumStructureStrength)
-                evidence.Add($"Nifty structure changed to bearish ({structure.Strength:P0} strength).");
+                evidence.Add($"Underlying structure changed to bearish ({structure.Strength:P0} strength).");
             swingBroken = latest.Close < priorSwingBars.Min(x => x.Low);
             if (swingBroken)
-                evidence.Add("Nifty closed below the recent confirmed swing low.");
+                evidence.Add("Underlying closed below the recent confirmed swing low.");
         }
         else
         {
             persistent = recent.TakeLast(3).All(bar => bar.Close > fastEma);
-            if (persistent) evidence.Add("Three completed Nifty candles remained above EMA 9.");
+            if (persistent) evidence.Add("Three completed underlying candles remained above EMA 9.");
             if (fastEma > slowEma)
                 evidence.Add("EMA 9 crossed above EMA 21.");
             oppositeStructure = structure.Direction == MarketStructureDirection.Bullish &&
                                 structure.Strength >= minimumStructureStrength;
             if (oppositeStructure &&
                 structure.Strength >= minimumStructureStrength)
-                evidence.Add($"Nifty structure changed to bullish ({structure.Strength:P0} strength).");
+                evidence.Add($"Underlying structure changed to bullish ({structure.Strength:P0} strength).");
             swingBroken = latest.Close > priorSwingBars.Max(x => x.High);
             if (swingBroken)
-                evidence.Add("Nifty closed above the recent confirmed swing high.");
+                evidence.Add("Underlying closed above the recent confirmed swing high.");
         }
 
         var evidenceRequired = behaviour is SessionBehaviour.ZigZag or SessionBehaviour.RangeBound
