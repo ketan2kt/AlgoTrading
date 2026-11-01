@@ -52,6 +52,33 @@ commit and working-tree state. It never reads credentials.
 
 ## Deployment
 
+Before removing or replacing a regular entry path, run the database-backed
+entry-path impact check over recent completed sessions. Supply the strategy
+labels that the proposed change would remove, using PowerShell `-like` patterns:
+
+```powershell
+./scripts/check-entry-path-impact.ps1 -Market sensex -From 2026-10-26 -To 2026-10-30 -RemoveStrategy 'Research|*','PaperOnly|persistent-directional-thesis-v1|*'
+```
+
+For an entry-code PR, add `-ReviewId <unique-lowercase-name>` to save a
+secret-free JSON review under `docs/entry-path-reviews/` and commit that file
+with the code change. Use a nonmatching removal pattern (for example,
+`'__no_removed_path__'`) when modifying or adding a setup without removing an
+existing one. CI checks the changed entry-decision modules and fails if a new
+review is missing, inconsistent, or shows zero historically retained regular
+entries. The deployment preflight requires successful push CI, so this also
+blocks deployment of a known failing review. CI validates the saved evidence;
+it does not have production diagnostics access to independently re-query it.
+
+It excludes Hero Zero, Expansion Pair, and pyramid add-on legs so these cannot
+mask loss of regular entries. A nonzero result means stop and review the
+proposed change before publishing: either no baseline regular trades were
+observed or every observed regular entry path would be removed. A passing
+result only proves historical usage of a remaining path; it does not prove
+that current code will open a trade or that the change improves net P&L.
+Record the path counts and limitations in the task handover. This check is
+read-only and requires the existing Azure diagnostics access.
+
 The live execution worker uses persisted paper fills and position lifecycle events
 for quantities and exits. It does not apply a separate research-promotion gate or
 five-lot size. The deployment workflow sets and verifies
