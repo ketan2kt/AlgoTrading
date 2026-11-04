@@ -24,6 +24,16 @@ public sealed class LiveExecutionController(
     public async Task<ActionResult<LiveTradingArmStatus>> Get(CancellationToken cancellationToken) =>
         Ok(await armService.GetAsync(cancellationToken));
 
+    [ValidateAntiForgeryToken]
+    [HttpPost("protection-monitor/{intentId:guid}/review")]
+    public async Task<IActionResult> ReviewReminder(Guid intentId,ProtectionReminderReview request,
+        [FromServices] ILiveProtectionMonitor monitor,CancellationToken cancellationToken)
+    {
+        if(request.Version is not {Length:64})return BadRequest();
+        return await monitor.ReviewAsync(intentId,request.Version,User.Identity?.Name??"administrator",cancellationToken)
+            ? NoContent() : Conflict("Reminder changed or is not eligible for review. Refresh to check the latest record.");
+    }
+
     [EnableRateLimiting("authentication")]
     [ValidateAntiForgeryToken]
     [HttpPut("markets/{market}/arm")]
@@ -41,3 +51,5 @@ public sealed class ArmLiveExecutionRequest
 {
     public bool Armed { get; init; }
 }
+
+public sealed record ProtectionReminderReview(string Version);

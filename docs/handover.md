@@ -2,7 +2,9 @@
 
 ## Session evidence — merged to main; deployment dispatched
 
-Local follow-up (not deployed): the protection badge now fits the rail, reads “After hours” outside regular weekday 09:15–15:30 IST hours, and pauses automatic reads then. Opening or refreshing the dialog still shows every unresolved record. No changes to broker handling or reconciliation. Boundary fixtures added; diff checked, visual/runtime validation pending.
+Local follow-up: Protection → Mark reviewed dismisses only the exact prior-session alert after administrator confirmation. The existing audit log stores the review; changed evidence reopens the reminder. No trading/order writes or migration. IST-boundary and reappearance fixture added; diff checked, runtime tests pending. Not deployed.
+
+[PR #23](https://github.com/ketan2kt/AlgoTrading/pull/23) merged to main at f08c21f. The protection badge fits the rail and shows “After hours” outside regular weekday 09:15–15:30 IST hours; manual refresh still exposes unresolved records. Broker handling is unchanged. [Main CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/41899596445) passed. [Deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41899963969) dispatched once; completion and visual validation unverified.
 
 [PR #22](https://github.com/ketan2kt/AlgoTrading/pull/22) merged as `1456005`. [Main CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/41896279171) passed all checks. [Deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41896686655) dispatched once; completion and real-session behavior remain unverified. The per-feature notes below describe the pre-release checks and evidence limitations.
 

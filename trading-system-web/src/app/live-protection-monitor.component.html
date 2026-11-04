@@ -2,7 +2,7 @@
   <span>Protection</span>
   @if(!inSession()){<small>After hours</small>}
   @else if(failed()){<small class="flag">Unknown</small>}
-  @else if(snapshot();as s){<small [class.flag]="s.attention>0">{{s.attention ? s.attention+' to review' : s.rows.length ? 'Matched' : 'No open trades'}}</small>}
+  @else if(snapshot();as s){<small [class.flag]="s.attention>0">{{s.attention ? s.attention+' to review' : s.rows.length ? 'No new alerts' : 'No open trades'}}</small>}
   @else{<small>Checking…</small>}
 </button>
 <dialog #panel aria-labelledby="protection-heading">
@@ -13,16 +13,32 @@
     <div class="toolbar"><div><strong>{{snapshot()?.attention ?? '—'}} to review</strong>
       @if(snapshot();as s){<small>Read {{s.readAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata'}} IST</small>}</div>
       <button type="button" (click)="refresh()" [disabled]="busy()">Refresh</button></div>
+    @if(feedback()){<p role="status">{{feedback()}}</p>}
     @if(failed()){<p role="alert">Protection records could not be read. Status is unknown.</p>}
     @else if(snapshot();as s){
       @for(r of s.rows;track r.id){
-        <article><div class="identity"><div><small>{{r.market}}</small><strong>{{r.symbol}}</strong></div><span class="finding" [class.warn]="r.needsAttention">{{r.finding}}</span></div>
+        @if(!r.reviewedAt){
+        <article><div class="identity"><div><small>{{r.market}} · {{r.sessionDate}}</small><strong>{{r.symbol}}</strong></div><span class="finding" [class.warn]="r.needsAttention">{{r.finding}}</span></div>
           <dl><div><dt>Paper stop</dt><dd>{{r.desiredStop===null?'Unknown':'₹'+(r.desiredStop|number:'1.2-2')}}</dd></div>
             <div><dt>Confirmed stop</dt><dd>{{r.confirmedStop===null?'Unknown':'₹'+(r.confirmedStop|number:'1.2-2')}}</dd></div>
             <div><dt>Units · paper / live / stop</dt><dd>{{r.paperUnits??'—'}} / {{r.liveUnits??'—'}} / {{r.confirmedUnits??'—'}}</dd></div></dl>
           <small class="receipt">Stop order: {{r.stopOrderId??'unknown'}} · Confirmed: {{r.confirmedAt?(r.confirmedAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata')+' IST':'no recorded confirmation'}}</small>
-        </article>
+          @if(r.reviewVersion){
+            <div class="review">
+              @if(confirming()===r.reviewVersion){
+                <p>Checked this record against Groww? This clears the reminder, not the position or its stop.</p>
+                <button type="button" (click)="markReviewed(r)" [disabled]="saving()">Confirm review</button>
+                <button type="button" (click)="confirming.set(null)" [disabled]="saving()">Cancel</button>
+              }@else{<button type="button" (click)="confirming.set(r.reviewVersion)" [disabled]="saving()">Mark reviewed</button>}
+            </div>
+          }
+        </article>}
       }@empty{<p>No unsettled system trades in this snapshot.</p>}
+      @if(hasReviewed(s)){
+        <details><summary>Previously reviewed reminders</summary>
+          @for(r of s.rows;track r.id){@if(r.reviewedAt){<article><strong>{{r.symbol}}</strong> · {{r.sessionDate}} · {{r.finding}}<small class="receipt">Reviewed {{r.reviewedAt|date:'dd MMM, HH:mm':'Asia/Kolkata'}} IST</small></article>}}
+        </details>
+      }
     }@else{<p role="status">Reading saved records…</p>}
     <footer>Compares paper stops with saved broker confirmations across all three markets. No account query or order changes.</footer>
   </div>
