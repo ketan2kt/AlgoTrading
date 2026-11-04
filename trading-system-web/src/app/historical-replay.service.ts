@@ -62,6 +62,32 @@ export interface HistoricalNormalPolicyConfiguration {
   bankNiftyStopPercent:number;
   [key:string]:unknown;
 }
+export type ReplayTrial = 'control'|'custom-stop'|'smaller-stop'|'reversal-lock'|'fixed-target';
+
+// Only the proposal is edited. No live settings API is involved.
+export function replayProposal(base:HistoricalNormalPolicyConfiguration,trial:ReplayTrial,customStop:number) {
+  const p=structuredClone(base);
+  if(trial==='control') return p;
+  if(trial==='custom-stop' || trial==='smaller-stop') {
+    const distance=(n:number)=>trial==='custom-stop'?customStop:Number((n*0.8).toFixed(4));
+    p.niftyAdmission.stopLossPercent=distance(base.niftyAdmission.stopLossPercent);
+    p.sensexEntry.stopPercent=distance(base.sensexEntry.stopPercent);
+    p.bankNiftyStopPercent=distance(base.bankNiftyStopPercent);
+  } else {
+    const nifty=p['niftyExits'] as Record<string,unknown>, other=p['marketExits'] as Record<string,unknown>;
+    if(!nifty || !other) throw new Error('Frozen settings do not support this exit experiment.');
+    if(trial==='reversal-lock') {
+      if(nifty['protectProfitableConfirmedReversals']!==true || other['protectProfitableReversals']!==true)
+        throw new Error('This experiment requires existing confirmed-reversal protection for all three markets.');
+      nifty['reversalProfitLockFraction']=0.9; other['reversalLockFraction']=0.9;
+    } else if(trial==='fixed-target') {
+      nifty['targetExtensionEnabled']=false; other['targetExtensionEnabled']=false;
+    } else throw new Error('Unknown replay trial.');
+  }
+  if(trial!=='custom-stop' && JSON.stringify(p)===JSON.stringify(base))
+    throw new Error('This proposal already matches the frozen baseline. No experiment was run.');
+  return p;
+}
 export interface HistoricalNormalReplayReport {
   baselineBuildId:string|null;proposalBuildId:string|null;
   savedRunId:string|null;executionBuildId:string|null;
@@ -99,7 +125,7 @@ export class HistoricalReplayService {
   savedNormalReport(id:string) {
     return this.http.get<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/runs/'+encodeURIComponent(id));
   }
-  compareNormal(from:string,to:string,stopPercent:number,baselineBuildId='',proposalBuildId='',frozenInputRunId='') {
+  compareNormal(from:string,to:string,stopPercent:number,baselineBuildId='',proposalBuildId='',frozenInputRunId='',trial:ReplayTrial='custom-stop') {
     const configuration:Observable<HistoricalNormalPolicyConfiguration|NormalReplaySavedConfiguration>=frozenInputRunId
       ? this.http.get<NormalReplaySavedConfiguration>('/api/research/historical-replay/normal-policy/runs/'+
           encodeURIComponent(frozenInputRunId)+'/configuration')
@@ -108,16 +134,14 @@ export class HistoricalReplayService {
       switchMap(value=>{
         const saved=frozenInputRunId?value as NormalReplaySavedConfiguration:null;
         const baseline=saved?saved.baseline:value as HistoricalNormalPolicyConfiguration;
-        const proposal=structuredClone(baseline);
-        proposal.niftyAdmission.stopLossPercent=stopPercent;
-        proposal.sensexEntry.stopPercent=stopPercent;
-        proposal.bankNiftyStopPercent=stopPercent;
+        const proposal=replayProposal(baseline,trial,stopPercent);
         return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(
           switchMap(csrf=>this.http.post<HistoricalNormalReplayReport>(
             '/api/research/historical-replay/normal-policy/compare',{
               from:saved?.from??from,to:saved?.to??to,baseline,proposal,
               baselineBuildId:baselineBuildId||saved?.baselineBuildId||null,
-              proposalBuildId:proposalBuildId||null,frozenInputRunId:frozenInputRunId||null,
+              proposalBuildId:trial==='custom-stop' ? proposalBuildId||null : baselineBuildId||saved?.baselineBuildId||null,
+              frozenInputRunId:frozenInputRunId||null,
               execution:saved?.execution??{stopPercent:.1,targetPercent:.1,
                 entrySlippagePercent:.0025,exitSlippagePercent:.0025,
                 maximumHoldMinutes:375,minimumMinutesBetweenEntries:0,maximumConcurrentPositions:10,

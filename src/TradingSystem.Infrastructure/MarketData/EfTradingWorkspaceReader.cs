@@ -173,6 +173,7 @@ internal sealed class EfTradingWorkspaceReader(
                 value.ProposedEntry,
                 value.ProposedStopLoss,
                 value.ProposedTarget,
+                value.ReasonsJson,
                 value.Status,
                 Strategy = strategy.Code + " " + version.Version
             })
@@ -278,7 +279,9 @@ internal sealed class EfTradingWorkspaceReader(
                 order?.FillTimeUtc,
                 result?.ClosedAtUtc,
                 excursion.MaximumProfit,
-                excursion.MaximumLoss);
+                excursion.MaximumLoss,
+                StrategyPremiumStop: automation.ActiveSignalId == value.Id ? automation.StopLoss : null,
+                EntryEvidence: ReadEvidence(value.ReasonsJson, "supporting"));
         }).ToArray();
         var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
@@ -305,19 +308,64 @@ internal sealed class EfTradingWorkspaceReader(
                 value.StopLoss, value.Target, Math.Abs(value.EntryPrice - value.StopLoss) * value.Quantity,
                 value.EntryPrice * value.Quantity, [], value.Status, value.CurrentPrice,
                 isActive ? null : value.CurrentPrice, isActive ? null : value.RealisedPnl,
-                isActive ? (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
-                    value.EntryPrice - value.CurrentPrice) * value.Quantity : null,
+                isActive ? value.CurrentPnlAt(value.CurrentPrice) : null,
                 value.OpenedAtUtc, value.ClosedAtUtc,
                 value.MaximumFavourablePnl is { } peak && value.ExcursionSampleCount > 1
                     ? Math.Max(0m, peak) : null,
                 value.MaximumAdversePnl is { } trough && value.ExcursionSampleCount > 1
-                    ? Math.Max(0m, -trough) : null);
+                    ? Math.Max(0m, -trough) : null,
+                StrategyPremiumStop: isActive ? value.StopLoss : null);
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
                 IncludeNiftyMarketPosition(value.Strategy)))
                 .OrderByDescending(value => value.SignalTimeUtc).ToArray()
             : marketOverlays;
+        var activeIds = overlays.Where(x => x.EntryTimeUtc.HasValue && !x.ExitTimeUtc.HasValue && x.FillPrice.HasValue)
+            .Select(x => x.SignalId).ToArray();
+        if (activeIds.Length > 0)
+        {
+            var legacyIds = legacyOverlays.Select(x => x.SignalId).Intersect(activeIds).ToHashSet();
+            var outcomes = legacyIds.Select(id => $"LiveProtectionDesired:{id:N}").ToArray();
+            var stops = outcomes.Length == 0 ? new Dictionary<string, string>() : await dbContext.MarketStrategyAudits.AsNoTracking()
+                .Where(a => a.Market == market && outcomes.Contains(a.Outcome) && a.CandleTimeUtc >= sessionStartUtc)
+                .GroupBy(a => a.Outcome).Select(g => g.OrderByDescending(a => a.CandleTimeUtc).First())
+                .ToDictionaryAsync(a => a.Outcome, a => a.ReasonsJson, cancellationToken);
+            var brokerStops = await dbContext.LiveExecutionIntents.AsNoTracking()
+                .Where(i => activeIds.Contains(i.SourceId) && i.Status == "Protected" && i.FilledQuantity > 0 &&
+                    i.ProtectionId != null && i.ProtectedAtUtc != null && i.LastError == null &&
+                    (i.SourceType == "MARKET_POSITION" || i.SourceType == "NIFTY"))
+                .ToDictionaryAsync(i => new { i.SourceType, i.SourceId }, i => i.StopLoss, cancellationToken);
+            var marketReasons = new Dictionary<Guid, string[]>();
+            if (activeIds.Any(id => !legacyIds.Contains(id)))
+            {
+                var entries = await dbContext.MarketStrategyAudits.AsNoTracking().Where(a =>
+                    a.Market == market && a.Outcome == "PaperPositionOpened" &&
+                    a.CandleTimeUtc >= positionHistoryStartUtc && a.CandleTimeUtc < sessionEndUtc)
+                    .Select(a => a.ReasonsJson).ToListAsync(cancellationToken);
+                foreach (var json in entries)
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                            doc.RootElement.TryGetProperty("positionId", out var id) &&
+                            id.ValueKind == JsonValueKind.String && id.TryGetGuid(out var sourceId) &&
+                            activeIds.Contains(sourceId))
+                            marketReasons[sourceId] = ReadEvidence(json, "reasons");
+                    }
+                    catch (JsonException) { /* Older audit formats need not have structured evidence. */ }
+                }
+            }
+            overlays = overlays.Select(row => !activeIds.Contains(row.SignalId) ? row : row with
+            {
+                StrategyPremiumStop = stops.TryGetValue($"LiveProtectionDesired:{row.SignalId:N}", out var json) &&
+                    AutomaticLiveExecutionService.TryReadDesiredStop(json, out var stop) ? stop : row.StrategyPremiumStop,
+                BrokerAcknowledgedStop = brokerStops.TryGetValue(new { SourceType = legacyIds.Contains(row.SignalId)
+                    ? "NIFTY" : "MARKET_POSITION", SourceId = row.SignalId }, out var acknowledged) ? acknowledged : null,
+                EntryEvidence = marketReasons.GetValueOrDefault(row.SignalId) ?? row.EntryEvidence
+            }).ToArray();
+        }
         if (market != "nifty")
         {
             var todaysPositions = marketPositionRows.Where(value => value.OpenedAtUtc >= sessionStartUtc &&
@@ -411,6 +459,32 @@ internal sealed class EfTradingWorkspaceReader(
                 null, null, null, null, []);
         }).ToArray();
 
+        WorkspaceEngineRead? engineRead = null;
+        if (market == "nifty")
+        {
+            var latest = legacyEvaluations.OrderByDescending(e => e.CandleTimeUtc)
+                .ThenByDescending(e => e.Outcome == "PaperPositionOpened").ThenBy(e => e.EvaluationId).FirstOrDefault();
+            if (latest is not null)
+            {
+                var source = latest.SignalId is {} id ? signalRows.FirstOrDefault(s => s.Id == id) : null;
+                var reason = latest.FailedConditions.Count > 0 ? latest.FailedConditions[0] :
+                    ReadEvidence(source?.ReasonsJson, "supporting").FirstOrDefault();
+                engineRead = new(latest.CandleTimeUtc, latest.Outcome, reason,
+                    ReadIndexConfirmation(source?.ReasonsJson));
+            }
+        }
+        else
+        {
+            var latest = await dbContext.MarketStrategyAudits.AsNoTracking().Where(a =>
+                    a.Market == market && a.CandleTimeUtc >= sessionStartUtc && a.CandleTimeUtc < sessionEndUtc &&
+                    (a.Outcome.EndsWith("Rejected") || a.Outcome == "NoSignal" || a.Outcome == "PaperPositionOpened" ||
+                     a.Outcome == "DataIncomplete" || a.Outcome == "InstrumentUnavailable" || a.Outcome == "QuoteUnavailable"))
+                .OrderByDescending(a => a.CandleTimeUtc).ThenByDescending(a => a.Outcome == "PaperPositionOpened")
+                .ThenBy(a => a.Id).Select(a => new { a.CandleTimeUtc, a.Outcome, a.ReasonsJson }).FirstOrDefaultAsync(cancellationToken);
+            if (latest is not null) engineRead = new(latest.CandleTimeUtc, latest.Outcome,
+                ReadEvidence(latest.ReasonsJson, "reasons").FirstOrDefault(), ReadIndexConfirmation(latest.ReasonsJson));
+        }
+
         var message = !options.Enabled
             ? $"Live {definition.DisplayName} ingestion is disabled by server configuration."
             : state.Message;
@@ -446,7 +520,7 @@ internal sealed class EfTradingWorkspaceReader(
             futuresVolume,
             research,
             operationalReports,
-            definition.Code);
+            definition.Code, engineRead);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,
@@ -591,6 +665,34 @@ internal sealed class EfTradingWorkspaceReader(
             target,
             riskAmount,
             exposure);
+    }
+
+    private static decimal? ReadIndexConfirmation(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("indexConfirmationLevel", out var level) &&
+                level.ValueKind == JsonValueKind.Number && level.TryGetDecimal(out var price) && price > 0 ? price : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static string[] ReadEvidence(string? json, string field)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && !root.TryGetProperty(field, out root)) return [];
+            return root.ValueKind == JsonValueKind.Array ? root.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(x.GetString()))
+                .Select(x => x.GetString()!).ToArray() : [];
+        }
+        catch (JsonException) { return []; }
     }
 
     internal static string[] ParseRejectionReasons(string? reasonsJson)

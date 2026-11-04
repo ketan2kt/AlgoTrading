@@ -1,7 +1,23 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { HistoricalReplayService } from './historical-replay.service';
+import { HistoricalReplayService, replayProposal } from './historical-replay.service';
+
+describe('three-market replay experiments',()=>{
+  const base={niftyAdmission:{stopLossPercent:10},sensexEntry:{stopPercent:12},bankNiftyStopPercent:8,
+    niftyExits:{protectProfitableConfirmedReversals:true,reversalProfitLockFraction:.8,targetExtensionEnabled:true},
+    marketExits:{protectProfitableReversals:true,reversalLockFraction:.8,targetExtensionEnabled:true}};
+  it('isolates each proposal from baseline and other settings',()=>{
+    expect(replayProposal(base,'control',4)).toEqual(base);
+    expect(replayProposal(base,'smaller-stop',4)).toEqual({...base,niftyAdmission:{stopLossPercent:8},
+      sensexEntry:{stopPercent:9.6},bankNiftyStopPercent:6.4});
+    expect(replayProposal(base,'reversal-lock',4)).toEqual({...base,
+      niftyExits:{...base.niftyExits,reversalProfitLockFraction:.9},marketExits:{...base.marketExits,reversalLockFraction:.9}});
+    expect(replayProposal(base,'fixed-target',4)).toEqual({...base,
+      niftyExits:{...base.niftyExits,targetExtensionEnabled:false},marketExits:{...base.marketExits,targetExtensionEnabled:false}});
+    expect(base.niftyExits.targetExtensionEnabled).toBe(true);
+  });
+});
 
 describe('HistoricalReplayService', () => {
   beforeEach(() => TestBed.configureTestingModule({

@@ -6,6 +6,7 @@ import {
   OnChanges,
   OnDestroy,
   SimpleChanges,
+  signal,
   ViewChild,
 } from '@angular/core';
 import {
@@ -34,37 +35,21 @@ import {
 } from './chart-candles';
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
-import { chartLevels, ema, entryExplanation, sessionVwap } from './chart-overlays';
-import { buildDecisionMap, DecisionMapView } from './decision-map';
+import { chartLevels, ema, sessionVwap } from './chart-overlays';
+import { activeFills } from './chart-active-fills';
 
 @Component({
   selector: 'app-nifty-chart',
   standalone: true,
   template: `
     <div class="chart-shell">
-      @if (decisionMap; as map) {
-        <details class="decision-map" aria-label="Live decision map">
-          <summary>
-            <span>MARKET READ</span>
-            <strong>{{map.regime}} · {{map.bias}} · {{map.setup}}</strong>
-            <small>{{map.location}} · {{map.remainingRoom}}</small>
-          </summary>
-          <div class="decision-map__grid">
-            <div><span>REGIME</span><strong>{{map.regime}}</strong></div>
-            <div><span>BIAS</span><strong>{{map.bias}}</strong></div>
-            <div><span>SETUP</span><strong>{{map.setup}}</strong></div>
-            <div><span>LOCATION</span><strong>{{map.location}}</strong></div>
-            <div><span>ROOM</span><strong>{{map.remainingRoom}}</strong></div>
-            <div><span>VOLUME</span><strong>{{map.volume}}</strong></div>
-          </div>
-          <div class="decision-map__frames">
-            @for (frame of map.timeframes; track frame.label) {
-              <small [attr.data-direction]="frame.direction">{{frame.label}} {{frame.direction}}</small>
-            }
-          </div>
-          <p>{{map.reasons[0]}}</p>
-        </details>
-      }
+      <div class="engine-read"><b>Engine decision</b>
+        @if (snapshot?.engineRead; as d) {
+          <span>{{timeIst(d.candleTimeUtc)}} IST · {{humanize(d.outcome)}}</span>
+          @if (d.reason) { <span>{{d.reason}}</span> }
+          @if (d.indexConfirmationLevel != null) { <span>Index confirmation {{d.indexConfirmationLevel.toFixed(2)}}</span> }
+        } @else { <span>No recorded entry decision for this session yet.</span> }
+      </div>
       <div class="chart-stage">
         <div class="overlay-controls" aria-label="Chart overlays">
           <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
@@ -75,7 +60,7 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
-        <div class="volume-label">{{ snapshot?.instrument }} VOLUME</div>
+        <div class="volume-label">FUTURES VOLUME</div>
         @if (!snapshot?.candles?.length) {
           <div class="chart-empty">
             <strong>Waiting for live {{ snapshot?.instrument || 'market' }} candles</strong>
@@ -83,6 +68,13 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
           </div>
         }
       </div>
+      @if (fills().length) {
+        <details class="fill-key">
+          <summary>Active fills ({{fills().length}}) · select a candle for details</summary>
+          @for (fill of fills(); track fill.trade.signalId) { <p>{{fillDetail(fill)}}</p> }
+        </details>
+        @for (fill of selectedFills; track fill.trade.signalId) { <p class="fill-readout">{{fillDetail(fill)}}</p> }
+      }
     </div>
   `,
   styles: [
@@ -125,28 +117,9 @@ import { buildDecisionMap, DecisionMapView } from './decision-map';
       .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#e6f2e2ee; color:#315b43; font-size:.7rem; }
       .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
-      .decision-map { margin:0; border:0; border-bottom:1px solid #c6dac5; background:#edf6eb; }
-      .decision-map summary { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:10px; align-items:center; min-height:34px; padding:5px 10px; cursor:pointer; list-style:none; }
-      .decision-map summary::-webkit-details-marker { display:none; }
-      .decision-map summary::after { content:'Details'; color:#34734b; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; }
-      .decision-map[open] summary::after { content:'Hide'; }
-      .decision-map summary span { color:#557460; font-size:.62rem; letter-spacing:.11em; }
-      .decision-map summary strong { overflow:hidden; color:#173f2d; font-size:.76rem; text-overflow:ellipsis; white-space:nowrap; }
-      .decision-map summary small { overflow:hidden; color:#557460; font-size:.7rem; text-overflow:ellipsis; white-space:nowrap; }
-      .decision-map__grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; padding:2px 8px 5px; }
-      .decision-map__grid div { min-width:0; padding:3px 5px; }
-      .decision-map span { display:block; color:#557460; font-size:.62rem; letter-spacing:.09em; }
-      .decision-map strong { display:block; overflow:hidden; color:#173f2d; font-size:.76rem; text-overflow:ellipsis; white-space:nowrap; }
-      .decision-map__frames { display:flex; gap:5px; padding:0 13px 5px; }
-      .decision-map__frames small { padding:2px 5px; border-radius:4px; background:#dcebd9; color:#315b43; font-size:.66rem; }
-      .decision-map__frames small[data-direction='Bullish'] { color:#167143; }
-      .decision-map__frames small[data-direction='Bearish'] { color:#a9363e; }
-      .decision-map p { margin:0; padding:2px 13px 7px; color:#557460; font-size:.7rem; }
-      @media (max-width: 900px) {
-        .decision-map summary { grid-template-columns:auto minmax(120px,1fr); }
-        .decision-map summary small { display:none; }
-        .decision-map__grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-      }
+      .engine-read,.fill-key,.fill-readout { margin:0; padding:4px 9px; border-bottom:1px solid #aac5ac; background:#edf6eb; color:#254c37; font-size:.75rem; }
+      .engine-read { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
+      .fill-key summary { cursor:pointer; } .fill-key p { margin:3px 0; }
     `,
   ],
 })
@@ -168,7 +141,18 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private renderedInstrument = '';
   private renderedSessionDate: string | null = null;
   protected rangeText = '';
-  protected decisionMap: DecisionMapView | null = null;
+  protected readonly fills = signal<ReturnType<typeof activeFills>>([]);
+  private readonly hovered = signal<number|null>(null);
+  private readonly pinned = signal<number|null>(null);
+  private confirmationSeries: ISeriesApi<'Line'> | null = null;
+  private readonly clock = new Intl.DateTimeFormat('en-IN',{ timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false });
+  protected timeIst(iso:string) { return this.clock.format(Date.parse(iso)); }
+  protected humanize(value:string) { return value.replace(/([a-z])([A-Z])/g,'$1 $2'); }
+  protected get selectedFills() { return this.fills().filter(f=>f.time===(this.hovered() ?? this.pinned())); }
+  protected fillDetail(f:ReturnType<typeof activeFills>[number]) {
+    return [f.trade.executionInstrument, this.timeIst(f.trade.entryTimeUtc!)+' IST', 'Entry ₹'+f.trade.fillPrice!.toFixed(2),
+      f.trade.entryEvidence?.join(' · ') || 'Entry reason not recorded'].join(' · ');
+  }
   protected visibility = this.readVisibility();
 
   ngAfterViewInit(): void {
@@ -199,6 +183,10 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       wickUpColor: '#25834d',
       wickDownColor: '#dc5961',
     });
+    this.chart.subscribeCrosshairMove(e=>this.hovered.set(typeof e.time==='number'?e.time:null));
+    this.chart.subscribeClick(e=>this.pinned.set(typeof e.time==='number' && this.fills().some(f=>f.time===e.time)?e.time:null));
+    this.confirmationSeries = this.chart.addSeries(LineSeries,{color:'#895d19',lineStyle:LineStyle.Dashed,
+      lineWidth:2,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,pointMarkersVisible:true});
     this.series.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.24 } });
     this.volumeSeries = this.chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
@@ -228,11 +216,12 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   private render(): void {
     if (!this.series || !this.chart || !this.snapshot) return;
-    this.decisionMap = buildDecisionMap(this.snapshot);
+
     const instrumentIdentity = `${this.snapshot.exchange}:${this.snapshot.instrument}`;
     if (instrumentIdentity !== this.renderedInstrument) {
       this.hasFittedContent = false;
       this.renderedInstrument = instrumentIdentity;
+      this.pinned.set(null); this.hovered.set(null);
       this.renderedSessionDate = null;
     }
     const displayCandles = aggregateCandles(this.snapshot.candles, this.timeframeMinutes);
@@ -283,6 +272,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.priceLines = [];
     const levels=chartLevels(this.snapshot.candles);
     this.rangeText=levels ? `Range ${levels.dayRange.toFixed(2)} · ${levels.dayRangePercent.toFixed(2)}%` : '';
+    if(this.visibility.openingRange && levels?.openingRangeHigh==null) this.rangeText += ' · Opening range unavailable (09:15–09:30 IST)';
     const levelLine=(price:number|null,title:string,color:string,style:LineStyle=LineStyle.Dashed):void=>{
       if(price==null)return;
       this.priceLines.push(this.series!.createPriceLine({price,color,lineWidth:1,lineStyle:style,title}));
@@ -291,7 +281,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     if(levels&&this.visibility.previous){levelLine(levels.previousHigh,'PREV HIGH','#679476');levelLine(levels.previousLow,'PREV LOW','#679476');levelLine(levels.previousClose,'PREV CLOSE','#879c89',LineStyle.Dotted);}
     if(levels&&this.visibility.openingRange){levelLine(levels.openingRangeHigh,'OR HIGH','#ae8b35');levelLine(levels.openingRangeLow,'OR LOW','#ae8b35');}
     const overlay = this.latestOverlay();
-    if (overlay) {
+    if (overlay && !(overlay.entry===overlay.target && overlay.entry===overlay.stopLoss)) {
       const entry = overlay.entry;
       const lineTitles = chartPriceLineTitles(this.snapshot, overlay.direction);
       this.priceLines.push(
@@ -315,36 +305,20 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
         }),
       );
     }
-    const activeTrades = this.snapshot.overlays.filter(value => this.isActiveOptionTrade(value));
-    const activeTradeIds = new Set(activeTrades.map(value => value.signalId));
-    const tradeMarkers = activeTrades.map(value => ({
-      time: Math.floor(new Date(value.signalTimeUtc).getTime() / 1000) as Time,
-      position: (value.direction === 'Buy' ? 'belowBar' : 'aboveBar') as 'belowBar'|'aboveBar',
-      color: '#f2c94c',
-      shape: (value.direction === 'Buy' ? 'arrowUp' : 'arrowDown') as 'arrowUp'|'arrowDown',
-      text: entryExplanation(value,this.snapshot!.evaluations),
-    }));
-    const acceptedMarkers = this.snapshot.evaluations.filter(value =>
-      value.outcome === 'PaperPositionOpened' && value.signalId !== null &&
-      activeTradeIds.has(value.signalId)).slice(0,5).map(value => ({
-      time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
-      position: 'aboveBar' as const,
-      color: '#28d17c',
-      shape: 'circle' as const,
-      text: 'ENTRY ACCEPTED',
-    }));
-    const latestRejection = this.snapshot.evaluations.filter(value =>
-      value.outcome.includes('Rejected')).slice(0,1).map(value => ({
-      time: Math.floor(new Date(value.candleTimeUtc).getTime() / 1000) as Time,
-      position: 'aboveBar' as const,
-      color: '#83998e',
-      shape: 'circle' as const,
-      text: 'LATEST SETUP REJECTED',
-    }));
-    const visibleTimes = new Set(candles.map(value => value.time as number));
-    const markers = [...latestRejection, ...acceptedMarkers, ...tradeMarkers]
-      .filter(value => visibleTimes.has(value.time as number))
-      .sort((left,right)=>(left.time as number)-(right.time as number));
+    const decision = this.snapshot.engineRead;
+    const when = decision ? Date.parse(decision.candleTimeUtc) : NaN;
+    const index = displayCandles.findIndex(c=>{const start=Date.parse(c.openTimeUtc);return start<=when && when<start+c.intervalSeconds*1000;});
+    const price = decision?.indexConfirmationLevel;
+    const segment = index>=0 && price!=null && price>0 ? displayCandles.slice(index,index+2)
+      .filter(c=>Date.parse(c.openTimeUtc)-Date.parse(displayCandles[index].openTimeUtc)<=displayCandles[index].intervalSeconds*1000)
+      .map(c=>({time:(Date.parse(c.openTimeUtc)/1000) as Time,value:price})) : [];
+    this.confirmationSeries?.setData(segment);
+    const fills = activeFills(this.snapshot.overlays, displayCandles);
+    this.fills.set(fills);
+    const markers = fills.map(f=>({time:f.time as Time,
+      position:f.side==='CE'?'belowBar' as const:'aboveBar' as const,
+      color:f.side==='CE'?'#167143':'#a9363e',shape:f.side==='CE'?'arrowUp' as const:'arrowDown' as const,
+      text:f.side}));
     if (this.markerApi) this.markerApi.setMarkers(markers);
     else this.markerApi = createSeriesMarkers(this.series, markers);
     if (candles.length && (

@@ -1,14 +1,15 @@
-import { WorkspaceCandle, WorkspaceStrategyEvaluation, WorkspaceTradeOverlay, WorkspaceVolumeBar } from './trading-workspace';
+import { WorkspaceCandle, WorkspaceVolumeBar } from './trading-workspace';
 
 export interface ChartLevelSnapshot {
   sessionKey:string; dayHigh:number; dayLow:number; dayRange:number; dayRangePercent:number;
   previousHigh:number|null; previousLow:number|null; previousClose:number|null;
-  openingRangeHigh:number; openingRangeLow:number;
+  openingRangeHigh:number|null; openingRangeLow:number|null;
 }
 export interface IndicatorPoint { openTimeUtc:string; value:number; }
 
+const sessionDate = new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'});
 export function sessionKey(openTimeUtc:string):string {
-  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(openTimeUtc));
+  const parts=sessionDate.formatToParts(new Date(openTimeUtc));
   const part=(type:string)=>parts.find(value=>value.type===type)?.value || '';
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
@@ -21,8 +22,15 @@ export function chartLevels(candles:WorkspaceCandle[],openingRangeMinutes=15):Ch
   const current=ordered.filter(value=>sessionKey(value.openTimeUtc)===currentKey);
   const previousKey=keys.length>1 ? keys.at(-2)! : null;
   const previous=previousKey ? ordered.filter(value=>sessionKey(value.openTimeUtc)===previousKey) : [];
-  const firstTime=Date.parse(current[0].openTimeUtc);
-  const opening=current.filter(value=>Date.parse(value.openTimeUtc)<firstTime+openingRangeMinutes*60000);
+  const start=Date.parse(currentKey+'T09:15:00+05:30');
+  const end=start+openingRangeMinutes*60000;
+  const opening=current.filter(c=>Date.parse(c.openTimeUtc)>=start && Date.parse(c.openTimeUtc)<end);
+  let cursor=start;
+  const complete=opening.every(c=>{
+    if(!c.isClosed || c.intervalSeconds<=0 || Date.parse(c.openTimeUtc)!==cursor)return false;
+    cursor+=c.intervalSeconds*1000;
+    return cursor<=end;
+  }) && cursor===end;
   const dayHigh=Math.max(...current.map(value=>value.high));
   const dayLow=Math.min(...current.map(value=>value.low));
   return {sessionKey:currentKey,dayHigh,dayLow,dayRange:dayHigh-dayLow,
@@ -30,7 +38,7 @@ export function chartLevels(candles:WorkspaceCandle[],openingRangeMinutes=15):Ch
     previousHigh:previous.length ? Math.max(...previous.map(value=>value.high)) : null,
     previousLow:previous.length ? Math.min(...previous.map(value=>value.low)) : null,
     previousClose:previous.length ? previous.at(-1)!.close : null,
-    openingRangeHigh:Math.max(...opening.map(value=>value.high)),openingRangeLow:Math.min(...opening.map(value=>value.low))};
+    openingRangeHigh:complete?Math.max(...opening.map(value=>value.high)):null,openingRangeLow:complete?Math.min(...opening.map(value=>value.low)):null};
 }
 
 export function ema(candles:WorkspaceCandle[],period:number):IndicatorPoint[] {
@@ -45,13 +53,4 @@ export function sessionVwap(candles:WorkspaceCandle[],volumeBars:WorkspaceVolume
   return candles.map(candle=>{const next=sessionKey(candle.openTimeUtc);if(next!==key){key=next;priceVolume=0;totalVolume=0;}
     const volume=volumes.get(Date.parse(candle.openTimeUtc))??candle.volume;if(volume>0){priceVolume+=((candle.high+candle.low+candle.close)/3)*volume;totalVolume+=volume;}
     return {openTimeUtc:candle.openTimeUtc,value:totalVolume>0?priceVolume/totalVolume:Number.NaN};}).filter(value=>Number.isFinite(value.value));
-}
-
-export function entryExplanation(overlay:WorkspaceTradeOverlay,evaluations:WorkspaceStrategyEvaluation[]):string {
-  const evaluation=evaluations.find(value=>value.signalId===overlay.signalId);if(!evaluation)return `${overlay.strategy} · ${overlay.status}`;
-  const bullish=overlay.direction==='Buy';const reasons:string[]=[];
-  if(bullish?evaluation.currentPrice>evaluation.vwap:evaluation.currentPrice<evaluation.vwap)reasons.push(bullish?'above VWAP':'below VWAP');
-  if(bullish?evaluation.fastEma>evaluation.slowEma:evaluation.fastEma<evaluation.slowEma)reasons.push(bullish?'EMA9 > EMA21':'EMA9 < EMA21');
-  if(bullish?evaluation.currentPrice>evaluation.openingRangeHigh:evaluation.currentPrice<evaluation.openingRangeLow)reasons.push('OR breakout');
-  return reasons.length?`${overlay.strategy} · ${reasons.join(' + ')}`:`${overlay.strategy} · ${overlay.status}`;
 }

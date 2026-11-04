@@ -55,6 +55,7 @@ internal sealed class EfPaperLifecycleAuditStore(
         var reasons = JsonSerializer.Serialize(new
         {
             supporting = signal.SupportingReasons,
+            indexConfirmationLevel = signal.IndexConfirmationLevel,
             invalidating = signal.InvalidatingReasons,
             entryType = signal.EntryType,
             rewardToRiskRatio = signal.RewardToRiskRatio,

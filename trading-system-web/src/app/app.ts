@@ -361,6 +361,17 @@ export class App implements OnInit, OnDestroy {
     return view.overlays.filter((overlay) => overlay.fillPrice !== null);
   }
 
+  protected openDeskTrades(view: TradingWorkspaceSnapshot): WorkspaceTradeOverlay[] {
+    return view.overlays.filter(trade => trade.fillPrice != null && trade.exitTimeUtc == null &&
+      (trade.lifecycleStatus.startsWith('Active') || trade.lifecycleStatus === 'Entry filled'));
+  }
+
+  protected showDeskTrade(signalId: string): void {
+    const row = document.getElementById('position-' + signalId);
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: 'nearest' });
+  }
+
   protected requestTradeExit(overlay: WorkspaceTradeOverlay): void {
     if (this.selectedMarket === null || !overlay.lifecycleStatus.startsWith('Active')) return;
     const market = this.selectedMarket;

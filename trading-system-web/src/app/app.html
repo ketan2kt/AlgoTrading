@@ -59,9 +59,9 @@
           <span><strong>Sarthi</strong><small>Trading desk</small></span>
         </div>
         <div class="market-tab-group">
-        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'bank-nifty'" [class.market-tab--alert]="marketTabAlert('bank-nifty')" (click)="openMarket('bank-nifty')">Bank Nifty @if (marketTabAlert('bank-nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [attr.aria-current]="selectedMarket === 'nifty' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'bank-nifty'" [attr.aria-current]="selectedMarket === 'bank-nifty' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('bank-nifty')" (click)="openMarket('bank-nifty')">Bank Nifty @if (marketTabAlert('bank-nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [attr.aria-current]="selectedMarket === 'sensex' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
@@ -243,6 +243,23 @@
         }
         @if (workspaceError) { <div class="feed-notice feed-notice--warning" role="alert">{{ workspaceError }}</div> }
 
+        @let openTrades = openDeskTrades(view);
+        @if (openTrades.length) {
+          <section class="desk-open-trades" aria-label="Open positions">
+            <h2>Open positions <span>{{openTrades.length}}</span></h2>
+            @for (trade of openTrades; track trade.signalId) {
+              <div class="desk-open-trade">
+                <button type="button" (click)="showDeskTrade(trade.signalId)" title="View full trade details">{{compactOptionName(trade)}}</button>
+                <small>{{trade.quantity}} units · Entry ₹{{trade.fillPrice | number:'1.2-2'}}</small>
+                <small>{{trade.lifecycleStatus}}</small>
+                <small>Peak observed: {{trade.maximumFavourablePnl != null ? '₹' + (trade.maximumFavourablePnl | number:'1.2-2') : 'Not recorded'}}</small>
+                <small>Strategy stop: {{trade.strategyPremiumStop != null ? '₹' + (trade.strategyPremiumStop | number:'1.2-2') : 'Not recorded'}}</small>
+                @if (trade.brokerAcknowledgedStop != null) { <small>Last broker-acknowledged stop: ₹{{trade.brokerAcknowledgedStop | number:'1.2-2'}}</small> }
+                <strong [class.good]="(trade.unrealisedPnl ?? 0) > 0" [class.bad]="(trade.unrealisedPnl ?? 0) < 0">Live P&amp;L: {{trade.unrealisedPnl != null ? '₹' + (trade.unrealisedPnl | number:'1.2-2') : 'Awaiting quote'}}</strong>
+              </div>
+            }
+          </section>
+        }
         <section class="chart-panel workspace-priority-chart">
           <div class="panel-heading desk-chart-toolbar">
             <div><span>{{ view.instrument }}</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
@@ -288,7 +305,7 @@
             </div>
             @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
               @for (overlay of executedTrades(view); track overlay.signalId) {
-                <div class="signal-row">
+                <div class="signal-row" [id]="'position-' + overlay.signalId" tabindex="-1">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
                   <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
                   @if (selectedMarket === 'natural-gas') {

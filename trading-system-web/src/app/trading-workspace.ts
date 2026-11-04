@@ -48,10 +48,14 @@ export interface WorkspaceTradeOverlay {
   exitTimeUtc: string | null;
   maximumFavourablePnl: number | null;
   maximumAdverseLoss: number | null;
+  strategyPremiumStop?: number | null;
+  brokerAcknowledgedStop?: number | null;
+  entryEvidence?: string[] | null;
 }
 
 export interface TradingWorkspaceSnapshot {
   marketCode?: string;
+  engineRead?: { candleTimeUtc:string; outcome:string; reason:string|null; indexConfirmationLevel?:number|null } | null;
   instrument: string;
   exchange: string;
   timeframe: string;
