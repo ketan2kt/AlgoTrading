@@ -192,7 +192,17 @@ internal sealed class OperationalAutomationService(
                 value.Source == "StrategyEvaluation");
             if (source.Market.Equals("NIFTY", StringComparison.OrdinalIgnoreCase))
                 metrics["regularEvaluations"] = regularEvaluationCount.ToString(CultureInfo.InvariantCulture);
-            if (source.Summary.DecisionCount == 0)
+            var evidenceGap = source.TelemetryWarnings.Any(value =>
+                value.StartsWith("Missing normal-engine evidence", StringComparison.Ordinal) ||
+                value.StartsWith("Regular-engine evidence gap", StringComparison.Ordinal));
+            if (evidenceGap)
+            {
+                status = "Critical";
+                headline = "Regular-engine analysis evidence is missing; specialty trades do not establish engine health.";
+                findings.AddRange(source.TelemetryWarnings);
+                actionRequired = true;
+            }
+            else if (source.Summary.DecisionCount == 0)
             {
                 status = "Critical";
                 headline = "No strategy decisions have been recorded.";
@@ -222,11 +232,14 @@ internal sealed class OperationalAutomationService(
         }
         else if (slot.Name == "DailyReport")
         {
-            status = source.Summary.DecisionCount > 0 ? "Healthy" : "Attention";
+            var evidenceGap = source.TelemetryWarnings.Any(value =>
+                value.StartsWith("Missing normal-engine evidence", StringComparison.Ordinal) ||
+                value.StartsWith("Regular-engine evidence gap", StringComparison.Ordinal));
+            status = source.Summary.DecisionCount > 0 && !evidenceGap ? "Healthy" : "Attention";
             headline = $"{source.Summary.CompletedTradeCount} completed trade(s), " +
                        $"{source.Summary.Wins} win(s), {source.Summary.Losses} loss(es), " +
                        $"net {source.Summary.NetRealisedPnl:0.00}.";
-            actionRequired = source.Summary.DecisionCount == 0;
+            actionRequired = source.Summary.DecisionCount == 0 || evidenceGap;
             findings.AddRange(source.TelemetryWarnings);
         }
         else
@@ -241,7 +254,9 @@ internal sealed class OperationalAutomationService(
             findings.AddRange(source.TelemetryWarnings.Where(value =>
                 !value.StartsWith("No paper trade", StringComparison.OrdinalIgnoreCase)));
             actionRequired = missingPath > 0 || unlinked > 0 || source.Summary.DecisionCount == 0 ||
-                             source.Summary.LastCandleAtUtc is null;
+                             source.Summary.LastCandleAtUtc is null || source.TelemetryWarnings.Any(value =>
+                                 value.StartsWith("Missing normal-engine evidence", StringComparison.Ordinal) ||
+                                 value.StartsWith("Regular-engine evidence gap", StringComparison.Ordinal));
             status = actionRequired ? "Attention" : "Healthy";
             headline = actionRequired
                 ? "The post-market telemetry audit found incomplete evidence."

@@ -4,6 +4,8 @@ public sealed class IntradayExpansionPairOptions
 {
     public const string SectionName = "PaperTrading:IntradayExpansionPair";
     public bool Enabled { get; init; } = true;
+    // A market-specific hold must not disable management of already-open legs.
+    public bool NiftyEntryEnabled { get; init; }
     public int ScanIntervalSeconds { get; init; } = 30;
     public string EntryWindowStart { get; init; } = "10:10";
     public string EntryCutoff { get; init; } = "14:30";
@@ -22,4 +24,8 @@ public sealed class IntradayExpansionPairOptions
     public int MaximumPairsPerDay { get; init; } = 2;
     public int CooldownMinutes { get; init; } = 60;
     public int NearbyContractsPerSide { get; init; } = 10;
+
+    public bool AllowsNewEntry(string marketCode) =>
+        !string.Equals(marketCode, "nifty", StringComparison.OrdinalIgnoreCase) ||
+        NiftyEntryEnabled;
 }

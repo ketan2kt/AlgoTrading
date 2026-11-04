@@ -261,6 +261,28 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         if (decisions.Count > MaximumDecisions)
             warnings.Add($"Decision details were limited to the latest {MaximumDecisions}; summary counts cover the full day.");
 
+        var engineCoverage = await EfEngineEvidenceReader.Query(db, tradingDate, market)
+            .GroupBy(value => value.EventType)
+            .Select(group => new EngineEvidenceCoverage(group.Key, group.Count(),
+                group.Min(value => value.OccurredAtUtc), group.Max(value => value.OccurredAtUtc)))
+            .ToListAsync(cancellationToken);
+        foreach (var marketCode in selectedMarketCodes)
+        {
+            if (marketCode == "bankex") continue; // Legacy positions, no new entry engine.
+            var symbol = marketCode.Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
+            var latestRegular = evaluations.Where(value =>
+                    instrumentMarkets.GetValueOrDefault(value.InstrumentId) == symbol)
+                .Select(value => (DateTimeOffset?)value.CandleTimeUtc)
+                .Concat(audits.Where(value => value.Market.Equals(marketCode, StringComparison.OrdinalIgnoreCase) &&
+                    (value.Outcome == "NoSignal" || value.Outcome == "PaperPositionOpened" ||
+                     value.Outcome == "DecisionSnapshot:v2"))
+                    .Select(value => (DateTimeOffset?)value.CandleTimeUtc)).DefaultIfEmpty().Max();
+            var coverageWarning = TradingEvidenceCoveragePolicy.Warning(marketCode, tradingDate,
+                latestRegular, engineCoverage.FirstOrDefault(value =>
+                    value.EngineKey == $"EngineEvidence.{marketCode}.regular")?.LastAtUtc, lastCandleAtUtc);
+            if (coverageWarning is not null) warnings.Add(coverageWarning);
+        }
+
         var outcomeCounts = decisions
             .GroupBy(value => value.Outcome, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(value => value.Count())
@@ -294,6 +316,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             events,
             warnings)
         {
+            EngineEvidenceCoverage = engineCoverage,
             ExpansionPairObservations = audits
                 .Where(value => value.Outcome == "ExpansionPair:Observation")
                 .Select(value => new ExpansionPairObservation(value.Market.ToUpperInvariant(),

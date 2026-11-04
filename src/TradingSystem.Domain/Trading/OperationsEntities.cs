@@ -88,12 +88,14 @@ public sealed class SystemEvent : Entity, IAppendOnlyEntity
         string severity,
         string eventType,
         string message,
-        DateTimeOffset occurredAtUtc) : base(id)
+        DateTimeOffset occurredAtUtc,
+        string? detailsJson = null) : base(id)
     {
         Severity = severity;
         EventType = eventType;
         Message = message;
         OccurredAtUtc = occurredAtUtc.ToUniversalTime();
+        DetailsJson = detailsJson;
     }
 
     public string Severity { get; private init; }

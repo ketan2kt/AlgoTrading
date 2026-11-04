@@ -15,6 +15,7 @@ using TradingSystem.Application.Strategies;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Infrastructure.Diagnostics;
 using TradingSystem.Infrastructure.Persistence;
 
 namespace TradingSystem.Infrastructure.Execution;
@@ -27,10 +28,13 @@ internal sealed partial class AutomatedPaperTradingService(
     IOptions<AutomatedPaperTradingOptions> options,
     IOptions<MarketDataOptions> marketOptions,
     TimeProvider timeProvider,
+    TradingEngineEvidenceRecorder evidenceRecorder,
     ILogger<AutomatedPaperTradingService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private DateTimeOffset? lastEvaluatedCandleUtc;
+    private string cyclePhase = "Startup";
+    private Dictionary<string, object?> cycleInputs = [];
     private readonly Dictionary<Guid, decimal> favourablePriceBySignal = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -38,6 +42,7 @@ internal sealed partial class AutomatedPaperTradingService(
         if (!options.Value.Enabled)
         {
             state.Record("Disabled", false, "Automated paper trading is disabled by server configuration.");
+            await RecordCycleEvidenceAsync(stoppingToken);
             return;
         }
 
@@ -56,21 +61,52 @@ internal sealed partial class AutomatedPaperTradingService(
             }
             catch (Exception exception)
             {
-                state.Record("Faulted", false, "Automation cycle failed; new entries are blocked.");
+                var cause = exception.GetBaseException();
+                var failureCode = cause is PostgresException postgres
+                    ? $"{cause.GetType().Name}/{postgres.SqlState}"
+                    : cause.GetType().Name;
+                state.Record("Faulted", false,
+                    $"Automation cycle failed ({failureCode}); new entries are blocked.");
                 LogCycleFailed(logger, exception);
             }
+
+            await RecordCycleEvidenceAsync(stoppingToken);
 
             await Task.Delay(TimeSpan.FromSeconds(options.Value.EvaluationIntervalSeconds), stoppingToken);
         }
     }
 
+    private async Task RecordCycleEvidenceAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = state.GetCurrent();
+        var local = TimeZoneInfo.ConvertTime(snapshot.ObservedAtUtc, IndiaTimeZone);
+        if (snapshot.Status != "Disabled" &&
+            (local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ||
+             TimeOnly.FromDateTime(local.DateTime) < new TimeOnly(9, 15) ||
+             TimeOnly.FromDateTime(local.DateTime) > new TimeOnly(15, 15))) return;
+        await evidenceRecorder.RecordAsync("nifty", "regular", cyclePhase,
+            snapshot.Status, snapshot.Message, snapshot.ObservedAtUtc,
+            new { inputs = cycleInputs, automation = snapshot }, cancellationToken);
+    }
+
     private async Task RunCycleAsync(CancellationToken cancellationToken)
     {
+        cyclePhase = "LoadConfigurationAndInstrument";
+        cycleInputs = [];
+        cycleInputs["configuration"] = new
+        {
+            options.Value.Enabled, options.Value.MinimumSignalCandles,
+            options.Value.MinimumFuturesConfirmationCandles,
+            options.Value.EntryWindowStart, options.Value.EntryCutoff,
+            marketOptions.Value.CandleIntervalSeconds,
+            marketOptions.Value.MaximumAgeSeconds
+        };
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
         var configuredLots = (await scope.ServiceProvider
             .GetRequiredService<ITradingLotConfigurationService>()
             .GetAsync(cancellationToken)).NiftyLots;
+        cycleInputs["configuredLots"] = configuredLots;
         var live = scope.ServiceProvider.GetRequiredService<IOptions<LiveNiftyOptions>>().Value;
         var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
             value.Exchange == live.Exchange && value.TradingSymbol == live.TradingSymbol &&
@@ -80,6 +116,8 @@ internal sealed partial class AutomatedPaperTradingService(
             state.Record("Blocked", false, "Nifty instrument is not synchronised.");
             return;
         }
+        cycleInputs["underlyingInstrumentId"] = instrument.Id;
+        cyclePhase = "SessionAndPortfolioRecovery";
 
         try
         {
@@ -110,6 +148,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.Mode == TradingMode.Paper && value.Key == "EmergencyKillSwitch")
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
         var killSwitchActive = bool.TryParse(killSwitch, out var active) && active;
+        cycleInputs["killSwitchActive"] = killSwitchActive;
         var dailyLossOverrideJson = await db.ApplicationSettings.AsNoTracking().Where(value =>
                 value.Mode == TradingMode.Paper && value.Key == EfPaperDailyLossOverrideService.Key)
             .Select(value => value.ValueJson).SingleOrDefaultAsync(cancellationToken);
@@ -120,6 +159,7 @@ internal sealed partial class AutomatedPaperTradingService(
             killSwitchActive, cancellationToken);
         var tradeState = await RebuildTradeStateAsync(db, recoverySignals, sessionStart, sessionEnd,
             cancellationToken);
+        cyclePhase = "PaperReconciliation";
         var reconciliation = await broker.ReconcileAsync(
             tradeState.OpenPositions.Select(open => new ExpectedBrokerPosition(open.Entry.InstrumentId,
                 open.Entry.Direction, open.RemainingQuantity)).ToArray(), cancellationToken);
@@ -137,6 +177,11 @@ internal sealed partial class AutomatedPaperTradingService(
             .OrderByDescending(value => value.SourceTimestampUtc).FirstOrDefaultAsync(cancellationToken);
         var fresh = latest is not null && now - latest.ReceivedAtUtc <=
             TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
+        cycleInputs["spotSourceAtUtc"] = latest?.SourceTimestampUtc;
+        cycleInputs["spotReceivedAtUtc"] = latest?.ReceivedAtUtc;
+        cycleInputs["maximumQuoteAgeSeconds"] = marketOptions.Value.MaximumAgeSeconds;
+        cycleInputs["spotFresh"] = fresh;
+        cyclePhase = "PositionManagement";
 
         state.SynchronizeActivePositions(tradeState.OpenPositions.Select(value => value.Signal.SignalId));
 
@@ -216,6 +261,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         RecordPortfolioRisk(state, tradeState, options.Value.MaximumDailyLoss, true);
+        cyclePhase = "EntryPrerequisites";
 
         if (killSwitchActive)
         {
@@ -236,6 +282,8 @@ internal sealed partial class AutomatedPaperTradingService(
         var entryWindowStart = ParseTime(options.Value.EntryWindowStart);
         var entryCutoff = ParseTime(options.Value.EntryCutoff);
         var localTime = TimeOnly.FromTimeSpan(indiaNow.TimeOfDay);
+        cycleInputs["entryWindowStart"] = entryWindowStart;
+        cycleInputs["entryCutoff"] = entryCutoff;
         if (!IndexEntryWindowPolicy.AllowsEntry(localTime, entryWindowStart, entryCutoff))
         {
             state.Record(localTime < entryWindowStart ? "WarmingUp" : "EntryCutoff", false,
@@ -249,6 +297,8 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        cycleInputs["spotCandleCount"] = candles.Count;
+        cycleInputs["minimumSpotCandles"] = options.Value.MinimumSignalCandles;
         if (candles.Count < options.Value.MinimumSignalCandles)
         {
             state.Record("WarmingUp", false,
@@ -258,6 +308,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var sessionDate = DateOnly.FromDateTime(indiaNow.Date);
+        cyclePhase = "FuturesConfirmation";
         var confirmationFuture = await db.Instruments.AsNoTracking().Where(value =>
                 value.Exchange == "NSE" && value.Type == InstrumentType.Future &&
                 value.TradingSymbol.StartsWith("NIFTY") && value.IsActive &&
@@ -271,11 +322,15 @@ internal sealed partial class AutomatedPaperTradingService(
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
+        cycleInputs["futureSymbol"] = confirmationFuture.TradingSymbol;
+        cycleInputs["futureInstrumentId"] = confirmationFuture.Id;
         var confirmationCandles = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == confirmationFuture.Id && value.Source == "Groww" &&
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+        cycleInputs["futureCandleCount"] = confirmationCandles.Count;
+        cycleInputs["minimumFutureCandles"] = options.Value.MinimumFuturesConfirmationCandles;
         if (confirmationCandles.Count < options.Value.MinimumFuturesConfirmationCandles)
         {
             state.Record("WarmingUp", false,
@@ -285,6 +340,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var latestCandle = candles[^1];
+        cycleInputs["lastSpotCandleAtUtc"] = latestCandle.OpenTimeUtc;
         if (lastEvaluatedCandleUtc == latestCandle.OpenTimeUtc)
         {
             state.Record("Scanning", true, "Latest completed candle evaluated; waiting for the next candle.",
@@ -301,6 +357,7 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        cyclePhase = "PreviousSessionAndAlignedFeatures";
         var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == instrument.Id && value.Source == "Groww" &&
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
@@ -314,6 +371,7 @@ internal sealed partial class AutomatedPaperTradingService(
             .OrderBy(group => group.Key).SelectMany(group => group.OrderBy(value => value.OpenTimeUtc))
             .ToArray();
         var previousClose = previousSessionCandles.LastOrDefault()?.Close;
+        cycleInputs["previousClose"] = previousClose;
         if (previousClose is null)
         {
             state.Record("WarmingUp", false,
@@ -326,6 +384,8 @@ internal sealed partial class AutomatedPaperTradingService(
             TimeOnly.FromTimeSpan(TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).TimeOfDay) < openingRangeEnd).ToArray();
         var alignedConfirmation = confirmationCandles
             .Where(value => value.OpenTimeUtc <= latestCandle.OpenTimeUtc).ToArray();
+        cycleInputs["alignedFutureCandles"] = alignedConfirmation.Length;
+        cycleInputs["alignedFutureVolume"] = alignedConfirmation.Sum(value => value.Volume);
         if (alignedConfirmation.Length < 2)
         {
             state.Record("WarmingUp", false,
@@ -347,6 +407,8 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var relativeVolume = alignedConfirmation[^1].Volume / averageVolume;
+        cyclePhase = "StrategyEvaluation";
+        cycleInputs["relativeVolume"] = relativeVolume;
         var confirmationVolume = alignedConfirmation.ToDictionary(value => value.OpenTimeUtc,
             value => value.Volume);
         var weightedSpotCandles = candles.Where(value => confirmationVolume.ContainsKey(value.OpenTimeUtc))
@@ -446,28 +508,14 @@ internal sealed partial class AutomatedPaperTradingService(
         }
         if (signal is null)
         {
-            var lastNoTradeAudit = await db.StrategyEvaluations.AsNoTracking()
-                .Where(value => value.StrategyCode == strategy.StrategyId &&
-                                value.InstrumentId == instrument.Id &&
-                                value.Outcome == "NoSignal" &&
-                                value.CandleTimeUtc >= sessionStart &&
-                                value.CandleTimeUtc < sessionEnd)
-                .OrderByDescending(value => value.CandleTimeUtc)
-                .Select(value => (DateTimeOffset?)value.CandleTimeUtc)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (StrategyEvaluationAuditCadence.IsNoTradeAuditDue(sessionStart,
-                    candleDecisionTime, lastNoTradeAudit,
-                    options.Value.NoTradeAuditIntervalMinutes))
-            {
-                await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                    latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                    relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
-                    null, null, null, cancellationToken, shadowStructure);
-            }
+            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
+                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
+                relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
+                null, null, null, cancellationToken, shadowStructure);
             state.Record("Scanning", true,
                 $"Scanning each completed candle across the price-action portfolio. " +
                 $"{string.Join(" ", strategyEvaluation.FailedConditions)} " +
-                $"No-trade research is stored every {options.Value.NoTradeAuditIntervalMinutes} minutes.",
+                "The no-trade reason is stored for this completed candle.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
         }
@@ -524,64 +572,26 @@ internal sealed partial class AutomatedPaperTradingService(
             .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= now)
             .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                 value.Open, value.High, value.Low, value.Close)).ToArray();
-        var middayChop = MiddayChopConfirmationPolicy.Evaluate(
-            TimeOnly.FromDateTime(indiaNow.DateTime), fullSessionBars, signal.Direction,
-            shadowStructure, marketOptions.Value.CandleIntervalSeconds);
-        if (!middayChop.Permitted)
-        {
-            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "MiddayChopConfirmationRejected", middayChop.Reasons,
-                signal, null, null, cancellationToken, shadowStructure);
-            state.Record("MiddayChopConfirmationRejected", true,
-                string.Join(" ", middayChop.Reasons), tradeState.TradesToday,
-                tradeState.RealisedPnl, signalId: signal.SignalId,
-                direction: signal.Direction.ToString());
-            return;
-        }
-        var location = MarketLocationPolicy.Evaluate(fullSessionBars,
+        var preQuoteGate = NiftyPreQuoteEntryGatePolicy.Evaluate(
+            TimeOnly.FromDateTime(indiaNow.DateTime), fullSessionBars,
             previousSessionCandles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
-                value.Open, value.High, value.Low, value.Close)).ToArray(), signal.Direction,
+                value.Open, value.High, value.Low, value.Close)).ToArray(),
+            signal.Direction, shadowStructure, multiTimeframeV2,
+            marketOptions.Value.CandleIntervalSeconds,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
             strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
-        if (!location.Permitted)
+        if (!preQuoteGate.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "MarketLocationRejected", location.Reasons,
+                relativeVolume, regime, preQuoteGate.RejectionOutcome,
+                preQuoteGate.Reasons,
                 signal, null, null, cancellationToken, shadowStructure);
-            state.Record("MarketLocationRejected", true,
-                $"{location.Context}. {string.Join(" ", location.Reasons)}",
-                tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
-                direction: signal.Direction.ToString());
-            return;
-        }
-
-        var sessionMove = SessionMoveQualityPolicy.Evaluate(fullSessionBars, signal.Direction,
-            strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m);
-        if (!sessionMove.Permitted)
-        {
-            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "SessionMoveMaturityRejected", sessionMove.Reasons,
-                signal, null, null, cancellationToken, shadowStructure);
-            state.Record("SessionMoveMaturityRejected", true,
-                string.Join(" ", sessionMove.Reasons), tradeState.TradesToday,
-                tradeState.RealisedPnl, signalId: signal.SignalId,
-                direction: signal.Direction.ToString());
-            return;
-        }
-
-        var matureEdge = MatureEdgeEntryPolicy.Evaluate(sessionMove, multiTimeframeV2,
-            signal.Direction);
-        if (!matureEdge.Permitted)
-        {
-            await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "MatureEdgeConfirmationRejected", matureEdge.Reasons,
-                signal, null, null, cancellationToken, shadowStructure);
-            state.Record("MatureEdgeConfirmationRejected", true,
-                string.Join(" ", matureEdge.Reasons), tradeState.TradesToday, tradeState.RealisedPnl,
+            state.Record(preQuoteGate.RejectionOutcome, true,
+                preQuoteGate.RejectionOutcome == "MarketLocationRejected"
+                    ? $"{preQuoteGate.LocationContext}. {string.Join(" ", preQuoteGate.Reasons)}"
+                    : string.Join(" ", preQuoteGate.Reasons),
+                tradeState.TradesToday, tradeState.RealisedPnl,
                 signalId: signal.SignalId, direction: signal.Direction.ToString());
             return;
         }
@@ -919,7 +929,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 invalidatingReasons = signal.InvalidatingReasons,
                 context = new { regime, shadowStructure, vwap, fast, slow, atrPercent = atr,
                     relativeFuturesVolume = relativeVolume, openingRangeHigh, openingRangeLow },
-                location, entryQuality,
+                location = preQuoteGate.Location, entryQuality,
                 timing = new { signal.MarketDataTimestampUtc, signal.ExpiresAtUtc,
                     candleDecisionTime, recordedAtUtc = timeProvider.GetUtcNow(),
                     completedBarsSincePriorSameDirectionExit = reentryDecision.CompletedBarsSinceExit,

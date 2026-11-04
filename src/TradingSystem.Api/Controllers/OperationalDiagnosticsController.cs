@@ -14,9 +14,28 @@ namespace TradingSystem.Api.Controllers;
 public sealed class OperationalDiagnosticsController(
     IOperationalAutomationReportReader operationalReports,
     IPaperTradingReportReader paperReports,
+    IEngineEvidenceReader engineEvidence,
     IOptions<ReadOnlyDiagnosticsOptions> options) : ControllerBase
 {
     private const string ApiKeyHeader = "X-Sarthi-Diagnostics-Key";
+
+    [HttpGet("engine-evidence")]
+    public async Task<ActionResult<EngineEvidencePage>> GetEngineEvidence(
+        [FromQuery] DateOnly date, [FromQuery] string market = "all",
+        [FromQuery] int offset = 0, [FromQuery] int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var authorization = AuthorizeRequest();
+        if (authorization is not null) return authorization;
+        if (date == default || offset < 0 || offset > 100_000 || limit is < 1 or > 500)
+            return BadRequest("A date, nonnegative bounded offset and limit from 1 to 500 are required.");
+        try { return Ok(await engineEvidence.ReadAsync(date, market, offset, limit, cancellationToken)); }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            ModelState.AddModelError(nameof(market), exception.Message);
+            return ValidationProblem(ModelState);
+        }
+    }
 
     [HttpGet("operational")]
     public async Task<ActionResult<IReadOnlyList<OperationalAutomationReport>>> GetOperational(

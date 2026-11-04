@@ -40,17 +40,34 @@ public sealed class NiftyOptionContractSelectorTests
         Assert.Null(result);
     }
 
-    [Fact]
-    public void ExpiryDaySelectsOneStepInTheMoney()
+    [Theory]
+    [InlineData(Direction.Buy, InstrumentType.CallOption)]
+    [InlineData(Direction.Sell, InstrumentType.PutOption)]
+    public void ExpiryDayRollsToNextExpiryWithNormalStrikeSelection(
+        Direction direction, InstrumentType type)
     {
         var result = NiftyOptionContractSelector.Select([
-            Option(InstrumentType.PutOption, Today, 25000),
-            Option(InstrumentType.PutOption, Today, 25050)
-        ], Direction.Sell, 25010m, Today,
+            Option(type, Today, 25000),
+            Option(type, Today, 25050),
+            Option(type, Today.AddDays(7), 25000),
+            Option(type, Today.AddDays(7), 25050)
+        ], direction, 25010m, Today,
             new NiftyOptionSelectionOptions(10, 1, 0, 50m));
 
         Assert.NotNull(result);
-        Assert.Equal(25050m, result.StrikePrice);
+        Assert.Equal(Today.AddDays(7), result.ExpiryDate);
+        Assert.Equal(25000m, result.StrikePrice);
+    }
+
+    [Fact]
+    public void ExpiryDayDoesNotFallBackToTodaysContractIfNextSeriesIsUnavailable()
+    {
+        var result = NiftyOptionContractSelector.Select([
+            Option(InstrumentType.CallOption, Today, 25000),
+            Option(InstrumentType.CallOption, Today.AddDays(14), 25000)
+        ], Direction.Buy, 25000m, Today);
+
+        Assert.Null(result);
     }
 
     private static NiftyOptionContractCandidate Option(

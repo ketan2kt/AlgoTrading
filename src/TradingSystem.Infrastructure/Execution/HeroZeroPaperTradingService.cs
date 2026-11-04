@@ -11,6 +11,7 @@ using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
+using TradingSystem.Infrastructure.Diagnostics;
 
 namespace TradingSystem.Infrastructure.Execution;
 
@@ -21,13 +22,21 @@ internal sealed partial class HeroZeroPaperTradingService(
     IOptions<HeroZeroOptions> options,
     IOptions<MarketDataOptions> marketData,
     TimeProvider timeProvider,
+    TradingEngineEvidenceRecorder evidenceRecorder,
     ILogger<HeroZeroPaperTradingService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled) return;
+        if (!options.Value.Enabled)
+        {
+            foreach (var market in new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex })
+                await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "Startup", "Disabled",
+                    "Hero Zero is disabled by server configuration.", timeProvider.GetUtcNow(),
+                    new { options.Value.Enabled }, stoppingToken);
+            return;
+        }
         while (!stoppingToken.IsCancellationRequested)
         {
             foreach (var market in new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex })
@@ -40,6 +49,9 @@ internal sealed partial class HeroZeroPaperTradingService(
                     state.Set(new(market.Code, false, null, "Faulted",
                         "The latest scan failed safely; no new pair was opened.", timeProvider.GetUtcNow(),
                         null, null, null, [], 0m, 0m, 0m));
+                    await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "Scan", "Faulted",
+                        "Hero Zero scan or position management failed.", timeProvider.GetUtcNow(),
+                        TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
                 }
             }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.ScanIntervalSeconds), stoppingToken);
@@ -62,6 +74,9 @@ internal sealed partial class HeroZeroPaperTradingService(
             value.TradingSymbol == market.UnderlyingSymbol && value.IsActive, cancellationToken);
         if (underlying is null)
         {
+            await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "Instrument", "InstrumentUnavailable",
+                "The index instrument is not synchronised.", now,
+                new { market.UnderlyingSymbol }, cancellationToken);
             state.Set(Empty(market.Code, "InstrumentUnavailable", "Synchronise the index instrument."));
             return;
         }
@@ -87,6 +102,9 @@ internal sealed partial class HeroZeroPaperTradingService(
         }
         if (expiry is null || expiry != today)
         {
+            await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "ExpirySelection", "NoCurrentExpiry",
+                "No eligible current-expiry Hero Zero entry is available.", now,
+                new { today, selectedExpiry = expiry }, cancellationToken);
             state.Set(new(market.Code, false, expiry, "Watching next expiry",
                 expiry is null ? "No eligible weekly option expiry is synchronised." :
                     $"Next synchronised expiry is {expiry:dd MMM}; no Hero Zero entry today.",
@@ -98,6 +116,9 @@ internal sealed partial class HeroZeroPaperTradingService(
             market.UnderlyingSymbol), cancellationToken);
         if (spotQuote.LastPrice <= 0)
         {
+            await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "SpotQuote", "QuoteUnavailable",
+                "A positive index quote is required.", now,
+                new { spotQuote.LastPrice }, cancellationToken);
             state.Set(Empty(market.Code, "DataUnavailable", "A fresh index quote is required."));
             return;
         }
@@ -156,6 +177,10 @@ internal sealed partial class HeroZeroPaperTradingService(
 
         state.Set(new(market.Code, true, expiry, status, explanation, now, spotQuote.LastPrice,
             call, put, [], 0m, 0m, 0m));
+        await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "EntryDecision", status,
+            explanation, now, new { expiry, spotQuote.LastPrice, candidateReady,
+                inEntryWindow, openedToday, call, put, expansion,
+                options.Value.MinimumCandidateScore }, cancellationToken);
         if (inEntryWindow && !openedToday)
         {
             // The 15-minute monitor audit can miss transient CE/PE pairs. Persist
