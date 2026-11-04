@@ -58,7 +58,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         var blockers = await db.LiveExecutionIntents.Where(value =>
                 value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" ||
                 value.Status == "ResidualStopSubmitting" || value.Status == "ResidualProtected" ||
-                value.Status == "PartialSubmitting" || value.Status == "AddOnSubmitting" ||
+                value.Status == "PartialSubmitting" || value.Status == "AddOnSubmitting" || value.Status == "ProtectedScaleMismatch" ||
                 value.Status == "ReconciliationRequired" || value.Status == "EntrySubmitting" ||
                 value.Status == "ProtectionSubmitting" ||
                 (value.Status == "Protected" && value.LastError != null))
@@ -67,7 +67,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             stale.Reject(stale.LastError!, timeProvider.GetUtcNow());
         if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(cancellationToken);
         if (blockers.Any(value => value.Status is "FinalExitPending" or "FinalSellSubmitting" or "ResidualStopSubmitting" or
-                                  "ResidualProtected" or "PartialSubmitting" or "AddOnSubmitting" or
+                                  "ResidualProtected" or "PartialSubmitting" or "AddOnSubmitting" or "ProtectedScaleMismatch" or
                                   "ReconciliationRequired" or "EntrySubmitting" or "ProtectionSubmitting" ||
                                   value.Status == "Protected" && value.LastError is not null))
             return;
@@ -237,7 +237,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task SyncProtectedPositionsAsync(TradingDbContext db,
         CancellationToken cancellationToken)
     {
-        var managed = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" ||
+        var managed = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch" ||
             value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" || value.Status == "ResidualStopSubmitting" ||
             value.Status == "ResidualProtected" || value.Status == "AddOnSubmitting" || value.Status == "PartialSubmitting")
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
@@ -374,9 +374,9 @@ internal sealed partial class AutomaticLiveExecutionService(
             (source.Status == "Active" && source.RemainingQuantity <= 0))
             throw new InvalidOperationException("The paper position has invalid remaining quantity.");
         var unmirroredPartial = source.PartialExitQuantity - intent.MirroredPartialExitQuantity;
-        if (unmirroredPartial < 0 || unmirroredPartial >= intent.FilledQuantity)
+        if (intent.Status != "ProtectedScaleMismatch" && (unmirroredPartial < 0 || unmirroredPartial >= intent.FilledQuantity))
             throw new InvalidOperationException("The paper partial exit cannot be reconciled safely.");
-        if (unmirroredPartial > 0)
+        if (unmirroredPartial > 0 && intent.Status != "ProtectedScaleMismatch")
             await MirrorPartialExitAsync(db, intent, unmirroredPartial,
                 source.PartialExitPrice ?? source.CurrentPrice, cancellationToken);
         if (intent.Status == "ReconciliationRequired") return;
@@ -396,14 +396,14 @@ internal sealed partial class AutomaticLiveExecutionService(
         var unmirroredAddOn = addOn.Quantity - intent.MirroredAddOnQuantity;
         if (unmirroredAddOn < 0)
             throw new InvalidOperationException("The paper add-on cannot be reconciled safely.");
-        if (unmirroredAddOn > 0)
+        if (unmirroredAddOn > 0 && intent.Status != "ProtectedScaleMismatch")
             await MirrorAddOnAsync(db, intent, unmirroredAddOn, addOn.Price,
                 cancellationToken);
         var partial = await ReadPaperActionAsync(db, prefix + "-PARTIAL", cancellationToken);
         var unmirroredPartial = partial.Quantity - intent.MirroredPartialExitQuantity;
-        if (unmirroredPartial < 0 || unmirroredPartial >= intent.FilledQuantity)
+        if (intent.Status != "ProtectedScaleMismatch" && (unmirroredPartial < 0 || unmirroredPartial >= intent.FilledQuantity))
             throw new InvalidOperationException("The paper partial exit cannot be reconciled safely.");
-        if (unmirroredPartial > 0)
+        if (unmirroredPartial > 0 && intent.Status != "ProtectedScaleMismatch")
             await MirrorPartialExitAsync(db, intent, unmirroredPartial, partial.Price,
                 cancellationToken);
         if (intent.Status == "ReconciliationRequired") return;
@@ -491,17 +491,18 @@ internal sealed partial class AutomaticLiveExecutionService(
             await SettleActionAsync(prior, reference, paperQuantity, cancellationToken);
         if (action.FilledQuantity <= 0)
         {
-            intent.RequireReconciliation("Add-on did not fill; original live protection remains in place.");
+            await broker.ConfirmProtectionAsync(intent.ProtectionId!, intent.FilledQuantity, intent.StopLoss, cancellationToken);
+            intent.RetainProtectedRemainder("Add-on did not fill; original live stop verified. Manage actual size; block new entries.");
             await db.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("Live add-on did not fill.");
+            return;
         }
         await broker.ModifyProtectionAsync(intent.ProtectionId!,
             checked(intent.FilledQuantity + action.FilledQuantity), intent.StopLoss,
             cancellationToken);
         intent.RecordAddOn(action.FilledQuantity, timeProvider.GetUtcNow());
-        await db.SaveChangesAsync(cancellationToken);
         if (action.FilledQuantity != paperQuantity)
-            throw new InvalidOperationException("Live add-on filled less than its paper source.");
+            intent.RetainProtectedRemainder("Partial add-on fill; live stop verified on actual quantity.");
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task MirrorPartialExitAsync(TradingDbContext db,
@@ -540,7 +541,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         {
             await broker.ModifyProtectionAsync(intent.ProtectionId!, intent.FilledQuantity,
                 intent.StopLoss, cancellationToken);
-            intent.RequireReconciliation("Live partial did not fill; full-size broker stop confirmed.");
+            intent.RetainProtectedRemainder("Live partial did not fill; full-size stop verified. Continue managing actual size.");
             await db.SaveChangesAsync(cancellationToken);
             return;
         }
@@ -549,9 +550,9 @@ internal sealed partial class AutomaticLiveExecutionService(
                 intent.FilledQuantity - action.FilledQuantity, intent.StopLoss,
                 cancellationToken);
         intent.RecordPartialExit(action.FilledQuantity, timeProvider.GetUtcNow());
-        await db.SaveChangesAsync(cancellationToken);
         if (action.FilledQuantity != paperQuantity)
-            throw new InvalidOperationException("Live partial exit filled less than its paper source.");
+            intent.RetainProtectedRemainder("Partial sell filled less than requested; live stop verified on actual remainder.");
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task MirrorStopUpdateAsync(TradingDbContext db,
@@ -573,7 +574,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task MirrorFinalExitAsync(TradingDbContext db,
         LiveExecutionIntent intent, decimal paperPrice, CancellationToken cancellationToken)
     {
-        if (intent.Status == "Protected")
+        if (intent.Status is "Protected" or "ProtectedScaleMismatch")
         {
             intent.BeginFinalExit();
             await db.SaveChangesAsync(cancellationToken);
@@ -761,7 +762,7 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     private async Task<bool> ReconcileAsync(TradingDbContext db, CancellationToken cancellationToken)
     {
-        var active = await db.LiveExecutionIntents.Where(value => value.Status == "Protected")
+        var active = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch")
             .ToListAsync(cancellationToken);
         var actual = await broker.GetPositionsAsync(cancellationToken);
         var recentlyClosed = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
@@ -770,7 +771,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             .Select(value => value.InstrumentId).Distinct().ToListAsync(cancellationToken);
         var unsettled = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
                 value.Status != "Closed" && value.Status != "Rejected" &&
-                value.Status != "Protected")
+                value.Status != "Protected" && value.Status != "ProtectedScaleMismatch")
             .Select(value => value.InstrumentId).Distinct().ToListAsync(cancellationToken);
         foreach (var instrumentId in recentlyClosed.Where(value =>
                      !active.Any(intent => intent.InstrumentId == value) &&

@@ -81,7 +81,7 @@ public sealed class LiveExecutionIntent : MutableEntity
     public void AdjustProtectedExposure(int remainingQuantity, decimal paperStopLoss,
         DateTimeOffset atUtc)
     {
-        if (Status != "Protected" || remainingQuantity <= 0 || paperStopLoss <= 0)
+        if (Status is not ("Protected" or "ProtectedScaleMismatch") || remainingQuantity <= 0 || paperStopLoss <= 0)
             throw new InvalidOperationException("Only an open protected position can be adjusted.");
         FilledQuantity = remainingQuantity;
         StopLoss = paperStopLoss;
@@ -118,7 +118,7 @@ public sealed class LiveExecutionIntent : MutableEntity
 
     public void BeginFinalExit()
     {
-        if (Status != "Protected") throw new InvalidOperationException("Cannot start final exit.");
+        if (Status is not ("Protected" or "ProtectedScaleMismatch")) throw new InvalidOperationException("Cannot start final exit.");
         Status = "FinalExitPending";
     }
 
@@ -136,6 +136,13 @@ public sealed class LiveExecutionIntent : MutableEntity
     }
 
     public void RecordExitUncertainty(string reason) => LastError = reason;
+
+    public void RetainProtectedRemainder(string reason)
+    {
+        if (FilledQuantity <= 0 || ProtectionId is null) throw new InvalidOperationException("Missing managed protection.");
+        Status = "ProtectedScaleMismatch";
+        LastError = reason;
+    }
 
     public void BeginScaleAction(string phase)
     {

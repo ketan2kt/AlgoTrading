@@ -38,4 +38,20 @@ public sealed class LiveExecutionIntentTests
         intent.Closed(DateTimeOffset.UtcNow);
         Assert.Equal(0, intent.FilledQuantity);
     }
+
+    [Fact]
+    public void PartialFillMismatchCanStillTrailAndExitTheActualQuantity()
+    {
+        var intent = NewIntent();
+        intent.Filled(100, 101m);
+        intent.Protected("broker-stop", DateTimeOffset.UtcNow);
+        intent.BeginScaleAction("PartialSubmitting");
+        intent.RecordPartialExit(20, DateTimeOffset.UtcNow);
+        intent.RetainProtectedRemainder("Only 20 sold; verified stop on 80");
+        intent.AdjustProtectedExposure(80, 95m, DateTimeOffset.UtcNow);
+        Assert.Equal("ProtectedScaleMismatch", intent.Status);
+        Assert.Equal(80, intent.FilledQuantity);
+        intent.BeginFinalExit();
+        Assert.Equal("FinalExitPending", intent.Status);
+    }
 }
