@@ -158,7 +158,27 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
-        services.AddScoped<IGrowwInstrumentSynchronizer, GrowwInstrumentSynchronizer>();
+        services.AddSingleton<HistoricalQuoteArchive>();
+        services.AddSingleton<IHistoricalQuoteArchive>(provider => provider.GetRequiredService<HistoricalQuoteArchive>());
+        services.AddHostedService(provider => provider.GetRequiredService<HistoricalQuoteArchive>());
+        services.AddHttpClient(GrowwHistoricalFeedTransport.HttpClientName, client =>
+        {
+            client.BaseAddress = new Uri("https://api.groww.in/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        }).RedactLoggedHeaders(static _ => true);
+        services.AddOptions<HistoricalFeedCaptureOptions>()
+            .Bind(configuration.GetSection(HistoricalFeedCaptureOptions.SectionName))
+            .Validate(value => value.MaximumInstruments is >= 1 and <= 1000 && value.SampleSeconds is >= 1 and <= 10,
+                "Historical feed limits must respect Groww's instrument cap and a 1–10 second sample cadence.")
+            .ValidateOnStart();
+        services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
+        services.AddHostedService<GrowwHistoricalFeedCaptureService>();
+        services.AddHostedService<HistoricalAfterMarketBackfillService>();
+        services.AddScoped<GrowwInstrumentSynchronizer>();
+        services.AddScoped<IGrowwInstrumentSynchronizer>(provider =>
+            provider.GetRequiredService<GrowwInstrumentSynchronizer>());
+        services.AddScoped<IHistoricalInstrumentMasterCapturer>(provider =>
+            provider.GetRequiredService<GrowwInstrumentSynchronizer>());
         services.AddHostedService<GrowwInstrumentSynchronizationService>();
         services.AddSingleton<MarketDataHealthMonitor>();
         services.AddSingleton<IMarketDataHealthReader>(provider => provider.GetRequiredService<MarketDataHealthMonitor>());
@@ -202,6 +222,13 @@ public static class DependencyInjection
         services.AddSingleton<IHeroZeroMonitorReader>(provider => provider.GetRequiredService<HeroZeroMonitorState>());
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();
         services.AddScoped<IPaperTradingReportReader, EfPaperTradingReportReader>();
+        services.AddScoped<IHistoricalReplayReportReader, EfHistoricalReplayReportReader>();
+        services.AddScoped<IHistoricalReplayArchiveReader, EfHistoricalReplayArchiveReader>();
+        services.AddScoped<HistoricalNormalReplayComparisonService>();
+        services.AddSingleton<IHistoricalPolicyBuildStore, FileHistoricalPolicyBuildStore>();
+        services.AddHostedService<HistoricalPolicyBuildCaptureService>();
+        services.AddSingleton<IHistoricalNormalReplayRunStore, FileHistoricalNormalReplayRunStore>();
+        services.AddSingleton<FileHistoricalFeedManifestReader>();
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
@@ -224,6 +251,7 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddHostedService<GrowwOptionResearchCaptureService>();
         services.AddScoped<GrowwHistoricalCandleImporter>();
+        services.AddScoped<GrowwHistoricalResearchImporter>();
         services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
         services.AddHostedService<GrowwSensexFuturesMarketDataService>();
         services.AddOptions<HeroZeroOptions>()
@@ -295,16 +323,8 @@ public static class DependencyInjection
         services.AddSingleton<ITradingStrategy>(provider =>
         {
             var priceAction = provider.GetRequiredService<IOptions<PriceActionStrategyOptions>>().Value;
-            return new CompositeTradingStrategy([
-                new OpeningRangeBreakoutStrategy(
-                    provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value),
-                new OpeningRangeRetestStrategy(priceAction),
-                new VwapTrendPullbackStrategy(priceAction),
-                new EmaPullbackContinuationStrategy(priceAction),
-                new RangeBreakoutRetestStrategy(priceAction),
-                new VwapRejectionReversalStrategy(priceAction),
-                new MomentumExpansionStrategy(priceAction)
-            ]);
+            return IndexStrategyPortfolio.Create(priceAction,
+                provider.GetRequiredService<IOptions<OpeningRangeBreakoutOptions>>().Value);
         });
         services.AddOptions<PreliminaryRiskOptions>()
             .Bind(configuration.GetSection("Risk:Preliminary"))

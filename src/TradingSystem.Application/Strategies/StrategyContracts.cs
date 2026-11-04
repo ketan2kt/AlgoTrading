@@ -54,6 +54,9 @@ public interface ITradingStrategy
 {
     string StrategyId { get; }
     string Version { get; }
+    // Research fingerprints must distinguish different strategy options even
+    // when the strategy implementation version is unchanged.
+    string ConfigurationManifest => string.Empty;
     StrategySignal? Evaluate(StrategyEvaluationContext context);
     StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context);
 }

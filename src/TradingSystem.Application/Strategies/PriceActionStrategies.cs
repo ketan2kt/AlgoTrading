@@ -18,6 +18,8 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     protected PriceActionStrategyOptions Options { get; } = options;
     public abstract string StrategyId { get; }
     public string Version => "1.0.0";
+    public string ConfigurationManifest =>
+        System.Text.Json.JsonSerializer.Serialize(Options);
 
     public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
     public abstract StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context);
@@ -305,6 +307,10 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
 {
     public string StrategyId => "price-action-portfolio";
     public string Version => "1.0.0";
+    public string ConfigurationManifest =>
+        System.Text.Json.JsonSerializer.Serialize(strategies.Select(value =>
+            new { value.StrategyId, value.Version,
+                value.ConfigurationManifest }));
     public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
 
     public StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)

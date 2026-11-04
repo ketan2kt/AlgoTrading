@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.Execution;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
@@ -10,7 +11,8 @@ namespace TradingSystem.Infrastructure.Broker.Groww;
 internal sealed class GrowwInstrumentSynchronizer(
     IGrowwReadOnlyGateway gateway,
     TradingDbContext dbContext,
-    TimeProvider timeProvider) : IGrowwInstrumentSynchronizer
+    TimeProvider timeProvider) : IGrowwInstrumentSynchronizer,
+        IHistoricalInstrumentMasterCapturer
 {
     public async Task<GrowwInstrumentSyncResult> SynchronizeAsync(
         CancellationToken cancellationToken)
@@ -79,6 +81,7 @@ internal sealed class GrowwInstrumentSynchronizer(
             }
         }
 
+        await AddSnapshotIfNewAsync(supported, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return new GrowwInstrumentSyncResult(
             downloaded.Count,
@@ -86,6 +89,54 @@ internal sealed class GrowwInstrumentSynchronizer(
             updated,
             downloaded.Count - supported.Length,
             timeProvider.GetUtcNow());
+    }
+
+    public async Task CaptureAsync(CancellationToken cancellationToken)
+    {
+        var downloaded = await gateway.GetInstrumentMasterAsync(cancellationToken);
+        var supported = SelectRequiredTradingRecords(downloaded)
+            .Select(record => (Record: record, Mapping: TryMap(record)))
+            .ToArray();
+        if (supported.Count(value => value.Mapping!.Value.Type == InstrumentType.Index &&
+                value.Record.Exchange == "NSE" &&
+                value.Record.TradingSymbol == "NIFTY") != 1)
+            throw new GrowwApiException(
+                "Groww instrument master did not contain exactly one valid NSE NIFTY cash index.",
+                "MALFORMED_RESPONSE");
+        await AddSnapshotIfNewAsync(supported, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task AddSnapshotIfNewAsync(
+        (GrowwInstrumentRecord Record,
+            (InstrumentSegment Segment, InstrumentType Type, DateOnly? ExpiryDate)? Mapping)[] supported,
+        CancellationToken cancellationToken)
+    {
+        // Preserve the exact dated metadata observed from this official master.
+        // Mutable Instrument rows alone cannot prove a past lot/expiry/tick.
+        var snapshotItems = supported.Select(item => new HistoricalInstrumentSnapshotItem(
+                item.Record.Exchange, item.Record.TradingSymbol,
+                item.Record.GrowwSymbol, item.Mapping!.Value.Segment,
+                item.Mapping.Value.Type, item.Mapping.Value.ExpiryDate,
+                item.Record.StrikePrice is > 0m ? item.Record.StrikePrice : null,
+                item.Mapping.Value.Type == InstrumentType.Index ? 1 :
+                    item.Record.LotSize ?? throw Missing(item.Record, "lot_size"),
+                item.Mapping.Value.Type == InstrumentType.Index ? 0m :
+                    InstrumentPriceIncrement.FromGrowwInstrumentMaster(
+                        item.Record.TickSize ?? throw Missing(item.Record, "tick_size"))))
+            .ToArray();
+        var snapshot = HistoricalInstrumentMasterFingerprint.Create(snapshotItems);
+        var observedAt = timeProvider.GetUtcNow();
+        var sessionDate = DateOnly.FromDateTime(observedAt
+            .ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        const string source = "GrowwInstrumentMasterV1";
+        if (!await dbContext.HistoricalInstrumentMasterSnapshots.AsNoTracking()
+            .AnyAsync(value => value.SessionDate == sessionDate &&
+                value.Source == source && value.Fingerprint == snapshot.Fingerprint,
+                cancellationToken))
+            dbContext.HistoricalInstrumentMasterSnapshots.Add(new(
+                Guid.NewGuid(), sessionDate, observedAt, source,
+                snapshot.Fingerprint, snapshot.ContractCount, snapshot.PayloadJson));
     }
 
     internal static IReadOnlyList<GrowwInstrumentRecord> SelectSupportedUniqueRecords(

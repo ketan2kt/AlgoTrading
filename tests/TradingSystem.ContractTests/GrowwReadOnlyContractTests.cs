@@ -163,6 +163,48 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task HistoricalExpiryDiscoveryUsesOfficialReadOnlyEndpoint()
+    {
+        HttpRequestMessage? captured = null;
+        var gateway = CreateGateway(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"expiries":["2026-11-03","2026-11-10","2026-11-03"]}}
+                """);
+        });
+
+        var expiries = await gateway.GetHistoricalExpiriesAsync(
+            "NSE", "NIFTY", 2026, 11, CancellationToken.None);
+
+        Assert.Equal([new DateOnly(2026, 11, 3), new DateOnly(2026, 11, 10)], expiries);
+        Assert.Equal("/v1/historical/expiries", captured!.RequestUri!.AbsolutePath);
+        Assert.Contains("underlying_symbol=NIFTY", captured.RequestUri.Query, StringComparison.Ordinal);
+        Assert.Contains("month=11", captured.RequestUri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HistoricalContractDiscoveryUsesOfficialReadOnlyEndpoint()
+    {
+        HttpRequestMessage? captured = null;
+        var gateway = CreateGateway(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"contracts":["NSE-NIFTY-03Nov26-22000-PE","NSE-NIFTY-03Nov26-22000-CE"]}}
+                """);
+        });
+
+        var contracts = await gateway.GetHistoricalContractsAsync(
+            "NSE", "NIFTY", new DateOnly(2026, 11, 3), CancellationToken.None);
+
+        Assert.Equal(2, contracts.Count);
+        Assert.Equal("/v1/historical/contracts", captured!.RequestUri!.AbsolutePath);
+        Assert.Contains("expiry_date=2026-11-03", captured.RequestUri.Query, StringComparison.Ordinal);
+        Assert.All(contracts, value => Assert.StartsWith("NSE-NIFTY-03Nov26-", value));
+    }
+
+    [Fact]
     public async Task HistoricalFuturesCandleAllowsNullVolumeAndFailsClosedDownstream()
     {
         var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """

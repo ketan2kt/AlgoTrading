@@ -46,7 +46,7 @@ internal static class DirectionalThesisShadowAudit
         return assessment;
     }
 
-    private static PersistentDirectionalThesisV1? Read(string? json)
+    internal static PersistentDirectionalThesisV1? Read(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try { return JsonSerializer.Deserialize<PersistentDirectionalThesisV1>(json); }

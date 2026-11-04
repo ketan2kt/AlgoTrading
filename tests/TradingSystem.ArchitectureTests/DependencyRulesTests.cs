@@ -34,4 +34,28 @@ public sealed class DependencyRulesTests
 
         Assert.True(result.IsSuccessful);
     }
+
+    [Fact]
+    public void HistoricalReplayDecisionsDoNotDependOnBrokerExecution()
+    {
+        var result = Types.InAssembly(typeof(ISystemStatusReader).Assembly)
+            .That()
+            .ResideInNamespace("TradingSystem.Application.Execution")
+            .And()
+            .HaveNameStartingWith("Historical")
+            .ShouldNot()
+            .HaveDependencyOnAny(
+                // A frozen GrowwQuote value is permitted for as-of pricing;
+                // gateways, orders and broker controls are not.
+                "TradingSystem.Application.Broker.IBrokerGateway",
+                "TradingSystem.Application.Broker.IPaperBrokerControl",
+                "TradingSystem.Application.Broker.IGrowwReadOnlyGateway",
+                "TradingSystem.Application.Broker.BrokerOrderRequest",
+                "TradingSystem.Infrastructure",
+                "TradingSystem.Api",
+                "TradingSystem.Worker")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful);
+    }
 }

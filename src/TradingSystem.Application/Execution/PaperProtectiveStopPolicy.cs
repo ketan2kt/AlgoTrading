@@ -4,6 +4,39 @@ namespace TradingSystem.Application.Execution;
 
 public static class PaperProtectiveStopPolicy
 {
+    // Shared premium protection calculation for production and offline replay.
+    // The caller supplies the favourable mark observed as-of this decision;
+    // neither path may substitute a later high or a non-executable peak.
+    public static decimal CalculateNetProtected(Direction direction, decimal entry,
+        decimal initialStop, decimal favourable, ProfessionalExitPlan plan,
+        bool breakEvenEnabled, bool trailingEnabled, int costQuantity,
+        int protectionQuantity, string exchangeCode)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(costQuantity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(protectionQuantity);
+        var stop = initialStop;
+        if (breakEvenEnabled || trailingEnabled)
+            stop = Calculate(direction, entry, initialStop, favourable,
+                breakEvenEnabled ? plan.BreakEvenTriggerR : decimal.MaxValue,
+                trailingEnabled ? plan.TrailDistanceR : decimal.MaxValue,
+                plan.ProfitLockTriggerR, plan.ProfitLockR);
+        var risk = Math.Abs(entry - initialStop);
+        if (risk <= 0m) throw new ArgumentOutOfRangeException(nameof(initialStop));
+        var favourableMove = direction == Direction.Buy ? favourable - entry :
+            entry - favourable;
+        if (favourableMove < risk * plan.BreakEvenTriggerR) return stop;
+        var charges = PaperTradingCostModel.CalculateOptionCharges([
+            new(direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                PaperOptionTransactionSide.Sell, entry, costQuantity),
+            new(direction == Direction.Buy ? PaperOptionTransactionSide.Sell :
+                PaperOptionTransactionSide.Buy, Math.Max(.05m, stop),
+                costQuantity)
+        ], exchangeCode).Total;
+        return ProtectNetProfit(direction, entry, stop, protectionQuantity,
+            charges);
+    }
+
     public static decimal ProtectNetProfit(Direction direction, decimal entry,
         decimal existingStop, int quantity, decimal estimatedCosts, decimal tickSize = .05m)
     {

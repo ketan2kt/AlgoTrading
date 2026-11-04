@@ -42,4 +42,22 @@ public sealed class PaperTradingCostModelTests
         Assert.Equal(PaperTradingCostBreakdown.Empty,
             PaperTradingCostModel.CalculateOptionCharges([]));
     }
+
+    [Fact]
+    public void BseOptionsUseGrowwsPublishedBsePremiumTurnoverRate()
+    {
+        var transactions = new[]
+        {
+            new PaperOptionTransaction(PaperOptionTransactionSide.Buy, 100m, 65),
+            new PaperOptionTransaction(PaperOptionTransactionSide.Sell, 110m, 65)
+        };
+        var nse = PaperTradingCostModel.CalculateOptionCharges(transactions);
+        var bse = PaperTradingCostModel.CalculateOptionCharges(transactions, "BSE");
+
+        Assert.Equal("GROWW-BSE-OPTIONS-2026-04-01", bse.ScheduleVersion);
+        Assert.Equal(4.44m, bse.ExchangeTransactionCharges);
+        Assert.True(bse.Total < nse.Total);
+        Assert.Equal(nse.Brokerage, bse.Brokerage);
+        Assert.Equal(nse.SecuritiesTransactionTax, bse.SecuritiesTransactionTax);
+    }
 }

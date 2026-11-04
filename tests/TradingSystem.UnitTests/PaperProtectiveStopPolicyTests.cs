@@ -75,6 +75,27 @@ public sealed class PaperProtectiveStopPolicyTests
         Assert.Equal(201.14m, stop);
     }
 
+    [Fact]
+    public void SharedNetProtectedStopMatchesProductionSequence()
+    {
+        var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
+        var original = PaperProtectiveStopPolicy.Calculate(Direction.Buy,
+            200m, 180m, 225m, plan.BreakEvenTriggerR,
+            plan.TrailDistanceR, plan.ProfitLockTriggerR, plan.ProfitLockR);
+        var costs = PaperTradingCostModel.CalculateOptionCharges([
+            new(PaperOptionTransactionSide.Buy, 200m, 150),
+            new(PaperOptionTransactionSide.Sell, Math.Max(.05m, original), 150)
+        ]).Total;
+        original = PaperProtectiveStopPolicy.ProtectNetProfit(Direction.Buy,
+            200m, original, 75, costs);
+
+        var shared = PaperProtectiveStopPolicy.CalculateNetProtected(
+            Direction.Buy, 200m, 180m, 225m, plan, true, true,
+            150, 75, "NSE");
+
+        Assert.Equal(original, shared);
+    }
+
     [Theory]
     [InlineData(Direction.Buy, 100, 110, 90, 108)]
     [InlineData(Direction.Sell, 100, 90, 110, 92)]
