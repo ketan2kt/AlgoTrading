@@ -6,15 +6,15 @@ import { TradingWorkspaceSnapshot } from './trading-workspace';
 
 @Injectable({ providedIn: 'root' })
 export class TradingWorkspaceService {
-  private static readonly markets = ['nifty', 'sensex', 'bank-nifty', 'natural-gas'];
+  private static readonly markets = ['nifty', 'sensex', 'bank-nifty'];
   private readonly http = inject(HttpClient);
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;
   private connectionStart: Promise<void> | null = null;
   private activeMarket = 'nifty';
 
-  getMarket(market: string): Observable<TradingWorkspaceSnapshot> {
-    return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=7000`);
+  getMarket(market: string, extendedHistory = false): Observable<TradingWorkspaceSnapshot> {
+    return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=${extendedHistory ? 7000 : 750}`);
   }
 
   requestTradeExit(market: string, tradeId: string): Observable<{ status: string }> {

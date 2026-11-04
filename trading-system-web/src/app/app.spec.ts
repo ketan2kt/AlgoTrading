@@ -116,17 +116,18 @@ describe('App', () => {
     currentUser.next({ username: 'administrator', roles: ['Administrator'] });
     await fixture.whenStable();
 
-    expect(fixture.nativeElement.textContent).toContain('Nifty command view');
+    expect(fixture.nativeElement.querySelector('.market-tab--active')?.textContent).toContain('Nifty');
     expect(fixture.nativeElement.textContent).toContain('Sensex');
-    expect(fixture.nativeElement.textContent).toContain('Nifty command view');
+    expect(fixture.nativeElement.querySelector('.workspace-heading')).toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Checking token status');
     expect(fixture.nativeElement.textContent).not.toContain('Enable loud trade alerts');
     expect(fixture.nativeElement.textContent).not.toContain('Trade alerts on');
-    expect(fixture.nativeElement.textContent).toContain('Add today’s token');
+    expect(fixture.nativeElement.querySelector('.desk-reports button')?.textContent).toContain('Reports');
+    expect(fixture.nativeElement.textContent).not.toContain('Add today’s token');
     http.verify();
   });
 
-  it('shows deterministic paper-entry readiness checks', async () => {
+  it('keeps the desk focused on chart and trades and exposes diagnostics on demand', async () => {
     TestBed.overrideProvider(AuthService, {
       useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
     });
@@ -190,15 +191,15 @@ describe('App', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('SESSION READINESS');
-    expect(fixture.nativeElement.textContent).toContain('Previous-session context');
-    expect(fixture.nativeElement.textContent).toContain('Nifty futures confirmation');
-    expect(fixture.nativeElement.textContent).toContain('18/21 candles');
-    expect(fixture.nativeElement.textContent).toContain('Ignore limit today');
-    expect(fixture.nativeElement.textContent).toContain('RESEARCH LOGS');
-    expect(fixture.nativeElement.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
-    const logsButton = Array.from(fixture.nativeElement.querySelectorAll('button'))
-      .find((button: unknown) => (button as HTMLButtonElement).textContent?.includes('View logs')) as HTMLButtonElement;
+    const desk: HTMLElement = fixture.nativeElement;
+    expect(desk.querySelector('.workspace-priority-chart')?.nextElementSibling?.classList.contains('workspace-priority-events')).toBe(true);
+    expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')?.textContent).toContain('Unknown');
+    expect(desk.textContent).not.toContain('SESSION READINESS');
+    expect(desk.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
+    (desk.querySelector('.desk-reports > button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const logsButton = Array.from(desk.querySelectorAll('#desk-report-links button'))
+      .find(button => button.textContent?.includes('Research logs')) as HTMLButtonElement;
     logsButton.click();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
@@ -230,8 +231,8 @@ describe('App', () => {
     sensexButton.click(); fixture.detectChanges();
 
     expect(window.location.pathname).toBe('/sensex');
-    expect(fixture.nativeElement.textContent).toContain('Sensex command view');
-    expect(fixture.nativeElement.textContent).toContain('LIVE TRADING WORKSPACE');
+    expect(fixture.nativeElement.querySelector('.market-tab--active')?.textContent).toContain('Sensex');
+    expect(fixture.nativeElement.querySelector('.workspace-heading')).toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('Feed integration pending');
 
     expect(fixture.nativeElement.querySelector('.market-tabs')?.textContent).not.toContain('Natural Gas');

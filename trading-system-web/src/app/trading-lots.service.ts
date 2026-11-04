@@ -18,11 +18,10 @@ export class TradingLotsService {
     return this.http.get<TradingLotConfiguration>('/api/trading-lots');
   }
 
-  save(niftyLots: number, sensexLots: number, bankNiftyLots: number,
-       bankexLots: number): Observable<TradingLotConfiguration> {
+  save(niftyLots: number, sensexLots: number, bankNiftyLots: number): Observable<TradingLotConfiguration> {
     return this.http.get<{ token: string }>('/api/security/antiforgery-token').pipe(
       switchMap(({ token }) => this.http.put<TradingLotConfiguration>('/api/trading-lots',
-        { niftyLots, sensexLots, bankNiftyLots, bankexLots },
+        { niftyLots, sensexLots, bankNiftyLots },
         { headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }) })),
     );
   }

@@ -245,6 +245,12 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       close: value.close,
     }));
     this.series.setData(candles);
+    const market = this.snapshot.marketCode?.toLowerCase() ?? (this.snapshot.instrument.includes('BANK') ? 'bank-nifty' : this.snapshot.exchange === 'BSE' ? 'sensex' : 'nifty');
+    const mark = 'desk:chart-request:' + market;
+    if(candles.length && performance.getEntriesByName(mark,'mark').length){
+      const measure='desk:chart-series-ready:'+market;
+      performance.clearMeasures(measure); performance.measure(measure,mark); performance.clearMarks(mark);
+    }
     const candleDirectionByTime = new Map(
       displayCandles.map((value) => [
         Math.floor(new Date(value.openTimeUtc).getTime() / 1000),

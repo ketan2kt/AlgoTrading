@@ -82,38 +82,38 @@
 
         @if (section === 'inquiries') {
           <section class="admin-card">
-            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">INBOX / {{ inquiryTotal }} TOTAL</p><h2>Every enquiry, in one place.</h2></div><label class="admin-search"><span aria-hidden="true">⌕</span><input name="inquirySearch" [(ngModel)]="inquirySearch" placeholder="Search name, email, message…" aria-label="Search enquiries"></label></header>
+            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">INBOX / {{ inquiryTotal }} TOTAL</p><h2>Every enquiry, in one place.</h2></div><label class="admin-search"><span aria-hidden="true">⌕</span><input name="inquirySearch" maxlength="120" [(ngModel)]="inquirySearch" (change)="searchInquiries()" (keyup.enter)="searchInquiries()" placeholder="Search name, email, message…" aria-label="Search enquiries"></label></header>
             @if (inquiriesLoading) { <p class="admin-empty">Loading enquiries…</p> }
             @else if (inquiriesError) { <p class="admin-alert admin-alert--error" role="alert">{{ inquiriesError }}</p> }
-            @else if (visibleInquiries.length === 0) { <p class="admin-empty">{{ inquiries.length ? 'No enquiries match this search.' : 'No enquiries have been submitted yet.' }}</p> }
+            @else if (inquiries.length === 0) { <p class="admin-empty">{{ inquirySearch ? 'No enquiries match this search.' : 'No enquiries have been submitted yet.' }}</p> }
             @else {
               <div class="admin-table-scroll"><table class="admin-table"><thead><tr><th>Contact</th><th>Service</th><th>Received</th><th>Email status</th><th>Message</th></tr></thead><tbody>
-                @for (item of visibleInquiries; track item.id) {
+                @for (item of inquiries; track item.id) {
                   <tr><td><strong>{{ item.name }}</strong><small>{{ item.email }}</small>@if (item.company) { <small>{{ item.company }}</small> }</td><td>{{ item.service }}</td><td>{{ item.createdAtUtc | date:'dd MMM yyyy, HH:mm':'Asia/Kolkata' }} IST</td><td><span class="admin-status" [class.admin-status--good]="item.deliveryStatus === 'Delivered'">{{ item.deliveryStatus }}</span><small>{{ item.deliveryAttempts }} attempt{{ item.deliveryAttempts === 1 ? '' : 's' }}</small></td><td class="admin-message"><details><summary>Read message</summary><p>{{ item.message }}</p></details></td></tr>
                 }
               </tbody></table></div>
-              @if (inquiryTotal > inquiries.length) { <div class="admin-table-footnote"><span>Showing {{ inquiries.length }} of {{ inquiryTotal }} enquiries.</span><button type="button" class="admin-text-button" (click)="loadMoreInquiries()" [disabled]="inquiriesLoading">{{ inquiriesLoading ? 'Loading…' : 'Load older enquiries ↓' }}</button></div> }
+              @if (inquiryMatches > inquiries.length) { <div class="admin-table-footnote"><span>Showing {{ inquiries.length }} of {{ inquiryMatches }} matching enquiries.</span><button type="button" class="admin-text-button" (click)="loadMoreInquiries()" [disabled]="inquiriesLoading">{{ inquiriesLoading ? 'Loading…' : 'Load older enquiries ↓' }}</button></div> }
             }
           </section>
         }
 
         @if (section === 'users') {
           <section class="admin-card">
-            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">IDENTITIES / {{ userTotal }} TOTAL</p><h2>Registered accounts.</h2></div><div class="admin-card__actions"><label class="admin-search"><span aria-hidden="true">⌕</span><input name="userSearch" [(ngModel)]="userSearch" placeholder="Search accounts…" aria-label="Search user accounts"></label><button class="admin-button admin-button--primary" type="button" (click)="showAddUser = !showAddUser">{{ showAddUser ? 'Cancel' : 'Add user' }} <span aria-hidden="true">{{ showAddUser ? '−' : '+' }}</span></button></div></header>
+            <header class="admin-card__heading admin-card__heading--wrap"><div><p class="admin-eyebrow">IDENTITIES / {{ userTotal }} TOTAL</p><h2>Registered accounts.</h2></div><div class="admin-card__actions"><label class="admin-search"><span aria-hidden="true">⌕</span><input name="userSearch" maxlength="120" [(ngModel)]="userSearch" (change)="searchUsers()" (keyup.enter)="searchUsers()" placeholder="Search accounts…" aria-label="Search user accounts"></label><button class="admin-button admin-button--primary" type="button" (click)="showAddUser = !showAddUser">{{ showAddUser ? 'Cancel' : 'Add user' }} <span aria-hidden="true">{{ showAddUser ? '−' : '+' }}</span></button></div></header>
             @if (showAddUser) {
               <form class="admin-add-user" (ngSubmit)="createPendingUser()"><div><p class="admin-eyebrow">NEW ACCOUNT</p><h3>Add a pending user</h3><p>This creates a disabled account only—no password, invite, role or trading access is granted.</p></div><label>Email address<input name="newUserEmail" type="email" [(ngModel)]="newUserEmail" autocomplete="email" maxlength="254" required placeholder="person@example.com"></label><button class="admin-button admin-button--primary" type="submit" [disabled]="userSaveBusy || !newUserEmail">{{ userSaveBusy ? 'Adding…' : 'Add pending user' }}</button></form>
               @if (userSaveError) { <p class="admin-alert admin-alert--error" role="alert">{{ userSaveError }}</p> }
             }
             @if (usersLoading) { <p class="admin-empty">Loading accounts…</p> }
             @else if (usersError) { <p class="admin-alert admin-alert--error" role="alert">{{ usersError }}</p> }
-            @else if (visibleUsers.length === 0) { <p class="admin-empty">{{ users.length ? 'No accounts match this search.' : 'No accounts are registered.' }}</p> }
+            @else if (users.length === 0) { <p class="admin-empty">{{ userSearch ? 'No accounts match this search.' : 'No accounts are registered.' }}</p> }
             @else {
               <div class="admin-table-scroll"><table class="admin-table"><thead><tr><th>Account</th><th>Role</th><th>Created</th><th>Access</th><th>Email</th></tr></thead><tbody>
-                @for (item of visibleUsers; track item.id) {
+                @for (item of users; track item.id) {
                   <tr><td><strong>{{ item.username }}</strong><small>{{ item.email }}</small></td><td><span class="admin-role-list">@for (role of item.roles; track role) { <span class="admin-role">{{ role }}</span> } @if (!item.roles.length) { <span class="admin-muted">No role</span> }</span></td><td>{{ item.createdAtUtc | date:'dd MMM yyyy':'Asia/Kolkata' }}</td><td><span class="admin-status" [class.admin-status--good]="item.isActive && item.emailConfirmed">{{ item.isActive && item.emailConfirmed ? 'Active' : 'Pending / disabled' }}</span></td><td>{{ item.emailConfirmed ? 'Confirmed' : 'Unconfirmed' }}</td></tr>
                 }
               </tbody></table></div>
-              @if (userTotal > users.length) { <div class="admin-table-footnote"><span>Showing {{ users.length }} of {{ userTotal }} accounts.</span><button type="button" class="admin-text-button" (click)="loadMoreUsers()" [disabled]="usersLoading">{{ usersLoading ? 'Loading…' : 'Load more users ↓' }}</button></div> }
+              @if (userMatches > users.length) { <div class="admin-table-footnote"><span>Showing {{ users.length }} of {{ userMatches }} matching accounts.</span><button type="button" class="admin-text-button" (click)="loadMoreUsers()" [disabled]="usersLoading">{{ usersLoading ? 'Loading…' : 'Load more users ↓' }}</button></div> }
             }
           </section>
         }
