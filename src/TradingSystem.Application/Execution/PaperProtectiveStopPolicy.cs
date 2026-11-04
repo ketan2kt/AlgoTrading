@@ -4,6 +4,12 @@ namespace TradingSystem.Application.Execution;
 
 public static class PaperProtectiveStopPolicy
 {
+    public static decimal ExecutableTrail(Direction direction, decimal proposed, decimal prior, decimal tick)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tick);
+        return direction == Direction.Buy ? Math.Max(Math.Ceiling(prior / tick), Math.Floor(proposed / tick)) * tick :
+            Math.Min(Math.Floor(prior / tick), Math.Ceiling(proposed / tick)) * tick;
+    }
     // Shared premium protection calculation for production and offline replay.
     // The caller supplies the favourable mark observed as-of this decision;
     // neither path may substitute a later high or a non-executable peak.

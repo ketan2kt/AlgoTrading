@@ -27,10 +27,10 @@ public sealed record HistoricalNiftyExitSettings(
 public sealed class HistoricalNiftyPositionPolicy(
     IHistoricalReplayPortfolioPolicy entryPolicy,
     HistoricalNiftyExitSettings settings,
-    string spotSymbol = "NIFTY") : IHistoricalReplayPortfolioPolicy
+    string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v6";
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v7";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
@@ -80,6 +80,8 @@ public sealed class HistoricalNiftyPositionPolicy(
                 proposed = PaperProtectiveStopPolicy.ProtectReversalProfit(
                     Direction.Buy, position.EntryPrice, mark, proposed,
                     settings.ReversalProfitLockFraction);
+            proposed = ticks is not null ? PaperProtectiveStopPolicy.ExecutableTrail(Direction.Buy,
+                proposed, position.StopPrice, ticks[position.Symbol]) : Math.Max(proposed, position.StopPrice);
             if (proposed != position.StopPrice)
                 updates.Add(new(position.Symbol,
                     frame.Market.AvailableAtUtc, proposed) { RecomputedFromInitialRisk = true });
@@ -194,7 +196,7 @@ public sealed class HistoricalNiftyPositionPolicy(
             Direction.Buy, mark, position.EntryPrice,
             position.InitialStopPrice,
             position.OriginalQuantity > 0 ? position.OriginalQuantity : position.Quantity,
-            plan, settings.PartialProfitEnabled,
+            position.LotSize ?? 0, plan, settings.PartialProfitEnabled,
             position.Quantity != position.OriginalQuantity, reason);
         return (reason, partial);
     }

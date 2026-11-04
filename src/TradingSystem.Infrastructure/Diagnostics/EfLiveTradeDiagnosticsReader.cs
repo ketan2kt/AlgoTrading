@@ -29,12 +29,17 @@ internal sealed class EfLiveTradeDiagnosticsReader(
         var market = (intent?.Market ?? position?.Market ?? "NIFTY").ToLowerInvariant();
         var compactSourceId = sourceId.ToString("N");
         var fromUtc = intent?.CreatedAtUtc ?? position?.OpenedAtUtc;
-        var audits = await db.MarketStrategyAudits.AsNoTracking()
-            .Where(value => value.Market == market &&
-                (fromUtc == null || value.CandleTimeUtc >= fromUtc.Value.AddMinutes(-1)) &&
-                (fromUtc == null || value.CandleTimeUtc <= fromUtc.Value.AddDays(1)) &&
+        var sourceFilter = System.Text.Json.JsonSerializer.Serialize(new { sourceIdCompact = compactSourceId });
+        var query = db.MarketStrategyAudits.AsNoTracking().Where(value => value.Market == market);
+        if (fromUtc is { } since)
+        {
+            var lower = since.AddMinutes(-1);
+            var upper = since.AddDays(1);
+            query = query.Where(value => value.CandleTimeUtc >= lower && value.CandleTimeUtc <= upper);
+        }
+        var audits = await query.Where(value =>
                 ((value.Outcome.StartsWith("LiveExecution:") &&
-                  value.ReasonsJson.Contains(compactSourceId)) ||
+                  EF.Functions.JsonContains(value.ReasonsJson, sourceFilter)) ||
                  value.Outcome == "LiveProtectionDesired:" + compactSourceId))
             .OrderBy(value => value.CandleTimeUtc)
             .Take(300)
@@ -54,11 +59,13 @@ internal sealed class EfLiveTradeDiagnosticsReader(
                 null, null, position?.EntryPrice ?? paper!.EntryPrice,
                 position?.StopLoss, position?.Target, null, audits, orders, limitations);
         }
-        var references = new[]
+        var references = new List<(string Role, string Reference)>
         {
-            (Role: "Entry", Reference: intent.ClientReference),
-            (Role: "Protection", Reference: "LP" + intent.Id.ToString("N")[..16]),
-            (Role: "FinalExit", Reference: "LX" + sourceId.ToString("N")[..16])
+            ("Entry", intent.ClientReference), ("Protection", "LP" + intent.Id.ToString("N")[..16]),
+            ("FinalExit", "LX" + sourceId.ToString("N")[..16]),
+            ("PartialExit", "LQ" + sourceId.ToString("N")[..16]),
+            ("AddOn", "LA" + sourceId.ToString("N")[..16]),
+            ("ResidualProtection", "LR" + intent.Id.ToString("N")[..16])
         };
         foreach (var item in references)
         {

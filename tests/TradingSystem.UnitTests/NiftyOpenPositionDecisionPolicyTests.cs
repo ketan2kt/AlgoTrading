@@ -36,11 +36,15 @@ public sealed class NiftyOpenPositionDecisionPolicyTests
     {
         var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Range);
         Assert.Equal(75, NiftyOpenPositionDecisionPolicy.PartialQuantity(
-            Direction.Buy, 108m, 100m, 90m, 150, plan,
+            Direction.Buy, 108m, 100m, 90m, 150, 75, plan,
             true, false, PaperExitReason.None));
         Assert.Equal(0, NiftyOpenPositionDecisionPolicy.PartialQuantity(
-            Direction.Buy, 108m, 100m, 90m, 150, plan,
+            Direction.Buy, 108m, 100m, 90m, 150, 75, plan,
             true, false, PaperExitReason.StopLoss));
+        Assert.Equal(130, NiftyOpenPositionDecisionPolicy.PartialQuantity(
+            Direction.Buy, 108m, 100m, 90m, 325, 65, plan, true, false, PaperExitReason.None));
+        Assert.Equal(0, NiftyOpenPositionDecisionPolicy.PartialQuantity(
+            Direction.Buy, 108m, 100m, 90m, 65, 65, plan, true, false, PaperExitReason.None));
     }
 
     private static PaperExitReason Resolve(decimal mark,

@@ -56,7 +56,8 @@ public sealed class HistoricalNormalPolicyFactory
                     settings.MinimumFutureCandles, settings.CandleIntervalSeconds, settings.NiftyLots,
                     contracts, settings.NiftySelection, new MarketRegimeEngine(settings.Regime),
                     IndexStrategyPortfolio.Create(settings.PriceAction, settings.OpeningRange),
-                    settings.NiftyAdmission), settings.NiftyExits),
+                    settings.NiftyAdmission), settings.NiftyExits, ticks: contracts.ToDictionary(
+                        c => c.TradingSymbol, c => c.TickSize, StringComparer.Ordinal)),
             "SENSEX" when slice.FrontFutureSymbol is { Length: > 0 } future =>
                 new HistoricalMarketOptionPositionPolicy(new HistoricalSensexSignalPolicy(
                     slice.UnderlyingInstrumentId, date, future, settings.SensexEntry, contracts, slice.PriorSensexThesis),

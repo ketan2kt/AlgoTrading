@@ -133,8 +133,8 @@ public sealed class GrowwBrokerGateway(
             OrderType: "SL", TriggerPrice: request.StopLoss), cancellationToken);
         if (order.State != OrderState.BrokerAcknowledged || order.FilledQuantity != 0)
             throw new BrokerOrderOutcomeUnknownException(request.ClientReference);
-        return new BrokerProtectionSnapshot(request.ClientReference, order.BrokerOrderId,
-            order.State.ToString(), request.Quantity, request.StopLoss, timeProvider.GetUtcNow());
+        var verified = await ConfirmProtectionAsync(order.BrokerOrderId, request.Quantity, request.StopLoss, cancellationToken);
+        return verified with { ClientReference = request.ClientReference };
     }
 
     public async Task<BrokerProtectionSnapshot> ModifyProtectionAsync(string brokerProtectionId,
@@ -158,9 +158,35 @@ public sealed class GrowwBrokerGateway(
             payload.OrderStatus.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase) ||
             payload.OrderStatus.Equals("EXECUTED", StringComparison.OrdinalIgnoreCase))
             throw new BrokerOrderOutcomeUnknownException(brokerProtectionId);
-        return new BrokerProtectionSnapshot(string.Empty,
-            payload.GrowwOrderId ?? brokerProtectionId, payload.OrderStatus ?? "UNKNOWN",
-            quantity, stopLoss, timeProvider.GetUtcNow());
+        if (payload.GrowwOrderId is not null && payload.GrowwOrderId != brokerProtectionId)
+            throw new BrokerOrderOutcomeUnknownException(brokerProtectionId);
+        return await ConfirmProtectionAsync(brokerProtectionId, quantity, stopLoss, cancellationToken);
+    }
+
+    internal async Task<BrokerProtectionSnapshot> ConfirmProtectionAsync(string id, int quantity,
+        decimal stopLoss, CancellationToken cancellationToken)
+    {
+        // Modify/create acknowledgement can mean MODIFICATION_REQUESTED; verify the actual
+        // sell stop on the same broker ID. Poll reads only; never resend an uncertain mutation.
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            OrderDetailPayload? detail = null;
+            try
+            {
+                detail = await SendAsync<OrderDetailPayload>(HttpMethod.Get,
+                    $"/v1/order/detail/{Uri.EscapeDataString(id)}?segment=FNO", null, cancellationToken);
+            }
+            catch (GrowwApiException ex) when (ex.StatusCode == 404) { }
+            if (detail is not null && detail.OrderId == id && detail.OrderType == "SL" &&
+                detail.TransactionType == "SELL" && detail.OrderStatus is ("TRIGGER_PENDING" or "OPEN") &&
+                detail.Quantity == quantity && detail.FilledQuantity == 0 &&
+                detail.TriggerPrice == stopLoss && detail.Price == ProtectiveLimit(stopLoss))
+                return new(string.Empty, id, detail.OrderStatus, quantity, stopLoss, timeProvider.GetUtcNow());
+            if (detail?.FilledQuantity > 0 || detail?.OrderStatus is "CANCELLED" or "REJECTED" or "FAILED" or "COMPLETED" or "EXECUTED")
+                break;
+            if (attempt < 4) await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+        }
+        throw new BrokerOrderOutcomeUnknownException(id);
     }
 
     public async Task CancelProtectionAsync(string brokerProtectionId,
@@ -371,7 +397,7 @@ public sealed class GrowwBrokerGateway(
     {
         "COMPLETED" or "EXECUTED" when requested > 0 && filled >= requested => OrderState.Filled,
         "COMPLETED" or "EXECUTED" => OrderState.PartiallyFilled,
-        "OPEN" or "PENDING" or "NEW" or "PLACED" => filled > 0 ? OrderState.PartiallyFilled : OrderState.BrokerAcknowledged,
+        "OPEN" or "TRIGGER_PENDING" or "PENDING" or "NEW" or "PLACED" => filled > 0 ? OrderState.PartiallyFilled : OrderState.BrokerAcknowledged,
         "CANCELLED" => OrderState.Cancelled,
         "REJECTED" or "FAILED" => OrderState.RejectedByBroker,
         _ => OrderState.ReconciliationRequired
@@ -395,6 +421,10 @@ public sealed class GrowwBrokerGateway(
         [property: JsonPropertyName("order_status")] string? OrderStatus,
         [property: JsonPropertyName("filled_quantity")] int FilledQuantity);
     private sealed record OrderDetailPayload(
+        [property: JsonPropertyName("groww_order_id")] string? OrderId,
+        [property: JsonPropertyName("transaction_type")] string? TransactionType,
+        [property: JsonPropertyName("quantity")] int? Quantity,
+        [property: JsonPropertyName("filled_quantity")] int? FilledQuantity,
         [property: JsonPropertyName("order_status")] string? OrderStatus,
         [property: JsonPropertyName("order_type")] string? OrderType,
         [property: JsonPropertyName("price")] decimal? Price,

@@ -19,4 +19,23 @@ public sealed class LiveExecutionIntentTests
     private static LiveExecutionIntent NewIntent() => new(Guid.NewGuid(), "SENSEX", Guid.NewGuid(),
         "SENSEX", Guid.NewGuid(), Direction.Buy, 100, 100m, 90m, 110m,
         "LE12345678", DateTimeOffset.UtcNow);
+
+    [Fact]
+    public void FinalExitCannotSubmitTwiceAndTracksOnlyTheVerifiedRemainder()
+    {
+        var intent = NewIntent();
+        intent.Filled(100, 101m);
+        intent.Protected("first-stop", DateTimeOffset.UtcNow);
+        intent.BeginFinalExit();
+        intent.BeginFinalSell();
+        Assert.Throws<InvalidOperationException>(intent.BeginFinalSell);
+        intent.ReserveResidualProtection(40);
+        Assert.Equal(40, intent.FilledQuantity);
+        Assert.Equal("ResidualStopSubmitting", intent.Status);
+        intent.ResidualProtected("recovery-stop", DateTimeOffset.UtcNow);
+        Assert.Equal("ResidualProtected", intent.Status);
+        Assert.Equal("recovery-stop", intent.ProtectionId);
+        intent.Closed(DateTimeOffset.UtcNow);
+        Assert.Equal(0, intent.FilledQuantity);
+    }
 }
