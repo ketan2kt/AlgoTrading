@@ -1,16 +1,21 @@
 <section class="control-center-card trading-lots-card">
-  <span>MARKET EXECUTION</span><h3>Lot sizes and new live entries</h3>
-  <p>Lot edits apply after Save. Live switches apply immediately and stay set until changed. Switching off blocks new live entries; existing live positions remain managed.</p>
+  <header class="execution-heading"><span>EXECUTION SETTINGS</span><h3>Market controls</h3></header>
+  <div class="execution-markets">
   @for (row of rows; track row.key) {
-    <div class="desk-market-row">
-      <label>{{row.name}} lots @if (lots; as draft) { <input type="number" min="1" max="50" step="1" [(ngModel)]="draft[row.field]" [disabled]="saving" /> } @else { <small>{{loadingLots?'Loading…':'Unavailable'}}</small> }</label>
+    <article class="execution-market">
+      <h4>{{row.name}}</h4>
+      <label>Trade size · lots @if (lots; as draft) { <input type="number" [attr.aria-label]="row.name + ' lots'" min="1" max="50" step="1" [(ngModel)]="draft[row.field]" [disabled]="saving" /> } @else { <small>{{loadingLots?'Loading…':'Unavailable'}}</small> }</label>
       <button type="button" class="market-live-toggle" [class.is-on]="armed(row.key)===true" [attr.aria-label]="row.name + ' new live entries'" [attr.aria-pressed]="armed(row.key)" [disabled]="!canSwitch(row.key)" (click)="switch(row.key)">{{changing===row.key?'Updating…':loadingLive?'Loading…':armed(row.key)===null?'Status unavailable':armed(row.key)?'New live entries ON':'New live entries OFF'}}</button>
-    </div>
+    </article>
   }
-  <button type="button" [disabled]="!lots || saving" (click)="save()">{{saving?'Saving…':'Save lot sizes'}}</button>
+  </div>
+  <p class="execution-help">Save to apply lot sizes. Live switches apply immediately and stay set. OFF blocks new live entries but keeps existing positions managed.</p>
+  <div class="execution-actions">
+  <button type="button" class="execution-save" [disabled]="!lots || saving" (click)="save()">{{saving?'Saving…':'Save lot sizes'}}</button>
   @if (!lots && !loadingLots) { <button type="button" (click)="loadLots()">Reload lot sizes</button> }
   @if (!loadingLive && !changing) { <button type="button" (click)="loadLive()">Reload live status</button> }
+  </div>
   @if(status && !status.buildEnabled){<small>Live execution disabled by server configuration.</small>}
   @if(lotMessage || liveMessage){<p role="status">{{lotMessage}} {{liveMessage}}</p>}
-  @if(status?.latestIntentStatus){<p>Latest broker attempt: {{status?.latestIntentMarket}} · {{status?.latestIntentStatus}} · {{status?.latestIntentAtUtc | date:'dd MMM HH:mm:ss':'Asia/Kolkata'}} IST. {{status?.latestIntentError}}</p>}
+  @if(status?.latestIntentStatus){<p class="execution-receipt"><strong>Last broker attempt</strong> {{status?.latestIntentMarket}} · {{status?.latestIntentStatus}} · {{status?.latestIntentAtUtc | date:'dd MMM HH:mm:ss':'Asia/Kolkata'}} IST. {{status?.latestIntentError}}</p>}
 </section>

@@ -66,7 +66,7 @@
         <div class="workspace-nav-actions">
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') { <button class="workspace-nav-actions__primary" type="button" (click)="openHeroZero()">Hero Zero</button> }
-          <div class="desk-reports"><button type="button" aria-controls="desk-report-links" [attr.aria-expanded]="reportsOpen" (click)="reportsOpen=!reportsOpen">Reports ▾</button>
+          <div class="desk-reports"><button type="button" aria-controls="desk-report-links" [attr.aria-expanded]="reportsOpen" (click)="reportsOpen=!reportsOpen">Reports</button>
           @if(reportsOpen){<div id="desk-report-links" class="desk-report-links" (keydown.escape)="reportsOpen=false">
             <button type="button" (click)="reportsOpen=false;openReport()">Performance</button>
             <button type="button" (click)="reportsOpen=false;openPnlReport()">P&amp;L</button>
@@ -106,10 +106,10 @@
           <section class="evaluation-panel logs-modal control-center" role="dialog" aria-modal="true"
             aria-label="Trading control center" (click)="$event.stopPropagation()">
             <header class="panel-heading dialog-heading">
-              <div><span>CONTROL CENTER</span><h2>Controls</h2><p>{{ preparedMarketName() }} settings and system state</p></div>
+              <div><span>TRADING DESK</span><h2>Control center</h2><p>{{ preparedMarketName() }} workspace · Execution, broker and safety</p></div>
               <button type="button" class="dialog-close" (click)="closeControls()" aria-label="Close controls">×</button>
             </header>
-            <div class="control-center-actions">
+            <div class="control-center-actions"><strong>Workspace actions</strong>
               <button type="button" (click)="refreshWorkspace()">Refresh workspace</button>
               <button type="button" (click)="openGrowwPositions()">Groww live positions</button>
 
@@ -119,7 +119,7 @@
             @if (selectedMarket !== 'natural-gas') {
               <app-market-controls />
             }
-            <details class="desk-advanced" [open]="!tokenStatus.isConfigured || tokenStatus.isExpired || !!tokenError || workspace?.feedStatus === 'InstrumentUnavailable'"><summary>Broker maintenance · Groww token and instruments</summary>
+            <details class="desk-advanced controls-disclosure" [open]="!tokenStatus.isConfigured || tokenStatus.isExpired || !!tokenError || workspace?.feedStatus === 'InstrumentUnavailable'"><summary>Broker connection <small>Groww token &amp; instruments</small></summary>
             <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">
               <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add today’s token for live market data.' }}</p></div>
               @if (!showTokenForm) { <button type="button" (click)="openTokenForm()">{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Replace token' : 'Add token' }}</button> }
@@ -130,6 +130,7 @@
             <section class="instrument-sync-card control-center-card"><div><span>INSTRUMENT MASTER</span><strong>{{ preparedMarketName() }}</strong><p>Refresh broker identifiers when an instrument is unavailable.</p></div><button type="button" [disabled]="instrumentSyncBusy" (click)="synchronizeInstruments()">{{ instrumentSyncBusy ? 'Synchronising…' : 'Synchronise' }}</button></section>
             </details>
             @if(workspace; as view){
+            <details class="controls-disclosure"><summary>Session diagnostics <small>Feed, risk &amp; entry readiness</small></summary>
             <section class="market-strip">
               <article><span>Feed</span><strong [class.good]="view.isFresh" [class.bad]="!view.isFresh">{{ view.feedStatus }}</strong></article>
               <article><span>Last update</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') + ' IST' : '—' }}</strong></article>
@@ -142,9 +143,10 @@
             }
             <section class="readiness-panel"><div class="panel-heading"><div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div></div><div class="readiness-grid">@for (check of view.paperAutomation.readinessChecks || []; track check.code) { <article [class.readiness-pass]="check.ready"><span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span><strong>{{ check.label }}</strong><p>{{ check.detail }}</p></article> }</div></section>
             @if (selectedMarket !== 'natural-gas') { <section class="option-routing-panel"><div><span>OPTION ROUTING</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for signal' }}</strong></div>@if (view.paperAutomation.selectedOptionSymbol) { <div><span>Type / strike</span><strong>{{ view.paperAutomation.selectedOptionType }} / {{ view.paperAutomation.selectedOptionStrike | number:'1.0-0' }}</strong></div><div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date:'dd MMM':'Asia/Kolkata' }}</strong></div> }</section> }
+            </details>
             @if (operationalAlerts(view).length) { <div class="feed-notice feed-notice--warning">{{ operationalAlerts(view)[0] }}</div> }
             }
-            <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
+            <section class="controls-emergency"><div><strong>Emergency control</strong><small>Global · paper trading</small></div><div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div></section>
           </section>
         </div>
         }
