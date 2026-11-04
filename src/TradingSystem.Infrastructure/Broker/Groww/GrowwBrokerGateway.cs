@@ -397,7 +397,9 @@ public sealed class GrowwBrokerGateway(
     {
         "COMPLETED" or "EXECUTED" when requested > 0 && filled >= requested => OrderState.Filled,
         "COMPLETED" or "EXECUTED" => OrderState.PartiallyFilled,
-        "OPEN" or "TRIGGER_PENDING" or "PENDING" or "NEW" or "PLACED" => filled > 0 ? OrderState.PartiallyFilled : OrderState.BrokerAcknowledged,
+        "OPEN" or "TRIGGER_PENDING" or "PENDING" or "NEW" or "PLACED" or "ACKED" or "APPROVED" =>
+            filled > 0 ? OrderState.PartiallyFilled : OrderState.BrokerAcknowledged,
+        "CANCELLATION_REQUESTED" => OrderState.CancelPending,
         "CANCELLED" => OrderState.Cancelled,
         "REJECTED" or "FAILED" => OrderState.RejectedByBroker,
         _ => OrderState.ReconciliationRequired

@@ -5,6 +5,13 @@ namespace TradingSystem.UnitTests;
 
 public sealed class PaperProtectiveStopPolicyTests
 {
+    [Fact]
+    public void ExecutableTrailCannotGiveBackAnAlreadyRecordedStop()
+    {
+        Assert.Equal(112.55m, PaperProtectiveStopPolicy.ExecutableTrail(Direction.Buy, 112.589m, 110m, .05m));
+        Assert.Equal(112.55m, PaperProtectiveStopPolicy.ExecutableTrail(Direction.Buy, 110m, 112.55m, .05m));
+        Assert.Equal(98.15m, PaperProtectiveStopPolicy.ExecutableTrail(Direction.Sell, 98.11m, 101m, .05m));
+    }
     [Theory]
     [InlineData(Direction.Buy, 90, 108, 104)]
     [InlineData(Direction.Buy, 90, 116, 111.2)]

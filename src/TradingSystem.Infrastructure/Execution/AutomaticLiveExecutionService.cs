@@ -785,6 +785,25 @@ internal sealed partial class AutomaticLiveExecutionService(
             value.Direction, value.FilledQuantity)).ToArray();
         var result = ReconcileManagedPositions(expected, actual, timeProvider.GetUtcNow());
         if (result.TradingPermitted) return true;
+        // A DAY stop can legitimately execute before paper closes. Attribute the
+        // fill to the exact protection order, never to a net position alone.
+        foreach (var group in active.GroupBy(x => x.InstrumentId))
+        {
+            var held = actual.Where(x => x.InstrumentId == group.Key && x.Direction == Direction.Buy).Sum(x => x.Quantity);
+            if (held >= group.Sum(x => x.FilledQuantity)) continue;
+            foreach (var intent in group)
+            {
+                var stop = await broker.GetOrderAsync(Reference("LP", intent.Id), cancellationToken);
+                if (!IsConfirmedFinalFill(stop, intent.FilledQuantity) || stop!.BrokerOrderId != intent.ProtectionId) continue;
+                var competing = await broker.GetOrderAsync(Reference("LX", intent.SourceId), cancellationToken);
+                if (competing is not null && (competing.FilledQuantity != 0 ||
+                    competing.State is not (OrderState.Cancelled or OrderState.RejectedByBroker))) continue;
+                intent.Closed(timeProvider.GetUtcNow());
+                await db.SaveChangesAsync(cancellationToken);
+                await TryRecordLiveEventAsync(db, intent, "BrokerStopFilledBeforePaperExit",
+                    new { stop.BrokerOrderId, stop.FilledQuantity, stop.AverageFillPrice }, cancellationToken);
+            }
+        }
         LogReconciliationBlocked(logger, string.Join(" ", result.Mismatches));
         return false;
     }
