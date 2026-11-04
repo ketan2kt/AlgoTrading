@@ -467,7 +467,7 @@ internal sealed class EfTradingWorkspaceReader(
             if (latest is not null)
             {
                 var source = latest.SignalId is {} id ? signalRows.FirstOrDefault(s => s.Id == id) : null;
-                var reason = latest.FailedConditions.FirstOrDefault() ??
+                var reason = latest.FailedConditions.Count > 0 ? latest.FailedConditions[0] :
                     ReadEvidence(source?.ReasonsJson, "supporting").FirstOrDefault();
                 engineRead = new(latest.CandleTimeUtc, latest.Outcome, reason,
                     ReadIndexConfirmation(source?.ReasonsJson));
