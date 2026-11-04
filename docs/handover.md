@@ -1,6 +1,10 @@
-# Current handover — 4 November 2026
+# Current handover — 5 November 2026
 
-## Session evidence — built locally from main b7b6bc0
+## Session evidence — merged to main; deployment dispatched
+
+Local follow-up (not deployed): the protection badge now fits the rail, reads “After hours” outside regular weekday 09:15–15:30 IST hours, and pauses automatic reads then. Opening or refreshing the dialog still shows every unresolved record. No changes to broker handling or reconciliation. Boundary fixtures added; diff checked, visual/runtime validation pending.
+
+[PR #22](https://github.com/ketan2kt/AlgoTrading/pull/22) merged as `1456005`. [Main CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/41896279171) passed all checks. [Deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41896686655) dispatched once; completion and real-session behavior remain unverified. The per-feature notes below describe the pre-release checks and evidence limitations.
 
 - **5 Nov · Live protection monitor, local:** Admin desk badge and read-only dialog for Nifty, Sensex and Bank Nifty. Reads a consistent DB snapshot of unsettled system live intents, paper stop/units and exact source/intent/order-linked broker receipts. Exceptions first; missing, uncertain, prior-session and superseded confirmations cannot produce a match. Shows confirmation time, not current exchange state; account-only trades are outside scope. Visible tabs refresh every 20s; no broker API calls or order/control mutations. Static checks only; runtime, live-session validation and deployment pending.
 
