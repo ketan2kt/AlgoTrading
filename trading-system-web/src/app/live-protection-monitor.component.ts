@@ -8,6 +8,13 @@ interface Row {id:string;market:string;symbol:string;lifecycle:string;paperUnits
   confirmedAt:string|null;finding:string;needsAttention:boolean}
 interface Snapshot {readAt:string;attention:number;rows:Row[]}
 
+// Presentation only: regular Indian index desk hours, independent of browser time zone.
+export function inProtectionDeskHours(now:Date):boolean {
+  const ist=new Date(now.getTime()+330*60_000);
+  const minutes=ist.getUTCHours()*60+ist.getUTCMinutes();
+  return ist.getUTCDay()>0 && ist.getUTCDay()<6 && minutes>=555 && minutes<930;
+}
+
 @Component({selector:'app-live-protection-monitor',imports:[DatePipe,DecimalPipe],
   templateUrl:'./live-protection-monitor.component.html',styleUrl:'./live-protection-monitor.component.scss'})
 export class LiveProtectionMonitorComponent implements OnInit,OnDestroy{
@@ -17,11 +24,18 @@ export class LiveProtectionMonitorComponent implements OnInit,OnDestroy{
   protected readonly snapshot=signal<Snapshot|null>(null);
   protected readonly failed=signal(false);
   protected readonly busy=signal(false);
-  ngOnInit(){this.refresh();this.timer=setInterval(()=>this.refresh(),20_000);}
+  protected readonly inSession=signal(inProtectionDeskHours(new Date()));
+  private tick(readOnce=false){
+    const active=inProtectionDeskHours(new Date());
+    const changed=active!==this.inSession();
+    this.inSession.set(active);
+    if(active||changed||readOnce)this.refresh();
+  }
+  ngOnInit(){this.tick(true);this.timer=setInterval(()=>this.tick(),20_000);}
   ngOnDestroy(){clearInterval(this.timer);this.request?.unsubscribe();}
   @HostListener('document:visibilitychange') visibility(){
     if(document.hidden){this.request?.unsubscribe();this.busy.set(false);this.snapshot.set(null);}
-    else this.refresh();
+    else this.tick(true);
   }
   protected refresh(){
     if(document.hidden||this.busy())return;

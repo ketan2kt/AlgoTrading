@@ -937,6 +937,13 @@ app-root .desk-reports > button[aria-expanded=true]::after { transform: rotate(2
 app-root .workspace-layout .desk-report-links { border: 1px solid #62886d; background: #d9ebd7; padding: .32rem; gap: .28rem; }
 app-root .workspace-layout .desk-report-links button { color: #123d29; background: #f5faf1; border-color: #73957b; text-align: start; padding: .4rem .5rem; }
 app-root .workspace-layout .market-tabs .mute-alerts-button.muted { color: #543a06; background: #fff0c5; border-color: #ad8737; }
+/* The protection control must fit the rail without widening its siblings.
+   Its native dialog is also inside the nav DOM; don't hide its actions on mobile. */
+app-root .workspace-layout .workspace-nav-actions app-live-protection-monitor .trigger { display:grid; }
+app-root .workspace-layout .workspace-nav-actions app-live-protection-monitor dialog button { display:inline-flex; }
+@media(min-width:901px) {
+  app-root .workspace-layout .workspace-nav-actions { width:100%; min-width:0; box-sizing:border-box; }
+}
 
 /* Execution is the primary task. Diagnostics and maintenance stay one disclosure away. */
 app-root .control-center.logs-modal { width: min(860px, calc(100% - 1rem)); grid-template-columns: minmax(0,1fr); }

@@ -1,23 +1,29 @@
-<button type="button" class="trigger" [class.attention]="(snapshot()?.attention??0)>0 || failed()"
-  aria-haspopup="dialog" (click)="open(panel)">Live protection ·
-  @if(snapshot();as s){ {{s.attention?s.attention+' need attention':s.rows.length?'Last checks matched':'No open intents'}} }
-  @else { {{failed()?'Unknown':'Checking…'}} }</button>
+<button type="button" class="trigger" aria-haspopup="dialog" (click)="open(panel)">
+  <span>Protection</span>
+  @if(!inSession()){<small>After hours</small>}
+  @else if(failed()){<small class="flag">Unknown</small>}
+  @else if(snapshot();as s){<small [class.flag]="s.attention>0">{{s.attention ? s.attention+' to review' : s.rows.length ? 'Matched' : 'No open trades'}}</small>}
+  @else{<small>Checking…</small>}
+</button>
 <dialog #panel aria-labelledby="protection-heading">
-  <header><div><small>TRADING DESK · READ ONLY</small><h2 id="protection-heading">Live protection</h2></div>
-    <button type="button" autofocus (click)="panel.close()" aria-label="Close live protection">Close</button></header>
-  <p>Nifty, Sensex and Bank Nifty · system-managed live trades only. This compares saved paper stops with broker confirmations; it does not query your account or modify orders.</p>
-  <div class="toolbar"><span>@if(snapshot();as s){Snapshot {{s.readAt|date:'HH:mm:ss':'Asia/Kolkata'}} IST · {{s.attention}} need attention}
-    @else{Status unknown}</span><button type="button" (click)="refresh()" [disabled]="busy()">Refresh</button></div>
-  @if(failed()){<p role="alert">Could not read protection records. Current status is unknown.</p>}
-  @else if(snapshot();as s){
-    @for(r of s.rows;track r.id){
-      <article [class.warn]="r.needsAttention"><div class="identity"><div><small>{{r.market}} · {{r.lifecycle}}</small><strong>{{r.symbol}}</strong></div>
-        <b>{{r.finding}}</b></div>
-        <dl><div><dt>Strategy stop</dt><dd>{{r.desiredStop===null?'Unknown':'₹'+(r.desiredStop|number:'1.2-2')}}</dd></div>
-          <div><dt>Last confirmed stop</dt><dd>{{r.confirmedStop===null?'Unknown':'₹'+(r.confirmedStop|number:'1.2-2')}}</dd></div>
-          <div><dt>Units · paper / live / stop</dt><dd>{{r.paperUnits??'—'}} / {{r.liveUnits??'—'}} / {{r.confirmedUnits??'—'}}</dd></div></dl>
-        <small>Order {{r.stopOrderId??'unknown'}} · Confirmed {{r.confirmedAt?(r.confirmedAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata')+' IST':'—'}}</small>
-      </article>
-    }@empty{<p>No open or unsettled managed live intents in the recorded snapshot.</p>}
-  }@else{<p role="status">Reading protection records…</p>}
+  <header><div><small class="eyebrow">TRADING DESK · READ ONLY</small><h2 id="protection-heading">Live protection</h2></div>
+    <button type="button" autofocus (click)="panel.close()">Close</button></header>
+  <div class="content">
+    @if(!inSession()){<p class="notice"><strong>After hours</strong> · These are saved records, not a current broker position. Unresolved items remain available for review.</p>}
+    <div class="toolbar"><div><strong>{{snapshot()?.attention ?? '—'}} to review</strong>
+      @if(snapshot();as s){<small>Read {{s.readAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata'}} IST</small>}</div>
+      <button type="button" (click)="refresh()" [disabled]="busy()">Refresh</button></div>
+    @if(failed()){<p role="alert">Protection records could not be read. Status is unknown.</p>}
+    @else if(snapshot();as s){
+      @for(r of s.rows;track r.id){
+        <article><div class="identity"><div><small>{{r.market}}</small><strong>{{r.symbol}}</strong></div><span class="finding" [class.warn]="r.needsAttention">{{r.finding}}</span></div>
+          <dl><div><dt>Paper stop</dt><dd>{{r.desiredStop===null?'Unknown':'₹'+(r.desiredStop|number:'1.2-2')}}</dd></div>
+            <div><dt>Confirmed stop</dt><dd>{{r.confirmedStop===null?'Unknown':'₹'+(r.confirmedStop|number:'1.2-2')}}</dd></div>
+            <div><dt>Units · paper / live / stop</dt><dd>{{r.paperUnits??'—'}} / {{r.liveUnits??'—'}} / {{r.confirmedUnits??'—'}}</dd></div></dl>
+          <small class="receipt">Stop order: {{r.stopOrderId??'unknown'}} · Confirmed: {{r.confirmedAt?(r.confirmedAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata')+' IST':'no recorded confirmation'}}</small>
+        </article>
+      }@empty{<p>No unsettled system trades in this snapshot.</p>}
+    }@else{<p role="status">Reading saved records…</p>}
+    <footer>Compares paper stops with saved broker confirmations across all three markets. No account query or order changes.</footer>
+  </div>
 </dialog>
