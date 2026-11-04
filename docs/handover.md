@@ -10,6 +10,10 @@ The mobile desk uses one scrollable bar: Nifty, Bank Nifty and Sensex first, the
 
 The three desks show a compact summary above the chart for each filled, still-open trade. Selecting a contract focuses its existing full trade row. No open trade means no extra panel. This is a display-only change; no local runtime tests requested or deployment dispatched.
 
+## Faster deployment
+
+The main deployment can skip Bicep only when the previous successful main release's baseline matches the current infrastructure source, target, live Azure resource configuration and database connection setting. The first release seeds the baseline; a mismatch, missing baseline, read failure or forced full run reapplies Bicep. Both paths retain the existing tests, secret checks, package deployment, migrations and health/build identity verification. See the workflow summary for the path used. No production speedup has been measured yet.
+
 ## Trading desk visual feedback — authorized for main deployment after CI
 
 Reports and its menu now specify text, surface and border together. All three market tabs and desk buttons have resting borders and keyboard focus. Controls groups per-market lots/live settings, broker connection, session diagnostics and the global emergency control; existing handlers and trading policies are unchanged. Source diff inspected; no local UI tests per Ketan. These edits are not part of the [previous deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41852809649).

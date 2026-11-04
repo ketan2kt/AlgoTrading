@@ -6,9 +6,14 @@ on:
       deploy:
         description: Type DEPLOY-LIVE to deploy the armed-controlled live-capable build
         required: true
+      force_infrastructure:
+        description: Reapply Bicep even if the verified infrastructure is unchanged
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -53,9 +58,40 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy infrastructure
-        id: infrastructure
+      - name: Check previous successful infrastructure baseline
+        id: baseline
+        if: github.ref == 'refs/heads/main' && !inputs.force_infrastructure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PG_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}
         run: |
+          # Only a successful previous deployment from this workflow on main is trusted.
+          # Missing/expired artifacts, drift or unavailable read access take the original path.
+          previous=$(gh run list --workflow azure-deploy.yml --event workflow_dispatch \
+            --limit 10 --json databaseId,headBranch,conclusion \
+            --jq "map(select(.databaseId < ${GITHUB_RUN_ID}))[0] | select(.headBranch == \"main\" and .conclusion == \"success\") | .databaseId") || previous=""
+          if [[ "$previous" =~ ^[0-9]+$ ]] && \
+             gh run download "$previous" -n verified-infra-v1 -D "$RUNNER_TEMP/prior-infra" && \
+             python3 scripts/deploy-infra-baseline.py reuse "$RUNNER_TEMP/prior-infra/baseline.json"; then
+            echo "Using verified infrastructure from successful run $previous."
+          else
+            echo "No matching verified baseline. Running full infrastructure deployment."
+          fi
+
+      - name: Resolve deployment infrastructure
+        id: infrastructure
+        env:
+          REUSE: ${{ steps.baseline.outputs.reuse }}
+        run: |
+          if [[ "$REUSE" == true ]]; then
+            echo "app=${{ steps.baseline.outputs.webAppName }}" >> "$GITHUB_OUTPUT"
+            echo "postgres_host=${{ steps.baseline.outputs.postgresHostName }}" >> "$GITHUB_OUTPUT"
+            echo "postgres_database=${{ steps.baseline.outputs.postgresDatabaseName }}" >> "$GITHUB_OUTPUT"
+            echo "postgres_login=${{ steps.baseline.outputs.postgresAdministratorLogin }}" >> "$GITHUB_OUTPUT"
+            echo 'Release path: **app only** (verified infrastructure).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           outputs=$(az deployment group create \
             --name "paper-${GITHUB_RUN_ID}" \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
@@ -65,6 +101,8 @@ jobs:
               prefix=sarthitrading \
               postgresAdministratorPassword="${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}" \
             --query properties.outputs -o json)
+          printf '%s' "$outputs" > "$RUNNER_TEMP/infra-outputs.json"
+          echo 'Release path: **full infrastructure**.' >> "$GITHUB_STEP_SUMMARY"
           echo "app=$(jq -r '.webAppName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
           echo "postgres_host=$(jq -r '.postgresHostName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
           echo "postgres_database=$(jq -r '.postgresDatabaseName.value' <<< "$outputs")" >> "$GITHUB_OUTPUT"
@@ -259,6 +297,31 @@ jobs:
             echo "App Service is running '$actual'; expected '$expected'." >&2
             exit 1
           fi
+
+      - name: Prepare baseline for the next release
+        id: prepare_baseline
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          REUSE: ${{ steps.baseline.outputs.reuse }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PG_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMINISTRATOR_PASSWORD }}
+        run: |
+          if [[ "$REUSE" == true ]]; then
+            cp "$RUNNER_TEMP/prior-infra/baseline.json" "$RUNNER_TEMP/baseline.json"
+          elif ! python3 scripts/deploy-infra-baseline.py capture "$RUNNER_TEMP/baseline.json" "$RUNNER_TEMP/infra-outputs.json"; then
+            echo "::notice::No baseline captured; next release will take the full path."
+            exit 0
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Store verified infrastructure baseline
+        if: steps.prepare_baseline.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-infra-v1
+          path: ${{ runner.temp }}/baseline.json
+          overwrite: true
+          retention-days: 30
 
       - name: Capture sanitized deployment failure diagnostics
         if: failure() && steps.infrastructure.outputs.app != ''
