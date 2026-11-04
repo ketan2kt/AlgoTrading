@@ -450,9 +450,27 @@ internal sealed partial class MultiMarketPaperTradingService(
                           ? executionInstrument.Type == InstrumentType.CallOption
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
-                select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+                select new { priorPosition.ClosedAtUtc, priorPosition.Status, priorPosition.Strategy,
+                    priorPosition.RealisedPnl, priorPosition.EntryPrice,
+                    priorPosition.Quantity }).FirstOrDefaultAsync(cancellationToken);
+            var priorSameDirectionExitUtc = priorSameDirectionExit?.ClosedAtUtc;
+            if (priorSameDirectionExit is not null &&
+                !priorSameDirectionExit.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) &&
+                !priorSameDirectionExit.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
+                !priorSameDirectionExit.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal) &&
+                !SensexFullStopReentryPolicy.AllowsEntry(
+                    now, priorSameDirectionExitUtc, priorSameDirectionExit.Status,
+                    priorSameDirectionExit.RealisedPnl, priorSameDirectionExit.EntryPrice,
+                    priorSameDirectionExit.Quantity, options.Value.OptionStopLossPercent))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    "SensexFullStopReentryDeferred", decision.Confidence,
+                    ["A full-sized same-direction stop occurred less than ten minutes ago; await a fresh setup."],
+                    cancellationToken);
+                return;
+            }
             if (persistentDirectionalEntry && !SensexMorningThesisReentryPolicy.AllowsEntry(
-                    localTime, true, priorSameDirectionExit))
+                    localTime, true, priorSameDirectionExitUtc))
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MorningPersistentThesisReentryDeferred", decision.Confidence,
@@ -464,7 +482,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional);
             var reentry = StructuralReentryPolicy.Evaluate(priceBars
                     .Where(bar => bar.OpenTimeUtc.AddSeconds(interval) <= now).ToArray(),
-                decision.Direction.Value, priorSameDirectionExit, persistentDirectionalContext);
+                decision.Direction.Value, priorSameDirectionExitUtc, persistentDirectionalContext);
             // A persistent thesis is not fresh post-exit evidence. Continuation bases remain eligible.
             if (!reentry.Permitted)
             {

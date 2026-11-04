@@ -188,10 +188,23 @@ internal sealed class OperationalAutomationService(
                 .OrderByDescending(value => value.Value).FirstOrDefault();
             metrics["dominantOutcome"] = dominant.Key ?? "unavailable";
             metrics["dominantOutcomeCount"] = dominant.Value.ToString(CultureInfo.InvariantCulture);
+            var regularEvaluationCount = source.Decisions.Count(value =>
+                value.Source == "StrategyEvaluation");
+            if (source.Market.Equals("NIFTY", StringComparison.OrdinalIgnoreCase))
+                metrics["regularEvaluations"] = regularEvaluationCount.ToString(CultureInfo.InvariantCulture);
             if (source.Summary.DecisionCount == 0)
             {
                 status = "Critical";
                 headline = "No strategy decisions have been recorded.";
+                actionRequired = true;
+            }
+            else if (source.Market.Equals("NIFTY", StringComparison.OrdinalIgnoreCase) &&
+                     regularEvaluationCount == 0 && tradeCount == 0 &&
+                     dominant.Key?.StartsWith("HeroZero:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                status = "Attention";
+                headline = "No Nifty regular-strategy evaluation was recorded; Hero Zero activity does not explain the missing regular trades.";
+                findings.Add("Check the Nifty entry prerequisites and futures confirmation feed; the recorded data does not identify which prerequisite blocked evaluation.");
                 actionRequired = true;
             }
             else if (tradeCount == 0)

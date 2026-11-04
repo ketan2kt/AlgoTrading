@@ -57,14 +57,9 @@ function Assert-DeploymentCiPassed {
 }
 
 function Get-DiagnosticsContext {
-    $resourceGroup = Invoke-Captured gh @(
-        'variable', 'get', 'AZURE_RESOURCE_GROUP', '--repo', $repo)
-    $app = Invoke-Captured az @(
-        'webapp', 'list', '--resource-group', $resourceGroup,
-        '--query', "[?contains(name, 'sarthitradingweb')].name | [0]", '-o', 'tsv')
-    if ([string]::IsNullOrWhiteSpace($app)) {
-        throw "No Sarthi trading web app was found in '$resourceGroup'."
-    }
+    # Non-secret resource identifiers: diagnostics must not depend on GitHub API availability.
+    $resourceGroup = 'rg-sarthi-trading-centralindia'
+    $app = 'sarthitradingweb5amvyarepxaci'
     $diagnosticsKey = Invoke-Captured az @(
         'webapp', 'config', 'appsettings', 'list',
         '--resource-group', $resourceGroup, '--name', $app,
