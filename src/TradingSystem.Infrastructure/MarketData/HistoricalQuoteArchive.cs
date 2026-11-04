@@ -137,15 +137,49 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY") || exchange is not ("NSE" or "BSE"))
             throw new ArgumentException("Unsupported research market.");
         if (!Directory.Exists(root)) return new([], true);
-        var paths = Directory.GetFiles(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
-            .Where(value => value.EndsWith(".ndjson", StringComparison.Ordinal) || value.EndsWith(".ndjson.gz", StringComparison.Ordinal)).ToArray();
-        var gaps = paths.Length == 0 || dropped.GetValueOrDefault(date) > 0 || buffered.GetValueOrDefault(date) > 0 ||
-            File.Exists(Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".capture-gap"));
+        var gaps = false;
         var result = await FileHistoricalReplayQuotePath.BuildAsync(Path.Combine(root, "replay-paths"), ProjectAsync(token), token);
         return new(result, gaps);
 
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken)){
+                if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
+                    value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
+                yield return HistoricalQuoteProjection.ToReplay(value, symbol);
+            }
+        }
+    }
+
+    internal async Task<(Dictionary<Guid,List<Application.Diagnostics.PaperTimelineMark>> Marks,bool Gaps)> HeldMarksAsync(
+        DateOnly date, IReadOnlyList<(Guid Id,string Exchange,string Symbol,DateTimeOffset From,DateTimeOffset To)> windows,CancellationToken token)
+    {
+        var result=new Dictionary<Guid,List<Application.Diagnostics.PaperTimelineMark>>();
+        if(windows.Count==0)return(result,false);
+        var byContract=windows.ToLookup(w=>(w.Exchange,w.Symbol));
+        bool gaps=false;
+        int count=0;
+        await foreach(var v in StreamDay(date,()=>gaps=true,token)){
+            if(v.Request.Segment!="FNO")continue;
+            foreach(var w in byContract[(v.Request.Exchange,v.Request.TradingSymbol)]){
+                if(v.ReceivedAtUtc<w.From || v.ReceivedAtUtc>=w.To)continue;
+                if(++count>maximumReadObservations)throw new InvalidDataException("Held-position quote limit exceeded.");
+                var source=HistoricalQuoteProjection.ToReplay(v,w.Symbol).SourceAtUtc;
+                if(!result.TryGetValue(w.Id,out var rows)) result[w.Id]=rows=[];
+                rows.Add(new(v.ReceivedAtUtc,v.Quote.LastPrice,source));
+            }
+        }
+        return(result,gaps);
+    }
+
+    private async IAsyncEnumerable<HistoricalQuoteObservation> StreamDay(DateOnly date, Action gap,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+            if(!Directory.Exists(root)){gap();yield break;}
+            var paths=Directory.GetFiles(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"*.ndjson*")
+                .Where(p=>p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal)).ToArray();
+            if(paths.Length==0 || dropped.GetValueOrDefault(date)>0 || buffered.GetValueOrDefault(date)>0 ||
+               File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+".capture-gap")))gap();
             foreach (var path in paths)
             {
                 var info = new FileInfo(path);
@@ -159,17 +193,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     ArchiveLine? record;
                     try { record = JsonSerializer.Deserialize<ArchiveLine>(line); }
-                    catch (JsonException) { gaps = true; continue; }
+                    catch (JsonException) { gap(); continue; }
                     var value = record?.Observation;
                     if (record is null || record.DroppedCount > 0 || value?.Request is null || value.Quote is null ||
                         value.Id == Guid.Empty || LocalDate(value.ReceivedAtUtc) != date || value.Quote.LastPrice <= 0m)
-                    { gaps = true; continue; }
-                    if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
-                        value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
-                    yield return HistoricalQuoteProjection.ToReplay(value, symbol);
+                    { gap(); continue; }
+                    yield return value;
                 }
             }
-        }
     }
 
     public Task<HistoricalQuoteArchiveDay> ReadMarketAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)

@@ -28,32 +28,54 @@ internal sealed class EfLiveTradeDiagnosticsReader(
             .SingleOrDefaultAsync(value => value.SourceId == sourceId, cancellationToken);
         var market = (intent?.Market ?? position?.Market ?? "NIFTY").ToLowerInvariant();
         var compactSourceId = sourceId.ToString("N");
-        var fromUtc = intent?.CreatedAtUtc ?? position?.OpenedAtUtc;
+        var fillAt = position?.OpenedAtUtc ?? await db.PaperBrokerEvents.AsNoTracking()
+            .Where(x => x.ClientReference == compactSourceId + "-ENTRY" && x.EventType == "OrderFilled")
+            .MinAsync(x => (DateTimeOffset?)x.OccurredAtUtc,cancellationToken);
+        var fromUtc = fillAt ?? intent?.CreatedAtUtc;
         var sourceFilter = System.Text.Json.JsonSerializer.Serialize(new { sourceIdCompact = compactSourceId });
+        var positionFilter = System.Text.Json.JsonSerializer.Serialize(new { positionId = sourceId });
         var query = db.MarketStrategyAudits.AsNoTracking().Where(value => value.Market == market);
         if (fromUtc is { } since)
         {
-            var lower = since.AddMinutes(-1);
+            var lower = since.AddMinutes(-15); // Opening audit is indexed by the decision candle.
             var upper = since.AddDays(1);
             query = query.Where(value => value.CandleTimeUtc >= lower && value.CandleTimeUtc <= upper);
         }
         var audits = await query.Where(value =>
                 ((value.Outcome.StartsWith("LiveExecution:") &&
                   EF.Functions.JsonContains(value.ReasonsJson, sourceFilter)) ||
-                 value.Outcome == "LiveProtectionDesired:" + compactSourceId))
+                 value.Outcome == "LiveProtectionDesired:" + compactSourceId ||
+                 value.Outcome == "PaperStopSize:" + compactSourceId ||
+                 value.Outcome == "TrailingStop:" + compactSourceId ||
+                 (value.Outcome == "PaperPositionOpened" && EF.Functions.JsonContains(value.ReasonsJson,positionFilter)) ||
+                 value.Outcome == "LiveEntryDecision:" + compactSourceId ||
+                 value.Outcome == "LiveParityMissed:" + compactSourceId ||
+                 value.Outcome == "LiveParityException:" + compactSourceId))
             .OrderBy(value => value.CandleTimeUtc)
-            .Take(300)
+            .Take(301)
             .Select(value => new LiveTradeTimelineEvent(value.CandleTimeUtc,
                 value.Outcome, value.ReasonsJson))
             .ToListAsync(cancellationToken);
 
         var orders = new List<LiveBrokerOrderEvidence>(3);
         var limitations = new List<string>();
+        if (audits.Count > 300)
+        {
+            audits.RemoveAt(300);
+            limitations.Add("Timeline limited to the first 300 observations. Later stop confirmations or fills may be absent here; use Daily Analysis for the session.");
+        }
         if (intent is null)
         {
-            limitations.Add("No live intent was persisted. A source-specific skip reason was not recorded, so switch timing, signal age, eligibility and worker state cannot be distinguished retrospectively.");
-            if (position?.Strategy.StartsWith("PaperOnly|", StringComparison.Ordinal) == true)
-                limitations.Add("This research-only source is excluded from live discovery by current policy. Before this policy was enforced, its label alone did not prove why an older order was absent.");
+            var observed = DailyExecutionEvidence.EntryObservation(audits.Select(a =>
+                DailyExecutionEvidence.Parse(a.ObservedAtUtc,a.Event,a.EvidenceJson)).OfType<DailyExecutionEvidence.Observation>());
+            if (observed is not null) limitations.Add($"No live intent. Recorded discovery evidence: {observed.Reason}");
+            else if (fillAt is { } at)
+            {
+                var history = await DailyLiveRouteHistory.ReadAsync(db,[DailyLiveRouteHistory.Key(market)],
+                    at,at.AddTicks(10),cancellationToken);
+                limitations.Add(DailyLiveRouteHistory.Explain(market,at,history));
+            }
+            else limitations.Add("No live intent or dated paper-fill evidence. Cause unknown.");
             return new LiveTradeDiagnosticsReport(paperTradeId, sourceId, market.ToUpperInvariant(),
                 position?.Strategy, position?.Status ?? "Closed", "NoLiveIntent", null,
                 null, null, position?.EntryPrice ?? paper!.EntryPrice,
@@ -96,6 +118,8 @@ internal sealed class EfLiveTradeDiagnosticsReader(
             intent.CreatedAtUtc, intent.SubmittedAtUtc, intent.ProtectedAtUtc,
             position?.EntryPrice ?? paper!.EntryPrice,
             position?.StopLoss, position?.Target, intent.AverageFillPrice,
-            audits, orders, limitations);
+            audits, orders, limitations)
+        { StopHistory = StopComparison.Review(sourceId,audits.SelectMany(a =>
+            StopComparison.Parse(a.ObservedAtUtc,a.Event,a.EvidenceJson))) };
     }
 }

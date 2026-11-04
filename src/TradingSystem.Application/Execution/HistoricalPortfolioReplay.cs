@@ -592,6 +592,7 @@ public static class HistoricalPortfolioReplay
                             {
                                 open.AddOnQuantity = addOn.Quantity;
                                 open.AddOnPrice = addOnPrice;
+                                open.AddOnAt = quote.AvailableAtUtc;
                                 open.RemainingQuantity += addOn.Quantity;
                                 filledAddOnsThisTime.Add(quote.Symbol);
                                 peakEntryCapitalExposure = Math.Max(
@@ -851,6 +852,8 @@ public static class HistoricalPortfolioReplay
             IsPartialExit = partial,
             ExchangeCode = open.ExchangeCode,
             OriginalQuantity = open.TotalQuantity,
+            EntryUnits = open.Candidate.Quantity, OriginalEntryPremium = open.BaseEntryPrice,
+            AddOnAt = open.AddOnAt, AddOnUnits = open.AddOnQuantity, AddOnPremium = open.AddOnPrice,
             EntryPriceSource = open.EntryPriceSource,
             ExitPriceSource = exit.BidPrice is > 0m
                 ? "ObservedBid" : exit.Source == "GrowwChainReceiptLtp"
@@ -980,6 +983,7 @@ public static class HistoricalPortfolioReplay
         public int RemainingQuantity { get; set; } = candidate.Quantity;
         public int AddOnQuantity { get; set; }
         public decimal? AddOnPrice { get; set; }
+        public DateTimeOffset? AddOnAt { get; set; }
         public int TotalQuantity => Candidate.Quantity + AddOnQuantity;
         public decimal EntryCostAllocated { get; set; }
         public DateTimeOffset EntryAtUtc { get; } = entryAtUtc;

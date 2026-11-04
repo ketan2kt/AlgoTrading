@@ -89,6 +89,10 @@ export function replayProposal(base:HistoricalNormalPolicyConfiguration,trial:Re
   return p;
 }
 export interface HistoricalNormalReplayReport {
+  paperFidelity?:{verdict:string;paperTrades:number;replayTrades:number;gaps:string[];
+    rows:FidelityRow[];firstDifference:FidelityRow|null}|null;
+  experimentFinding?:string|null;
+  verifiedControlWithFills?:boolean;
   baselineBuildId:string|null;proposalBuildId:string|null;
   savedRunId:string|null;executionBuildId:string|null;
   comparison:{
@@ -105,6 +109,8 @@ export interface HistoricalNormalReplayReport {
   limitations:string[];
 }
 export interface HistoricalPolicyBuild {id:string;capturedAtUtc:string;assemblyHashes:Record<string,string>}
+interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
+interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null}
 export interface HistoricalNormalReplayRunSummary {
   id:string;createdAtUtc:string;from:string;to:string;baselineBuildId:string|null;proposalBuildId:string|null;
   includedDays:number;baselineNet:number;proposalNet:number;
@@ -116,6 +122,11 @@ interface NormalReplaySavedConfiguration {
 @Injectable({providedIn:'root'})
 export class HistoricalReplayService {
   private readonly http=inject(HttpClient);
+  comparePaperSession(date:string) {
+    return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
+      this.http.post<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/paper-session/'+encodeURIComponent(date),
+        {},{headers:{'X-CSRF-TOKEN':csrf.token}})));
+  }
   policyBuilds() {
     return this.http.get<HistoricalPolicyBuild[]>('/api/research/historical-replay/normal-policy/builds');
   }

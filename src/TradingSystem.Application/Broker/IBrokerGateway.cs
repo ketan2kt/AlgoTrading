@@ -50,7 +50,11 @@ public sealed record BrokerOrderSnapshot(
     int FilledQuantity,
     decimal? AverageFillPrice,
     OrderState State,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc)
+{
+    // Quantity represented by the broker trades used to calculate AverageFillPrice.
+    public int? PricedQuantity { get; init; }
+}
 
 public sealed record BrokerPositionSnapshot(
     Guid InstrumentId,

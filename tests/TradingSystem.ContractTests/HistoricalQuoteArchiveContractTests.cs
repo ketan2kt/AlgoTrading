@@ -10,6 +10,27 @@ public sealed class HistoricalQuoteArchiveContractTests : IDisposable
     private static readonly DateOnly Date = new(2026, 11, 4);
     private static readonly DateTimeOffset At = new(2026, 11, 4, 4, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData("NSE","NIFTY26NOV23000CE")]
+    [InlineData("BSE","SENSEX26NOV75000PE")]
+    [InlineData("NSE","BANKNIFTY26NOV54000CE")]
+    public async Task TimelineReadsOnlyHeldOptionReceiptsWithoutRetimingThePrice(string exchange,string symbol)
+    {
+        using var archive=Archive();
+        var id=Guid.NewGuid();
+        var sample=Observation() with { Request=new(exchange,"FNO",symbol),ReceivedAtUtc=At,
+            Quote=Observation().Quote with {LastTradeTimeEpochMilliseconds=At.AddSeconds(-45).ToUnixTimeMilliseconds()} };
+        archive.TryRecord(sample);
+        archive.TryRecord(sample with {Id=Guid.NewGuid(),ReceivedAtUtc=At.AddMinutes(1)});
+        archive.TryRecord(sample with {Id=Guid.NewGuid(),Request=new(exchange,"CASH",symbol)});
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var (marks,gaps)=await archive.HeldMarksAsync(Date,[(id,exchange,symbol,At,At.AddMinutes(1))],CancellationToken.None);
+        Assert.False(gaps);
+        var point=Assert.Single(marks[id]);
+        Assert.Equal(At,point.At);
+        Assert.Equal(At.AddSeconds(-45),point.SourceAt);
+    }
+
     [Fact]
     public async Task ExistingQuoteResponsePreservesTwoSidedPriceOiAndReceiptTimeAcrossRestart()
     {

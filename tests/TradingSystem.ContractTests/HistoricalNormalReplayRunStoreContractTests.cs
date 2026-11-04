@@ -161,6 +161,21 @@ public sealed class HistoricalNormalReplayRunStoreContractTests : IDisposable
         public Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly date, string market, CancellationToken token) =>
             throw new NotSupportedException("Saved input reuse must not read the current archive.");
     }
+    [Fact]
+    public void ControlRejectsDifferentFillsEvenWhenNetAndTradeCountMatch()
+    {
+        var date = new DateOnly(2026, 11, 5);
+        var request = new HistoricalNormalReplayComparisonRequest(date, date, Configuration(), Configuration(), HistoricalReplayParameters.Default);
+        var at = new DateTimeOffset(2026, 11, 5, 4, 0, 0, TimeSpan.Zero);
+        var trade = new HistoricalReplayFill("NIFTYCE","test",at,at,at.AddMinutes(1),100,101,1,1,0,1,"target");
+        var a = new HistoricalReplayResult([trade],1,0,0,0,1,0,"test");
+        var result = new HistoricalSharedPortfolioResult(new([],[]),[new(date,a,a)],"data","run",1,0,"Preview",[]);
+        Assert.True(HistoricalExperimentReview.Assess(request,result,true).VerifiedControlWithFills);
+        var different = a with { Trades = [trade with { ExitAtUtc = at.AddMinutes(2) }] };
+        Assert.False(HistoricalExperimentReview.Assess(request,result with { Days=[new(date,a,different)] },true).VerifiedControlWithFills);
+        Assert.False(HistoricalExperimentReview.Assess(request,result with { Days=[] },true).VerifiedControlWithFills);
+    }
+
     private static HistoricalNormalPolicyConfiguration Configuration() => new(60, 4, 2,
         new(9, 30), 5, 5, 10m, new(),
         new(true, 1.5m, 500m, 100m, 100m, 10m, 1m, 8, 100_000m, 1_000_000m, 100_000m,

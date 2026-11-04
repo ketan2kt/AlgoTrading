@@ -24,4 +24,16 @@ public sealed class DailyAnalysisController(IDailyTradingDiagnosticsReader reade
             return Conflict(new { message = "Today's analysis is available from 3:15 PM IST." });
         return Ok(await reader.ReadAsync(requested, "all", cancellationToken));
     }
+
+    [HttpGet("timeline")]
+    public async Task<ActionResult<PaperSessionTimeline>> Timeline([FromQuery] DateOnly date,CancellationToken token)
+    {
+        Response.Headers.CacheControl="no-store";
+        var local=clock.GetUtcNow().ToOffset(TimeSpan.FromHours(5.5)).DateTime;
+        var today=DateOnly.FromDateTime(local);
+        if(date>today || date<today.AddDays(-366))return BadRequest("Invalid session date.");
+        if(date==today && TimeOnly.FromDateTime(local)<new TimeOnly(15,30))
+            return Conflict(new {message="Session Timeline is available after 15:30 IST."});
+        return Ok((await reader.ReadWithTimelineAsync(date,token)).Timeline);
+    }
 }

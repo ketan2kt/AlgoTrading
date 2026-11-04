@@ -272,6 +272,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             "|controlStateVerified=" + controls.InitialStateVerified +
             "|controlStateGaps=" + string.Join(';', controls.Gaps) +
             "|streamingUniverse=" + feedManifest?.UniverseFingerprint +
+            "|sessionPolicy=" + feedManifest?.PolicyReceipt?.Fingerprint +
             "|sensexPriorThesisCaptured=" + feedManifest?.SensexPriorThesisStateCaptured +
             "|priorSensexThesis=" + JsonSerializer.Serialize(feedManifest?.PriorSensexThesis) +
             "|barTiming=CompletionTimeModel;recorded-bars-preferred;missing-only-research-repairs" +
@@ -328,6 +329,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 .OrderBy(value => value, StringComparer.Ordinal).ToArray())
         {
             UnderlyingInstrumentId = index.Id,
+            SessionPolicyFingerprint = feedManifest?.PolicyReceipt?.Fingerprint,
             PriorSensexThesis = feedManifest?.PriorSensexThesis,
             ControlStateGaps = controls.Gaps,
             UniversePages = pageReceipts.Select(value =>

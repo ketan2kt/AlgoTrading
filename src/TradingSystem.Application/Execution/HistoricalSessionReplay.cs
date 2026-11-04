@@ -109,6 +109,11 @@ public sealed record HistoricalReplayFill(string Symbol, string Strategy, DateTi
     public string ExchangeCode { get; init; } = "NSE";
     public bool IsPartialExit { get; init; }
     public int OriginalQuantity { get; init; }
+    public int EntryUnits { get; init; }
+    public decimal? OriginalEntryPremium { get; init; }
+    public DateTimeOffset? AddOnAt { get; init; }
+    public int AddOnUnits { get; init; }
+    public decimal? AddOnPremium { get; init; }
     public decimal? InitialStopPrice { get; init; }
     public decimal? FinalStopPrice { get; init; }
     public decimal? InitialTargetPrice { get; init; }

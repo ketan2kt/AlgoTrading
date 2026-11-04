@@ -9,6 +9,7 @@ import { GrowwTokenService } from './groww-token.service';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
 import { NiftyChartComponent } from './nifty-chart.component';
+import { LiveProtectionMonitorComponent } from './live-protection-monitor.component';
 import { TradingWorkspaceSnapshot } from './trading-workspace';
 
 @Component({ selector: 'app-nifty-chart', standalone: true, template: '' })
@@ -17,6 +18,8 @@ class MockNiftyChartComponent {
   @Input() timeframeMinutes = 5;
 }
 
+@Component({selector:'app-live-protection-monitor',template:''})
+class MockProtectionMonitor {}
 describe('App', () => {
   beforeEach(async () => {
     window.history.replaceState({}, '', '/nifty');
@@ -25,8 +28,8 @@ describe('App', () => {
       providers: [provideHttpClient(), provideHttpClientTesting()],
     });
     TestBed.overrideComponent(App, {
-      remove: { imports: [NiftyChartComponent] },
-      add: { imports: [MockNiftyChartComponent] },
+      remove: { imports: [NiftyChartComponent,LiveProtectionMonitorComponent] },
+      add: { imports: [MockNiftyChartComponent,MockProtectionMonitor] },
     });
     await TestBed.compileComponents();
   });

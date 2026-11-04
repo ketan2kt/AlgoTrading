@@ -13,6 +13,7 @@ public sealed record HistoricalReplayArchiveSlice(HistoricalReplaySessionData Se
     public string? InstrumentMasterSnapshotFingerprint { get; init; }
     public DateTimeOffset? InstrumentMasterCapturedAtUtc { get; init; }
     public PersistentDirectionalThesisV1? PriorSensexThesis { get; init; }
+    public string? SessionPolicyFingerprint { get; init; }
 }
 
 public interface IHistoricalReplayArchiveReader

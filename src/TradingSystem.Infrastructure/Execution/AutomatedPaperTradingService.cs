@@ -876,6 +876,8 @@ internal sealed partial class AutomatedPaperTradingService(
             throw new InvalidOperationException($"Paper option entry ended in state {entry.State}.");
         scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
 
+        await TracePaperProtectionAsync(db, signal.SignalId, instrument.Id, decision.FinalStopLoss,
+            entry.FilledQuantity, entry.UpdatedAtUtc, cancellationToken);
         await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
             latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
             relativeVolume, regime, "PaperPositionOpened", [], signal, selectedOption,
@@ -1019,7 +1021,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         effectiveStop = await PersistLiveProtectionDesiredAsync(researchDb, open.Signal.SignalId,
-            underlyingInstrumentId, open.Entry.Direction, open.StopLoss, optionInstrument.TickSize, effectiveStop, cancellationToken);
+            underlyingInstrumentId, open.Entry.Direction, open.StopLoss, optionInstrument.TickSize, effectiveStop, open.RemainingQuantity, cancellationToken);
 
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
                                  exitPlan.ExtendTarget &&
@@ -1044,6 +1046,9 @@ internal sealed partial class AutomatedPaperTradingService(
                 await broker.SubmitAsync(new(addOnReference, open.Entry.InstrumentId,
                     open.Entry.Direction, optionInstrument.LotSize, price), cancellationToken);
                 var addOn = await paperControl.ProcessNextFillAsync(addOnReference, cancellationToken);
+                if (addOn.FilledQuantity > 0)
+                    await TracePaperProtectionAsync(researchDb, open.Signal.SignalId, underlyingInstrumentId,
+                        effectiveStop, open.RemainingQuantity + addOn.FilledQuantity, addOn.UpdatedAtUtc, cancellationToken);
                 await services.GetRequiredService<IAuditWriter>().WriteAsync(new AuditEntry(
                     "paper-automation", "WinnerAddOn", "Signal", open.Signal.SignalId.ToString("N"),
                     "One winner add-on was filled after 1R and confirmed continuation; live mirroring depends on broker execution.",
@@ -1139,7 +1144,10 @@ internal sealed partial class AutomatedPaperTradingService(
             var partialDirection = open.Entry.Direction == Direction.Buy ? Direction.Sell : Direction.Buy;
             await broker.SubmitAsync(new(partialReference, open.Entry.InstrumentId, partialDirection,
                 partialQuantity, price), cancellationToken);
-            await paperControl.ProcessNextFillAsync(partialReference, cancellationToken);
+            var partialFill = await paperControl.ProcessNextFillAsync(partialReference, cancellationToken);
+            if (partialFill.FilledQuantity > 0)
+                await TracePaperProtectionAsync(researchDb, open.Signal.SignalId, underlyingInstrumentId,
+                    effectiveStop, open.RemainingQuantity - partialFill.FilledQuantity, partialFill.UpdatedAtUtc, cancellationToken);
             state.Record("PositionOpen", false,
                 $"Partial profit booked on {partialQuantity} units; break-even/trailing protection is active.",
                 tradeState.TradesToday, tradeState.RealisedPnl, unrealised, open.Signal.SignalId,
@@ -1358,9 +1366,26 @@ internal sealed partial class AutomatedPaperTradingService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task TracePaperProtectionAsync(TradingDbContext db, Guid signalId, Guid underlyingId,
+        decimal effectiveStop, int remainingQuantity, DateTimeOffset at, CancellationToken token)
+    {
+        // Evidence only; the trading worker never reads this outcome to manage orders.
+        var audit = new MarketStrategyAudit(Guid.NewGuid(), "nifty", underlyingId, at,
+            $"PaperStopSize:{signalId:N}", 0m, JsonSerializer.Serialize(new { effectiveStop, remainingQuantity }));
+        try { db.MarketStrategyAudits.Add(audit); await db.SaveChangesAsync(token); }
+        catch (Exception ex) when (!token.IsCancellationRequested)
+        {
+            db.Entry(audit).State = EntityState.Detached;
+            LogProtectionTraceUnavailable(logger, signalId, ex.GetType().Name);
+        }
+    }
+
+    [LoggerMessage(LogLevel.Warning, "Paper protection trace unavailable for {sourceId}: {failureType}.")]
+    private static partial void LogProtectionTraceUnavailable(ILogger logger, Guid sourceId, string failureType);
+
     private async Task<decimal> PersistLiveProtectionDesiredAsync(TradingDbContext db, Guid signalId,
         Guid underlyingInstrumentId, Direction direction, decimal initialStop, decimal tickSize, decimal effectiveStop,
-        CancellationToken cancellationToken)
+        int remainingQuantity, CancellationToken cancellationToken)
     {
         var outcome = $"LiveProtectionDesired:{signalId:N}";
         var previous = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
@@ -1374,7 +1399,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var now = timeProvider.GetUtcNow();
         db.MarketStrategyAudits.Add(new MarketStrategyAudit(Guid.NewGuid(),
             TradingMarketCatalog.Nifty.Code, underlyingInstrumentId, now, outcome, 0m,
-            JsonSerializer.Serialize(new { signalId, effectiveStop, observedAtUtc = now })));
+            JsonSerializer.Serialize(new { signalId, effectiveStop, remainingQuantity, observedAtUtc = now })));
         await db.SaveChangesAsync(cancellationToken);
         return effectiveStop;
     }
