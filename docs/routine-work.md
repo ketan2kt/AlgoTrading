@@ -103,12 +103,16 @@ successful push CI run for that commit before either the dry run or dispatch can
 proceed. If CI is pending, missing, or failed, it stops without sending a deployment.
 Fix the reported CI issue, push a new commit, and retry only after that commit's
 full backend, frontend, and dependency-audit checks pass. This preflight prevents
-known build/test failures from consuming a deployment run; the deployment workflow
-still performs its own independent quality gate.
+known build/test failures from consuming a deployment run. Main CI runs the protected-session
+and remaining tests as disjoint sets, then packages the checked Angular and .NET outputs.
+Deployment accepts only an unexpired package from that successful main push run. Before
+Azure sign-in it verifies the workflow, repository, commit, attempt and package checksum;
+it never rebuilds or reruns tests. All Azure safety and post-deployment checks still run.
+If the package has expired (30-day retention), rerun the entire CI workflow on that commit.
 
 Requires an authenticated GitHub CLI with workflow dispatch access. This invokes
 the existing `azure-deploy.yml` with its required `deploy=DEPLOY-LIVE` input.
-It deploys the selected remote ref, not uncommitted or unpushed local work.
+It deploys only the checked remote main commit, not uncommitted or unpushed local work.
 It neither commits nor pushes changes. The current workflow enables the controlled-live
 build while setting trading mode to Paper; older paper-only deployment descriptions
 do not describe all current capabilities. Consult the workflow before changing it.

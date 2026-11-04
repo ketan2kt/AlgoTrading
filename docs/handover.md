@@ -2,7 +2,9 @@
 
 ## Session evidence — merged to main; deployment dispatched
 
-Local follow-up: Protection → Mark reviewed dismisses only the exact prior-session alert after administrator confirmation. The existing audit log stores the review; changed evidence reopens the reminder. No trading/order writes or migration. IST-boundary and reappearance fixture added; diff checked, runtime tests pending. Not deployed.
+Release workflow: main CI publishes a single commit-stamped application ZIP from its tested binaries and browser build. Deployment validates its originating CI run, attempt and checksum before Azure access. No tests or builds in deployment; infrastructure, migration, secret, health and build-identity checks remain in place.
+
+[PR #24](https://github.com/ketan2kt/AlgoTrading/pull/24) merged as 95d01af. Protection → Mark reviewed dismisses only the exact prior-session alert after administrator confirmation. The audit log retains the review, and changed evidence reopens the reminder. No trading/order writes or migration. [Main CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/41903642381) passed. [Deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41904056871) dispatched once; completion unverified.
 
 [PR #23](https://github.com/ketan2kt/AlgoTrading/pull/23) merged to main at f08c21f. The protection badge fits the rail and shows “After hours” outside regular weekday 09:15–15:30 IST hours; manual refresh still exposes unresolved records. Broker handling is unchanged. [Main CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/41899596445) passed. [Deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41899963969) dispatched once; completion and visual validation unverified.
 

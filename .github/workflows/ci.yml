@@ -31,9 +31,35 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet restore TradingSystem.slnx
-      - run: dotnet build TradingSystem.slnx --no-restore --configuration Release
-      - run: dotnet test TradingSystem.slnx --no-build --configuration Release
+      - run: dotnet build TradingSystem.slnx --no-restore --configuration Release /p:UseAppHost=false /p:InformationalVersion="1.0.0+${GITHUB_SHA}"
+      - name: Run protected-session regressions
+        run: |
+          dotnet test TradingSystem.slnx --no-build -c Release --filter Category=DeploymentRegression \
+            --logger trx --results-directory "$RUNNER_TEMP/protected"
+          python3 - "$RUNNER_TEMP/protected" <<'PY'
+          import pathlib, sys, xml.etree.ElementTree as ET
+          counters = [ET.parse(p).find(".//{*}Counters") for p in pathlib.Path(sys.argv[1]).glob("*.trx")]
+          if not any(c is not None and int(c.get("passed", 0)) > 0 for c in counters):
+              sys.exit("Protected-session gate did not run any passing tests.")
+          PY
+      - name: Run remaining backend tests
+        run: dotnet test TradingSystem.slnx --no-build -c Release --filter 'Category!=DeploymentRegression'
       - run: dotnet list TradingSystem.slnx package --vulnerable --include-transitive
+      - name: Publish tested backend binaries
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          dotnet publish src/TradingSystem.Api/TradingSystem.Api.csproj --no-build --no-restore \
+            -c Release /p:UseAppHost=false /p:InformationalVersion="1.0.0+${GITHUB_SHA}" -o "$RUNNER_TEMP/api"
+          tar -C "$RUNNER_TEMP/api" -czf "$RUNNER_TEMP/api.tgz" .
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: ci-api
+          path: ${{ runner.temp }}/api.tgz
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+          compression-level: 0
 
   frontend:
     runs-on: ubuntu-latest
@@ -51,3 +77,45 @@ jobs:
       - run: npm run build
       - run: npm run test:ci
       - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: ci-browser
+          path: trading-system-web/dist/trading-system-web/browser/
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 7
+
+  release-package:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, frontend, entry-path-review]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-api
+          path: inputs
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-browser
+          path: browser
+      - name: Assemble release from checked outputs
+        run: |
+          mkdir -p app release
+          tar -xzf inputs/api.tgz -C app
+          test -s app/TradingSystem.Api.dll
+          test -s browser/index.html
+          mkdir -p app/wwwroot
+          cp -R browser/. app/wwwroot/
+          (cd app && zip -qr ../release/trading-system.zip .)
+          cd release
+          sha256sum trading-system.zip > package.sha256
+          printf '%s\n' "$GITHUB_SHA" > source.sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-${{ github.sha }}-${{ github.run_attempt }}
+          path: release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
