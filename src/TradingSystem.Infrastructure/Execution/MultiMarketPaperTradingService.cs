@@ -11,6 +11,7 @@ using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
+using TradingSystem.Infrastructure.Diagnostics;
 
 namespace TradingSystem.Infrastructure.Execution;
 
@@ -21,15 +22,24 @@ internal sealed partial class MultiMarketPaperTradingService(
     IOptions<MarketDataOptions> marketOptions,
     TimeProvider timeProvider,
     LiveExecutionWakeSignal liveWakeSignal,
+    TradingEngineEvidenceRecorder evidenceRecorder,
     ILogger<MultiMarketPaperTradingService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private readonly Dictionary<string, DateTimeOffset> lastEvaluated = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, decimal> favourablePriceByPosition = [];
+    private readonly Dictionary<string, string> entryPhases = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled) return;
+        if (!options.Value.Enabled)
+        {
+            foreach (var market in new[] { TradingMarketCatalog.Sensex, TradingMarketCatalog.BankNifty })
+                await evidenceRecorder.RecordAsync(market.Code, "regular", "Startup", "Disabled",
+                    "Automated trading is disabled by server configuration.", timeProvider.GetUtcNow(),
+                    new { options.Value.Enabled }, stoppingToken);
+            return;
+        }
         await Task.WhenAll(RunEntryLoopAsync(stoppingToken), RunPositionLoopAsync(stoppingToken));
     }
 
@@ -45,7 +55,14 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 try { await RunMarketAsync(market, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                catch (Exception exception) { LogCycleFailed(logger, market.Code, exception); }
+                catch (Exception exception)
+                {
+                    LogCycleFailed(logger, market.Code, exception);
+                    await evidenceRecorder.RecordAsync(market.Code, "regular",
+                        entryPhases.GetValueOrDefault(market.Code, "Startup"), "Faulted",
+                        "Entry evaluation failed before completion.", timeProvider.GetUtcNow(),
+                        TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
+                }
             }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.EvaluationIntervalSeconds), stoppingToken);
         }
@@ -66,7 +83,13 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 try { await RunPositionCycleAsync(market, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                catch (Exception exception) { LogCycleFailed(logger, market.Code, exception); }
+                catch (Exception exception)
+                {
+                    LogCycleFailed(logger, market.Code, exception);
+                    await evidenceRecorder.RecordAsync(market.Code, "positions", "PositionManagement",
+                        "Faulted", "Position monitoring failed.", timeProvider.GetUtcNow(),
+                        TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
+                }
             }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.EvaluationIntervalSeconds), stoppingToken);
         }
@@ -86,6 +109,7 @@ internal sealed partial class MultiMarketPaperTradingService(
 
     private async Task RunMarketAsync(TradingMarketDefinition market, CancellationToken cancellationToken)
     {
+        entryPhases[market.Code] = "ConfigurationAndInstrument";
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
         var lotConfiguration = await scope.ServiceProvider
@@ -97,7 +121,13 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (localTime < market.SessionStart || localTime > market.SessionEnd) return;
         var today = DateOnly.FromDateTime(india.Date);
         var underlying = await FindUnderlyingAsync(db, market, today, cancellationToken);
-        if (underlying is null) return;
+        if (underlying is null)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "regular", "Instrument", "InstrumentUnavailable",
+                "The index instrument is not synchronised.", now,
+                new { market.UnderlyingSymbol, market.Exchange }, cancellationToken);
+            return;
+        }
 
         await CaptureExitResearchAsync(db, market, now, cancellationToken);
 
@@ -105,8 +135,15 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (market == TradingMarketCatalog.Sensex &&
             !IndexEntryWindowPolicy.AllowsEntry(localTime,
                 TimeOnly.ParseExact(options.Value.EntryWindowStart, "HH:mm"),
-                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm"))) return;
+                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm")))
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "regular", "EntryWindow", "OutsideEntryWindow",
+                "New entries are outside the configured entry window.", now,
+                new { localTime, options.Value.EntryWindowStart, options.Value.EntryCutoff }, cancellationToken);
+            return;
+        }
 
+        entryPhases[market.Code] = "CompletedCandles";
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
@@ -114,10 +151,28 @@ internal sealed partial class MultiMarketPaperTradingService(
                 (market.InstrumentType != InstrumentType.Index || value.OpenTimeUtc >= sessionStartUtc))
             .OrderByDescending(value => value.OpenTimeUtc).Take(market.InstrumentType == InstrumentType.Index ? 600 : 90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (candles.Count < (market.InstrumentType == InstrumentType.Index ? 12 : 21)) return;
+        if (candles.Count < (market.InstrumentType == InstrumentType.Index ? 12 : 21))
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "regular", "CompletedCandles", "WarmingUp",
+                "Insufficient completed candles for evaluation.", now,
+                new { count = candles.Count, minimum = market.InstrumentType == InstrumentType.Index ? 12 : 21,
+                    interval }, cancellationToken);
+            return;
+        }
         var latest = candles[^1];
-        if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc) return;
+        if (lastEvaluated.GetValueOrDefault(market.Code) == latest.OpenTimeUtc)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "regular", "CompletedCandles", "WaitingForNextCandle",
+                "This completed candle was already evaluated.", now,
+                new { latest.OpenTimeUtc, interval, count = candles.Count }, cancellationToken);
+            return;
+        }
+        await evidenceRecorder.RecordAsync(market.Code, "regular", "CompletedCandles", "Evaluating",
+            "Evaluating a new completed candle.", now,
+            new { latest.OpenTimeUtc, latest.Close, interval, count = candles.Count,
+                lots = lotConfiguration.ForMarket(market.Code) }, cancellationToken);
         lastEvaluated[market.Code] = latest.OpenTimeUtc;
+        entryPhases[market.Code] = "StrategyAndConfirmation";
 
         if (market is { Code: "bank-nifty" or "bankex" })
         {
@@ -384,11 +439,11 @@ internal sealed partial class MultiMarketPaperTradingService(
                 latest.Close <= 0m ? 0m : structureAtr / latest.Close * 100m,
                 openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
             var middayChop = MiddayChopConfirmationPolicy.Evaluate(localTime,
-                completedSessionBars, decision.Direction.Value, structure, interval);
+                completedSessionBars, decision.Direction.Value, structure, interval, includeOtherHours: true);
             if (!middayChop.Permitted)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "MiddayChopConfirmationRejected", decision.Confidence,
+                    "ChopConfirmationRejected", decision.Confidence,
                     middayChop.Reasons, cancellationToken);
                 return;
             }
@@ -398,7 +453,11 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
                 AverageTrueRange(candles.TakeLast(15).ToArray()),
                 openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
-            if (!location.Permitted && (!supplementalSensexEntry || persistentDirectionalEntry))
+            location = ConfirmedEntryLocationPolicy.Evaluate(location, completedSessionBars,
+                decision.Direction.Value, structure, MultiTimeframeDecisionPolicy.Analyze(
+                    completedSessionBars, decision.Direction, openingBars.Max(value => value.High),
+                    openingBars.Min(value => value.Low)), structureAtr, interval);
+            if (!location.Permitted)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MarketLocationRejected", decision.Confidence,
@@ -575,12 +634,22 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         if (await db.MarketPaperPositions.AnyAsync(value => value.Market == market.Code &&
                 value.ExecutionInstrumentId == execution.Id && value.Status == "Active", cancellationToken))
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "DuplicateActiveContract",
+                decision.Confidence, ["An active position already uses the selected option contract."], cancellationToken);
             return;
+        }
 
+        entryPhases[market.Code] = "OptionQuote";
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
             execution.TradingSymbol), cancellationToken);
         var entry = market.ExecuteOptions ? quote.OfferPrice ?? quote.LastPrice : quote.LastPrice;
-        if (entry <= 0) return;
+        if (entry <= 0)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "OptionQuoteUnavailable",
+                decision.Confidence, [$"No positive entry quote for {execution.TradingSymbol}."], cancellationToken);
+            return;
+        }
         var tick = execution.TickSize > 0
             ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize)
             : 0.05m;
@@ -768,11 +837,23 @@ internal sealed partial class MultiMarketPaperTradingService(
     {
         if (!IndexEntryWindowPolicy.AllowsEntry(localTime,
                 TimeOnly.ParseExact(options.Value.EntryWindowStart, "HH:mm"),
-                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm"))) return;
+                TimeOnly.ParseExact(options.Value.EntryCutoff, "HH:mm")))
+        {
+            await AddAuditAsync(db, market, underlying.Id, candles[^1].OpenTimeUtc,
+                "OutsideEntryWindow", 0m, ["New entries are outside the configured entry window."], cancellationToken);
+            return;
+        }
         var latest = candles[^1];
         var interval = marketOptions.Value.CandleIntervalSeconds;
         if (latest.OpenTimeUtc.AddSeconds(interval) > now ||
-            now - latest.OpenTimeUtc > TimeSpan.FromMinutes(3)) return;
+            now - latest.OpenTimeUtc > TimeSpan.FromMinutes(3))
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "CandleUnavailable", 0m,
+                [$"Latest candle {latest.OpenTimeUtc:O} is incomplete or more than three minutes old at {now:O}."],
+                cancellationToken);
+            return;
+        }
         var decision = Evaluate(candles);
         if (decision.Direction is null)
         {
@@ -781,7 +862,13 @@ internal sealed partial class MultiMarketPaperTradingService(
             return;
         }
         if (await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
-                value.Market == market.Code && value.Status == "Active", cancellationToken)) return;
+                value.Market == market.Code && value.Status == "Active", cancellationToken))
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "ActivePosition", decision.Confidence,
+                ["An existing position is active; no additional banking-index entry was opened."], cancellationToken);
+            return;
+        }
 
         var completed = candles.Where(value => value.OpenTimeUtc.AddSeconds(interval) <= now)
             .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
@@ -803,23 +890,41 @@ internal sealed partial class MultiMarketPaperTradingService(
         var opening = candles.Take(3).ToArray();
         var openingHigh = opening.Max(value => value.High);
         var openingLow = opening.Min(value => value.Low);
-        var location = MarketLocationPolicy.Evaluate(completed, previous,
-            decision.Direction.Value, atr, openingHigh, openingLow);
-        if (!location.Permitted)
+        var preQuote = BankIndexPreQuoteGatePolicy.Evaluate(completed, previous,
+            decision.Direction.Value, atr, openingHigh, openingLow, interval);
+        if (preQuote.RejectionOutcome == "ChopConfirmationRejected")
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                "MarketLocationRejected", decision.Confidence, location.Reasons, cancellationToken);
+                preQuote.RejectionOutcome, decision.Confidence, preQuote.Reasons, cancellationToken);
             return;
         }
-        var move = SessionMoveQualityPolicy.Evaluate(completed, decision.Direction.Value, atr);
-        var mature = MatureEdgeEntryPolicy.Evaluate(move,
-            MultiTimeframeDecisionPolicy.Analyze(completed, decision.Direction,
-                openingHigh, openingLow), decision.Direction.Value);
-        if (!move.Permitted || !mature.Permitted)
+        if (!preQuote.Location.Permitted)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                "SessionMoveQualityRejected", decision.Confidence,
-                [.. move.Reasons, .. mature.Reasons], cancellationToken);
+                preQuote.RejectionOutcome, decision.Confidence, preQuote.Reasons, cancellationToken);
+            return;
+        }
+        if (!preQuote.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                preQuote.RejectionOutcome, decision.Confidence,
+                preQuote.Reasons, cancellationToken);
+            return;
+        }
+        var priorBankExit = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
+            join priorInstrument in db.Instruments.AsNoTracking()
+                on priorPosition.ExecutionInstrumentId equals priorInstrument.Id
+            where priorPosition.Market == market.Code && priorPosition.ClosedAtUtc >= sessionStartUtc &&
+                priorPosition.Status != "Active" &&
+                (decision.Direction == Direction.Buy ? priorInstrument.Type == InstrumentType.CallOption :
+                    priorInstrument.Type == InstrumentType.PutOption)
+            orderby priorPosition.ClosedAtUtc descending
+            select priorPosition.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var reentry = StructuralReentryPolicy.Evaluate(completed, decision.Direction.Value, priorBankExit);
+        if (!reentry.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
             return;
         }
         var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db,
@@ -843,12 +948,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ["No current monthly option contract is synchronized."], cancellationToken);
             return;
         }
+        entryPhases[market.Code] = "BankOptionQuoteAndAdmission";
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
             execution.TradingSymbol), cancellationToken);
-        var entry = quote.OfferPrice ?? quote.LastPrice;
-        if (entry <= 0m || execution.LotSize <= 0) return;
-        if (quote.BidPrice is > 0m && quote.OfferPrice is > 0m &&
-            (quote.OfferPrice.Value - quote.BidPrice.Value) / quote.OfferPrice.Value > .015m)
+        var tick = execution.TickSize > 0m
+            ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize) : .05m;
+        var admission = BankIndexOptionAdmissionPolicy.Evaluate(quote.LastPrice,
+            quote.BidPrice, quote.OfferPrice, execution.LotSize, tick,
+            options.Value.OptionStopLossPercent);
+        if (admission.SpreadRejected)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                 "OptionSpreadRejected", decision.Confidence,
@@ -856,12 +964,18 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             return;
         }
-        var tick = execution.TickSize > 0m
-            ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize) : .05m;
-        var riskDistance = entry * options.Value.OptionStopLossPercent / 100m;
-        var stop = RoundToTick(entry - riskDistance, tick);
-        var target = RoundToTick(entry + riskDistance, tick);
-        if (!PaperPriceGeometryPolicy.IsValid(Direction.Buy, entry, stop, target)) return;
+        if (!admission.Permitted)
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                "OptionGeometryRejected", decision.Confidence,
+                [$"Invalid option entry/lot/tick or protective geometry: entry={admission.Entry}, " +
+                 $"stop={admission.Stop}, target={admission.Target}, lot={execution.LotSize}, tick={tick}."],
+                cancellationToken);
+            return;
+        }
+        var entry = admission.Entry;
+        var stop = admission.Stop;
+        var target = admission.Target;
         var quantity = checked(execution.LotSize * lotConfiguration.ForMarket(market.Code));
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
             execution.Id, "Bank index directional breakout", Direction.Buy,
@@ -874,7 +988,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 direction = Direction.Buy.ToString(), entry, initialStop = stop, target,
                 quantity, execution = execution.TradingSymbol, quoteSnapshot = quote,
                 evaluationStartedAtUtc = now, paperEntryRecordedAtUtc = timeProvider.GetUtcNow(),
-                reasons = decision.Reasons, location = location.Context,
+                reasons = decision.Reasons, location = preQuote.Location.Context,
                 optionInterest = optionInterest.Reasons })));
         await db.SaveChangesAsync(cancellationToken);
         liveWakeSignal.Notify();
@@ -1365,12 +1479,12 @@ internal sealed partial class MultiMarketPaperTradingService(
         return filledEntries.Any(value => !exitedIds.Contains(value[..^"-ENTRY".Length]));
     }
 
-    private async Task AuditIfDueAsync(TradingDbContext db, TradingMarketDefinition market, Guid instrumentId,
+    private static async Task AuditIfDueAsync(TradingDbContext db, TradingMarketDefinition market, Guid instrumentId,
         DateTimeOffset candleTime, MarketDecision decision, CancellationToken cancellationToken)
     {
-        var cutoff = candleTime.AddMinutes(-options.Value.NoTradeAuditIntervalMinutes);
         if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value => value.Market == market.Code &&
-            value.CandleTimeUtc >= cutoff, cancellationToken)) return;
+            value.UnderlyingInstrumentId == instrumentId && value.Outcome == "NoSignal" &&
+            value.CandleTimeUtc == candleTime, cancellationToken)) return;
         await AddAuditAsync(db, market, instrumentId, candleTime, "NoSignal", decision.Confidence,
             decision.Reasons, cancellationToken);
     }

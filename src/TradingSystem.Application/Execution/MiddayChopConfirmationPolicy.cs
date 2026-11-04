@@ -7,8 +7,8 @@ public sealed record MiddayChopConfirmationDecision(bool Applies, bool Permitted
     IReadOnlyList<string> Reasons);
 
 /// <summary>
-/// Adds a completed-five-minute confirmation only during the observed midday window
-/// and only when the existing structure classifier sees chop/transition conditions.
+/// Requires completed-five-minute confirmation for chop. Legacy callers may
+/// retain the midday-only window; regular index engines request all-session coverage.
 /// </summary>
 public static class MiddayChopConfirmationPolicy
 {
@@ -17,25 +17,62 @@ public static class MiddayChopConfirmationPolicy
 
     public static MiddayChopConfirmationDecision Evaluate(TimeOnly indiaTime,
         IReadOnlyList<StrategyPriceBar> completedBars, Direction direction,
-        MarketStructureQualitySnapshot structure, int sourceIntervalSeconds)
+        MarketStructureQualitySnapshot structure, int sourceIntervalSeconds,
+        bool includeOtherHours = false)
     {
         ArgumentNullException.ThrowIfNull(completedBars);
         ArgumentNullException.ThrowIfNull(structure);
 
-        if (indiaTime < WindowStart || indiaTime > WindowEnd)
+        if (!includeOtherHours && (indiaTime < WindowStart || indiaTime > WindowEnd))
             return new(false, true, ["Outside the midday chop-confirmation window."]);
 
         var choppy = structure.State is MarketStructureQualityState.NoisyChop or
                          MarketStructureQualityState.StructuredRange ||
                      structure.State == MarketStructureQualityState.VolatilityTransition &&
-                     structure.ChopScore >= .50m;
+                     structure.ChopScore >= .50m || includeOtherHours && IsRangeLike(completedBars);
         if (!choppy)
             return new(false, true, ["Midday structure is not classified as choppy; normal trend entries remain eligible."]);
 
+        return Confirm(completedBars, direction, sourceIntervalSeconds);
+    }
+
+    public static MiddayChopConfirmationDecision EvaluateObservedPath(
+        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(completedBars);
+        return IsRangeLike(completedBars)
+            ? Confirm(completedBars, direction, sourceIntervalSeconds)
+            : new(false, true, ["The observed path is not range-like; normal trend entries remain eligible."]);
+    }
+
+    public static MiddayChopConfirmationDecision ConfirmCompletedStructure(
+        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds) =>
+        Confirm(completedBars, direction, sourceIntervalSeconds);
+
+    private static bool IsRangeLike(IReadOnlyList<StrategyPriceBar> source)
+    {
+        if (source.Count < 12) return false;
+        var bars = source.TakeLast(20).ToArray();
+        var changes = bars.Zip(bars.Skip(1), (left, right) => right.Close - left.Close).ToArray();
+        var travelled = changes.Sum(Math.Abs);
+        var efficiency = travelled <= 0m ? 0m : Math.Abs(bars[^1].Close - bars[0].Close) / travelled;
+        var signs = changes.Where(value => value != 0m).Select(Math.Sign).ToArray();
+        var flipRatio = signs.Length < 2 ? 0m :
+            (decimal)signs.Zip(signs.Skip(1)).Count(pair => pair.First != pair.Second) / (signs.Length - 1);
+        // Reuse the existing structure analyser's range-like classification.
+        return efficiency < .38m && flipRatio >= .40m;
+    }
+
+    private static MiddayChopConfirmationDecision Confirm(
+        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds)
+    {
         var fiveMinuteBars = AggregateFiveMinuteBars(completedBars, sourceIntervalSeconds);
         if (fiveMinuteBars.Length < 3)
             return new(true, false,
-                ["Midday chop is active; at least three completed five-minute bars are needed for a confirmation."]);
+                ["Choppy structure is active; at least three completed five-minute bars are needed for a confirmation."]);
+        if (fiveMinuteBars[^1].OpenTimeUtc.AddMinutes(5) <
+            completedBars[^1].OpenTimeUtc.AddSeconds(sourceIntervalSeconds).AddMinutes(-5))
+            return new(true, false, ["The completed five-minute confirmation is stale relative to the latest candle."]);
 
         var last = fiveMinuteBars[^1];
         var previous = fiveMinuteBars[^2];
@@ -43,7 +80,7 @@ public static class MiddayChopConfirmationPolicy
         if (last.OpenTimeUtc - previous.OpenTimeUtc != TimeSpan.FromMinutes(5) ||
             previous.OpenTimeUtc - prior.OpenTimeUtc != TimeSpan.FromMinutes(5))
             return new(true, false,
-                ["Midday chop is active; the latest three completed five-minute bars are not continuous, so confirmation is unavailable."]);
+                ["Choppy structure is active; the latest three completed five-minute bars are not continuous, so confirmation is unavailable."]);
         var alignedClose = direction == Direction.Buy
             ? last.Close > last.Open && last.Close > previous.Close
             : last.Close < last.Open && last.Close < previous.Close;
@@ -61,7 +98,7 @@ public static class MiddayChopConfirmationPolicy
             ? new(true, true,
                 ["A completed five-minute direction-aligned close confirmed a structure break or pullback resumption."])
             : new(true, false,
-                ["Midday chop is active; waiting for a completed five-minute direction-aligned structure break or pullback resumption."]);
+                ["Choppy structure is active; waiting for a completed five-minute direction-aligned structure break or pullback resumption."]);
     }
 
     private static StrategyPriceBar[] AggregateFiveMinuteBars(

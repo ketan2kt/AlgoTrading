@@ -12,6 +12,7 @@ using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Persistence;
+using TradingSystem.Infrastructure.Diagnostics;
 
 namespace TradingSystem.Infrastructure.Execution;
 
@@ -21,6 +22,7 @@ internal sealed partial class IntradayExpansionPairService(
     IOptions<IntradayExpansionPairOptions> options,
     IOptions<MarketDataOptions> marketData,
     TimeProvider timeProvider,
+    TradingEngineEvidenceRecorder evidenceRecorder,
     ILogger<IntradayExpansionPairService> logger) : BackgroundService
 {
     internal const string StrategyPrefix = "Expansion Pair|";
@@ -29,14 +31,27 @@ internal sealed partial class IntradayExpansionPairService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled) return;
+        if (!options.Value.Enabled)
+        {
+            foreach (var market in new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex })
+                await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "Startup", "Disabled",
+                    "Expansion pairs are disabled by server configuration.", timeProvider.GetUtcNow(),
+                    new { options.Value.Enabled }, stoppingToken);
+            return;
+        }
         while (!stoppingToken.IsCancellationRequested)
         {
             foreach (var market in new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex })
             {
                 try { await ScanAsync(market, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                catch (Exception exception) { LogScanFailure(logger, market.Code, exception); }
+                catch (Exception exception)
+                {
+                    LogScanFailure(logger, market.Code, exception);
+                    await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "Scan", "Faulted",
+                        "Expansion-pair scan or position management failed.", timeProvider.GetUtcNow(),
+                        TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
+                }
             }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.ScanIntervalSeconds), stoppingToken);
         }
@@ -56,7 +71,12 @@ internal sealed partial class IntradayExpansionPairService(
         var underlying = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
             value.Exchange == market.Exchange && value.Type == InstrumentType.Index &&
             value.TradingSymbol == market.UnderlyingSymbol && value.IsActive, cancellationToken);
-        if (underlying is null) return;
+        if (underlying is null)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "Instrument", "InstrumentUnavailable",
+                "The index instrument is not synchronised.", now, new { market.UnderlyingSymbol }, cancellationToken);
+            return;
+        }
 
         var active = await db.MarketPaperPositions.Where(value => value.Market == market.Code &&
             value.Status == "Active" && value.Strategy.StartsWith(StrategyPrefix))
@@ -71,17 +91,45 @@ internal sealed partial class IntradayExpansionPairService(
             return;
         }
 
+        // Hold only new Nifty pairs. Keep Sensex entries and existing pair
+        // management unchanged while the Nifty basket strategy is reviewed.
+        if (!options.Value.AllowsNewEntry(market.Code))
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "EntryControl", "Held",
+                "New Nifty expansion-pair entries are held for strategy review; existing legs remain managed.",
+                now, new { options.Value.NiftyEntryEnabled }, cancellationToken);
+            return;
+        }
+
         if (!IndexEntryWindowPolicy.AllowsEntry(localTime, ParseTime(options.Value.EntryWindowStart),
-                ParseTime(options.Value.EntryCutoff))) return;
+                ParseTime(options.Value.EntryCutoff)))
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "EntryWindow", "OutsideEntryWindow",
+                "Expansion-pair entry window is not open.", now,
+                new { localTime, options.Value.EntryWindowStart, options.Value.EntryCutoff }, cancellationToken);
+            return;
+        }
 
         var todayPositions = await db.MarketPaperPositions.AsNoTracking().Where(value =>
             value.Market == market.Code && value.OpenedAtUtc >= dayStart &&
             value.Strategy.StartsWith(StrategyPrefix)).ToListAsync(cancellationToken);
         var pairsToday = todayPositions.Select(value => PairPrefix(value.Strategy)).Distinct().Count();
-        if (pairsToday >= options.Value.MaximumPairsPerDay) return;
+        if (pairsToday >= options.Value.MaximumPairsPerDay)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "EntryControl", "PairLimit",
+                "The configured daily expansion-pair allowance is already used.", now,
+                new { pairsToday, options.Value.MaximumPairsPerDay }, cancellationToken);
+            return;
+        }
         DateTimeOffset? lastOpened = todayPositions.Count == 0
             ? null : todayPositions.Max(value => value.OpenedAtUtc);
-        if (lastOpened is not null && now - lastOpened < TimeSpan.FromMinutes(options.Value.CooldownMinutes)) return;
+        if (lastOpened is not null && now - lastOpened < TimeSpan.FromMinutes(options.Value.CooldownMinutes))
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "EntryControl", "Cooldown",
+                "Expansion-pair cooldown is active.", now,
+                new { lastOpened, options.Value.CooldownMinutes }, cancellationToken);
+            return;
+        }
 
         var completedBefore = now.AddSeconds(-marketData.Value.CandleIntervalSeconds);
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
@@ -89,11 +137,23 @@ internal sealed partial class IntradayExpansionPairService(
                 value.OpenTimeUtc >= dayStart && value.OpenTimeUtc <= completedBefore)
             .OrderByDescending(value => value.OpenTimeUtc).Take(90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-        if (candles.Count == 0) return;
+        if (candles.Count == 0)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "CompletedCandles", "CandlesUnavailable",
+                "No completed index candles are available.", now,
+                new { marketData.Value.CandleIntervalSeconds }, cancellationToken);
+            return;
+        }
         var fiveMinuteBars = IntradayExpansionPairPolicy.CompletedFiveMinuteBars(candles.Select(value =>
             new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray(),
             marketData.Value.CandleIntervalSeconds, now);
-        if (fiveMinuteBars.Length == 0) return;
+        if (fiveMinuteBars.Length == 0)
+        {
+            await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "CompletedCandles", "FiveMinuteBarsUnavailable",
+                "No complete five-minute signal bars are available.", now,
+                new { sourceCount = candles.Count }, cancellationToken);
+            return;
+        }
         var decision = IntradayExpansionPairPolicy.Evaluate(fiveMinuteBars);
         var decisionTime = fiveMinuteBars[^1].OpenTimeUtc;
         if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value => value.Market == market.Code &&
@@ -135,7 +195,12 @@ internal sealed partial class IntradayExpansionPairService(
 
         var spotQuote = await gateway.GetQuoteAsync(new(market.Exchange, market.QuoteSegment,
             market.UnderlyingSymbol), cancellationToken);
-        if (spotQuote.LastPrice <= 0) return;
+        if (spotQuote.LastPrice <= 0)
+        {
+            await AuditAsync(db, market.Code, underlying.Id, decisionTime, "ExpansionPair:QuoteUnavailable",
+                decision.Confidence, new { spotQuote.LastPrice }, cancellationToken);
+            return;
+        }
         var candidates = await LoadCandidatesAsync(db, market, expiry.Value, spotQuote.LastPrice,
             cancellationToken);
         var call = HeroZeroCandidatePolicy.Select(candidates, "CE", options.Value.TargetPremium,

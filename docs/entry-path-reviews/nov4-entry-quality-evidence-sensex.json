@@ -1,0 +1,90 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T09:47:08.4479261+00:00",
+  "market": "sensex",
+  "from": "2026-10-26",
+  "to": "2026-11-04",
+  "removeStrategies": [
+    "__no_removed_path__"
+  ],
+  "historicalRegularEntries": 76,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 76,
+  "sessions": [
+    {
+      "Date": "2026-10-26",
+      "RegularEntries": 10
+    },
+    {
+      "Date": "2026-10-27",
+      "RegularEntries": 11
+    },
+    {
+      "Date": "2026-10-28",
+      "RegularEntries": 12
+    },
+    {
+      "Date": "2026-10-29",
+      "RegularEntries": 0
+    },
+    {
+      "Date": "2026-10-30",
+      "RegularEntries": 8
+    },
+    {
+      "Date": "2026-11-02",
+      "RegularEntries": 11
+    },
+    {
+      "Date": "2026-11-03",
+      "RegularEntries": 9
+    },
+    {
+      "Date": "2026-11-04",
+      "RegularEntries": 15
+    }
+  ],
+  "strategyBreakdown": [
+    {
+      "strategy": "Sensex directional pullback participation",
+      "count": 21,
+      "removed": false
+    },
+    {
+      "strategy": "PaperOnly|persistent-directional-thesis-v1|sensex",
+      "count": 17,
+      "removed": false
+    },
+    {
+      "strategy": "Research|Sensex directional pullback participation",
+      "count": 16,
+      "removed": false
+    },
+    {
+      "strategy": "Research|Sensex controlled early pullback research",
+      "count": 6,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex controlled early pullback",
+      "count": 6,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex persistent directional thesis",
+      "count": 6,
+      "removed": false
+    },
+    {
+      "strategy": "Research|Sensex range-edge rejection",
+      "count": 2,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex range-edge rejection",
+      "count": 2,
+      "removed": false
+    }
+  ],
+  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability."
+}

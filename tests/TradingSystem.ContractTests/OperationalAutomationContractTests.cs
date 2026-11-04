@@ -87,6 +87,19 @@ public sealed class OperationalAutomationContractTests
         IReadOnlyList<DailyTradingTrade>? trades = null) =>
         new(new DateOnly(2026, 10, 22), "NIFTY", Now, summary, [], [], trades ?? [], [], []);
 
+    [Fact]
+    public void SpecialtyTradesCannotMaskMissingRegularEngineEvidence()
+    {
+        var source = Report(EmptySummary() with { DecisionCount = 10, CompletedTradeCount = 2 }) with
+        {
+            TelemetryWarnings = ["Missing normal-engine evidence for NIFTY; specialty activity is not regular evaluation."]
+        };
+        var result = OperationalAutomationService.BuildReport(
+            new("NoTradeWatch:1200", new TimeOnly(12, 0)), source, true, null, Now);
+        Assert.Equal("Critical", result.Status);
+        Assert.True(result.ActionRequired);
+    }
+
     private static DailyTradingDiagnosticsSummary EmptySummary() =>
         new(0, 0, 0, new Dictionary<string, int>(), 0, 0, 0, 0,
             0m, 0m, 0m, null, null, null);

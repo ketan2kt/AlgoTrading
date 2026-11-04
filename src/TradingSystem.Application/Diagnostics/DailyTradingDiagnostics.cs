@@ -32,6 +32,19 @@ public sealed record DailyTradingDiagnosticsReport(
     IReadOnlyList<string> TelemetryWarnings)
 {
     public IReadOnlyList<ExpansionPairObservation> ExpansionPairObservations { get; init; } = [];
+    public IReadOnlyList<EngineEvidenceCoverage> EngineEvidenceCoverage { get; init; } = [];
+}
+
+public sealed record EngineEvidenceCoverage(string EngineKey, int Records,
+    DateTimeOffset FirstAtUtc, DateTimeOffset LastAtUtc);
+
+public sealed record EngineEvidencePage(DateOnly TradingDate, string Market,
+    int Offset, int? NextOffset, IReadOnlyList<DailyTradingSystemEvent> Records);
+
+public interface IEngineEvidenceReader
+{
+    Task<EngineEvidencePage> ReadAsync(DateOnly tradingDate, string market, int offset,
+        int limit, CancellationToken cancellationToken);
 }
 
 public sealed record ExpansionPairObservation(

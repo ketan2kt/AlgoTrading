@@ -205,6 +205,7 @@ public static class DependencyInjection
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
+        services.AddScoped<IEngineEvidenceReader, EfEngineEvidenceReader>();
         services.AddScoped<ILiveTradeDiagnosticsReader, EfLiveTradeDiagnosticsReader>();
         services.AddScoped<IOperationalAutomationReportReader, EfOperationalAutomationReportReader>();
         services.AddOptions<OperationalAutomationOptions>()
@@ -244,6 +245,8 @@ public static class DependencyInjection
                                start < cutoff && cutoff < forcedExit,
                 "Hero Zero paper strategy settings are invalid.")
             .ValidateOnStart();
+        services.AddSingleton<TradingEngineEvidenceRecorder>();
+        services.AddHostedService(provider => provider.GetRequiredService<TradingEngineEvidenceRecorder>());
         services.AddHostedService<HeroZeroPaperTradingService>();
         services.AddOptions<IntradayExpansionPairOptions>()
             .Bind(configuration.GetSection(IntradayExpansionPairOptions.SectionName))

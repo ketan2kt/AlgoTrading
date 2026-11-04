@@ -49,15 +49,16 @@ public static class NiftyOptionContractSelector
         };
 
         var eligible = candidates.Where(value =>
-                value.Type == requiredType && value.ExpiryDate >= tradingDate &&
+                // Regular entries roll past today's expiry. Hero Zero has its
+                // own current-expiry selector and is deliberately unaffected.
+                value.Type == requiredType && value.ExpiryDate > tradingDate &&
                 value.ExpiryDate <= tradingDate.AddDays(options.MaximumDaysToExpiry) &&
                 value.StrikePrice > 0 && value.LotSize > 0 && value.TickSize > 0)
             .ToArray();
         if (eligible.Length == 0) return null;
 
         var nearestExpiry = eligible.Min(value => value.ExpiryDate);
-        var steps = nearestExpiry == tradingDate
-            ? options.ExpiryDayInTheMoneySteps : options.NormalInTheMoneySteps;
+        var steps = options.NormalInTheMoneySteps;
         var atm = Math.Round(underlyingPrice / options.StrikeStep,
             MidpointRounding.AwayFromZero) * options.StrikeStep;
         var desiredStrike = requiredType == InstrumentType.CallOption

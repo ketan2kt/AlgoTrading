@@ -1,0 +1,43 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T09:48:06.2882706+00:00",
+  "market": "bank-nifty",
+  "from": "2026-10-29",
+  "to": "2026-11-04",
+  "removeStrategies": [
+    "__no_removed_path__"
+  ],
+  "historicalRegularEntries": 25,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 25,
+  "sessions": [
+    {
+      "Date": "2026-10-29",
+      "RegularEntries": 0
+    },
+    {
+      "Date": "2026-10-30",
+      "RegularEntries": 6
+    },
+    {
+      "Date": "2026-11-02",
+      "RegularEntries": 7
+    },
+    {
+      "Date": "2026-11-03",
+      "RegularEntries": 6
+    },
+    {
+      "Date": "2026-11-04",
+      "RegularEntries": 6
+    }
+  ],
+  "strategyBreakdown": [
+    {
+      "strategy": "Bank index directional breakout",
+      "count": 25,
+      "removed": false
+    }
+  ],
+  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability."
+}
