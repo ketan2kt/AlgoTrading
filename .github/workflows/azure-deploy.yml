@@ -10,6 +10,10 @@ on:
         description: Reapply Bicep even if the verified infrastructure is unchanged
         type: boolean
         default: false
+      ci_run_id:
+        description: Successful main push CI run that produced the release package
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,35 +25,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality-gate:
-    if: inputs.deploy == 'DEPLOY-LIVE'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Restore backend dependencies
-        run: dotnet restore TradingSystem.slnx
-
-      - name: Run protected-session regression gate
-        run: >-
-          dotnet test tests/TradingSystem.UnitTests/TradingSystem.UnitTests.csproj
-          --configuration Release --no-restore
-          --filter Category=DeploymentRegression
-
-      - name: Run complete backend test suite
-        run: dotnet test TradingSystem.slnx --configuration Release --no-restore
-
   deploy:
-    if: inputs.deploy == 'DEPLOY-LIVE'
-    needs: quality-gate
+    if: inputs.deploy == 'DEPLOY-LIVE' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: azure-paper
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify successful main CI and exact release package
+        env:
+          CI_RUN: ${{ inputs.ci_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN" =~ ^[1-9][0-9]*$ ]]
+          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -er \
+            --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
+            'select(.path == ".github/workflows/ci.yml" and .event == "push" and
+              .head_branch == "main" and .head_sha == $sha and .head_repository.full_name == $repo and
+              .status == "completed" and .conclusion == "success") | .run_attempt')
+          gh run download "$CI_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "deploy-$GITHUB_SHA-$attempt" --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          test "$(cat source.sha)" = "$GITHUB_SHA"
+          sha256sum trading-system.zip | cmp - package.sha256
+          unzip -tq trading-system.zip
+          echo "Verified package from main CI run $CI_RUN, attempt $attempt, commit $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Sign in to Azure with workload identity
         uses: azure/login@v2
@@ -144,34 +145,6 @@ jobs:
             fi
           done
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.15.0
-          cache: npm
-          cache-dependency-path: trading-system-web/package-lock.json
-
-      - name: Build Angular application
-        working-directory: trading-system-web
-        run: |
-          npm ci
-          npm run build
-
-      - name: Publish ASP.NET Core application
-        run: |
-          rm -rf src/TradingSystem.Api/wwwroot/*
-          cp -R trading-system-web/dist/trading-system-web/browser/. src/TradingSystem.Api/wwwroot/
-          dotnet publish src/TradingSystem.Api/TradingSystem.Api.csproj \
-            --configuration Release \
-            --output publish \
-            /p:UseAppHost=false \
-            /p:InformationalVersion="1.0.0+${GITHUB_SHA}"
-          cd publish
-          zip -r ../trading-system.zip .
-
       - name: Deploy application package
         run: |
           # Never mutate App Service settings immediately before ZipDeploy. Even an
@@ -182,7 +155,7 @@ jobs:
             if az webapp deploy \
               --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
               --name "${{ steps.infrastructure.outputs.app }}" \
-              --src-path trading-system.zip \
+              --src-path "$RUNNER_TEMP/release/trading-system.zip" \
               --type zip \
               --clean true \
               --restart true; then

@@ -41,19 +41,25 @@ function Invoke-Captured {
 function Assert-DeploymentCiPassed {
     param([string]$RemoteRef)
 
+    if ($RemoteRef -ne 'main') { throw 'Only a checked main CI package can be deployed.' }
     $encodedRef = [Uri]::EscapeDataString($RemoteRef)
     $sha = Invoke-Captured gh @('api', "repos/$repo/commits/$encodedRef", '--jq', '.sha')
     if ($sha -notmatch '^[0-9a-f]{40}$') { throw "Could not resolve remote ref '$RemoteRef' to a commit." }
     $runsJson = Invoke-Captured gh @('run', 'list', '--repo', $repo,
-        '--workflow', 'ci.yml', '--commit', $sha, '--event', 'push',
-        '--limit', '10', '--json', 'databaseId,headSha,status,conclusion')
+        '--workflow', 'ci.yml', '--branch', 'main', '--commit', $sha, '--event', 'push',
+        '--limit', '10', '--json', 'databaseId,headSha,status,conclusion,attempt')
     $run = @(ConvertFrom-Json -InputObject $runsJson) |
         Where-Object { $_.headSha -eq $sha } | Select-Object -First 1
     if (-not $run) { throw "No push CI run exists for $sha. Deployment not dispatched." }
     if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') {
         throw "CI run $($run.databaseId) for $sha is $($run.status)/$($run.conclusion). Deployment not dispatched."
     }
-    Write-Output "CI passed for $sha (run $($run.databaseId))."
+    $artifactName = "deploy-$sha-$($run.attempt)"
+    $artifact = Invoke-Captured gh @('api', "repos/$repo/actions/runs/$($run.databaseId)/artifacts?name=$artifactName",
+        '--jq', '[.artifacts[] | select(.expired == false)] | length')
+    if ($artifact -ne '1') { throw "No unique unexpired release package for CI run $($run.databaseId). Deployment not dispatched." }
+    Write-Host "CI passed for $sha (run $($run.databaseId)); verified package is available."
+    return $run.databaseId
 }
 
 function Get-DiagnosticsContext {
@@ -121,8 +127,8 @@ try {
         }
         'deploy' {
             if ([string]::IsNullOrWhiteSpace($Ref)) { throw 'Supply -Ref with the authorized remote branch or tag.' }
-            Assert-DeploymentCiPassed $Ref
-            $dispatchArguments = @('workflow', 'run', $workflow, '--repo', $repo, '--ref', $Ref, '-f', 'deploy=DEPLOY-LIVE')
+            $ciRunId = Assert-DeploymentCiPassed $Ref
+            $dispatchArguments = @('workflow', 'run', $workflow, '--repo', $repo, '--ref', $Ref, '-f', 'deploy=DEPLOY-LIVE', '-f', "ci_run_id=$ciRunId")
             if ($DryRun) {
                 Write-Output ('Would invoke gh with arguments: ' + ($dispatchArguments | ConvertTo-Json -Compress))
                 Write-Output 'No deployment dispatched.'
