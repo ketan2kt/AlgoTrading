@@ -52,6 +52,8 @@ commit and working-tree state. It never reads credentials.
 
 ## Deployment
 
+Routine main releases automatically choose app-only or full provisioning. App-only requires a verified baseline from the previous successful deployment, identical infrastructure inputs, and matching Azure resources. A missing, expired, changed or unreadable baseline takes the full path. Set `force_infrastructure` in the workflow dispatch form for a deliberate reprovision. The workflow summary records the path. The first release containing this optimization performs a full deployment.
+
 Before removing or replacing a regular entry path, run the database-backed
 entry-path impact check over recent completed sessions. Supply the strategy
 labels that the proposed change would remove, using PowerShell `-like` patterns:
