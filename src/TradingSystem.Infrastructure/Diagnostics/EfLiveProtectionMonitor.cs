@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using TradingSystem.Application.Diagnostics;
 using TradingSystem.Domain.Trading;
@@ -10,6 +11,18 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
 {
     private static readonly string[] Markets=["NIFTY","SENSEX","BANK-NIFTY","BANKNIFTY"];
     private static readonly string[] StopKeys=["verifiedStop","reservedStop"];
+    private const string ReviewAction="ProtectionReminderReviewed";
+    public async Task<bool> ReviewAsync(Guid intentId,string version,string actor,CancellationToken token)
+    {
+        var row=(await ReadAsync(token)).Rows.SingleOrDefault(r=>r.Id==intentId);
+        if(row?.ReviewVersion is null || row.ReviewVersion!=version)return false;
+        if(row.ReviewedAt.HasValue)return true;
+        db.AuditLogs.Add(new AuditLog(Guid.NewGuid(),actor,ReviewAction,nameof(LiveExecutionIntent),
+            intentId.ToString("D"),"Administrator reviewed the prior-session reminder; broker state unchanged.",
+            "{}",JsonSerializer.Serialize(row),version,clock.GetUtcNow()));
+        await db.SaveChangesAsync(token);
+        return true;
+    }
     public Task<ProtectionMonitorReport> ReadAsync(CancellationToken token)
         => db.Database.CreateExecutionStrategy().ExecuteAsync(()=>ReadSnapshotAsync(token));
     private async Task<ProtectionMonitorReport> ReadSnapshotAsync(CancellationToken token)
@@ -45,6 +58,9 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
             .Select(e=>new {e.ClientReference,e.Sequence,e.PayloadJson,e.OccurredAtUtc}).ToListAsync(token);
         var latestFills=journal.GroupBy(e=>e.ClientReference).ToDictionary(g=>g.Key,g=>g.MaxBy(e=>e.Sequence)!);
         var rows=new List<ProtectionMonitorRow>();
+        var intentIds=intents.Select(i=>i.Id.ToString("D")).ToArray();
+        var reviews=(await db.AuditLogs.AsNoTracking().Where(a=>a.Action==ReviewAction && intentIds.Contains(a.EntityId))
+            .Select(a=>new {a.CorrelationId,a.OccurredAtUtc}).ToArrayAsync(token)).ToLookup(a=>a.CorrelationId);
         foreach(var i in intents){
             decimal? stop=null; int? units=null;DateTimeOffset? revision=null;
             if(i.SourceType=="MARKET_POSITION" && positions.TryGetValue(i.SourceId,out var p)){
@@ -66,9 +82,10 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
                 units=complete && held>=0?held:null;
                 if(closedSignals.Contains(i.SourceId))units=0;
             }
-            rows.Add(Assess(i,names.GetValueOrDefault(i.InstrumentId)??"(unknown contract)",stop,units,revision,evidence[i.Id],now));
+            var row=Assess(i,names.GetValueOrDefault(i.InstrumentId)??"(unknown contract)",stop,units,revision,evidence[i.Id],now);
+            rows.Add(row.ReviewVersion is { } v ? row with {ReviewedAt=reviews[v].Max(a=>(DateTimeOffset?)a.OccurredAtUtc)} : row);
         }
-        return new(now,rows.Count(r=>r.NeedsAttention),rows.OrderByDescending(r=>r.NeedsAttention)
+        return new(now,rows.Count(r=>r.NeedsAttention && r.ReviewedAt==null),rows.OrderByDescending(r=>r.NeedsAttention)
             .ThenBy(r=>r.Market).ThenBy(r=>r.Symbol).ThenBy(r=>r.Id).ToArray());
     }
 
@@ -121,7 +138,15 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
         else if(ack.At.ToOffset(TimeSpan.FromHours(5.5)).Date!=now.ToOffset(TimeSpan.FromHours(5.5)).Date)
             finding="Prior-session confirmation only";
         else finding="Last confirmed match";
-        return new(i.Id,i.Market,symbol,i.Status,units,i.FilledQuantity>0?i.FilledQuantity:null,stop,i.ProtectionId,
-            ack?.Qty,ack?.Price,ack?.At,finding,finding!="Last confirmed match");
+        var offset=TimeSpan.FromHours(5.5);
+        var row=new ProtectionMonitorRow(i.Id,i.Market,symbol,i.Status,units,i.FilledQuantity>0?i.FilledQuantity:null,stop,i.ProtectionId,
+            ack?.Qty,ack?.Price,ack?.At,finding,finding!="Last confirmed match")
+            {SessionDate=DateOnly.FromDateTime(i.CreatedAtUtc.ToOffset(offset).Date)};
+        if(!row.NeedsAttention || row.SessionDate>=DateOnly.FromDateTime(now.ToOffset(offset).Date))return row;
+        // A review acknowledges only these facts. New revisions, receipts or lifecycle changes reopen the reminder.
+        var latestReceipt=records.Select(p=>(DateTimeOffset?)p.At).Max();
+        var version=Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
+            new {row,i.ConcurrencyToken,i.LastError,revision,latestReceipt})));
+        return row with {ReviewVersion=version};
     }
 }

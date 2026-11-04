@@ -23,6 +23,19 @@ public class LiveProtectionMonitorTests
         Assert.Equal(finding,row.Finding);Assert.Equal(finding!="Last confirmed match",row.NeedsAttention);
     }
     [Fact]
+    public void OnlyPriorSessionAlertsCanBeReviewedAndNewEvidenceChangesTheVersion(){
+        var i=Open();
+        var firstMidnight=new DateTimeOffset(2026,11,6,0,0,0,TimeSpan.FromHours(5.5));
+        var current=EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[],firstMidnight.AddSeconds(-1));
+        var prior=EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[],firstMidnight);
+        Assert.Null(current.ReviewVersion);
+        Assert.True(prior.NeedsAttention);
+        Assert.NotNull(prior.ReviewVersion);
+        Assert.Equal(prior.ReviewVersion,EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[],firstMidnight.AddDays(1)).ReviewVersion);
+        Assert.NotEqual(prior.ReviewVersion,EfLiveProtectionMonitor.Assess(i,"X",90,150,null,
+            [new(i.SourceId,firstMidnight,StopComparison.Kind.Uncertain,null,null)],firstMidnight).ReviewVersion);
+    }
+    [Fact]
     public void ConfirmedStopForFullSizeDoesNotCoverPartialOrSurviveUncertainty(){
         var i=Open();i.RecordPartialExit(75,Now);
         var ack=new StopComparison.Point(i.SourceId,Now.AddSeconds(-5),StopComparison.Kind.Ack,90,150,"stop");
