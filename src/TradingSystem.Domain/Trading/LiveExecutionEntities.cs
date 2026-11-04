@@ -81,7 +81,7 @@ public sealed class LiveExecutionIntent : MutableEntity
     public void AdjustProtectedExposure(int remainingQuantity, decimal paperStopLoss,
         DateTimeOffset atUtc)
     {
-        if (Status != "Protected" || remainingQuantity <= 0 || paperStopLoss <= 0)
+        if (Status is not ("Protected" or "ProtectedScaleMismatch") || remainingQuantity <= 0 || paperStopLoss <= 0)
             throw new InvalidOperationException("Only an open protected position can be adjusted.");
         FilledQuantity = remainingQuantity;
         StopLoss = paperStopLoss;
@@ -90,19 +90,23 @@ public sealed class LiveExecutionIntent : MutableEntity
 
     public void RecordAddOn(int quantity, DateTimeOffset atUtc)
     {
-        if (Status != "Protected" || quantity <= 0)
+        if (Status is not ("Protected" or "AddOnSubmitting") || quantity <= 0)
             throw new InvalidOperationException("A live add-on requires an open protected position.");
         FilledQuantity = checked(FilledQuantity + quantity);
         MirroredAddOnQuantity = checked(MirroredAddOnQuantity + quantity);
+        Status = "Protected";
+        LastError = null;
         MarkUpdated(atUtc.ToUniversalTime());
     }
 
     public void RecordPartialExit(int quantity, DateTimeOffset atUtc)
     {
-        if (Status != "Protected" || quantity <= 0 || quantity >= FilledQuantity)
+        if (Status is not ("Protected" or "PartialSubmitting") || quantity <= 0 || quantity >= FilledQuantity)
             throw new InvalidOperationException("A partial exit must leave a protected position.");
         FilledQuantity -= quantity;
         MirroredPartialExitQuantity = checked(MirroredPartialExitQuantity + quantity);
+        Status = "Protected";
+        LastError = null;
         MarkUpdated(atUtc.ToUniversalTime());
     }
 
@@ -110,6 +114,48 @@ public sealed class LiveExecutionIntent : MutableEntity
     {
         if (FilledQuantity <= 0) throw new InvalidOperationException("An unfilled order cannot be protected.");
         Status = "ProtectionSubmitting";
+    }
+
+    public void BeginFinalExit()
+    {
+        if (Status is not ("Protected" or "ProtectedScaleMismatch")) throw new InvalidOperationException("Cannot start final exit.");
+        Status = "FinalExitPending";
+    }
+
+    public void BeginFinalSell()
+    {
+        if (Status != "FinalExitPending") throw new InvalidOperationException("Final sale already attempted.");
+        Status = "FinalSellSubmitting";
+    }
+
+    public void ReserveResidualProtection(int quantity)
+    {
+        if (quantity <= 0 || quantity > FilledQuantity) throw new ArgumentOutOfRangeException(nameof(quantity));
+        FilledQuantity = quantity;
+        Status = "ResidualStopSubmitting";
+    }
+
+    public void RecordExitUncertainty(string reason) => LastError = reason;
+
+    public void RetainProtectedRemainder(string reason)
+    {
+        if (FilledQuantity <= 0 || ProtectionId is null) throw new InvalidOperationException("Missing managed protection.");
+        Status = "ProtectedScaleMismatch";
+        LastError = reason;
+    }
+
+    public void BeginScaleAction(string phase)
+    {
+        if (Status != "Protected" || phase is not ("PartialSubmitting" or "AddOnSubmitting"))
+            throw new InvalidOperationException("Invalid live scale action.");
+        Status = phase;
+    }
+
+    public void ResidualProtected(string id, DateTimeOffset atUtc)
+    {
+        Protected(id, atUtc);
+        Status = "ResidualProtected";
+        LastError = "Final sell incomplete; residual broker stop verified. New entries blocked.";
     }
 
     public void RequireReconciliation(string reason)

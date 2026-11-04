@@ -169,10 +169,12 @@ public sealed class HistoricalNiftyPositionPolicyTests
         Assert.Empty(policy.EvaluateAddOns(frame));
     }
 
-    [Fact]
-    public void OddPaperPartialIsReportedAsNonExecutableNotSilentlyCredited()
+    [Theory]
+    [InlineData(75, 0, 75)]
+    [InlineData(375, 150, 225)]
+    public void OneLotRunsIntactAndOddLotCountsBookOnlyExecutablePartials(int units, int partial, int remainder)
     {
-        var policy = new HistoricalNiftyPositionPolicy(new EntryPolicy(75),
+        var policy = new HistoricalNiftyPositionPolicy(new EntryPolicy(units),
             new(new TimeOnly(15, 15), true, true, true,
                 false, .6m, true, .55m, 3, true, .8m, 5, 5, 60));
         var result = HistoricalPortfolioReplay.Run([
@@ -184,8 +186,9 @@ public sealed class HistoricalNiftyPositionPolicyTests
         ], policy, new(.10m, .15m, 0m, 0m, 10, 0),
             Start, Start.AddMinutes(8));
 
-        Assert.Equal(1, result.UnsupportedPartialCount);
-        Assert.Equal(75, Assert.Single(result.Trades).Quantity);
+        Assert.Equal(0, result.UnsupportedPartialCount);
+        Assert.Equal(partial, result.Trades.Where(x => x.IsPartialExit).Sum(x => x.Quantity));
+        Assert.Equal(remainder, Assert.Single(result.Trades, x => !x.IsPartialExit).Quantity);
     }
 
     private sealed class EntryPolicy(int quantity = 150)

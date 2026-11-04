@@ -48,6 +48,10 @@ public sealed class LiveExecutionDiscoveryContractTests
         { FilledQuantity = 50, State = OrderState.PartiallyFilled }, 100));
         Assert.False(AutomaticLiveExecutionService.IsConfirmedFinalFill(order, 125));
         Assert.False(AutomaticLiveExecutionService.IsConfirmedFinalFill(null, 100));
+        Assert.Equal(0, AutomaticLiveExecutionService.ConfirmedResidual(order with
+            { State = OrderState.PartiallyFilled, FilledQuantity = 40 }, 100));
+        Assert.Equal(60, AutomaticLiveExecutionService.ConfirmedResidual(order with
+            { State = OrderState.Cancelled, FilledQuantity = 40 }, 100));
         var stop = order with { ClientReference = "LP1234567890", FilledQuantity = 10 };
         Assert.True(AutomaticLiveExecutionService.HasConflictingExitFills(order, stop));
         Assert.False(AutomaticLiveExecutionService.HasConflictingExitFills(null, stop));

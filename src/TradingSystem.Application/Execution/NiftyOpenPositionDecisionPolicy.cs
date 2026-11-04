@@ -32,19 +32,20 @@ public static class NiftyOpenPositionDecisionPolicy
 
     public static int PartialQuantity(Direction direction,
         decimal currentPrice, decimal entryPrice, decimal initialStop,
-        int totalQuantity, ProfessionalExitPlan exitPlan,
+        int totalQuantity, int lotSize, ProfessionalExitPlan exitPlan,
         bool partialProfitEnabled, bool alreadyPartiallyExited,
         PaperExitReason resolvedExit)
     {
         if (resolvedExit != PaperExitReason.None || !partialProfitEnabled ||
-            alreadyPartiallyExited || totalQuantity <= 1) return 0;
+            alreadyPartiallyExited || lotSize <= 0 || totalQuantity <= lotSize ||
+            totalQuantity % lotSize != 0) return 0;
         var risk = Math.Abs(entryPrice - initialStop);
         if (risk <= 0m) return 0;
         var reached = direction == Direction.Buy
             ? currentPrice >= entryPrice + risk * exitPlan.PartialProfitR
             : currentPrice <= entryPrice - risk * exitPlan.PartialProfitR;
-        return reached ? Math.Clamp(
-            (int)Math.Floor(totalQuantity * exitPlan.PartialExitFraction),
-            1, Math.Max(1, totalQuantity - 1)) : 0;
+        var lots = totalQuantity / lotSize;
+        return reached ? lotSize * Math.Clamp((int)Math.Floor(lots * exitPlan.PartialExitFraction),
+            1, lots - 1) : 0;
     }
 }

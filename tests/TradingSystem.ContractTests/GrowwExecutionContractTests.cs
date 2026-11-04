@@ -163,6 +163,8 @@ public sealed class GrowwExecutionContractTests
         {
             requests.Add((request.Method, request.RequestUri!.AbsolutePath,
                 request.Content is null ? null : await request.Content.ReadAsStringAsync()));
+            if (request.RequestUri!.AbsolutePath == "/v1/order/detail/STOP-123")
+                return Json(HttpStatusCode.OK, """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"TRIGGER_PENDING","transaction_type":"SELL","order_type":"SL","quantity":65,"filled_quantity":0,"price":93.10,"trigger_price":95}}""");
             if (request.Method == HttpMethod.Get)
                 return Json(HttpStatusCode.NotFound, "{}");
             return Json(HttpStatusCode.Created,
@@ -174,7 +176,7 @@ public sealed class GrowwExecutionContractTests
             CancellationToken.None);
 
         Assert.Equal("STOP-123", result.BrokerProtectionId);
-        Assert.Equal(2, requests.Count);
+        Assert.Equal(3, requests.Count);
         Assert.Equal("/v1/order/create", requests[1].Path);
         Assert.Contains("\"transaction_type\":\"SELL\"", requests[1].Body, StringComparison.Ordinal);
         Assert.Contains("\"order_type\":\"SL\"", requests[1].Body, StringComparison.Ordinal);
@@ -190,6 +192,8 @@ public sealed class GrowwExecutionContractTests
         string? body = null;
         var gateway = CreateGateway(async request =>
         {
+            if (request.Method == HttpMethod.Get)
+                return Json(HttpStatusCode.OK, """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"TRIGGER_PENDING","transaction_type":"SELL","order_type":"SL","quantity":40,"filled_quantity":0,"price":95.55,"trigger_price":97.5}}""");
             body = await request.Content!.ReadAsStringAsync();
             return Json(HttpStatusCode.OK,
                 """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"OPEN"}}""");
@@ -203,6 +207,29 @@ public sealed class GrowwExecutionContractTests
         Assert.Contains("\"groww_order_id\":\"STOP-123\"", body, StringComparison.Ordinal);
         Assert.Contains("\"order_type\":\"SL\"", body, StringComparison.Ordinal);
         Assert.Contains("\"quantity\":40", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RequestedModificationWithStaleDetailIsNotConfirmation()
+    {
+        var reads = 0;
+        var writes = 0;
+        var gateway = CreateGateway(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                writes++;
+                return Task.FromResult(Json(HttpStatusCode.OK,
+                    """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"MODIFICATION_REQUESTED"}}"""));
+            }
+            reads++;
+            return Task.FromResult(Json(HttpStatusCode.OK,
+                """{"status":"SUCCESS","payload":{"groww_order_id":"STOP-123","order_status":"TRIGGER_PENDING","order_type":"SL","transaction_type":"SELL","quantity":40,"filled_quantity":0,"price":93.1,"trigger_price":95}}"""));
+        });
+        await Assert.ThrowsAsync<BrokerOrderOutcomeUnknownException>(() =>
+            gateway.ModifyProtectionAsync("STOP-123", 40, 97.5m, CancellationToken.None));
+        Assert.Equal(1, writes);
+        Assert.Equal(5, reads);
     }
 
     [Theory]

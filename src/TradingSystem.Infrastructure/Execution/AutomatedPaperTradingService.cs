@@ -1018,8 +1018,8 @@ internal sealed partial class AutomatedPaperTradingService(
             };
         }
 
-        await PersistLiveProtectionDesiredAsync(researchDb, open.Signal.SignalId,
-            underlyingInstrumentId, effectiveStop, cancellationToken);
+        effectiveStop = await PersistLiveProtectionDesiredAsync(researchDb, open.Signal.SignalId,
+            underlyingInstrumentId, open.Entry.Direction, open.StopLoss, optionInstrument.TickSize, effectiveStop, cancellationToken);
 
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
                                  exitPlan.ExtendTarget &&
@@ -1131,7 +1131,7 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var partialQuantity = NiftyOpenPositionDecisionPolicy.PartialQuantity(
             open.Entry.Direction, price, entryPrice, open.StopLoss,
-            open.TotalQuantity, exitPlan, options.Value.PartialProfitEnabled,
+            open.TotalQuantity, optionInstrument.LotSize, exitPlan, options.Value.PartialProfitEnabled,
             open.PartialExit is not null, exitReason);
         if (partialQuantity > 0)
         {
@@ -1358,21 +1358,25 @@ internal sealed partial class AutomatedPaperTradingService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task PersistLiveProtectionDesiredAsync(TradingDbContext db, Guid signalId,
-        Guid underlyingInstrumentId, decimal effectiveStop, CancellationToken cancellationToken)
+    private async Task<decimal> PersistLiveProtectionDesiredAsync(TradingDbContext db, Guid signalId,
+        Guid underlyingInstrumentId, Direction direction, decimal initialStop, decimal tickSize, decimal effectiveStop,
+        CancellationToken cancellationToken)
     {
         var outcome = $"LiveProtectionDesired:{signalId:N}";
         var previous = await db.MarketStrategyAudits.AsNoTracking().Where(value =>
                 value.Market == TradingMarketCatalog.Nifty.Code && value.Outcome == outcome)
             .OrderByDescending(value => value.CandleTimeUtc)
             .Select(value => value.ReasonsJson).FirstOrDefaultAsync(cancellationToken);
-        if (AutomaticLiveExecutionService.TryReadDesiredStop(previous, out var priorStop) &&
-            priorStop == effectiveStop) return;
+        var recorded = AutomaticLiveExecutionService.TryReadDesiredStop(previous, out var priorStop);
+        effectiveStop = PaperProtectiveStopPolicy.ExecutableTrail(direction, effectiveStop,
+            recorded ? priorStop : initialStop, tickSize);
+        if (recorded && priorStop == effectiveStop) return effectiveStop;
         var now = timeProvider.GetUtcNow();
         db.MarketStrategyAudits.Add(new MarketStrategyAudit(Guid.NewGuid(),
             TradingMarketCatalog.Nifty.Code, underlyingInstrumentId, now, outcome, 0m,
             JsonSerializer.Serialize(new { signalId, effectiveStop, observedAtUtc = now })));
         await db.SaveChangesAsync(cancellationToken);
+        return effectiveStop;
     }
 
     private async Task PersistDeferredDirectionalStopAsync(TradingDbContext db, OpenTrade open,
