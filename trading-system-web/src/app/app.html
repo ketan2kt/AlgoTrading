@@ -64,6 +64,7 @@
         <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [attr.aria-current]="selectedMarket === 'sensex' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
         </div>
         <div class="workspace-nav-actions">
+          <app-live-protection-monitor />
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') { <button class="workspace-nav-actions__primary" type="button" (click)="openHeroZero()">Hero Zero</button> }
           <div class="desk-reports"><button type="button" aria-controls="desk-report-links" [attr.aria-expanded]="reportsOpen" (click)="reportsOpen=!reportsOpen">Reports</button>
@@ -129,8 +130,9 @@
             @if (tokenSuccess) { <div class="feed-notice">{{ tokenSuccess }}</div> }
             <section class="instrument-sync-card control-center-card"><div><span>INSTRUMENT MASTER</span><strong>{{ preparedMarketName() }}</strong><p>Refresh broker identifiers when an instrument is unavailable.</p></div><button type="button" [disabled]="instrumentSyncBusy" (click)="synchronizeInstruments()">{{ instrumentSyncBusy ? 'Synchronising…' : 'Synchronise' }}</button></section>
             </details>
-            @if(workspace; as view){
             <details class="controls-disclosure"><summary>Session diagnostics <small>Feed, risk &amp; entry readiness</small></summary>
+            <app-research-capture-health />
+            @if(workspace; as view){
             <section class="market-strip">
               <article><span>Feed</span><strong [class.good]="view.isFresh" [class.bad]="!view.isFresh">{{ view.feedStatus }}</strong></article>
               <article><span>Last update</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') + ' IST' : '—' }}</strong></article>
@@ -143,15 +145,17 @@
             }
             <section class="readiness-panel"><div class="panel-heading"><div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div></div><div class="readiness-grid">@for (check of view.paperAutomation.readinessChecks || []; track check.code) { <article [class.readiness-pass]="check.ready"><span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span><strong>{{ check.label }}</strong><p>{{ check.detail }}</p></article> }</div></section>
             @if (selectedMarket !== 'natural-gas') { <section class="option-routing-panel"><div><span>OPTION ROUTING</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for signal' }}</strong></div>@if (view.paperAutomation.selectedOptionSymbol) { <div><span>Type / strike</span><strong>{{ view.paperAutomation.selectedOptionType }} / {{ view.paperAutomation.selectedOptionStrike | number:'1.0-0' }}</strong></div><div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date:'dd MMM':'Asia/Kolkata' }}</strong></div> }</section> }
+            }
             </details>
-            @if (operationalAlerts(view).length) { <div class="feed-notice feed-notice--warning">{{ operationalAlerts(view)[0] }}</div> }
+            @if (workspace; as view) {
+              @if (operationalAlerts(view).length) { <div class="feed-notice feed-notice--warning">{{ operationalAlerts(view)[0] }}</div> }
             }
             <section class="controls-emergency"><div><strong>Emergency control</strong><small>Global · paper trading</small></div><div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div></section>
           </section>
         </div>
         }
 
-        @if (replayOpen) { <app-replay-panel (closed)="replayOpen=false" /> }
+        @if (replayOpen) { <app-replay-panel [initialDate]="replaySessionDate" (closed)="replayOpen=false" /> }
       @if (workspace; as view) {
         @if (narratorToasts.length) {
           <aside class="narrator-toast-stack" aria-live="assertive" aria-label="Live market alerts">
@@ -707,6 +711,59 @@
                   <article><span>Gross P&amp;L</span><strong>₹{{a.summary.grossPnl|number:'1.0-0'}}</strong><small>Before charges</small></article>
                   <article><span>Decision funnel</span><strong>{{a.summary.acceptedDecisionCount}} · {{a.summary.rejectedDecisionCount}}</strong><small>Accepted · rejected</small></article>
                 </div>
+                <app-session-timeline [report]="a" (replay)="openHistoricalReplay($event)" />
+                @if(a.executionReview?.length){
+                  @if(a.livePnl;as total){
+                    <details class="daily-analysis-section"><summary>Realised paper vs live · {{total.confirmed}} confirmed closed</summary>
+                      <p><strong>Live gross subtotal: {{total.confirmedGrossSubtotal === null ? '—' : '₹'+(total.confirmedGrossSubtotal|number:'1.2-2')}}</strong> · After estimated charges: {{total.estimatedNetSubtotal === null ? '—' : '₹'+(total.estimatedNetSubtotal|number:'1.2-2')}}.
+                        Actual broker charges and account net are unverified.</p>
+                      <p>{{total.comparable}} matched · {{total.paperOnly}} no live intent · {{total.notFilled}} not filled · {{total.open}} open · {{total.incomplete}} incomplete.
+                        Live minus paper on matched units, before charges: {{total.matchedExecutionDifference === null ? '—' : '₹'+(total.matchedExecutionDifference|number:'1.2-2')}}.</p>
+                      <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Paper gross on live units</th><th>Live gross</th><th>Difference</th><th>Est. net</th><th>Evidence</th></tr></thead><tbody>
+                        @for(r of a.executionReview;track r.tradeId){@if(r.pnl;as p){
+                          <tr><td>{{r.market}} · {{r.symbol}}<small>{{p.closedUnits===null ? '' : p.closedUnits+' closed units'}}</small></td>
+                            <td>{{p.matchedPaperGross===null?'—':(p.matchedPaperGross|number:'1.2-2')}}</td>
+                            <td>{{p.liveGross===null?'—':(p.liveGross|number:'1.2-2')}}</td>
+                            <td>{{p.executionDifference===null?'—':(p.executionDifference|number:'1.2-2')}}
+                              @if(p.entryDifference!==null){<small>Buys {{p.entryDifference|number:'1.2-2'}} · sells {{p.exitDifference|number:'1.2-2'}}</small>}</td>
+                            <td>{{p.estimatedNet===null?'—':(p.estimatedNet|number:'1.2-2')}}
+                              @if(p.estimatedCharges!==null){<small>Est. costs ₹{{p.estimatedCharges|number:'1.2-2'}}</small>}</td>
+                            <td>{{p.status}}<small>{{p.reason}}</small></td></tr>
+                        }}
+                      </tbody></table></div>
+                      <small>Amounts in ₹. Subtotals cover only fully evidenced, closed system trades in this report. Open positions, unmatched account activity and missing fills are not counted as zero.</small>
+                    </details>
+                  }
+                  <details class="daily-analysis-section"><summary>Paper vs live · first recorded difference per trade</summary>
+                    <p>Net P&amp;L above is the strategy result, not broker P&amp;L. A different fill price is not by itself an execution failure.</p>
+                    <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Live intent</th><th>First evidence / gap</th></tr></thead><tbody>
+                    @for(r of a.executionReview;track r.tradeId){<tr><td>{{r.market}} · {{r.symbol}}</td><td>{{r.intentStatus}}
+                      @if(r.entryRoute){<small>{{r.entryRoute}}</small>}
+                      @if(r.paperToIntentSeconds !== null){<small>Paper → intent: {{r.paperToIntentSeconds}} s</small>}
+                      @if(r.intentToSubmittedSeconds !== null){<small>Intent → recorded submission: {{r.intentToSubmittedSeconds}} s</small>}</td>
+                      <td>{{r.finding}} @if(r.observedAtUtc){<small>Observed {{r.observedAtUtc|date:'HH:mm:ss':'Asia/Kolkata'}} IST</small>}</td></tr>}
+                    </tbody></table></div>
+                    <h4>Trailing-stop comparison</h4>
+                    <p>Times are IST. Confirmation is when the app verified Groww’s working stop, not when the exchange triggered it. A missing confirmation is not proof there was no stop.</p>
+                    @for(r of a.executionReview;track r.tradeId){
+                      @if(r.intentStatus !== 'No live intent'){
+                        <details><summary>{{r.market}} · {{r.symbol}} · {{r.stopHistory?.length ?? 0}} stop observations</summary>
+                        @if(r.stopHistory?.length){
+                          <div class="daily-analysis-table"><table><thead><tr><th>Paper stop / units</th><th>Verified stop / units</th><th>Delay</th><th>Stop fill / units</th><th>Finding</th></tr></thead><tbody>
+                          @for(s of r.stopHistory;track $index){
+                            <tr><td>{{s.paperStop ?? '—'}} / {{s.paperQuantity ?? '—'}}<small>{{s.paperAt|date:'HH:mm:ss.SSS':'Asia/Kolkata'}}</small></td>
+                            <td>{{s.brokerStop ?? '—'}} / {{s.brokerQuantity ?? '—'}}<small>{{s.confirmedAt|date:'HH:mm:ss.SSS':'Asia/Kolkata'}}</small></td>
+                            <td>{{s.secondsToConfirmation === null ? '—' : s.secondsToConfirmation+' s'}}
+                              @if(s.secondsBeforeCall !== null){<small>{{s.secondsBeforeCall}} s before call · {{s.secondsInCallAndVerification}} s call &amp; verification</small>}</td>
+                            <td>{{s.fillPrice ?? '—'}} / {{s.fillQuantity ?? '—'}}<small>{{s.fillObservedAt|date:'HH:mm:ss.SSS':'Asia/Kolkata'}}</small></td>
+                            <td>{{s.finding}}<small>{{s.orderId}}</small></td></tr>
+                          }</tbody></table></div>
+                        } @else {<p>No comparable stop evidence recorded for this trade.</p>}
+                        </details>
+                      }
+                    }
+                  </details>
+                }
                 <section class="daily-analysis-section"><div class="daily-analysis-section-heading"><div><span>EXECUTION DETAIL</span><h3>Trade by trade</h3></div><small>Peak and adverse are P&amp;L excursions; source coverage is shown per row.</small></div>
                   <div class="daily-analysis-table"><table><thead><tr><th>Market / contract</th><th>Entry → exit</th><th>Exit reason</th><th>Gross</th><th>Costs</th><th>Net</th><th>Peak profit</th><th>Max adverse</th></tr></thead><tbody>@for (t of a.trades; track t.tradeId) { <tr><td><strong>{{t.market}} · {{t.symbol}}</strong><small>{{t.strategy}} · {{t.direction}} · {{t.quantity}} qty</small></td><td><strong>{{t.openedAtUtc|date:'HH:mm:ss':'Asia/Kolkata'}}</strong><small>→ {{t.closedAtUtc ? (t.closedAtUtc|date:'HH:mm:ss':'Asia/Kolkata') : 'Open'}}</small></td><td>{{t.exitReason ?? 'Open'}}</td><td>₹{{t.grossPnl|number:'1.0-0'}}</td><td>₹{{t.costs|number:'1.0-0'}}</td><td [class.good]="t.netRealisedPnl>0" [class.bad]="t.netRealisedPnl<0">₹{{t.netRealisedPnl|number:'1.0-0'}}</td><td><strong class="daily-analysis-peak">₹{{t.maximumFavourableExcursion===null?'—':(t.maximumFavourableExcursion|number:'1.0-0')}}</strong><small>{{t.maximumFavourableExcursionAtUtc ? (t.maximumFavourableExcursionAtUtc|date:'HH:mm:ss':'Asia/Kolkata')+' IST' : 'time unavailable'}}</small></td><td><strong class="daily-analysis-adverse">₹{{t.maximumAdverseExcursion===null?'—':(t.maximumAdverseExcursion|number:'1.0-0')}}</strong><small>{{t.maximumAdverseExcursionAtUtc ? (t.maximumAdverseExcursionAtUtc|date:'HH:mm:ss':'Asia/Kolkata')+' IST' : 'time unavailable'}}</small><small class="daily-analysis-coverage">{{t.excursionCoverage}} · {{t.excursionSampleCount}} observations</small></td></tr> }</tbody></table></div>
                 </section>

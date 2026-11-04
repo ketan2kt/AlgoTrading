@@ -87,13 +87,13 @@ public sealed class GrowwBrokerGateway(
                 $"/v1/order/status/reference/{Uri.EscapeDataString(clientReference)}?segment=FNO", null,
                 cancellationToken);
             var local = await ResolveOrderContextAsync(clientReference, cancellationToken);
-            var average = await GetAverageFillPriceAsync(payload.GrowwOrderId, cancellationToken);
+            var priced = await ReadPricedFillsAsync(payload.GrowwOrderId, cancellationToken);
             return new BrokerOrderSnapshot(clientReference, Required(payload.GrowwOrderId),
                 local?.InstrumentId ?? Guid.Empty, local?.Direction ?? Direction.Buy,
                 local?.RequestedQuantity ?? payload.FilledQuantity, payload.FilledQuantity,
-                average, MapState(payload.OrderStatus, payload.FilledQuantity,
+                priced.Average, MapState(payload.OrderStatus, payload.FilledQuantity,
                     local?.RequestedQuantity ?? payload.FilledQuantity),
-                timeProvider.GetUtcNow());
+                timeProvider.GetUtcNow()) { PricedQuantity = priced.Quantity };
         }
         catch (GrowwApiException exception) when (exception.StatusCode == 404)
         {
@@ -285,9 +285,12 @@ public sealed class GrowwBrokerGateway(
         return envelope.Payload;
     }
 
-    internal async Task<decimal?> GetAverageFillPriceAsync(string? orderId, CancellationToken cancellationToken)
+    internal async Task<decimal?> GetAverageFillPriceAsync(string? orderId, CancellationToken cancellationToken) =>
+        (await ReadPricedFillsAsync(orderId, cancellationToken)).Average;
+
+    private async Task<(decimal? Average, int Quantity)> ReadPricedFillsAsync(string? orderId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(orderId)) return null;
+        if (string.IsNullOrWhiteSpace(orderId)) return (null,0);
         try
         {
             var payload = await SendAsync<TradesPayload>(HttpMethod.Get,
@@ -295,13 +298,14 @@ public sealed class GrowwBrokerGateway(
                 cancellationToken);
             var trades = payload.TradeList ?? [];
             var quantity = trades.Sum(x => x.Quantity);
-            return quantity == 0 ? null : trades.Sum(x => x.Price * x.Quantity) / quantity;
+            return (quantity == 0 ? null : trades.Sum(x => x.Price * x.Quantity) / quantity,
+                trades.All(x => x.Price > 0 && x.Quantity > 0) ? quantity : 0);
         }
         catch (GrowwApiException exception) when (exception.StatusCode == 404)
         {
             // An accepted but unfilled order can have no trade history yet. Do
             // not turn that into a missing order and accidentally submit twice.
-            return null;
+            return (null,0);
         }
     }
 

@@ -152,6 +152,7 @@ public static class DependencyInjection
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddSingleton<LiveExecutionWakeSignal>();
         services.AddHostedService<AutomaticLiveExecutionService>();
+        services.AddHostedService<LiveRoutingBaselineService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;
@@ -172,6 +173,7 @@ public static class DependencyInjection
                 "Historical feed limits must respect Groww's instrument cap and a 1–10 second sample cadence.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
+        services.AddSingleton<ResearchCapturePulse>();
         services.AddHostedService<GrowwHistoricalFeedCaptureService>();
         services.AddHostedService<HistoricalAfterMarketBackfillService>();
         services.AddScoped<GrowwInstrumentSynchronizer>();
@@ -225,6 +227,8 @@ public static class DependencyInjection
         services.AddScoped<IHistoricalReplayReportReader, EfHistoricalReplayReportReader>();
         services.AddScoped<IHistoricalReplayArchiveReader, EfHistoricalReplayArchiveReader>();
         services.AddScoped<HistoricalNormalReplayComparisonService>();
+        services.AddScoped<SessionPolicySettings>();
+        services.AddScoped<IRecordedPaperSessionReader, EfRecordedPaperSessionReader>();
         services.AddSingleton<IHistoricalPolicyBuildStore, FileHistoricalPolicyBuildStore>();
         services.AddHostedService<HistoricalPolicyBuildCaptureService>();
         services.AddSingleton<IHistoricalNormalReplayRunStore, FileHistoricalNormalReplayRunStore>();
@@ -232,6 +236,7 @@ public static class DependencyInjection
         services.AddScoped<ISelfImprovementResearchReader, EfSelfImprovementResearchReader>();
         services.AddScoped<IDailyResearchPipelineV2Reader, EfDailyResearchPipelineV2Reader>();
         services.AddScoped<IDailyTradingDiagnosticsReader, EfDailyTradingDiagnosticsReader>();
+        services.AddScoped<ILiveProtectionMonitor, EfLiveProtectionMonitor>();
         services.AddScoped<IEngineEvidenceReader, EfEngineEvidenceReader>();
         services.AddScoped<ILiveTradeDiagnosticsReader, EfLiveTradeDiagnosticsReader>();
         services.AddScoped<IOperationalAutomationReportReader, EfOperationalAutomationReportReader>();

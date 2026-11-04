@@ -27,7 +27,7 @@ public sealed class HistoricalFeedCaptureOptions
 // controls are resolved. Failure only makes the research day ineligible.
 internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory scopes,
     IGrowwHistoricalFeedTransport transport, IHistoricalQuoteArchive archive,
-    IOptions<HistoricalFeedCaptureOptions> options, TimeProvider clock,
+    IOptions<HistoricalFeedCaptureOptions> options, TimeProvider clock, ResearchCapturePulse pulse,
     ILogger<GrowwHistoricalFeedCaptureService> logger) : BackgroundService
 {
     private static readonly TimeSpan India = TimeSpan.FromHours(5.5);
@@ -48,10 +48,12 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 TimeOnly.FromDateTime(local.DateTime) >= new TimeOnly(15, 35))
             { await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken); continue; }
             var date = DateOnly.FromDateTime(local.DateTime);
-            try { await CaptureSessionAsync(date, stoppingToken); }
+            pulse.Starting(date);
+            try { await CaptureSessionAsync(date, stoppingToken); pulse.Finished(); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
+                pulse.Failed();
                 archive.MarkCaptureGap(date);
                 // Never log transport/auth exception messages or NATS options:
                 // credentials may be embedded in third-party error details.
@@ -80,10 +82,13 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         var timer = Task.Delay(end - now, clock, lifetime.Token);
         var failed = false;
         DateTimeOffset? subscribedAt = null;
-        var consume = transport.ConsumeAsync(plan, accumulator.Observe,
-            () => { failed = true; archive.MarkCaptureGap(date); },
-            at => subscribedAt = at, lifetime.Token);
+        var consume = transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
+            { accumulator.Observe(instrument, kind, point, received); pulse.Received(instrument.Market, received); },
+            () => { failed = true; pulse.Failed(); archive.MarkCaptureGap(date); },
+            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count); }, lifetime.Token);
         var sampling = SampleAsync(accumulator, lifetime.Token);
+        // Never hold subscription startup waiting for optional fidelity metadata.
+        var receipt = CapturePolicyReceiptAsync(date, lifetime.Token);
         try
         {
             var completed = await Task.WhenAny(consume, timer, sampling);
@@ -115,9 +120,31 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             try { await sampling; }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception) when (sampling.IsFaulted) { manifest = manifest with { HasGaps = true }; }
+            manifest = manifest with { PolicyReceipt = await receipt };
             await WriteManifestAsync(path, manifest, CancellationToken.None);
         }
     }
+
+    private async Task<SessionPolicyReceipt?> CapturePolicyReceiptAsync(DateOnly date,CancellationToken token)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var started = clock.GetUtcNow();
+            var build = await scope.ServiceProvider.GetRequiredService<IHistoricalPolicyBuildStore>().CaptureCurrentAsync(token);
+            var config = await scope.ServiceProvider.GetRequiredService<SessionPolicySettings>().ReadAsync(token);
+            var at = clock.GetUtcNow();
+            var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+            if (await db.AuditLogs.AsNoTracking().AnyAsync(x=>x.Action=="IndexTradingLotsChanged" &&
+                x.OccurredAtUtc>=started && x.OccurredAtUtc<=at,token)) return null;
+            return SessionPolicyReceipt.Create(date,at,build.Id,config);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return null; }
+        catch (Exception ex) { PolicyReceiptFailed(logger,ex.GetType().Name,null); return null; }
+    }
+
+    private static readonly Action<ILogger,string,Exception?> PolicyReceiptFailed = LoggerMessage.Define<string>(
+        LogLevel.Warning,new EventId(6755,"ReplayPolicyReceiptMissing"),"Paper fidelity settings capture unavailable ({FailureType}).");
 
     private async Task SampleAsync(GrowwHistoricalFeedAccumulator accumulator, CancellationToken token)
     {

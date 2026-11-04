@@ -16,10 +16,7 @@ namespace TradingSystem.Api.Controllers;
 [EnableRateLimiting("diagnostics")]
 [Route("api/research/historical-replay/normal-policy")]
 public sealed class HistoricalNormalReplayController(HistoricalNormalReplayComparisonService comparison,
-    ITradingLotConfigurationService lots, IOptions<AutomatedPaperTradingOptions> automation,
-    IOptions<MarketDataOptions> data, IOptions<PreliminaryRiskOptions> risk,
-    IOptions<MarketRegimeOptions> regime, IOptions<PriceActionStrategyOptions> priceAction,
-    IOptions<OpeningRangeBreakoutOptions> openingRange, TimeProvider clock,
+    SessionPolicySettings settings, IRecordedPaperSessionReader recorded, TimeProvider clock,
     IHistoricalPolicyBuildStore builds, IHistoricalNormalReplayRunStore runs) : ControllerBase
 {
     private static readonly SemaphoreSlim ComparisonSlot = new(1, 1);
@@ -61,38 +58,27 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
     public async Task<ActionResult<HistoricalNormalPolicyConfiguration>> Configuration(CancellationToken cancellationToken)
     {
         Response.Headers.CacheControl = "no-store";
-        var sizes = await lots.GetAsync(cancellationToken);
-        var value = automation.Value;
-        var feed = data.Value;
-        var admission = new NiftyOptionAdmissionSettings(value.PermissivePaperExecution,
-            value.MaximumOptionSpreadPercent, value.MaximumOptionPremium, value.MinimumOptionVolume,
-            value.MinimumOptionOpenInterest, value.OptionStopLossPercent, value.OptionRewardToRiskRatio,
-            value.MaximumConcurrentPositions, risk.Value.MaximumRiskPerTrade, risk.Value.MaximumCapitalExposure,
-            value.MaximumDailyLoss, TimeOnly.ParseExact(value.EntryWindowStart, "HH:mm"),
-            TimeOnly.ParseExact(value.EntryCutoff, "HH:mm"), TimeOnly.ParseExact(value.ForcedExit, "HH:mm"),
-            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, value.SelectiveHedgingEnabled,
-            value.HedgeMinimumAtrPercent, value.HedgeMinimumRelativeFuturesVolume, value.HedgeMinimumSignalConfidence);
-        var exits = new HistoricalNiftyExitSettings(admission.ForcedExitTime, value.BreakEvenEnabled,
-            value.TrailingStopEnabled, value.PartialProfitEnabled, value.TargetExtensionEnabled,
-            value.TargetExtensionMinimumConfidence, value.UnderlyingTrendInvalidationEnabled,
-            value.MinimumReversalStructureStrength, value.RequiredReversalEvidenceCount,
-            value.ProtectProfitableConfirmedReversals, value.ReversalProfitLockFraction,
-            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds);
-        var marketExits = new HistoricalMarketOptionExitSettings(new TimeOnly(15, 15),
-            value.PartialProfitEnabled, value.TargetExtensionEnabled, value.UnderlyingTrendInvalidationEnabled,
-            value.MinimumReversalStructureStrength, value.RequiredReversalEvidenceCount,
-            value.ProtectProfitableConfirmedReversals, value.ReversalProfitLockFraction,
-            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds);
-        return Ok(new HistoricalNormalPolicyConfiguration(feed.CandleIntervalSeconds,
-            value.MinimumSignalCandles, value.MinimumFuturesConfirmationCandles,
-            TimeOnly.ParseExact(value.OpeningRangeEnd, "HH:mm"), sizes.NiftyLots, sizes.BankNiftyLots,
-            value.OptionStopLossPercent, new(value.MaximumOptionDaysToExpiry,
-                value.ExpiryDayInTheMoneySteps, value.NormalInTheMoneySteps, value.OptionStrikeStep),
-            admission, exits, new(admission.EntryWindowStart, admission.EntryCutoff,
-                new TimeOnly(15, 15), sizes.SensexLots, feed.CandleIntervalSeconds,
-                value.OptionStopLossPercent, feed.MaximumAgeSeconds), marketExits,
-            regime.Value, priceAction.Value, openingRange.Value)
-            { WeeklyCarryForwardEnabled = value.WeeklyCarryForwardEnabled });
+        return Ok(await settings.ReadAsync(cancellationToken));
+    }
+
+    [HistoricalReplayWorkWindow]
+    [ValidateAntiForgeryToken]
+    [HttpPost("paper-session/{date}")]
+    public async Task<ActionResult<HistoricalNormalReplayComparisonReport>> PaperSession(DateOnly date,CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl="no-store";
+        if(date.Year<2020 || !HistoricalReplaySessionCalendar.IsCompletedDate(date,clock.GetUtcNow()))
+            return BadRequest("Choose a completed session.");
+        try
+        {
+            var receipt=await recorded.ReceiptAsync(date,cancellationToken);
+            if(receipt is null) return Conflict("Inconclusive: no verified pre-open policy on a complete feed, or lot settings changed. Current settings will not be substituted.");
+            var execution=SessionPolicyReceipt.ComparisonExecution;
+            return await Compare(new(date,date,receipt.Settings,receipt.Settings,execution) {
+                BaselineBuildId=receipt.BuildId,ProposalBuildId=receipt.BuildId,PaperSessionPolicyFingerprint=receipt.Fingerprint
+            },cancellationToken);
+        }
+        catch (InvalidDataException) { return Conflict("Inconclusive: dated policy evidence or strategy archive is invalid."); }
     }
 
     [ValidateAntiForgeryToken]

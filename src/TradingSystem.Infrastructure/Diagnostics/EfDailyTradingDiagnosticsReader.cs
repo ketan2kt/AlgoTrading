@@ -8,16 +8,20 @@ namespace TradingSystem.Infrastructure.Diagnostics;
 
 internal sealed class EfDailyTradingDiagnosticsReader(
     TradingDbContext db,
-    TimeProvider timeProvider) : IDailyTradingDiagnosticsReader
+    TimeProvider timeProvider, MarketData.HistoricalQuoteArchive? quoteArchive = null) : IDailyTradingDiagnosticsReader
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     private const int MaximumDecisions = 500;
     private const int MaximumEvents = 100;
 
-    public async Task<DailyTradingDiagnosticsReport> ReadAsync(
+    public Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly date, CancellationToken token)
+        => ReadCoreAsync(date, "all", token, true);
+    public Task<DailyTradingDiagnosticsReport> ReadAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
+        => ReadCoreAsync(tradingDate, market, cancellationToken, false);
+    private async Task<DailyTradingDiagnosticsReport> ReadCoreAsync(
         DateOnly tradingDate,
         string market,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool withTimeline)
     {
         var normalizedMarket = NormalizeMarket(market);
         var selectedMarkets = normalizedMarket == "ALL"
@@ -67,7 +71,15 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 value.CurrentPrice,
                 Limit(value.FailedConditionsJson),
                 value.SignalId))
-            .Concat(audits.Where(value => value.Outcome != "ExpansionPair:Observation")
+            .Concat(audits.Where(value => value.Outcome != "ExpansionPair:Observation" &&
+                !value.Outcome.StartsWith("LiveExecution:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("LiveParityException:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("LiveParityMissed:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("LiveEntryDecision:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("LiveProtectionDesired:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("PaperStopSize:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("TrailingStop:", StringComparison.Ordinal) &&
+                !value.Outcome.StartsWith("PositionSample:", StringComparison.Ordinal))
                 .Select(value => new DailyTradingDecision(
                 value.Market.ToUpperInvariant(),
                 "MarketStrategyAudit",
@@ -305,6 +317,137 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             decisions.Count == 0 ? null : decisions[^1].CandleTimeUtc,
             lastCandleAtUtc);
 
+        var sources = trades.Select(t => t.SignalId ?? t.TradeId).Distinct().ToArray();
+        var intents = await db.LiveExecutionIntents.AsNoTracking().Where(i => sources.Contains(i.SourceId))
+            .ToDictionaryAsync(i => i.SourceId, cancellationToken);
+        var lifecycle = audits.Select(a => DailyExecutionEvidence.Parse(a.CandleTimeUtc, a.Outcome, a.ReasonsJson))
+            .OfType<DailyExecutionEvidence.Observation>().ToLookup(e => e.SourceId);
+        var refs = signalIds.SelectMany(id => new[] { $"{id:N}-ENTRY", $"{id:N}-ADDON", $"{id:N}-PARTIAL", $"{id:N}-EXIT" }).ToArray();
+        var protection = audits.SelectMany(a => StopComparison.Parse(a.CandleTimeUtc,a.Outcome,a.ReasonsJson))
+            .ToLookup(p => p.Source);
+        var fillRows = await db.PaperBrokerEvents.AsNoTracking().Where(x => x.EventType == "OrderFilled" && refs.Contains(x.ClientReference))
+            .Select(x => new {x.ClientReference,x.OccurredAtUtc,x.Sequence,x.PayloadJson}).ToListAsync(cancellationToken);
+        var fills = fillRows.GroupBy(x => x.ClientReference).ToDictionary(g => g.Key,g => g.Min(x => x.OccurredAtUtc));
+        var journal = fillRows.GroupBy(x=>x.ClientReference).ToDictionary(g=>g.Key,g=>g.MaxBy(x=>x.Sequence)!.PayloadJson);
+        var positionMap = marketPositions.ToDictionary(x=>x.Id);
+        var economics = audits.Select(a=>LiveFillPnl.Parse(a.Outcome,a.ReasonsJson))
+            .OfType<LiveFillPnl.Observation>().ToLookup(x=>x.Source);
+        var keys = trades.Where(t => !intents.ContainsKey(t.SignalId ?? t.TradeId))
+            .Select(t => DailyLiveRouteHistory.Key(t.Market)).Distinct().ToArray();
+        var history = await DailyLiveRouteHistory.ReadAsync(db, keys, fillRows.Count == 0 ? startUtc :
+            new[] { startUtc, fillRows.Min(x => x.OccurredAtUtc) }.Min(), endUtc, cancellationToken);
+        var reviews = trades.Select(t => {
+            var source = t.SignalId ?? t.TradeId;
+            DateTimeOffset? fillAt = !t.SignalId.HasValue ? t.OpenedAtUtc :
+                fills.TryGetValue($"{source:N}-ENTRY", out var at) ? at : null;
+            var route = fillAt is null ? "Paper broker fill timestamp missing; cannot establish switch state." :
+                DailyLiveRouteHistory.Explain(t.Market, fillAt.Value, history);
+            var paper = new Dictionary<LiveFillPnl.Leg,LiveFillPnl.PaperLeg>();
+            if (positionMap.TryGetValue(t.TradeId,out var position))
+            {
+                paper[LiveFillPnl.Leg.Entry]=new(position.Quantity,position.EntryPrice);
+                if (position.PartialExitPrice.HasValue) paper[LiveFillPnl.Leg.Partial]=new(position.PartialExitQuantity,position.PartialExitPrice.Value);
+                if (position.ClosedAtUtc.HasValue) paper[LiveFillPnl.Leg.Final]=new(position.Quantity-position.PartialExitQuantity,position.CurrentPrice);
+            }
+            else
+            {
+                foreach (var (role,suffix) in PaperLegReferences)
+                    if (LiveFillPnl.ReadPaperLeg(journal.GetValueOrDefault($"{source:N}-{suffix}")) is { } leg)
+                        paper[role]=leg;
+            }
+            var intent=intents.GetValueOrDefault(source);
+            return DailyExecutionEvidence.Review(t,intent,lifecycle[source],route,fillAt) with
+            {
+                StopHistory = intent is not null ? StopComparison.Review(source,protection[source]) : [],
+                Pnl = LiveFillPnl.Calculate(intent,economics[source],paper)
+            };
+        }).ToArray();
+        PaperSessionTimeline? timeline = null;
+        if (withTimeline)
+        {
+            var eligible = trades.Where(t => t.Market is "NIFTY" or "SENSEX" or "BANKNIFTY" or "BANK-NIFTY").ToArray();
+            var knownEntries = signalIds.Select(id => $"{id:N}-ENTRY").ToArray();
+            var missing = await db.PaperBrokerEvents.AsNoTracking().AnyAsync(e => e.EventType=="OrderFilled" &&
+                e.OccurredAtUtc>=startUtc && e.OccurredAtUtc<endUtc && e.ClientReference.EndsWith("-ENTRY") &&
+                !knownEntries.Contains(e.ClientReference), cancellationToken);
+            if (missing || eligible.Any(t => t.ClosedAtUtc is null))
+                timeline = new([], "An entry has no completed trade record. A combined session curve cannot be verified.");
+            else
+            {
+                var series = new List<PaperTimelineTrade>();
+                var partials = audits.Where(a=>a.Outcome.StartsWith("PartialProfit:",StringComparison.Ordinal)).ToLookup(a=>a.Outcome);
+                var entryReceipts=audits.Where(a=>a.Outcome=="PaperPositionOpened")
+                    .SelectMany(a=>StopComparison.Parse(a.CandleTimeUtc,a.Outcome,a.ReasonsJson)).ToLookup(p=>p.Source);
+                foreach (var t in eligible)
+                {
+                    var source = t.SignalId ?? t.TradeId;
+                    var actions = new List<PaperTimelineEvent>();
+                    bool valid = true;
+                    var sign = 1;
+                    if (positionMap.TryGetValue(t.TradeId,out var pos))
+                    {
+                        sign = pos.Direction == Direction.Buy ? 1 : -1;
+                        var entryTime = entryReceipts[source].FirstOrDefault()?.At ?? t.OpenedAtUtc;
+                        actions.Add(new(entryTime,"Entry",pos.Quantity,pos.EntryPrice));
+                        foreach (var a in partials[$"PartialProfit:{source:N}"])
+                        {
+                            var ev = ReadPartial(a.CandleTimeUtc,a.ReasonsJson);
+                            if(ev is null) valid=false; else actions.Add(ev);
+                        }
+                        valid &= actions.Where(a=>a.Kind=="Partial").Sum(a=>a.Units)==pos.PartialExitQuantity;
+                        actions.Add(new(t.ClosedAtUtc!.Value,"Exit",pos.Quantity-pos.PartialExitQuantity,pos.CurrentPrice));
+                    }
+                    else
+                    {
+                        foreach (var (_,suffix) in PaperLegReferences)
+                        {
+                            var key=$"{source:N}-{suffix}";
+                            var rows=fillRows.Where(x=>x.ClientReference==key).ToArray();
+                            if(rows.Length==0) continue;
+                            var row=rows.MaxBy(x=>x.Sequence)!;
+                            var leg=LiveFillPnl.ReadPaperLeg(row.PayloadJson);
+                            if(leg is null || rows.Length!=1) valid=false;
+                            if(leg is not null) actions.Add(new(row.OccurredAtUtc,suffix switch{
+                                "ENTRY"=>"Entry","ADDON"=>"Add-on","PARTIAL"=>"Partial",_=>"Exit"},leg.Qty,leg.Price));
+                        }
+                    }
+                    var from=actions.FirstOrDefault(a=>a.Kind=="Entry")?.At ?? t.OpenedAtUtc;
+                    var to=actions.FirstOrDefault(a=>a.Kind=="Exit")?.At ?? t.ClosedAtUtc!.Value;
+                    if(to<from || from<startUtc.AddHours(9.25) || to>startUtc.AddHours(15.5)){
+                        timeline=new([], "A trade falls outside the session clock; combined results are unavailable."); break;
+                    }
+                    var ordered=actions.OrderBy(a=>a.At).ToArray();
+                    int held=0;
+                    foreach(var e in ordered){
+                        held+=e.Kind is "Entry" or "Add-on"?e.Units:-e.Units;
+                        valid &= e.At>=from && e.At<=to && held>=0 && e.Units>0 && e.Price>0;
+                    }
+                    valid &= held==0 && actions.Any(a=>a.Kind=="Entry") && actions.Any(a=>a.Kind=="Exit") &&
+                        actions.Where(a=>a.Kind is "Entry" or "Add-on").Sum(a=>a.Units)==t.Quantity &&
+                        Math.Abs(sign*actions.Sum(a=>(a.Kind is "Entry" or "Add-on"?-1:1)*a.Price*a.Units)-t.GrossPnl)<=0.05m;
+                    decimal? lastStop=null;
+                    foreach(var p in protection[source].Where(p=>p.Type==StopComparison.Kind.Desired && p.Price>0 && p.At>=from && p.At<=to).OrderBy(p=>p.At)){
+                        if(p.Price!=lastStop) actions.Add(new(p.At,"Stop",0,p.Price!.Value));
+                        lastStop=p.Price;
+                    }
+                    series.Add(new(t.TradeId,from,to,t.GrossPnl,sign,valid,actions.OrderBy(a=>a.At).ToArray(),[]));
+                }
+                if(timeline is null){
+                    var records=eligible.ToDictionary(t=>t.TradeId);
+                    var windows=series.Select(t=>(t.Id,records[t.Id].Market=="SENSEX"?"BSE":"NSE",records[t.Id].Symbol,t.From,t.To)).ToArray();
+                    try{
+                        if(quoteArchive is null)timeline=new(series,null,"Quote archive unavailable. Only recorded fills are shown.");
+                        else{
+                            var (marks,gaps)=await quoteArchive.HeldMarksAsync(tradingDate,windows,cancellationToken);
+                            timeline=new(series.Select(t=>t with { Marks=marks.GetValueOrDefault(t.Id)??[] }).ToArray(),
+                                null,gaps?"The archive reports incomplete capture. Gaps are not interpolated.":null);
+                        }
+                    }catch(Exception e) when(e is IOException or UnauthorizedAccessException or InvalidDataException){
+                        timeline=new(series,null,"Quote archive could not be read completely. Only recorded fills are shown.");
+                    }
+                }
+            }
+        }
         return new DailyTradingDiagnosticsReport(
             tradingDate,
             normalizedMarket,
@@ -317,6 +460,9 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             warnings)
         {
             EngineEvidenceCoverage = engineCoverage,
+            Timeline = timeline,
+            ExecutionReview = reviews,
+            LivePnl = LiveFillPnl.Summarize(reviews.Select(r=>r.Pnl!)),
             ExpansionPairObservations = audits
                 .Where(value => value.Outcome == "ExpansionPair:Observation")
                 .Select(value => new ExpansionPairObservation(value.Market.ToUpperInvariant(),
@@ -324,6 +470,22 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 .ToArray()
         };
     }
+
+    private static PaperTimelineEvent? ReadPartial(DateTimeOffset at,string json)
+    {
+        try{
+            using var doc=System.Text.Json.JsonDocument.Parse(json);
+            var r=doc.RootElement;
+            if(r.ValueKind==System.Text.Json.JsonValueKind.Object && r.TryGetProperty("partialQuantity",out var q) &&
+                q.ValueKind==System.Text.Json.JsonValueKind.Number && q.TryGetInt32(out var units) && units>0 &&
+                r.TryGetProperty("price",out var p) && p.ValueKind==System.Text.Json.JsonValueKind.Number &&
+                p.TryGetDecimal(out var price) && price>0) return new(at,"Partial",units,price);
+        }catch(System.Text.Json.JsonException){}
+        return null;
+    }
+
+    private static readonly (LiveFillPnl.Leg Role,string Suffix)[] PaperLegReferences =
+        [(LiveFillPnl.Leg.Entry,"ENTRY"),(LiveFillPnl.Leg.AddOn,"ADDON"),(LiveFillPnl.Leg.Partial,"PARTIAL"),(LiveFillPnl.Leg.Final,"EXIT")];
 
     internal static string NormalizeMarket(string market) => market.Trim().ToUpperInvariant() switch
     {

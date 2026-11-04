@@ -1,0 +1,23 @@
+<button type="button" class="trigger" [class.attention]="(snapshot()?.attention??0)>0 || failed()"
+  aria-haspopup="dialog" (click)="open(panel)">Live protection ·
+  @if(snapshot();as s){ {{s.attention?s.attention+' need attention':s.rows.length?'Last checks matched':'No open intents'}} }
+  @else { {{failed()?'Unknown':'Checking…'}} }</button>
+<dialog #panel aria-labelledby="protection-heading">
+  <header><div><small>TRADING DESK · READ ONLY</small><h2 id="protection-heading">Live protection</h2></div>
+    <button type="button" autofocus (click)="panel.close()" aria-label="Close live protection">Close</button></header>
+  <p>Nifty, Sensex and Bank Nifty · system-managed live trades only. This compares saved paper stops with broker confirmations; it does not query your account or modify orders.</p>
+  <div class="toolbar"><span>@if(snapshot();as s){Snapshot {{s.readAt|date:'HH:mm:ss':'Asia/Kolkata'}} IST · {{s.attention}} need attention}
+    @else{Status unknown}</span><button type="button" (click)="refresh()" [disabled]="busy()">Refresh</button></div>
+  @if(failed()){<p role="alert">Could not read protection records. Current status is unknown.</p>}
+  @else if(snapshot();as s){
+    @for(r of s.rows;track r.id){
+      <article [class.warn]="r.needsAttention"><div class="identity"><div><small>{{r.market}} · {{r.lifecycle}}</small><strong>{{r.symbol}}</strong></div>
+        <b>{{r.finding}}</b></div>
+        <dl><div><dt>Strategy stop</dt><dd>{{r.desiredStop===null?'Unknown':'₹'+(r.desiredStop|number:'1.2-2')}}</dd></div>
+          <div><dt>Last confirmed stop</dt><dd>{{r.confirmedStop===null?'Unknown':'₹'+(r.confirmedStop|number:'1.2-2')}}</dd></div>
+          <div><dt>Units · paper / live / stop</dt><dd>{{r.paperUnits??'—'}} / {{r.liveUnits??'—'}} / {{r.confirmedUnits??'—'}}</dd></div></dl>
+        <small>Order {{r.stopOrderId??'unknown'}} · Confirmed {{r.confirmedAt?(r.confirmedAt|date:'dd MMM, HH:mm:ss':'Asia/Kolkata')+' IST':'—'}}</small>
+      </article>
+    }@empty{<p>No open or unsettled managed live intents in the recorded snapshot.</p>}
+  }@else{<p role="status">Reading protection records…</p>}
+</dialog>

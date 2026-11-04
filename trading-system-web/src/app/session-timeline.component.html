@@ -1,0 +1,42 @@
+<details class="timeline" #panel (toggle)="toggle(panel.open)">
+  <summary>Session Timeline <small>What moved the day’s P&amp;L?</small></summary>
+  @if (pending) { <p role="status">Reading recorded option quotes…</p> }
+  @else if (problem) { <p role="status">{{problem}}</p> }
+  @else if (!timeline) { <p>Expand to load the session.</p> }
+  @else if (timeline.unavailableReason) { <p>{{timeline.unavailableReason}}</p> }
+  @else if (!points.length) { <p>No recorded paper trades for these markets.</p> }
+  @else {
+    <div class="title"><div><strong>Nifty · Sensex · Bank Nifty</strong><small>Paper P&amp;L before charges · IST</small></div>
+      <button type="button" (click)="replay.emit(report.tradingDate)">Open this date in Replay →</button></div>
+    <div class="metrics"><div>Observed peak<strong>{{stat.peak<0?'Unavailable':cash(points[stat.peak].total)}}</strong>
+      @if(stat.peak>=0){<small>{{time(points[stat.peak].time)}}</small>}</div>
+      <div>Largest observed drop<strong>{{cash(stat.drop)}}</strong><small>Within continuous coverage</small></div>
+      <div>Final booked<strong>{{cash(points[points.length-1].booked)}}</strong><small>Gross, including partials</small></div></div>
+    <div class="legend"><span>━ Booked</span><span>┅ Total including open trades</span><small>Scale: {{cash(lo)}} to {{cash(hi)}}</small></div>
+    <svg viewBox="0 0 1000 166" preserveAspectRatio="none" role="img" aria-label="Session gross P&L. Use the range controls below to select exact observations." (click)="chartClick($event)">
+      <rect [attr.x]="x(points[first].time)" y="0" [attr.width]="x(points[last].time)-x(points[first].time)" height="166" fill="#d6edcf"/>
+      <line x1="0" x2="1000" [attr.y1]="y(0)" [attr.y2]="y(0)" stroke="#99ada7"/>
+      <path [attr.d]="paths.booked" stroke="#22445c"/>
+      <path [attr.d]="paths.total" stroke="#218356" stroke-dasharray="5 2"/>
+      @if(stat.peak>=0){<circle [attr.cx]="x(points[stat.peak].time)" [attr.cy]="y(points[stat.peak].total!)" r="3.5" fill="#17663e"><title>Observed session peak</title></circle>}
+      @if(stat.end>=0){<circle [attr.cx]="x(points[stat.end].time)" [attr.cy]="y(points[stat.end].total!)" r="3.5" fill="#ad4c2d"><title>Largest observed drop ends here</title></circle>}
+      @for(m of markers;track $index){<line [attr.x1]="m.x" [attr.x2]="m.x" y1="154" y2="163" stroke="#486953"><title>{{time(m.at)}} · {{m.label}}</title></line>}
+    </svg>
+    <div class="axis"><span>09:15</span><span>12:22</span><span>15:30</span></div>
+    <p>Click twice to select an interval. Open trades use the contract’s recorded last traded price, not an executable bid. Both receipt and broker price must be at most 30 seconds old. A fill values its instant only.</p>
+    @if(timeline.coverageNote){<p>{{timeline.coverageNote}}</p>}
+    @if(gaps.length){<details><summary>Data gaps · {{gaps.length}} intervals</summary>
+      <p>Missing receipt = no recent quote was recorded. Stale broker price = a quote arrived, but its price was already too old. Unverified quote = its timestamp or price could not be verified.</p>
+      @for(g of gaps;track g.start){<div class="row"><small>{{time(g.start)}} – {{time(g.end)}} IST</small><span>{{g.reason}}</span></div>}
+    </details>}
+    <div class="controls"><label>From · {{time(points[first].time)}}<input type="range" min="0" [max]="points.length-1" [value]="first" (input)="select(+$any($event.target).value,last)"/></label>
+      <label>To · {{time(points[last].time)}}<input type="range" min="0" [max]="points.length-1" [value]="last" (input)="select(first,+$any($event.target).value)"/></label>
+      <button type="button" [disabled]="stat.start<0" (click)="biggest()">Largest drop</button></div>
+    <h4>Change over this interval: {{cash(selectedChange)}}</h4>
+    @if(gap){<p>Coverage gap inside selection. Only known endpoint changes are shown.</p>}
+    @for(r of rows;track $index){<div class="row"><span>{{r.label}}</span><small>{{r.group}}</small><b>{{cash(r.delta)}}</b></div>}
+    @empty{<p>No paper position in this interval.</p>}
+    <details><summary>Recorded actions in this interval</summary>
+    @for(m of markers;track $index){@if(m.at>=points[first].time&&m.at<=points[last].time){<div class="row"><small>{{time(m.at)}}</small><span>{{m.label}}</span></div>}}</details>
+  }
+</details>

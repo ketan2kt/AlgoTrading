@@ -21,7 +21,10 @@ public sealed record LiveTradeDiagnosticsReport(
     decimal? LiveEntryFillPrice,
     IReadOnlyList<LiveTradeTimelineEvent> Timeline,
     IReadOnlyList<LiveBrokerOrderEvidence> BrokerOrders,
-    IReadOnlyList<string> Limitations);
+    IReadOnlyList<string> Limitations)
+{
+    public IReadOnlyList<StopComparisonRow> StopHistory { get; init; } = [];
+}
 
 public sealed record LiveTradeTimelineEvent(DateTimeOffset ObservedAtUtc, string Event,
     string EvidenceJson);

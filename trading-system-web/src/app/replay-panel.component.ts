@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
-import { ChangeDetectorRef, Component, inject, OnInit, OnDestroy, output } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, Input, OnInit, OnDestroy, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { ReplayTrial } from './historical-replay.service';
 import { Subscription } from 'rxjs';
@@ -7,6 +7,7 @@ import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, Histori
 @Component({selector:'app-replay-panel', imports:[DatePipe,DecimalPipe,PercentPipe,FormsModule], templateUrl:'./replay-panel.component.html', styleUrl:'./replay-panel.component.scss'})
 export class ReplayPanelComponent implements OnInit, OnDestroy {
   readonly closed=output<void>();
+  @Input() initialDate='';
   private readonly subscriptions=new Subscription();
   private readonly historicalReplayService=inject(HistoricalReplayService);
   private readonly view=inject(ChangeDetectorRef);
@@ -52,7 +53,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(value);
   }
   ngOnInit():void {
-
+    if(this.initialDate){this.replayFrom=this.initialDate;this.replayTo=this.initialDate;}
     this.loadSavedNormalRuns();
     this.subscriptions.add(this.historicalReplayService.policyBuilds().subscribe({
       next:value=>{this.replayPolicyBuilds=value;this.refreshView();},
@@ -74,8 +75,24 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     }));
   }
   protected closeHistoricalReplay():void { this.closed.emit(); }
+  protected verifyPaperSession():void {
+    if(!this.replayTo || this.normalReplayBusy)return;
+    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
+    this.subscriptions.add(this.historicalReplayService.comparePaperSession(this.replayTo).subscribe({
+      next:r=>{this.normalReplayReport=r;this.normalReplayBusy=false;this.loadSavedNormalRuns();this.refreshView();},
+      error:e=>{this.normalReplayError=typeof e.error==='string'?e.error:'Paper-session verification unavailable.';
+        this.normalReplayBusy=false;this.refreshView();}
+    }));
+  }
+  protected testRunnerOnControl(report:HistoricalNormalReplayReport):void {
+    if(!report.verifiedControlWithFills || !report.savedRunId || this.normalReplayBusy)return;
+    this.replayFrozenInputRun=report.savedRunId;
+    this.replayBaselineBuild=report.baselineBuildId??'';
+    this.normalReplayTrial='fixed-target';
+    this.runNormalReplay();
+  }
   protected runNormalReplay():void {
-    if(!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo ||
+    if((!this.replayFrozenInputRun && (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo)) ||
         (this.normalReplayTrial==='custom-stop' && (this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75))) {
       this.normalReplayError='Choose completed dates and a premium stop between 0 and 75%.';return;
     }

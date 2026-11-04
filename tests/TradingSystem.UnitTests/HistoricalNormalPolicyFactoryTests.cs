@@ -56,6 +56,18 @@ public sealed class HistoricalNormalPolicyFactoryTests
             CancellationToken cancellationToken) => throw new InvalidOperationException("No archive");
     }
 
+    [Fact]
+    public void FidelityRejectsLateWrongDayAndModifiedPolicyReceipts()
+    {
+        var date=new DateOnly(2026,11,5);
+        var open=new DateTimeOffset(2026,11,5,9,15,0,TimeSpan.FromHours(5.5));
+        var receipt=SessionPolicyReceipt.Create(date,open.AddMinutes(-2),Guid.NewGuid().ToString("N"),Configuration());
+        Assert.True(receipt.ValidFor(date));
+        Assert.False(receipt.ValidFor(date.AddDays(1)));
+        Assert.False((receipt with {Settings=receipt.Settings with {BankNiftyLots=99}}).ValidFor(date));
+        Assert.False(SessionPolicyReceipt.Create(date,open.AddSeconds(1),receipt.BuildId,receipt.Settings).ValidFor(date));
+    }
+
     private static HistoricalNormalPolicyConfiguration Configuration() => new(60, 4, 2,
         new(9, 30), 5, 5, 10m, new(),
         new(true, 1.5m, 500m, 100m, 100m, 10m, 1m, 8, 100_000m, 1_000_000m, 100_000m,

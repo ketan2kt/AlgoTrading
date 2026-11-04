@@ -7,6 +7,7 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
 {
     public bool SensexPriorThesisStateCaptured { get; init; }
     public PersistentDirectionalThesisV1? PriorSensexThesis { get; init; }
+    public SessionPolicyReceipt? PolicyReceipt { get; init; }
 }
 
 public static class HistoricalFeedCaptureEvidence

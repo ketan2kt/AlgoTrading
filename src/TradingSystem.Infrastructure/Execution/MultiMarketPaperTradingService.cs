@@ -1016,12 +1016,6 @@ internal sealed partial class MultiMarketPaperTradingService(
                         initialStop = previousStop, stop = position.StopLoss, position.Target,
                         livePnl, favourableR, protectionStage, observedAtUtc = observedAt })));
             }
-            if (position.StopLoss != previousStop)
-                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
-                    position.UnderlyingInstrumentId, observedAt,
-                    $"TrailingStop:{position.Id:N}", 0m, JsonSerializer.Serialize(new
-                    { positionId = position.Id, previousStop, newStop = position.StopLoss, price,
-                        observedAtUtc = observedAt })));
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
             // A breached stop takes precedence over continuation and partial exits.
@@ -1090,6 +1084,12 @@ internal sealed partial class MultiMarketPaperTradingService(
                         remainingQuantity = position.RemainingQuantity, partialCosts,
                         triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
             }
+            if (position.StopLoss != previousStop || positionDecision.PartialQuantity > 0)
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, observedAt,
+                    $"TrailingStop:{position.Id:N}", 0m, JsonSerializer.Serialize(new
+                    { positionId = position.Id, previousStop, newStop = position.StopLoss, price,
+                        remainingQuantity = position.RemainingQuantity, observedAtUtc = observedAt })));
             if (positionDecision.ExitReason is { } exitReason)
             {
                 var costs = market.ExecuteOptions

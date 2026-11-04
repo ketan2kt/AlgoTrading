@@ -59,7 +59,8 @@ internal sealed class EfLiveTradingArmService(
             db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live, key, json, now));
         else
             setting.ChangeValue(json, now);
-        await db.SaveChangesAsync(cancellationToken);
+        // The scoped EF audit writer saves both tracked changes together. A switch
+        // must not change successfully without its corresponding dated audit.
         await auditWriter.WriteAsync(new AuditEntry(actor,
             armed ? "LiveExecutionArmed" : "LiveExecutionDisarmed",
             nameof(ApplicationSetting), key, $"{market} live switch {(armed ? "ON" : "OFF")}", before ?? "null", json,

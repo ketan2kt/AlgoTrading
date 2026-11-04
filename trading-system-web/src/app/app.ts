@@ -18,7 +18,10 @@ import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.serv
 import { DailyDiagnostics, PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { ReplayPanelComponent } from './replay-panel.component';
+import { SessionTimelineComponent } from './session-timeline.component';
+import { LiveProtectionMonitorComponent } from './live-protection-monitor.component';
 import { MarketControlsComponent } from './market-controls.component';
+import { ResearchCaptureHealthComponent } from './research-capture-health.component';
 import {
   buildMarketNarratorEvents,
   MarketNarratorEvent,
@@ -30,7 +33,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -465,7 +468,8 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected closeReport():void { this.reportOpen=false; }
-  protected openHistoricalReplay():void {this.replayOpen=true;}
+  protected replaySessionDate='';
+  protected openHistoricalReplay(date=''):void {this.replaySessionDate=date;if(date)this.closeDailyAnalysis();this.replayOpen=true;}
   protected openDailyAnalysis(): void {
     this.dailyAnalysisOpen = true; this.dailyAnalysisLoading = true;
     this.dailyAnalysisError = ''; this.dailyAnalysis = null;

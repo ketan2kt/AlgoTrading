@@ -443,6 +443,10 @@ internal sealed class EfTradingWorkspaceReader(
                             value.CandleTimeUtc < sessionEndUtc &&
                             !value.Outcome.StartsWith("PositionSample:") &&
                             !value.Outcome.StartsWith("TrailingStop:") &&
+                            !value.Outcome.StartsWith("LiveExecution:") &&
+                            !value.Outcome.StartsWith("LiveEntryDecision:") &&
+                            !value.Outcome.StartsWith("LiveParityMissed:") &&
+                            !value.Outcome.StartsWith("LiveParityException:") &&
                             !value.Outcome.StartsWith("PostExit"))
             .OrderByDescending(value => value.CandleTimeUtc).Take(40).ToListAsync(cancellationToken);
         var evaluations = market == "nifty" ? legacyEvaluations : marketAudits.Select(value =>

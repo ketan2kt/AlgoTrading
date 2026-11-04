@@ -19,6 +19,26 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
         InstrumentType.CallOption, new(2026, 11, 10), 22000m, 65, .05m);
 
     [Fact]
+    public void PulseDoesNotCarrySubscriptionOrReceiptsAcrossRetriesOrDates()
+    {
+        var pulse = new ResearchCapturePulse();
+        var date = new DateOnly(2026, 11, 4);
+        pulse.Starting(date);
+        pulse.Subscribed(At, 8);
+        pulse.Received("NIFTY", At.AddSeconds(1));
+        pulse.Received("NIFTY", At);
+        Assert.Equal(At.AddSeconds(1), pulse.Read(date,true).LastReceiptByMarket["NIFTY"]);
+        pulse.Failed();
+        pulse.Starting(date);
+        var retry = pulse.Read(date,true);
+        Assert.True(retry.GapObserved);
+        Assert.Null(retry.SubscribedAtUtc);
+        Assert.Empty(retry.LastReceiptByMarket);
+        Assert.Equal("Not started", pulse.Read(date.AddDays(1),true).Phase);
+        Assert.Equal("Disabled", pulse.Read(date,false).Phase);
+    }
+
+    [Fact]
     public async Task UniverseSnapshotUsesOneReceiptTimeAndNeverExposesAnUnreceivedTick()
     {
         using var archive = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, directory);

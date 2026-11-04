@@ -7,6 +7,7 @@ public sealed record HistoricalNormalReplayComparisonRequest(DateOnly From, Date
     public string? BaselineBuildId { get; init; }
     public string? ProposalBuildId { get; init; }
     public string? FrozenInputRunId { get; init; }
+    public string? PaperSessionPolicyFingerprint { get; init; }
 }
 
 public sealed record HistoricalNormalReplayComparisonReport(
@@ -16,13 +17,16 @@ public sealed record HistoricalNormalReplayComparisonReport(
     public string? ProposalBuildId { get; init; }
     public string? SavedRunId { get; init; }
     public string? ExecutionBuildId { get; init; }
+    public string? ExperimentFinding { get; init; }
+    public bool VerifiedControlWithFills { get; init; }
+    public PaperSessionFidelity? PaperFidelity { get; init; }
 }
 
 // Read-only archive + pure policies. Never resolve a broker, production engine,
 // mutable trading control or the original accepted-trade candidate list.
 public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArchiveReader archive,
     IHistoricalPolicyBuildStore? builds = null, IHistoricalNormalReplayRunStore? runs = null,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null, IRecordedPaperSessionReader? recorded = null)
 {
     public async Task<HistoricalNormalReplayComparisonReport> CompareAsync(
         HistoricalNormalReplayComparisonRequest request, CancellationToken cancellationToken)
@@ -83,6 +87,31 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
                 .SelectMany(slice => slice.ControlStateGaps.Select(gap => slice.Session.IndexSymbol + ": " + gap)))
                 .Distinct(StringComparer.Ordinal).ToArray())).ToArray();
         result = result with { Cohort = new(result.Cohort.IncludedSessions, exclusions) };
+        var experiment = HistoricalExperimentReview.Assess(request, result, baselineModule?.BuildId == proposalModule?.BuildId);
+        PaperSessionFidelity? fidelity=null;
+        if(request.PaperSessionPolicyFingerprint is { } expected){
+            if(request.From!=request.To || recorded is null || request.FrozenInputRunId is not null ||
+                request.Execution!=SessionPolicyReceipt.ComparisonExecution)
+                throw new ArgumentException("Use a single newly captured session for paper fidelity.");
+            var receipt=await recorded.ReceiptAsync(request.From,cancellationToken);
+            if(receipt is null || receipt.Fingerprint!=expected || receipt.BuildId!=baselineModule?.BuildId ||
+                receipt.BuildId!=proposalModule?.BuildId || slices.Count!=3 ||
+                slices.Values.Any(x=>x.SessionPolicyFingerprint!=expected) ||
+                SessionPolicyReceipt.Create(receipt.Date,receipt.ObservedAt,receipt.BuildId,request.Baseline).Fingerprint!=expected ||
+                SessionPolicyReceipt.Create(receipt.Date,receipt.ObservedAt,receipt.BuildId,request.Proposal).Fingerprint!=expected)
+                fidelity=new("Inconclusive",0,0,["Captured build, settings or common three-market archive not verified."],[]);
+            else if(result.Days.Count!=1)
+                fidelity=new("Inconclusive",0,0,result.Cohort.ExcludedDates.SelectMany(d=>d.Reasons).DefaultIfEmpty("Session not eligible.").ToArray(),[]);
+            else {
+                // Read paper outcomes only after both simulations finish. Never seed entries with them.
+                var actual=await recorded.ReadTradesAsync(request.From,cancellationToken);
+                var replay=result.Days[0].Baseline;
+                if(replay.MissingEntryQuoteCount+replay.MissingExitQuoteCount+replay.MissingAddOnQuoteCount+
+                    replay.StaleQuoteCount+replay.UnsupportedPartialCount>0 || !experiment.VerifiedControlWithFills && replay.Trades.Count>0)
+                    actual=actual with {Gaps=actual.Gaps.Append("Replay execution evidence or identical-build control is incomplete.").ToArray()};
+                fidelity=PaperSessionFidelity.Compare(actual,replay.Trades);
+            }
+        }
         var report = new HistoricalNormalReplayComparisonReport(result,
         [
             "Normal-session policy comparison only: Hero Zero and expansion pairs are deliberately excluded, as requested.",
@@ -95,7 +124,10 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         {
             BaselineBuildId = baselineModule?.BuildId,
             ProposalBuildId = proposalModule?.BuildId,
-            ExecutionBuildId = current?.Id
+            ExecutionBuildId = current?.Id,
+            ExperimentFinding = experiment.Finding,
+            PaperFidelity = fidelity,
+            VerifiedControlWithFills = experiment.VerifiedControlWithFills
         };
         if (runs is not null && current is not null)
         {

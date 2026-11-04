@@ -14,6 +14,8 @@ public static class DailyAnalysisAvailabilityPolicy
 
 public interface IDailyTradingDiagnosticsReader
 {
+    Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly date, CancellationToken token)
+        => ReadAsync(date, "all", token);
     Task<DailyTradingDiagnosticsReport> ReadAsync(
         DateOnly tradingDate,
         string market,
@@ -33,6 +35,44 @@ public sealed record DailyTradingDiagnosticsReport(
 {
     public IReadOnlyList<ExpansionPairObservation> ExpansionPairObservations { get; init; } = [];
     public IReadOnlyList<EngineEvidenceCoverage> EngineEvidenceCoverage { get; init; } = [];
+    public IReadOnlyList<DailyExecutionReview> ExecutionReview { get; init; } = [];
+    public DailyLivePnlSummary? LivePnl { get; init; }
+    public PaperSessionTimeline? Timeline { get; init; }
+}
+
+public sealed record PaperSessionTimeline(IReadOnlyList<PaperTimelineTrade> Trades, string? UnavailableReason = null, string? CoverageNote = null);
+public sealed record PaperTimelineTrade(Guid Id, DateTimeOffset From, DateTimeOffset To, decimal FinalGross,
+    int Sign, bool Verified, IReadOnlyList<PaperTimelineEvent> Events, IReadOnlyList<PaperTimelineMark> Marks);
+public sealed record PaperTimelineEvent(DateTimeOffset At, string Kind, int Units, decimal Price);
+public sealed record PaperTimelineMark(DateTimeOffset At, decimal Price, DateTimeOffset? SourceAt);
+
+public sealed record DailyExecutionReview(Guid TradeId, string Market, string Symbol,
+    string IntentStatus, string Finding, DateTimeOffset? ObservedAtUtc,
+    double? PaperToIntentSeconds, double? IntentToSubmittedSeconds)
+{
+    public string? EntryRoute { get; init; }
+    public IReadOnlyList<StopComparisonRow> StopHistory { get; init; } = [];
+    public LivePnlComparison? Pnl { get; init; }
+}
+
+public sealed record LivePnlComparison(string Status, string Reason, int? ClosedUnits = null,
+    decimal? LiveGross = null, decimal? EstimatedCharges = null, decimal? MatchedPaperGross = null)
+{
+    public decimal? EstimatedNet => LiveGross - EstimatedCharges;
+    public decimal? ExecutionDifference => LiveGross - MatchedPaperGross;
+    public decimal? EntryDifference { get; init; }
+    public decimal? ExitDifference { get; init; }
+}
+public sealed record DailyLivePnlSummary(int Confirmed, int Comparable, int PaperOnly, int NotFilled,
+    int Open, int Incomplete, decimal? ConfirmedGrossSubtotal, decimal? EstimatedNetSubtotal,
+    decimal? MatchedPaperGrossSubtotal, decimal? MatchedExecutionDifference);
+
+public sealed record StopComparisonRow(DateTimeOffset? PaperAt, decimal? PaperStop, int? PaperQuantity,
+    DateTimeOffset? ConfirmedAt, decimal? BrokerStop, int? BrokerQuantity, string? OrderId,
+    double? SecondsToConfirmation, DateTimeOffset? FillObservedAt, decimal? FillPrice, int? FillQuantity, string Finding)
+{
+    public double? SecondsBeforeCall { get; init; }
+    public double? SecondsInCallAndVerification { get; init; }
 }
 
 public sealed record EngineEvidenceCoverage(string EngineKey, int Records,

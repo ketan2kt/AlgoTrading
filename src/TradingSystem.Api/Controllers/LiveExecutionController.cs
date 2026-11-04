@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using TradingSystem.Application.Risk;
+using TradingSystem.Application.Diagnostics;
 
 namespace TradingSystem.Api.Controllers;
 
@@ -11,6 +12,14 @@ namespace TradingSystem.Api.Controllers;
 public sealed class LiveExecutionController(
     ILiveTradingArmService armService) : ControllerBase
 {
+    [HttpGet("protection-monitor")]
+    public async Task<ActionResult<ProtectionMonitorReport>> ProtectionMonitor([FromServices] ILiveProtectionMonitor reader,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl="no-store";
+        return Ok(await reader.ReadAsync(cancellationToken));
+    }
+
     [HttpGet("status")]
     public async Task<ActionResult<LiveTradingArmStatus>> Get(CancellationToken cancellationToken) =>
         Ok(await armService.GetAsync(cancellationToken));
