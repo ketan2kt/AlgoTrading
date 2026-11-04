@@ -13,7 +13,7 @@ public sealed class GrowwReadOnlyGateway(
     IHttpClientFactory httpClientFactory,
     IGrowwAccessTokenProvider accessTokenProvider,
     IOptions<GrowwOptions> options,
-    TimeProvider? timeProvider = null) : IGrowwReadOnlyGateway, IDisposable
+    TimeProvider? timeProvider = null, IHistoricalQuoteArchive? historicalQuotes = null) : IGrowwReadOnlyGateway, IDisposable
 {
     internal const string ApiClientName = "GrowwReadOnlyApi";
     internal const string InstrumentClientName = "GrowwInstrumentMaster";
@@ -64,7 +64,9 @@ public sealed class GrowwReadOnlyGateway(
         {
             if (TryGetCachedQuote(cacheKey, out cached)) return cached;
             var quote = await GetQuoteCoreAsync(request, cancellationToken);
-            quoteCache[cacheKey] = new CachedQuote(quote, clock.GetUtcNow());
+            var receivedAt = clock.GetUtcNow();
+            quoteCache[cacheKey] = new CachedQuote(quote, receivedAt);
+            historicalQuotes?.TryRecord(new(Guid.NewGuid(), receivedAt, request, quote));
             return quote;
         }
         finally
@@ -170,6 +172,53 @@ public sealed class GrowwReadOnlyGateway(
         }
 
         return new GrowwHistoricalCandles(candles, payload.ClosingPrice, payload.IntervalInMinutes);
+    }
+
+    public async Task<IReadOnlyList<DateOnly>> GetHistoricalExpiriesAsync(
+        string exchange, string underlyingSymbol, int year, int? month,
+        CancellationToken cancellationToken)
+    {
+        ValidateIdentifier(exchange, nameof(exchange));
+        ValidateIdentifier(underlyingSymbol, nameof(underlyingSymbol));
+        if (year < 2020 || year > clock.GetUtcNow().Year || month is < 1 or > 12)
+            throw new ArgumentOutOfRangeException(nameof(year), "Historical year/month is invalid.");
+        var fields = new List<(string, string)>
+        {
+            ("exchange", exchange), ("underlying_symbol", underlyingSymbol),
+            ("year", year.ToString(CultureInfo.InvariantCulture))
+        };
+        if (month.HasValue)
+            fields.Add(("month", month.Value.ToString(CultureInfo.InvariantCulture)));
+        var payload = await GetPayloadAsync<HistoricalExpiriesPayload>(
+            "/v1/historical/expiries" + BuildQuery([.. fields]), cancellationToken);
+        if (payload.Expiries is null)
+            throw Malformed("Groww historical expiries response omitted expiries.");
+        var expiries = new List<DateOnly>(payload.Expiries.Length);
+        foreach (var raw in payload.Expiries)
+        {
+            if (!DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var expiry))
+                throw Malformed("Groww historical expiries response contained an invalid date.");
+            expiries.Add(expiry);
+        }
+        return expiries.Distinct().OrderBy(value => value).ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> GetHistoricalContractsAsync(
+        string exchange, string underlyingSymbol, DateOnly expiryDate,
+        CancellationToken cancellationToken)
+    {
+        ValidateIdentifier(exchange, nameof(exchange));
+        ValidateIdentifier(underlyingSymbol, nameof(underlyingSymbol));
+        var payload = await GetPayloadAsync<HistoricalContractsPayload>(
+            "/v1/historical/contracts" + BuildQuery(
+                ("exchange", exchange), ("underlying_symbol", underlyingSymbol),
+                ("expiry_date", expiryDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
+            cancellationToken);
+        if (payload.Contracts is null || payload.Contracts.Any(string.IsNullOrWhiteSpace))
+            throw Malformed("Groww historical contracts response omitted or invalidated contracts.");
+        return payload.Contracts.Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
     }
 
     public async Task<GrowwOptionChain> GetOptionChainAsync(
@@ -445,6 +494,12 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("candles")] JsonElement[]? Candles,
         [property: JsonPropertyName("closing_price")] decimal ClosingPrice,
         [property: JsonPropertyName("interval_in_minutes")] int IntervalInMinutes);
+
+    private sealed record HistoricalExpiriesPayload(
+        [property: JsonPropertyName("expiries")] string[]? Expiries);
+
+    private sealed record HistoricalContractsPayload(
+        [property: JsonPropertyName("contracts")] string[]? Contracts);
 
     private sealed record OptionChainPayload(
         [property: JsonPropertyName("underlying_ltp")] decimal UnderlyingLastPrice,

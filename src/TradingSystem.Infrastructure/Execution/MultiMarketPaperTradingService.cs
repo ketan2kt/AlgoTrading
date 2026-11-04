@@ -221,24 +221,16 @@ internal sealed partial class MultiMarketPaperTradingService(
                                 value.OpenTimeUtc <= latest.OpenTimeUtc)
                 .OrderByDescending(value => value.OpenTimeUtc).Take(40)
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-            var volumeByTime = futureCandles.Where(value => value.Volume > 0)
-                .ToDictionary(value => value.OpenTimeUtc, value => value.Volume);
-            var aligned = candles.Where(value => volumeByTime.ContainsKey(value.OpenTimeUtc)).ToArray();
-            var totalVolume = aligned.Sum(value => volumeByTime[value.OpenTimeUtc]);
-            var latestFuture = futureCandles.LastOrDefault(value => value.Volume > 0);
-            var baseline = futureCandles.Where(value => value.Volume > 0)
-                .TakeLast(Math.Min(20, futureCandles.Count)).SkipLast(1).ToArray();
-            var averageVolume = baseline.Length == 0 ? 0m : baseline.Average(value => (decimal)value.Volume);
-            var relativeVolumeV2 = latestFuture is null || averageVolume <= 0m
-                ? 0m : latestFuture.Volume / averageVolume;
-            var vwapV2 = totalVolume <= 0m ? 0m : aligned.Sum(value =>
-                ((value.High + value.Low + value.Close) / 3m) * volumeByTime[value.OpenTimeUtc]) /
-                totalVolume;
+            var confirmation = SensexFutureConfirmationPolicy.Evaluate(priceBars,
+                futureCandles.Select(value => new SensexFutureVolumeBar(
+                    value.OpenTimeUtc, value.Volume)).ToArray());
+            var vwapV2 = confirmation.Vwap;
+            var relativeVolumeV2 = confirmation.RelativeVolume;
             sensexVwap = vwapV2;
             sensexFast = fastV2;
             sensexSlow = slowV2;
             sensexRelativeVolume = relativeVolumeV2;
-            sensexConfirmationReady = vwapV2 > 0m && relativeVolumeV2 > 0m;
+            sensexConfirmationReady = confirmation.Ready;
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
@@ -282,85 +274,36 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             return;
         }
-        if (market == TradingMarketCatalog.Sensex && persistentThesis is not null)
+        if (market == TradingMarketCatalog.Sensex)
         {
-            var thesisEntry = PersistentDirectionalPaperEntryPolicyV1.Evaluate(priceBars, persistentThesis);
-            var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
-                value.Market == market.Code && value.Status == "Active", cancellationToken);
-            if (!hasActivePosition && thesisEntry.Direction is not null &&
-                (decision.Direction is null || decision.Direction == thesisEntry.Direction))
+            var hasActivePosition = await db.MarketPaperPositions.AsNoTracking()
+                .AnyAsync(value => value.Market == market.Code &&
+                    value.Status == "Active", cancellationToken);
+            var selection = SensexEntrySelectionPolicy.Evaluate(
+                new(decision.Direction, decision.Confidence, decision.Strategy,
+                    decision.Reasons), priceBars, lifecycle!, persistentThesis,
+                marketStateV2!, sensexVwap, sensexFast, sensexSlow,
+                hasActivePosition);
+            if (selection.EarlyCandidate is { } early)
             {
-                decision = new(thesisEntry.Direction.Value, thesisEntry.Confidence,
-                    "Sensex persistent directional thesis", thesisEntry.Reasons);
-                supplementalSensexEntry = true;
-                persistentDirectionalEntry = true;
-            }
-        }
-        if (market == TradingMarketCatalog.Sensex && decision.Direction is null)
-        {
-            var early = SensexEarlyPullbackResearchPolicy.Evaluate(priceBars);
-            if (early.Direction is null)
-                early = SensexPaperResearchEntryPolicy.DeriveLifecycleCandidate(lifecycle!);
-            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
-                latest.OpenTimeUtc, "SensexEarlyPullbackCandidate", early.Confidence,
-                JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
-            await db.SaveChangesAsync(cancellationToken);
-            var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
-                value.Market == market.Code && value.Status == "Active", cancellationToken);
-            var earlyEntry = SensexPaperResearchEntryPolicy.Evaluate(early.Direction,
-                early.Confidence, lifecycle!, hasActivePosition, persistentThesis);
-            if (earlyEntry.Permitted)
-            {
-                decision = new(early.Direction!.Value, earlyEntry.EffectiveConfidence,
-                    "Sensex controlled early pullback",
-                    [.. early.Reasons, .. earlyEntry.Reasons]);
-                supplementalSensexEntry = true;
-            }
-            else if (early.Direction is not null)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "SensexEarlyPullbackRejected", early.Confidence,
-                    earlyEntry.Reasons, cancellationToken);
-            }
-            if (!supplementalSensexEntry && !hasActivePosition && marketStateV2 is not null)
-            {
-                var range = RangePlaybookV2.Evaluate(priceBars, marketStateV2);
-                if (range.Direction is not null)
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    underlying.Id, latest.OpenTimeUtc,
+                    "SensexEarlyPullbackCandidate", early.Confidence,
+                    JsonSerializer.Serialize(new { early.Direction, early.Reasons })));
+                await db.SaveChangesAsync(cancellationToken);
+                if (selection.EarlyAssessment is { Permitted: false } rejected &&
+                    early.Direction is not null)
                 {
-                    decision = new(range.Direction.Value, range.Confidence,
-                        "Sensex range-edge rejection", range.Reasons);
-                    supplementalSensexEntry = true;
+                    await AddAuditAsync(db, market, underlying.Id,
+                        latest.OpenTimeUtc, "SensexEarlyPullbackRejected",
+                        early.Confidence, rejected.Reasons, cancellationToken);
                 }
             }
-            if (!supplementalSensexEntry && !hasActivePosition && marketStateV2 is not null)
-            {
-                var directional = DirectionalParticipationPolicy.Evaluate(priceBars,
-                    marketStateV2, sensexVwap, sensexFast, sensexSlow);
-                if (directional.Direction is not null)
-                {
-                    decision = new(directional.Direction.Value, directional.Confidence,
-                        DirectionalParticipationPolicy.SensexStrategy, directional.Reasons);
-                    supplementalSensexEntry = true;
-                }
-            }
-        }
-        if (market == TradingMarketCatalog.Sensex && !supplementalSensexEntry &&
-            marketStateV2 is not null)
-        {
-            var directional = DirectionalParticipationPolicy.Evaluate(priceBars,
-                marketStateV2, sensexVwap, sensexFast, sensexSlow);
-            if (directional.Direction is not null &&
-                (decision.Direction is null || decision.Direction == directional.Direction))
-            {
-                var hasActivePosition = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
-                    value.Market == market.Code && value.Status == "Active", cancellationToken);
-                if (!hasActivePosition)
-                {
-                    decision = new(directional.Direction.Value, directional.Confidence,
-                        DirectionalParticipationPolicy.SensexStrategy, directional.Reasons);
-                    supplementalSensexEntry = true;
-                }
-            }
+            decision = new(selection.Candidate.Direction,
+                selection.Candidate.Confidence, selection.Candidate.Strategy,
+                selection.Candidate.Reasons);
+            supplementalSensexEntry = selection.Supplemental;
+            persistentDirectionalEntry = selection.PersistentDirectional;
         }
         if (decision.Direction is null)
         {
@@ -438,52 +381,20 @@ internal sealed partial class MultiMarketPaperTradingService(
                 decision.Direction.Value, latest.Close, sensexVwap,
                 latest.Close <= 0m ? 0m : structureAtr / latest.Close * 100m,
                 openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
-            var middayChop = MiddayChopConfirmationPolicy.Evaluate(localTime,
-                completedSessionBars, decision.Direction.Value, structure, interval, includeOtherHours: true);
-            if (!middayChop.Permitted)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "ChopConfirmationRejected", decision.Confidence,
-                    middayChop.Reasons, cancellationToken);
-                return;
-            }
-            var location = MarketLocationPolicy.Evaluate(
-                completedSessionBars,
-                previousSession.Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open,
-                    value.High, value.Low, value.Close)).ToArray(), decision.Direction.Value,
-                AverageTrueRange(candles.TakeLast(15).ToArray()),
-                openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
-            location = ConfirmedEntryLocationPolicy.Evaluate(location, completedSessionBars,
+            var preQuote = NiftyPreQuoteEntryGatePolicy.Evaluate(localTime,
+                completedSessionBars, previousSession.Select(value => new StrategyPriceBar(
+                    value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray(),
                 decision.Direction.Value, structure, MultiTimeframeDecisionPolicy.Analyze(
                     completedSessionBars, decision.Direction, openingBars.Max(value => value.High),
-                    openingBars.Min(value => value.Low)), structureAtr, interval);
-            if (!location.Permitted)
+                    openingBars.Min(value => value.Low)), interval, structureAtr,
+                openingBars.Max(value => value.High), openingBars.Min(value => value.Low));
+            if (!preQuote.Permitted)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "MarketLocationRejected", decision.Confidence,
-                    [$"{location.Context}.", .. location.Reasons], cancellationToken);
-                return;
-            }
-
-            var sessionMove = SessionMoveQualityPolicy.Evaluate(completedSessionBars,
-                decision.Direction.Value, AverageTrueRange(candles.TakeLast(15).ToArray()));
-            if (!sessionMove.Permitted)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "SessionMoveMaturityRejected", decision.Confidence,
-                    sessionMove.Reasons, cancellationToken);
-                return;
-            }
-
-            var matureEdge = MatureEdgeEntryPolicy.Evaluate(sessionMove,
-                MultiTimeframeDecisionPolicy.Analyze(completedSessionBars, decision.Direction,
-                    openingBars.Max(value => value.High), openingBars.Min(value => value.Low)),
-                decision.Direction.Value);
-            if (!matureEdge.Permitted)
-            {
-                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                    "MatureEdgeConfirmationRejected", decision.Confidence,
-                    matureEdge.Reasons, cancellationToken);
+                    preQuote.RejectionOutcome, decision.Confidence,
+                    preQuote.RejectionOutcome == "MarketLocationRejected"
+                        ? [$"{preQuote.LocationContext}.", .. preQuote.Reasons] : preQuote.Reasons,
+                    cancellationToken);
                 return;
             }
 
@@ -500,7 +411,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             if (!optionInterest.Permitted) return;
 
-            var priorSameDirectionExit = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
+            var priorSameDirectionPosition = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
                 join executionInstrument in db.Instruments.AsNoTracking()
                     on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
                 where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
@@ -510,17 +421,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
                 select new { priorPosition.ClosedAtUtc, priorPosition.Status, priorPosition.Strategy,
-                    priorPosition.RealisedPnl, priorPosition.EntryPrice,
-                    priorPosition.Quantity }).FirstOrDefaultAsync(cancellationToken);
-            var priorSameDirectionExitUtc = priorSameDirectionExit?.ClosedAtUtc;
-            if (priorSameDirectionExit is not null &&
-                !priorSameDirectionExit.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) &&
-                !priorSameDirectionExit.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
-                !priorSameDirectionExit.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal) &&
-                !SensexFullStopReentryPolicy.AllowsEntry(
-                    now, priorSameDirectionExitUtc, priorSameDirectionExit.Status,
-                    priorSameDirectionExit.RealisedPnl, priorSameDirectionExit.EntryPrice,
-                    priorSameDirectionExit.Quantity, options.Value.OptionStopLossPercent))
+                    priorPosition.RealisedPnl, priorPosition.EntryPrice, priorPosition.Quantity })
+                .FirstOrDefaultAsync(cancellationToken);
+            var priorSameDirectionExit = priorSameDirectionPosition?.ClosedAtUtc;
+            if (priorSameDirectionPosition is { } prior &&
+                !prior.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) &&
+                !prior.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
+                !prior.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal) &&
+                !SensexFullStopReentryPolicy.AllowsEntry(now, prior.ClosedAtUtc, prior.Status,
+                    prior.RealisedPnl, prior.EntryPrice, prior.Quantity, options.Value.OptionStopLossPercent))
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "SensexFullStopReentryDeferred", decision.Confidence,
@@ -529,7 +438,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
             if (persistentDirectionalEntry && !SensexMorningThesisReentryPolicy.AllowsEntry(
-                    localTime, true, priorSameDirectionExitUtc))
+                    localTime, true, priorSameDirectionExit))
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "MorningPersistentThesisReentryDeferred", decision.Confidence,
@@ -541,7 +450,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ProfessionalTradeFramework.Map(marketStateV2) == ProfessionalTradeRegime.Directional);
             var reentry = StructuralReentryPolicy.Evaluate(priceBars
                     .Where(bar => bar.OpenTimeUtc.AddSeconds(interval) <= now).ToArray(),
-                decision.Direction.Value, priorSameDirectionExitUtc, persistentDirectionalContext);
+                decision.Direction.Value, priorSameDirectionExit, persistentDirectionalContext);
             // A persistent thesis is not fresh post-exit evidence. Continuation bases remain eligible.
             if (!reentry.Permitted)
             {
@@ -691,42 +600,33 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         else
         {
-            var riskDistance = entry * options.Value.OptionStopLossPercent / 100m;
-            stop = RoundToTick(entry - riskDistance, tick);
-            target = RoundToTick(entry + riskDistance, tick);
+            (stop, target) = SensexOptionAdmissionPolicy.ProtectivePrices(
+                entry, options.Value.OptionStopLossPercent, tick);
             var configuredLots = lotConfiguration.SensexLots;
             quantity = checked(execution.LotSize * configuredLots);
         }
         ProfessionalTradePlan? professionalPlan = null;
         if (market == TradingMarketCatalog.Sensex && marketStateV2 is not null)
         {
-            var spreadPercent = quote.BidPrice is > 0m && quote.OfferPrice is > 0m
-                ? (quote.OfferPrice.Value - quote.BidPrice.Value) / quote.OfferPrice.Value * 100m
-                : (decimal?)null;
-            var chargesPerLot = PaperTradingCostModel.CalculateOptionCharges([
-                new(PaperOptionTransactionSide.Buy, entry, execution.LotSize),
-                new(PaperOptionTransactionSide.Sell, target, execution.LotSize)]).Total;
-            var grossRewardPerLot = Math.Max(0m, (target - entry) * execution.LotSize);
-            var riskPerLot = Math.Max(.01m, (entry - stop) * execution.LotSize);
             var daysToExpiry = execution.ExpiryDate is { } planExpiry
                 ? Math.Max(0, planExpiry.DayNumber - today.DayNumber) : 10;
             var correlatedNiftyExposure = await HasActiveNiftyExposureAsync(db,
                 decision.Direction.Value, sessionStartUtc, cancellationToken);
-            professionalPlan = ProfessionalTradeFramework.Assess(new(
+            var professionalContext = new ProfessionalTradeAssessmentInput(
                 market.Code, persistentDirectionalEntry ? ProfessionalTradeRegime.Directional :
                     ProfessionalTradeFramework.Map(marketStateV2), decision.Confidence,
-                sensexRelativeVolume, adaptiveSetup?.RoomToOpposingLevelAtr, spreadPercent,
-                quote.Volume is { } optionVolume ? (long?)decimal.ToInt64(optionVolume) : null,
-                quote.OpenInterest is { } optionOi ? (long?)decimal.ToInt64(optionOi) : null,
+                sensexRelativeVolume, adaptiveSetup?.RoomToOpposingLevelAtr, null, null, null,
                 daysToExpiry, null, null,
-                Math.Max(0m, (grossRewardPerLot - chargesPerLot) / riskPerLot),
+                0m,
                 correlatedNiftyExposure, 0,
-                supplementalSensexEntry || adaptiveSetup?.Setup == "ContinuationOrRetest"));
-            if (!professionalPlan.Permitted)
+                supplementalSensexEntry || adaptiveSetup?.Setup == "ContinuationOrRetest");
+            professionalPlan = SensexOptionAdmissionPolicy.Evaluate(new(quote,
+                options.Value.OptionStopLossPercent, tick, execution.LotSize, professionalContext)).Plan;
+            if (professionalPlan is not { Permitted: true })
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "ProfessionalPlanRejected", decision.Confidence,
-                    professionalPlan.Reasons, cancellationToken);
+                    professionalPlan?.Reasons ?? ["Invalid Sensex option admission inputs."], cancellationToken);
                 return;
             }
             // Confidence and correlation remain eligibility/risk evidence. Once approved,
@@ -1031,12 +931,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas
                 ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
             var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
-            var positionRegime = position.Strategy.Contains("range", StringComparison.OrdinalIgnoreCase)
-                ? ProfessionalTradeRegime.Range
-                : position.Strategy.Contains("directional", StringComparison.OrdinalIgnoreCase) ||
-                  position.Strategy.Contains("continuation", StringComparison.OrdinalIgnoreCase)
-                    ? ProfessionalTradeRegime.Directional
-                    : ProfessionalTradeRegime.Transition;
+            var positionRegime = MarketOptionPositionPolicy.Regime(position.Strategy);
             var exitPlan = ProfessionalExitPolicy.For(positionRegime);
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var favourableExtreme = price;
@@ -1064,28 +959,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                     ? Math.Max(favourablePrice, price) : Math.Min(favourablePrice, price);
                 favourablePriceByPosition[position.Id] = favourablePrice;
                 favourableExtreme = favourablePrice;
-                var initialProtectiveStop = position.Direction == Direction.Buy
-                    ? position.EntryPrice - initialRisk
-                    : position.EntryPrice + initialRisk;
-                trailing = PaperProtectiveStopPolicy.Calculate(position.Direction,
-                    position.EntryPrice, initialProtectiveStop, favourablePrice,
-                    exitPlan.BreakEvenTriggerR,
-                    exitPlan.TrailDistanceR,
-                    exitPlan.ProfitLockTriggerR,
-                    exitPlan.ProfitLockR);
-                if (PeakFavourableForProtection(position.Direction, position.EntryPrice,
-                        favourablePrice) >= initialRisk * exitPlan.BreakEvenTriggerR)
-                {
-                    var protectionCosts = PaperTradingCostModel.CalculateOptionCharges([
-                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
-                        new(PaperOptionTransactionSide.Sell, Math.Max(.05m, trailing),
-                            position.RemainingQuantity)]).Total;
-                    trailing = PaperProtectiveStopPolicy.ProtectNetProfit(position.Direction,
-                        position.EntryPrice, trailing, position.RemainingQuantity, protectionCosts);
-                }
-                trailing = position.Direction == Direction.Buy
-                    ? Math.Max(position.StopLoss, trailing)
-                    : Math.Min(position.StopLoss, trailing);
+                trailing = MarketOptionPositionPolicy.ProtectedStop(position.Direction,
+                    position.EntryPrice, initialRisk, favourablePrice, position.StopLoss,
+                    position.RemainingQuantity, exitPlan);
             }
             var expectedUnderlyingDirection = market.ExecuteOptions
                 ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
@@ -1195,20 +1071,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                                 failedDecision.Reasons })));
                 }
             }
-            var partialThreshold = position.Direction == Direction.Buy
-                ? position.EntryPrice + initialRisk * exitPlan.PartialProfitR
-                : position.EntryPrice - initialRisk * exitPlan.PartialProfitR;
-            var partialReached = position.Direction == Direction.Buy
-                ? price >= partialThreshold : price <= partialThreshold;
-            if (!failedSetup && !reversalExit && MarketPaperExitSequencingPolicy.ShouldTakePartial(
-                    manualExitRequested, stopHit, targetHit, continuationConfirmed, forced) &&
-                market.ExecuteOptions && options.Value.PartialProfitEnabled &&
-                position.PartialExitQuantity == 0 && partialReached && position.RemainingQuantity > instrument.LotSize)
+            var positionDecision = MarketOptionPositionPolicy.Decide(position.Direction,
+                price, position.EntryPrice, position.StopLoss, position.Target, initialRisk,
+                position.RemainingQuantity, instrument.LotSize, exitPlan, manualExitRequested,
+                reversalExit, failedSetup, continuationConfirmed, forced,
+                market.ExecuteOptions && options.Value.PartialProfitEnabled,
+                position.PartialExitQuantity != 0);
+            if (positionDecision.PartialQuantity > 0)
             {
-                var totalLots = Math.Max(1, position.RemainingQuantity / instrument.LotSize);
-                var partialLots = Math.Clamp((int)Math.Floor(totalLots * exitPlan.PartialExitFraction),
-                    1, Math.Max(1, totalLots - 1));
-                var partialQuantity = partialLots * instrument.LotSize;
+                var partialQuantity = positionDecision.PartialQuantity;
                 var partialCosts = PaperTradingCostModel.CalculateOptionCharges([
                     new(PaperOptionTransactionSide.Buy, position.EntryPrice, partialQuantity),
                     new(PaperOptionTransactionSide.Sell, price, partialQuantity)]).Total;
@@ -1219,17 +1090,14 @@ internal sealed partial class MultiMarketPaperTradingService(
                         remainingQuantity = position.RemainingQuantity, partialCosts,
                         triggerR = exitPlan.PartialProfitR, regime = positionRegime.ToString() })));
             }
-            if (manualExitRequested || stopHit || reversalExit || failedSetup ||
-                (targetHit && !continuationConfirmed) || forced)
+            if (positionDecision.ExitReason is { } exitReason)
             {
                 var costs = market.ExecuteOptions
                     ? PaperTradingCostModel.CalculateOptionCharges([
                         new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
                         new(PaperOptionTransactionSide.Sell, price, position.RemainingQuantity)]).Total
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
-                position.Close(price, costs, manualExitRequested ? "ManualExit" : stopHit ? "StopLossHit" :
-                    reversalExit ? "UnderlyingTrendInvalidated" : failedSetup ? "FailedSetupExit" :
-                    targetHit ? "TargetHit" : "TimeExit", observedAt);
+                position.Close(price, costs, exitReason, observedAt);
                 favourablePriceByPosition.Remove(position.Id);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
@@ -1242,32 +1110,12 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static decimal PeakFavourableForProtection(Direction direction, decimal entry,
-        decimal favourablePrice) => direction == Direction.Buy
-        ? favourablePrice - entry : entry - favourablePrice;
-
     internal static (bool ShouldExit, bool ProtectProfit, decimal Stop) ConfirmedReversalResponse(
         TradingMarketDefinition market, UnderlyingTrendInvalidationResult invalidation,
         Direction optionDirection, decimal entry, decimal current, decimal existingStop,
-        bool protectProfitable, decimal lockFraction, decimal tickSize = .05m)
-    {
-        if (market.Code is not ("sensex" or "bank-nifty") || !invalidation.ShouldExit)
-            return (false, false, existingStop);
-        var favourable = optionDirection == Direction.Buy ? current - entry : entry - current;
-        if (favourable > 0m && protectProfitable)
-        {
-            var protectedStop = PaperProtectiveStopPolicy.ProtectReversalProfit(
-                optionDirection, entry, current, existingStop, lockFraction);
-            // A broker stop trigger must be on the option contract's price tick.
-            var roundedStop = optionDirection == Direction.Buy
-                ? Math.Floor(protectedStop / tickSize) * tickSize
-                : Math.Ceiling(protectedStop / tickSize) * tickSize;
-            return (false, true, optionDirection == Direction.Buy
-                ? Math.Max(existingStop, roundedStop)
-                : Math.Min(existingStop, roundedStop));
-        }
-        return (true, false, existingStop);
-    }
+        bool protectProfitable, decimal lockFraction, decimal tickSize = .05m) =>
+        MarketOptionPositionPolicy.Reversal(market.Code, invalidation, optionDirection,
+            entry, current, existingStop, protectProfitable, lockFraction, tickSize);
 
     private async Task CaptureExitResearchAsync(TradingDbContext db, TradingMarketDefinition market,
         DateTimeOffset now, CancellationToken cancellationToken)
@@ -1321,14 +1169,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             .Take(21)
             .OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
-        if (candles.Count < 9) return false;
-        var closes = candles.Select(value => value.Close).ToArray();
-        var fast = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
-        var slow = TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length));
-        var latest = candles[^1];
-        return direction == Direction.Buy
-            ? fast > slow && latest.Close >= fast
-            : fast < slow && latest.Close <= fast;
+        return MarketOptionPositionPolicy.Continuation(candles.Select(value =>
+            new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High,
+                value.Low, value.Close)).ToArray(), direction);
     }
 
     private async Task<UnderlyingTrendInvalidationResult> EvaluateUnderlyingInvalidationAsync(
@@ -1358,19 +1201,10 @@ internal sealed partial class MultiMarketPaperTradingService(
             .Take(30)
             .OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
-        if (candles.Count < 21)
-            return new(false, 0m, ["At least 21 completed underlying candles are required."]);
-        if (candles.Count(value => value.OpenTimeUtc.AddSeconds(interval) > openedAtUtc) < 2)
-            return new(false, 0m, ["Waiting for two completed underlying candles after entry."]);
-        if (observedAtUtc - candles[^1].OpenTimeUtc.AddSeconds(interval) >
-            TimeSpan.FromSeconds(interval + marketOptions.Value.MaximumAgeSeconds))
-            return new(false, 0m, ["Completed underlying candles are stale."]);
-        var closes = candles.Select(value => value.Close).ToArray();
         var bars = candles.Select(value => new StrategyPriceBar(value.OpenTimeUtc,
             value.Open, value.High, value.Low, value.Close)).ToArray();
-        return UnderlyingTrendInvalidationPolicy.Evaluate(originalDirection, bars,
-            TechnicalIndicators.ExponentialMovingAverage(closes, 9),
-            TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length)),
+        return MarketOptionPositionPolicy.Invalidation(bars, originalDirection,
+            openedAtUtc, observedAtUtc, interval, marketOptions.Value.MaximumAgeSeconds,
             options.Value.MinimumReversalStructureStrength,
             options.Value.RequiredReversalEvidenceCount);
     }

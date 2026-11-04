@@ -17,6 +17,11 @@ public sealed class TradingDbContext(
     public DbSet<BrokerAccessTokenSecret> BrokerAccessTokenSecrets => Set<BrokerAccessTokenSecret>();
     public DbSet<Instrument> Instruments => Set<Instrument>();
     public DbSet<Candle> Candles => Set<Candle>();
+    public DbSet<HistoricalResearchCandle> HistoricalResearchCandles => Set<HistoricalResearchCandle>();
+    public DbSet<HistoricalInstrumentMasterSnapshot> HistoricalInstrumentMasterSnapshots =>
+        Set<HistoricalInstrumentMasterSnapshot>();
+    public DbSet<HistoricalUniversePageReceipt> HistoricalUniversePageReceipts =>
+        Set<HistoricalUniversePageReceipt>();
     public DbSet<PersistedMarketObservation> MarketObservations => Set<PersistedMarketObservation>();
     public DbSet<OptionChainSnapshot> OptionChainSnapshots => Set<OptionChainSnapshot>();
     public DbSet<ExternalMarketSnapshot> ExternalMarketSnapshots => Set<ExternalMarketSnapshot>();
@@ -103,6 +108,45 @@ public sealed class TradingDbContext(
 
     private static void ConfigureTradingModel(ModelBuilder builder)
     {
+        builder.Entity<HistoricalInstrumentMasterSnapshot>(entity =>
+        {
+            ConfigureAppendOnly(entity, "historical_instrument_master_snapshots");
+            entity.Property(value => value.Source).HasMaxLength(80);
+            entity.Property(value => value.Fingerprint).HasMaxLength(64);
+            entity.Property(value => value.PayloadJson).HasColumnType("jsonb");
+            entity.HasIndex(value => new { value.SessionDate, value.CapturedAtUtc });
+            entity.HasIndex(value => new { value.SessionDate, value.Source,
+                value.Fingerprint }).IsUnique();
+        });
+
+        builder.Entity<HistoricalUniversePageReceipt>(entity =>
+        {
+            ConfigureAppendOnly(entity, "historical_universe_page_receipts");
+            entity.Property(value => value.Market).HasMaxLength(32);
+            entity.Property(value => value.UniverseFingerprint).HasMaxLength(64);
+            entity.Property(value => value.FetchedSymbolsJson).HasColumnType("jsonb");
+            entity.HasIndex(value => new { value.SessionDate, value.Market,
+                value.ExpiryDate, value.Page, value.PageSize }).IsUnique();
+        });
+
+        builder.Entity<HistoricalResearchCandle>(entity =>
+        {
+            ConfigureAppendOnly(entity, "historical_research_candles");
+            entity.Property(value => value.Exchange).HasMaxLength(20);
+            entity.Property(value => value.Underlying).HasMaxLength(40);
+            entity.Property(value => value.GrowwSymbol).HasMaxLength(180);
+            entity.Property(value => value.Source).HasMaxLength(80);
+            entity.Property(value => value.Open).HasPrecision(18, 4);
+            entity.Property(value => value.High).HasPrecision(18, 4);
+            entity.Property(value => value.Low).HasPrecision(18, 4);
+            entity.Property(value => value.Close).HasPrecision(18, 4);
+            entity.Property(value => value.OpenInterest).HasPrecision(24, 4);
+            entity.HasIndex(value => new { value.GrowwSymbol, value.OpenTimeUtc,
+                value.IntervalSeconds, value.Source }).IsUnique();
+            entity.HasIndex(value => new { value.Exchange, value.Underlying,
+                value.OpenTimeUtc });
+        });
+
         builder.Entity<PreSessionBriefSnapshot>(entity =>
         {
             ConfigureAppendOnly(entity, "pre_session_brief_snapshots");

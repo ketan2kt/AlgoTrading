@@ -3,8 +3,9 @@ using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Application.Execution;
 
-// The exact ordered post-signal, pre-OI gates used by Nifty production and
-// replay. The caller supplies completed, as-of bars; this function never reads
+// The exact ordered post-signal, pre-OI gates used by Nifty and Sensex production
+// and replay. The stable class name is retained for existing callers.
+// The caller supplies completed, as-of bars; this function never reads
 // a clock, database, broker or original trade history.
 public sealed record NiftyPreQuoteEntryGateDecision(bool Permitted,
     string RejectionOutcome, IReadOnlyList<string> Reasons,

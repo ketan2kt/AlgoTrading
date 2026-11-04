@@ -1,5 +1,11 @@
 # Current handover — 4 November 2026
 
+## Current release: normal historical replay and market-data capture
+
+Ketan authorized publishing the isolated replay/capture changes to main after CI. This supersedes the prior release note below. The website compares normal Nifty, Sensex and Bank Nifty policies using the same frozen data and clock. Pair replay is excluded. Capture is enabled by default and attempts a read-only Groww subscription from 09:00 IST; it retains timestamped quotes, quote depth, instrument universes and coverage gaps. Controlled deployment applies the research migrations.
+
+Local checks included shared-policy contracts, a million-quote streaming test, a synthetic full-session frozen comparison and frontend build/tests. The remaining acceptance check is operational: after 15:45 IST on 5 November, check each market’s coverage and compare/freeze the complete eligible session. A connected feed, an eligible session and matching rerun results are not established by successful deployment alone. Incomplete sessions must be excluded.
+
 ## Approved entry-quality / evidence release
 
 Ketan authorized deploying the completed entry-quality/evidence changes and Nifty

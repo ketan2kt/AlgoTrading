@@ -18,6 +18,8 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
 {
     public string StrategyId => "opening-range-breakout";
     public string Version => "1.0.0";
+    public string ConfigurationManifest =>
+        System.Text.Json.JsonSerializer.Serialize(options);
 
     public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
 

@@ -66,6 +66,7 @@
         <div class="workspace-nav-actions">
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           <button type="button" (click)="openReport()">Performance</button>
+          <button type="button" (click)="openHistoricalReplay()">Historical Replay</button>
           <button type="button" (click)="openPnlReport()">P&amp;L</button>
           <button type="button" (click)="openLogs()">Research</button>
           <button type="button" (click)="openNarrator()">Narrator</button>
@@ -899,6 +900,96 @@
                   <article class="evaluation-row"><div><span>Contract</span><strong>{{trade.contract}}</strong></div><div><span>Entry / exit</span><strong>{{trade.entryPrice|number:'1.2-2'}} / {{trade.exitPrice|number:'1.2-2'}}</strong></div><div><span>Quantity</span><strong>{{trade.quantity}}</strong></div><div><span>Result</span><strong>{{trade.exitReason}}</strong></div><div><span>P&amp;L</span><strong [class.good]="trade.realisedPnl>=0" [class.bad]="trade.realisedPnl<0">₹{{trade.realisedPnl|number:'1.2-2'}}</strong></div><div><span>Exited IST</span><strong>{{trade.exitTimeUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</strong></div></article>
                 }
               </div>
+            }
+          </section>
+        </div>
+        }
+
+        @if (replayOpen) {
+        <div class="logs-backdrop" (click)="closeHistoricalReplay()">
+          <section class="evaluation-panel logs-modal performance-modal historical-replay-modal" role="dialog" aria-modal="true" aria-label="Historical strategy replay research" (click)="$event.stopPropagation()">
+            <header class="panel-heading dialog-heading"><div><span>RESEARCH ONLY</span><h2>Historical Replay</h2><p>Full-session normal-strategy comparison · same frozen data · baseline versus proposal</p></div><button type="button" class="dialog-close" (click)="closeHistoricalReplay()" aria-label="Close historical replay">×</button></header>
+            <div class="historical-replay-form">
+              <label>From<input type="date" name="replayFrom" [(ngModel)]="replayFrom" required /></label>
+              <label>To<input type="date" name="replayTo" [(ngModel)]="replayTo" required /></label>
+            </div>
+            <details><summary>Legacy recorded-candidate study — not a full-strategy replay</summary>
+            <form class="historical-replay-form" (ngSubmit)="runHistoricalReplay()">
+              <label>Market<select name="replayMarket" [(ngModel)]="replayMarket"><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="bank-nifty">Bank Nifty</option></select></label>
+              <label>Stop %<input type="number" name="replayStop" [(ngModel)]="replayStopPercent" min="0.01" max="0.75" step="0.01" required /></label>
+              <label>Target %<input type="number" name="replayTarget" [(ngModel)]="replayTargetPercent" min="0.01" max="2" step="0.01" required /></label>
+              <button type="submit" [disabled]="replayLoading">{{replayLoading?'Running…':'Run recorded-candidate study'}}</button>
+            </form>
+            </details>
+            <section class="daily-analysis-section historical-normal-preview" aria-label="Normal strategy replay comparison">
+              <div class="daily-analysis-section-heading"><div><span>FULL-SESSION NORMAL STRATEGIES · RESEARCH</span><h3>Nifty + Sensex + Bank Nifty</h3></div></div>
+              <p>Evaluate fresh entries and exits, not just original trades. Choose saved strategy code below. Both versions start with a frozen copy of current settings, not the historical day's controls. The proposal changes the premium stop only. Costs use the same versioned paper-fee model and slippage assumptions, not verified broker contract notes. Hero Zero and expansion pairs are excluded.</p>
+              <div class="historical-normal-controls">
+                <label>Dataset<select [(ngModel)]="replayFrozenInputRun"><option value="">Archive · dates selected above</option>@for(run of replaySavedRuns;track run.id){<option [value]="run.id">Frozen {{run.from}} → {{run.to}} · {{run.id.slice(0,8)}}</option>}</select></label>
+                <button type="button" (click)="showSavedNormalReport()" [disabled]="normalReplayBusy || !replayFrozenInputRun">View saved result</button>
+                <label>Baseline strategy code<select [(ngModel)]="replayBaselineBuild"><option value="">{{replayFrozenInputRun?'Saved baseline build':'Current approved build'}}</option>@for(build of replayPolicyBuilds;track build.id){<option [value]="build.id">{{build.capturedAtUtc|date:'dd MMM yyyy HH:mm'}} · {{build.id.slice(0,8)}}</option>}</select></label>
+                <label>Proposal strategy code<select [(ngModel)]="replayProposalBuild"><option value="">Current approved build</option>@for(build of replayPolicyBuilds;track build.id){<option [value]="build.id">{{build.capturedAtUtc|date:'dd MMM yyyy HH:mm'}} · {{build.id.slice(0,8)}}</option>}</select></label>
+                <label>Proposal premium stop (%)<input type="number" min="0.1" max="75" step="0.5" [(ngModel)]="normalReplayStopPercent" aria-label="Normal replay proposal premium stop percentage" /></label>
+                <button type="button" (click)="runNormalReplay()" [disabled]="normalReplayBusy">{{normalReplayBusy?'Comparing…':'Compare normal strategies'}}</button>
+                <small>Frozen datasets keep their saved dates, baseline settings and execution assumptions. Comparisons run outside market hours.</small>
+              </div>
+              @if(normalReplayError){<p class="historical-replay-warning" role="alert">{{normalReplayError}}</p>}
+              @if(normalReplayReport;as result){
+                @let c=result.comparison;
+                <p role="status">{{c.cohort.includedDates.length}} included days · {{c.cohort.excludedDates.length}} excluded · {{c.evidenceStatus}}</p>
+                <div class="daily-analysis-table"><table><thead><tr><th>After-cost measure</th><th>Baseline</th><th>Proposal</th></tr></thead><tbody>
+                  <tr><td>Net P&amp;L</td><td>₹{{c.baselineNet|number:'1.2-2'}}</td><td>₹{{c.proposalNet|number:'1.2-2'}}</td></tr>
+                  <tr><td>Completed trades</td><td>{{c.baselineTrades}}</td><td>{{c.proposalTrades}}</td></tr>
+                  <tr><td>Win rate</td><td>{{c.baselineWinRate*100|number:'1.1-1'}}%</td><td>{{c.proposalWinRate*100|number:'1.1-1'}}%</td></tr>
+                  <tr><td>Expectancy / trade</td><td>₹{{c.baselineExpectancy|number:'1.2-2'}}</td><td>₹{{c.proposalExpectancy|number:'1.2-2'}}</td></tr>
+                  <tr><td>Worst sampled session drawdown</td><td>₹{{c.baselineWorstSessionDrawdown|number:'1.2-2'}}</td><td>₹{{c.proposalWorstSessionDrawdown|number:'1.2-2'}}</td></tr>
+                  <tr><td>Costs</td><td>₹{{c.baselineCosts|number:'1.2-2'}}</td><td>₹{{c.proposalCosts|number:'1.2-2'}}</td></tr>
+                  <tr><td>Sampled giveback</td><td>{{c.baselineSampledGiveback===null?'Unavailable':'₹'+(c.baselineSampledGiveback|number:'1.2-2')}}</td><td>{{c.proposalSampledGiveback===null?'Unavailable':'₹'+(c.proposalSampledGiveback|number:'1.2-2')}}</td></tr>
+                </tbody></table></div>
+                @if(c.days.length){<div class="daily-analysis-table"><table><thead><tr><th>Session</th><th>Split</th><th>Baseline net</th><th>Proposal net</th><th>Difference</th></tr></thead><tbody>
+                  @for(day of c.days;track day.date;let index=$index){<tr><td>{{day.date}}</td><td>{{index >= c.trainingDays ? 'Held-out' : 'Training'}}</td><td>₹{{day.baseline.netPnl|number:'1.2-2'}}</td><td>₹{{day.proposal.netPnl|number:'1.2-2'}}</td><td [class.good]="day.netDifference>0" [class.bad]="day.netDifference<0">₹{{day.netDifference|number:'1.2-2'}}</td></tr>}
+                </tbody></table></div>}
+                <details><summary>Exclusions, limitations and reproducibility</summary>
+                  <ul>@for(gap of c.evidenceGaps;track gap){<li>{{gap}}</li>}@for(note of result.limitations;track note){<li>{{note}}</li>}</ul>
+                  @for(day of c.cohort.excludedDates;track day.date){<p><strong>{{day.date}}</strong> · {{day.reasons.join('; ')}}</p>}
+                  <small>Saved run: {{result.savedRunId}}<br />Execution build: {{result.executionBuildId}}<br />Baseline code: {{result.baselineBuildId}}<br />Proposal code: {{result.proposalBuildId}}<br />Data: {{c.dataFingerprint || 'No eligible data'}}<br />Run: {{c.runFingerprint || 'No comparison run'}}</small>
+                </details>
+              }
+            </section>
+            <div class="historical-replay-backfill">
+              <button type="button" (click)="checkReplayCohort()" [disabled]="replayCohortBusy">{{replayCohortBusy?'Checking…':'Check full-session eligibility'}}</button>
+              <small>Nifty, Sensex and Bank Nifty on the same dates · incomplete dates excluded before strategy comparison</small>
+              @if(replayCohortError){<p role="alert">{{replayCohortError}}</p>}
+              @if(replayCohort; as cohort){
+                @if(cohort.from===replayFrom && cohort.to===replayTo){
+                  <p role="status">{{cohort.includedDates.length}} eligible days · {{cohort.excludedDates.length}} excluded days</p>
+                  @if(cohort.includedDates.length>0){<p>Included: {{cohort.includedDates.join(', ')}}</p>}
+                  @if(cohort.includedDates.length===0){<p class="historical-replay-warning">No complete three-market sessions in this range. The recorded-candidate prototype below is not a full-strategy verdict.</p>}
+                  <details><summary>Excluded dates and evidence gaps</summary>
+                    <div class="daily-analysis-table"><table><thead><tr><th>Date</th><th>Why excluded</th></tr></thead><tbody>
+                      @for(day of cohort.excludedDates;track day.date){<tr><td>{{day.date}}</td><td>{{day.reasons.join('; ')}}</td></tr>}
+                    </tbody></table></div>
+                  </details>
+                }
+              }
+            </div>
+            <div class="historical-replay-backfill"><button type="button" (click)="checkReplayArchiveCoverage()" [disabled]="replayCoverageBusy">{{replayCoverageBusy?'Checking…':'Check archive coverage for To date'}}</button><small>Exact index/futures minutes and option path availability</small>@if(replayCoverageMessage){<p role="status">{{replayCoverageMessage}}</p>}</div>
+            <div class="historical-replay-backfill"><button type="button" (click)="backfillReplayIndex()" [disabled]="replayIndexBusy">{{replayIndexBusy?'Importing…':'Backfill index session for To date'}}</button><small>Admin-only · official one-minute Groww history · completed session · outside market hours</small>@if(replayIndexMessage){<p role="status">{{replayIndexMessage}}</p>}</div>
+            <div class="historical-replay-backfill"><button type="button" (click)="backfillReplayFuture()" [disabled]="replayFutureBusy">{{replayFutureBusy?'Importing…':'Backfill front future for To date'}}</button><small>Verified historical FNO contract · completed session · outside market hours</small>@if(replayFutureMessage){<p role="status">{{replayFutureMessage}}</p>}</div>
+            <div class="historical-replay-backfill"><button type="button" (click)="backfillReplayDate()" [disabled]="replayBackfillBusy">{{replayBackfillBusy?'Importing…':'Backfill option bars for To date'}}</button><small>Admin-only · completed day · outside market hours · up to 20 recorded contracts</small>@if(replayBackfillMessage){<p role="status">{{replayBackfillMessage}}</p>}</div>
+            <div class="historical-replay-backfill"><button type="button" (click)="discoverReplayExpiries()" [disabled]="replayDiscoveryBusy">{{replayDiscoveryBusy?'Finding expiries…':'Discover historical expiries for To date'}}</button><label>Expiry<select [(ngModel)]="replayExpiry" name="replayExpiry" [disabled]="replayExpiries.length===0"><option value="">Select expiry</option>@for(expiry of replayExpiries;track expiry){<option [value]="expiry">{{expiry}}</option>}</select></label><label>Page<input type="number" [(ngModel)]="replayUniversePage" name="replayUniversePage" min="0" step="1" /></label><button type="button" (click)="backfillReplayUniversePage()" [disabled]="replayUniverseBusy || !replayExpiry">{{replayUniverseBusy?'Importing…':'Import contract page'}}</button><small>Research archive · 20 near-market contracts per page · page starts at 0 · outside market hours. Missing historical instrument metadata is reported, not guessed.</small>@if(replayUniverseMessage){<p role="status">{{replayUniverseMessage}}</p>}</div>
+            @if (replayError) { <p class="form-error" role="alert">{{replayError}}</p> }
+            @if (replayReport; as r) {
+              <p class="historical-replay-warning">This is a partial-coverage research simulation, not the live strategy or an executable P&amp;L forecast. The reference uses the same recorded candidates with default 10% stop / 15% target; it is not the original strategy. Do not compare either simulation directly with actual historical P&amp;L.</p>
+              <div class="historical-replay-metrics"><article><span>Recorded candidates</span><strong>{{r.simulation.candidateCount}}</strong></article><article><span>Simulated exits</span><strong>{{r.simulation.trades.length}}</strong></article><article><span>Missing entry / exit</span><strong>{{r.simulation.missingEntryQuoteCount}} / {{r.simulation.missingExitQuoteCount}}</strong></article><article><span>Replay net (modeled)</span><strong>₹{{r.simulation.netPnl|number:'1.0-0'}}</strong></article><article><span>Replay drawdown</span><strong>₹{{r.simulation.maximumDrawdown|number:'1.0-0'}}</strong></article><article><span>Win rate</span><strong>{{r.simulation.winRate|percent:'1.0-0'}}</strong></article><article><span>Expectancy / trade</span><strong>₹{{r.simulation.expectancy|number:'1.0-0'}}</strong></article><article><span>Modeled charges</span><strong>₹{{r.simulation.totalCosts|number:'1.0-0'}}</strong></article></div>
+              <p class="historical-replay-warning">Chronological validation: {{r.validation.trainingDays}} training days / {{r.validation.validationDays}} later validation days · modeled validation net ₹{{r.validation.validationNetPnl|number:'1.0-0'}} · {{r.validation.verdict}}.</p>
+              <h3>Same-input rule comparison</h3>
+              <div class="daily-analysis-table"><table><thead><tr><th>Date</th><th>Reference net</th><th>Proposed net</th><th>Difference</th><th>Reference trades</th><th>Proposed trades</th></tr></thead><tbody>@for(d of r.dayComparisons;track d.date){<tr><td>{{d.date}}</td><td>₹{{d.referenceNetPnl|number:'1.0-0'}}</td><td>₹{{d.proposedNetPnl|number:'1.0-0'}}</td><td [class.good]="d.difference>0" [class.bad]="d.difference<0">₹{{d.difference|number:'1.0-0'}}</td><td>{{d.referenceTrades}}</td><td>{{d.proposedTrades}}</td></tr>}</tbody></table></div>
+              <h3>Session coverage</h3>
+              <div class="daily-analysis-table"><table><thead><tr><th>Date</th><th>Index minutes</th><th>Missing index</th><th>Longest gap</th><th>Option snapshots</th><th>Option bars</th><th>Candidate signals</th><th>Actual trades</th><th>Actual net</th><th>Coverage</th></tr></thead><tbody>@for(s of r.sessions;track s.date){<tr><td>{{s.date}}</td><td>{{s.indexCandles}} / {{s.expectedIndexMinutes}}</td><td>{{s.missingIndexMinutes}}</td><td>{{s.longestIndexGapMinutes}}m</td><td>{{s.optionChainSnapshots}}</td><td>{{s.optionCandles}}</td><td>{{s.recordedCandidates}}</td><td>{{s.baselineTrades}}</td><td>₹{{s.baselineNetPnl|number:'1.0-0'}}</td><td>{{s.status}}</td></tr>}</tbody></table></div>
+              <h3>Simulated trades</h3>
+              <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Decision</th><th>Entry → exit</th><th>Modeled stop / target</th><th>Quantity</th><th>Net after costs</th><th>Exit</th></tr></thead><tbody>@for(t of r.simulation.trades;track t.symbol+t.entryAtUtc){<tr><td>{{t.symbol}}</td><td>{{t.decisionAtUtc|date:'dd MMM HH:mm':'Asia/Kolkata'}}</td><td>{{t.entryPrice|number:'1.2-2'}} → {{t.exitPrice|number:'1.2-2'}}</td><td>{{t.finalStopPrice===null || t.finalStopPrice===undefined?'—':(t.finalStopPrice|number:'1.2-2')}} / {{t.finalTargetPrice===null || t.finalTargetPrice===undefined?'—':(t.finalTargetPrice|number:'1.2-2')}}</td><td>{{t.quantity}}</td><td>₹{{t.netPnl|number:'1.0-0'}}</td><td>{{t.exitReason}}</td></tr>}</tbody></table></div>
+              <details><summary>Assumptions, limitations and reproducibility</summary><p>{{r.simulation.executionAssumption}}</p><ul>@for(l of r.limitations;track l){<li>{{l}}</li>}</ul><small>Dataset fingerprint: {{r.dataFingerprint}}</small></details>
             }
           </section>
         </div>

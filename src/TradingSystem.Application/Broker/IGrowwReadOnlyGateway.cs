@@ -12,6 +12,14 @@ public interface IGrowwReadOnlyGateway
         GrowwHistoricalCandleRequest request,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<DateOnly>> GetHistoricalExpiriesAsync(
+        string exchange, string underlyingSymbol, int year, int? month,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<string>> GetHistoricalContractsAsync(
+        string exchange, string underlyingSymbol, DateOnly expiryDate,
+        CancellationToken cancellationToken);
+
     Task<GrowwOptionChain> GetOptionChainAsync(
         GrowwOptionChainRequest request,
         CancellationToken cancellationToken);

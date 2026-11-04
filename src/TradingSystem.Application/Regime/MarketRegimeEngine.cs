@@ -4,6 +4,8 @@ namespace TradingSystem.Application.Regime;
 
 public sealed class MarketRegimeEngine(MarketRegimeOptions options)
 {
+    public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(options);
+
     public MarketRegimeResult Evaluate(MarketRegimeInput input)
     {
         ArgumentNullException.ThrowIfNull(input);

@@ -18,17 +18,23 @@ public static class PaperTradingCostModel
 {
     // Groww/NSE equity-option schedule effective 1 April 2026. Contract notes remain authoritative.
     public const string ScheduleVersion = "GROWW-NSE-OPTIONS-2026-04-01";
+    public const string BseScheduleVersion = "GROWW-BSE-OPTIONS-2026-04-01";
     private const decimal BrokeragePerExecutedOrder = 20m;
     private const decimal SttSellRate = 0.0015m;
     private const decimal ExchangeRate = 0.0003503m;
+    // Groww's published BSE equity-option rate: 0.0325% of premium turnover.
+    // https://groww.in/pricing/futures-and-options
+    private const decimal BseExchangeRate = 0.000325m;
     private const decimal InvestorProtectionFundRate = 0.000005m;
     private const decimal SebiRate = 0.000001m;
     private const decimal GstRate = 0.18m;
     private const decimal StampDutyBuyRate = 0.00003m;
 
     public static PaperTradingCostBreakdown CalculateOptionCharges(
-        IEnumerable<PaperOptionTransaction> transactions)
+        IEnumerable<PaperOptionTransaction> transactions, string exchangeCode = "NSE")
     {
+        if (exchangeCode is not ("NSE" or "BSE"))
+            throw new ArgumentOutOfRangeException(nameof(exchangeCode));
         var values = transactions.ToArray();
         if (values.Length == 0) return PaperTradingCostBreakdown.Empty;
         if (values.Any(value => value.Price <= 0 || value.Quantity <= 0))
@@ -41,13 +47,15 @@ public static class PaperTradingCostModel
         var turnover = buyTurnover + sellTurnover;
         var brokerage = BrokeragePerExecutedOrder * values.Length;
         var stt = sellTurnover * SttSellRate;
-        var exchange = turnover * ExchangeRate;
+        var exchange = turnover * (exchangeCode == "BSE" ?
+            BseExchangeRate : ExchangeRate);
         var ipft = turnover * InvestorProtectionFundRate;
         var sebi = turnover * SebiRate;
         var gst = (brokerage + exchange + ipft + sebi) * GstRate;
         var stamp = buyTurnover * StampDutyBuyRate;
         var total = brokerage + stt + exchange + ipft + sebi + gst + stamp;
-        return new(ScheduleVersion, Round(brokerage), Round(stt), Round(exchange), Round(ipft),
+        return new(exchangeCode == "BSE" ? BseScheduleVersion : ScheduleVersion,
+            Round(brokerage), Round(stt), Round(exchange), Round(ipft),
             Round(sebi), Round(gst), Round(stamp), Round(total));
     }
 
