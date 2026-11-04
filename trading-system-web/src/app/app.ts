@@ -1,4 +1,4 @@
-import { AsyncPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
@@ -30,7 +30,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -70,7 +70,8 @@ export class App implements OnInit, OnDestroy {
   protected tokenSuccess = '';
   protected instrumentSyncBusy = false;
   protected showTokenForm = false;
-  protected killSwitchActive = false;
+  protected killSwitchActive: boolean | null = null;
+  private killSwitchRevision = 0;
   protected killSwitchBusy = false;
   protected killSwitchMessage = '';
   protected dailyLossOverrideActive = false;
@@ -565,6 +566,8 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected setKillSwitch(active: boolean): void {
+    if (this.killSwitchBusy) return;
+    this.killSwitchRevision++;
     this.killSwitchBusy = true;
     this.killSwitchMessage = '';
     const reason = active ? 'Administrator emergency stop from dashboard.' :
@@ -579,7 +582,8 @@ export class App implements OnInit, OnDestroy {
       },
       error: () => {
         this.killSwitchBusy = false;
-        this.killSwitchMessage = 'Unable to change the kill switch.';
+        this.killSwitchActive = null;
+        this.killSwitchMessage = 'Unable to confirm the paper kill switch.';
         this.refreshView();
       },
     }));
@@ -693,12 +697,18 @@ export class App implements OnInit, OnDestroy {
   }
 
   private loadKillSwitch(): void {
+    if (this.killSwitchBusy) return;
+    const revision = ++this.killSwitchRevision;
     this.subscriptions.add(this.paperRisk.getKillSwitch().subscribe({
       next: (status) => {
+        if (revision !== this.killSwitchRevision) return;
+        this.killSwitchMessage = '';
         this.killSwitchActive = status.active;
         this.refreshView();
       },
       error: () => {
+        if (revision !== this.killSwitchRevision) return;
+        this.killSwitchActive = null;
         this.killSwitchMessage = 'Kill-switch state is unavailable.';
         this.refreshView();
       },

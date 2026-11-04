@@ -1,6 +1,8 @@
 # Current handover — 4 November 2026
 
-## Trading desk cleanup — authorized after green main CI
+## Trading desk cleanup — authorized for deployment after CI
+
+Nifty, Sensex and Bank Nifty now show the chart immediately followed by positions (or an empty state). Research moved to Reports → Research logs, Hero Zero to navigation, and the global paper kill switch to the chart toolbar with a fallback while the feed loads. No changes to trade decisions or kill-switch semantics. [PR 17](https://github.com/ketan2kt/AlgoTrading/pull/17) includes this layout and the admin search casing fix. Validate via CI, then deploy main once; Ketan will review the live layout.
 
 Controls distinguish unknown/loading from confirmed broker state. Lot writes update only the three supported markets. Reports/navigation and replay maintenance reorganized; older chart history on demand. Admin searches query the entire directory/inbox; capture resource samples reuse existing archive checks. No trading-policy, broker-cadence or database schema changes. CI is the verification path, per Ketan; manual desktop/mobile review and actual capture measurements remain post-release checks. Replay remains subject to the 5 November recorded-session acceptance.
 

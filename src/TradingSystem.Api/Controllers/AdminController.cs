@@ -60,11 +60,17 @@ public sealed class AdminController(
         take = Math.Clamp(take, 1, 100);
         var query = database.ContactInquiries.AsNoTracking();
         var total = await query.CountAsync(cancellationToken);
-        var term = search?.Trim().ToLowerInvariant();
+        var term = search?.Trim();
         if (!string.IsNullOrEmpty(term))
-            query = query.Where(i => i.Name.ToLower().Contains(term) || i.Email.ToLower().Contains(term) ||
-                (i.Company != null && i.Company.ToLower().Contains(term)) || i.Service.ToLower().Contains(term) ||
-                i.Message.ToLower().Contains(term));
+        {
+            var escaped = term.Replace("!", "!!", StringComparison.Ordinal)
+                .Replace("%", "!%", StringComparison.Ordinal).Replace("_", "!_", StringComparison.Ordinal);
+            var pattern = $"%{escaped}%";
+            query = query.Where(i => EF.Functions.ILike(i.Name, pattern, "!") ||
+                EF.Functions.ILike(i.Email, pattern, "!") ||
+                (i.Company != null && EF.Functions.ILike(i.Company, pattern, "!")) ||
+                EF.Functions.ILike(i.Service, pattern, "!") || EF.Functions.ILike(i.Message, pattern, "!"));
+        }
         var matched = string.IsNullOrEmpty(term) ? total : await query.CountAsync(cancellationToken);
         var items = await query.OrderByDescending(inquiry => inquiry.CreatedAtUtc).ThenBy(inquiry => inquiry.Id)
             .Skip(skip)

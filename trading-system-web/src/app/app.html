@@ -65,6 +65,7 @@
         </div>
         <div class="workspace-nav-actions">
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
+          @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') { <button class="workspace-nav-actions__primary" type="button" (click)="openHeroZero()">Hero Zero</button> }
           <div class="desk-reports"><button type="button" aria-controls="desk-report-links" [attr.aria-expanded]="reportsOpen" (click)="reportsOpen=!reportsOpen">Reports ▾</button>
           @if(reportsOpen){<div id="desk-report-links" class="desk-report-links" (keydown.escape)="reportsOpen=false">
             <button type="button" (click)="reportsOpen=false;openReport()">Performance</button>
@@ -78,34 +79,15 @@
         </div>
       </nav>
       <div class="workspace-shell">
-      <section class="workspace-heading">
-        <div>
-          <p class="eyebrow">LIVE TRADING WORKSPACE</p>
-          <h1>{{preparedMarketName()}} command view</h1>
-          <p>
-            Signed in as {{ user.username }} · Chart data is accepted only from the configured Groww
-            live source.
-          </p>
-          @if (workspace; as summary) {
-            <div class="workspace-heading__metrics" aria-label="Current session summary">
-              <span><i [class.live]="summary.isLive && summary.isFresh"></i>{{ summary.feedStatus }}</span>
-              <span>{{ summary.paperAutomation.tradesToday }} trades</span>
-              <span [class.good]="summary.paperAutomation.realisedPnl > 0" [class.bad]="summary.paperAutomation.realisedPnl < 0">₹{{ summary.paperAutomation.realisedPnl | number:'1.0-0' }} realised</span>
-              <span>{{ summary.paperAutomation.portfolioRisk?.openPositions ?? summary.paperAutomation.activePositionMarks?.length ?? 0 }} open</span>
-            </div>
-          }
-        </div>
-        <div class="workspace-actions">
-
-          @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') {
-            <button class="secondary-button hz-button" type="button" (click)="openHeroZero()">HZ</button>
-
-          }
-
-        </div>
-      </section>
-
-
+      <ng-template #paperStop>
+        <button type="button" class="desk-paper-stop" [class.is-active]="killSwitchActive === true"
+          [class.is-unknown]="killSwitchActive === null" [disabled]="killSwitchBusy"
+          [attr.aria-label]="killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch'"
+          [title]="killSwitchActive ? 'Clear the global paper kill switch' : 'Activate the global paper kill switch'"
+          (click)="setKillSwitch(!killSwitchActive)">Paper kill switch: {{ killSwitchBusy ? 'Updating…' : killSwitchActive === null ? 'Unknown' : killSwitchActive ? 'ON' : 'OFF' }}</button>
+        @if (killSwitchMessage) { <small role="status">{{ killSwitchMessage }}</small> }
+      </ng-template>
+      @if (!workspace) { <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div> }
       @if(tokenStatusLoading){<p class="feed-notice" role="status">Checking token status…</p>}
       @else if(!tokenStatus.isConfigured || tokenStatus.isExpired || tokenError || workspace?.feedStatus === 'InstrumentUnavailable'){
         <div class="feed-notice feed-notice--warning" role="status">Broker maintenance required. <button type="button" (click)="openControls()">Open Controls</button></div>
@@ -162,7 +144,7 @@
             @if (selectedMarket !== 'natural-gas') { <section class="option-routing-panel"><div><span>OPTION ROUTING</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for signal' }}</strong></div>@if (view.paperAutomation.selectedOptionSymbol) { <div><span>Type / strike</span><strong>{{ view.paperAutomation.selectedOptionType }} / {{ view.paperAutomation.selectedOptionStrike | number:'1.0-0' }}</strong></div><div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date:'dd MMM':'Asia/Kolkata' }}</strong></div> }</section> }
             @if (operationalAlerts(view).length) { <div class="feed-notice feed-notice--warning">{{ operationalAlerts(view)[0] }}</div> }
             }
-            <section class="safety-panel control-center-card"><span>EMERGENCY CONTROL</span><strong>{{ killSwitchActive ? 'Kill switch active' : 'Paper automation available' }}</strong><button type="button" [disabled]="killSwitchBusy" (click)="setKillSwitch(!killSwitchActive)">{{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}</button></section>
+            <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
           </section>
         </div>
         }
@@ -257,138 +239,10 @@
           </section>
         </div>
         }
-        <section class="market-strip legacy-control-section" [attr.aria-label]="'Live ' + preparedMarketName() + ' feed status'">
-          <article>
-            <span>Instrument</span><strong>{{ view.exchange }} · {{ view.instrument }}</strong>
-          </article>
-          <article>
-            <span>Feed</span
-            ><strong [class.good]="view.isLive && view.isFresh" [class.bad]="!view.isLive">{{
-              view.feedStatus
-            }}</strong>
-          </article>
-          <article>
-            <span>Data state</span><strong>{{ view.isFresh ? 'Fresh' : 'Trading blocked' }}</strong>
-          </article>
-          <article>
-            <span>Last market update</span
-            ><strong>{{
-              view.lastMarketTimestampUtc
-                ? (view.lastMarketTimestampUtc | date: 'HH:mm:ss' : 'Asia/Kolkata') + ' IST'
-                : '—'
-            }}</strong>
-          </article>
-          <article>
-            <span>Quote age</span>
-            <strong [class.bad]="!view.isFresh || (marketDataAgeSeconds(view) ?? 999) > 5">
-              {{ marketDataAgeLabel(view) }}{{ view.isFresh && (marketDataAgeSeconds(view) ?? 999) <= 5 ? ' · Fresh' : ' · Stale' }}
-            </strong>
-          </article>
-          <article>
-            <span>Timeframe</span><strong>{{ view.timeframe }}</strong>
-          </article>
-        </section>
-
-        <section class="market-strip legacy-control-section" aria-label="Automated paper trading status">
-          <article>
-            <span>Paper automation</span
-            ><strong [class.good]="view.paperAutomation.tradingPermitted"
-              [class.bad]="view.paperAutomation.status === 'Faulted' || view.paperAutomation.status === 'ReconciliationRequired'">
-              {{ view.paperAutomation.status }}
-            </strong>
-          </article>
-          <article>
-            <span>Trades today</span><strong>{{ view.paperAutomation.tradesToday }}</strong>
-          </article>
-          <article>
-            <span>Realised P&amp;L</span
-            ><strong [class.good]="view.paperAutomation.realisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl < 0">
-              {{ view.paperAutomation.realisedPnl | number: '1.2-2' }}
-            </strong>
-          </article>
-          <article>
-            <span>Unrealised P&amp;L</span
-            ><strong>{{ view.paperAutomation.unrealisedPnl | number: '1.2-2' }}</strong>
-          </article>
-          <article>
-            <span>Open positions</span><strong>{{ view.paperAutomation.portfolioRisk?.openPositions ?? view.paperAutomation.activePositionMarks?.length ?? 0 }}</strong>
-          </article>
-          @if (view.paperAutomation.portfolioRisk; as portfolioRisk) {
-            <article>
-              <span>Capital exposure</span><strong>₹{{ portfolioRisk.capitalExposure | number: '1.0-0' }}</strong>
-            </article>
-            <article>
-              <span>Risk at stops</span><strong>₹{{ portfolioRisk.openRiskAtStops | number: '1.0-0' }}</strong>
-            </article>
-            <article>
-              <span>Daily loss consumed</span><strong [class.bad]="portfolioRisk.dailyLossConsumed > 0">
-                ₹{{ portfolioRisk.dailyLossConsumed | number: '1.0-0' }} /
-                ₹{{ portfolioRisk.maximumDailyLoss | number: '1.0-0' }}
-              </strong>
-              <button type="button" class="risk-override-button"
-                [class.risk-override-button--active]="dailyLossOverrideActive"
-                [disabled]="dailyLossOverrideBusy"
-                (click)="setDailyLossOverride(!dailyLossOverrideActive)">
-                {{ dailyLossOverrideActive ? 'Restore limit' : 'Ignore limit today' }}
-              </button>
-              @if (dailyLossOverrideActive) { <small class="bad">Daily stop overridden until the next IST trading day.</small> }
-              @if (dailyLossOverrideMessage) { <small>{{ dailyLossOverrideMessage }}</small> }
-            </article>
-          }
-        </section>
-        @if (latestOperationalReport(view); as operations) {
-          <section class="market-strip legacy-control-section" aria-label="Latest automatic operational check">
-            <article><span>AUTOMATIC CHECK</span><strong>{{ operations.kind }}</strong></article>
-            <article><span>STATUS</span><strong [class.good]="!operations.actionRequired" [class.bad]="operations.actionRequired">{{ operations.status }}</strong></article>
-            <article><span>RESULT</span><strong>{{ operations.headline }}</strong></article>
-            <article><span>CHECKED</span><strong>{{ operations.generatedAtUtc | date: 'HH:mm' : 'Asia/Kolkata' }} IST</strong></article>
-          </section>
-        }
-        <div class="feed-notice legacy-control-section" [class.feed-notice--warning]="!view.paperAutomation.tradingPermitted">
-          {{ view.paperAutomation.message }}
-        </div>
-        <section class="readiness-panel legacy-control-section" aria-label="Paper trading readiness">
-          <div class="panel-heading">
-            <div><span>SESSION READINESS</span><strong>Paper-entry prerequisites</strong></div>
-          </div>
-          <div class="readiness-grid">
-            @for (check of view.paperAutomation.readinessChecks || []; track check.code) {
-              <article [class.readiness-pass]="check.ready" [class.readiness-block]="!check.ready">
-                <span>{{ check.ready ? 'READY' : 'BLOCKED' }}</span>
-                <strong>{{ check.label }}</strong>
-                <p>{{ check.detail }}</p>
-              </article>
-            } @empty {
-              <p class="empty-copy">Readiness checks are starting.</p>
-            }
-          </div>
-        </section>
-        @if (selectedMarket !== 'natural-gas') {
-        <section class="option-routing-panel legacy-control-section">
-          <div>
-            <span>OPTION ROUTING</span>
-            <strong>{{ view.paperAutomation.selectedOptionSymbol || 'Waiting for a directional signal' }}</strong>
-          </div>
-          @if (view.paperAutomation.selectedOptionSymbol) {
-            <div><span>Type</span><strong>{{ view.paperAutomation.selectedOptionType }}</strong></div>
-            <div><span>Strike</span><strong>{{ view.paperAutomation.selectedOptionStrike | number: '1.0-2' }}</strong></div>
-            <div><span>Expiry</span><strong>{{ view.paperAutomation.selectedOptionExpiry | date: 'dd MMM yyyy' : 'Asia/Kolkata' }}</strong></div>
-            <div><span>Lot size</span><strong>{{ view.paperAutomation.selectedOptionLotSize }}</strong></div>
-          }
-        </section>
-        }
-
-        @if (view.statusMessage) {
-          <div class="feed-notice legacy-control-section" [class.feed-notice--warning]="!view.isLive">
-            {{ view.statusMessage }}
-          </div>
-        }
-        @if (workspaceError) {
-          <div class="feed-notice feed-notice--warning legacy-control-section">{{ workspaceError }}</div>
-        }
+        @if (workspaceError) { <div class="feed-notice feed-notice--warning" role="alert">{{ workspaceError }}</div> }
 
         <section class="chart-panel workspace-priority-chart">
-          <div class="panel-heading">
+          <div class="panel-heading desk-chart-toolbar">
             <div><span>{{ view.instrument }}</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
             <label class="timeframe-control">
               <span>Timeframe</span>
@@ -402,10 +256,12 @@
                 }
               </select>
             </label>
+            <button type="button" class="desk-history-button" (click)="loadChartHistory()" [disabled]="chartHistoryBusy || !!chartHistory">{{ chartHistoryBusy ? 'Loading…' : chartHistory ? 'History loaded' : 'Older candles' }}</button>
             <div class="legend">
               <span class="dot dot--entry"></span>{{ selectedMarket === 'natural-gas' ? 'Futures entry' : 'Index trigger' }} <span class="dot dot--risk"></span>Invalidation
               <span class="dot dot--reward"></span>Objective
             </div>
+            <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
           </div>
           <div class="chart-status-rail" aria-label="Live decision status">
             <div><span>Automation</span><strong [class.good]="view.paperAutomation.tradingPermitted">{{ view.paperAutomation.status }}</strong></div>
@@ -413,11 +269,60 @@
             <div><span>Session P&amp;L</span><strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></div>
             <div><span>Updated</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') : 'Waiting' }}</strong></div>
           </div>
-          <div class="desk-chart-history"><button type="button" (click)="loadChartHistory()" [disabled]="chartHistoryBusy || !!chartHistory">{{ chartHistoryBusy ? 'Loading older candles…' : chartHistory ? 'Extended history loaded' : 'Load older candles' }}</button><small role="status">{{chartHistoryMessage}}</small></div>
+
+          @if (chartHistoryMessage) { <small class="desk-history-message" role="status">{{ chartHistoryMessage }}</small> }
           <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
           <p class="chart-attribution">
             Charts by TradingView Lightweight Charts™. Market data source: Groww.
           </p>
+
+        </section>
+
+
+        <section class="detail-grid workspace-priority-events">
+          <article class="positions-panel">
+            <div class="panel-heading">
+              <div><span>PAPER TRADES</span><strong>{{ selectedMarket === 'natural-gas' ? 'Natural Gas Mini futures calls and outcomes' : 'Option positions and outcomes' }}</strong></div>
+            </div>
+            @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
+              @for (overlay of executedTrades(view); track overlay.signalId) {
+                <div class="signal-row">
+                  <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
+                  <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
+                  @if (selectedMarket === 'natural-gas') {
+                    <div><span>Side</span><strong [class.good]="overlay.direction === 'Buy'" [class.bad]="overlay.direction === 'Sell'">{{ overlay.direction === 'Sell' ? 'SELL' : 'BUY' }}</strong></div>
+                  }
+                  <div><span>{{ selectedMarket === 'natural-gas' ? 'Entry price' : 'Entry premium' }}</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
+                  <div><span>{{ overlay.exitPrice !== null ? (selectedMarket === 'natural-gas' ? 'Exit price' : 'Exit premium') : (selectedMarket === 'natural-gas' ? 'Current price' : 'Current premium') }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
+                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Structural SL' : 'Premium SL' }}</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
+                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Objective' : 'Premium target' }}</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
+                  <div><span>Quantity</span><strong>{{ overlay.quantity }} units</strong></div>
+                  <div><span>Expiry</span><strong>{{ overlay.executionExpiry | date: 'dd MMM' : 'Asia/Kolkata' }}</strong></div>
+                  <div><span>{{ overlay.realisedPnl !== null ? 'Realised P&L' : 'Live P&L' }}</span><strong [class.good]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) >= 0" [class.bad]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) < 0">₹{{ (overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) | number: '1.2-2' }}</strong></div>
+                  <div><span>Max profit observed</span><strong class="good">@if (overlay.maximumFavourablePnl !== null) { ₹{{ overlay.maximumFavourablePnl | number: '1.2-2' }} } @else { — }</strong></div>
+                  <div><span>Max adverse loss</span><strong class="bad">@if (overlay.maximumAdverseLoss !== null) { ₹{{ overlay.maximumAdverseLoss | number: '1.2-2' }} } @else { — }</strong></div>
+                  <div><span>Trade taken (IST)</span><strong>{{ overlay.entryTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata' }}</strong></div>
+                  <div><span>Exited (IST)</span><strong>{{ overlay.exitTimeUtc ? (overlay.exitTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata') : 'Active' }}</strong></div>
+                  @if (selectedMarket !== 'natural-gas' && overlay.lifecycleStatus.startsWith('Active')) {
+                    <div class="trade-exit-action">
+                      <button type="button" (click)="requestTradeExit(overlay)"
+                        [disabled]="requestedTradeExits.has(selectedMarket + ':' + overlay.signalId)">
+                        {{ requestedTradeExits.has(selectedMarket + ':' + overlay.signalId) ? 'Exit requested' : 'Exit trade' }}
+                      </button>
+                    </div>
+                  }
+                </div>
+              } @empty { <p class="empty-copy">No trades taken for this market this session.</p> }
+          </article>
+        </section>
+
+        @if (logsOpen) {
+        <div class="logs-backdrop" (click)="closeLogs()">
+        <section class="evaluation-panel logs-modal research-modal" role="dialog" aria-modal="true" aria-label="Research logs" (click)="$event.stopPropagation()">
+          <header class="panel-heading dialog-heading">
+            <div><span>RESEARCH LOGS</span><h2>Research logs</h2><p>15-minute decisions and trade outcomes</p></div>
+            <button type="button" class="dialog-close" (click)="closeLogs()" aria-label="Close research logs">×</button>
+          </header>
           @if (view.research; as research) {
             <section class="market-strip" aria-label="Champion challenger research status">
               <article><span>RESEARCH SESSION</span><strong>{{research.sessionDate}}</strong></article>
@@ -549,63 +454,6 @@
               </details>
             }
           }
-        </section>
-
-        @if (operationalAlerts(view).length) {
-          <section class="logs-launch workspace-priority-events alert-strip legacy-control-section"><div><span>OPERATIONAL ALERTS</span><strong>{{operationalAlerts(view)[0]}}</strong></div><span>{{operationalAlerts(view).length}} active</span></section>
-        }
-
-        @if (executedTrades(view).length) {
-        <section class="detail-grid workspace-priority-events">
-          <article class="positions-panel">
-            <div class="panel-heading">
-              <div><span>PAPER TRADES</span><strong>{{ selectedMarket === 'natural-gas' ? 'Natural Gas Mini futures calls and outcomes' : 'Option positions and outcomes' }}</strong></div>
-            </div>
-            @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
-              @for (overlay of executedTrades(view); track overlay.signalId) {
-                <div class="signal-row">
-                  <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
-                  <div><span>Contract</span><strong>{{ compactOptionName(overlay) }}</strong></div>
-                  @if (selectedMarket === 'natural-gas') {
-                    <div><span>Side</span><strong [class.good]="overlay.direction === 'Buy'" [class.bad]="overlay.direction === 'Sell'">{{ overlay.direction === 'Sell' ? 'SELL' : 'BUY' }}</strong></div>
-                  }
-                  <div><span>{{ selectedMarket === 'natural-gas' ? 'Entry price' : 'Entry premium' }}</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
-                  <div><span>{{ overlay.exitPrice !== null ? (selectedMarket === 'natural-gas' ? 'Exit price' : 'Exit premium') : (selectedMarket === 'natural-gas' ? 'Current price' : 'Current premium') }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
-                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Structural SL' : 'Premium SL' }}</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
-                    <div><span>{{ selectedMarket === 'natural-gas' ? 'Objective' : 'Premium target' }}</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
-                  <div><span>Quantity</span><strong>{{ overlay.quantity }} units</strong></div>
-                  <div><span>Expiry</span><strong>{{ overlay.executionExpiry | date: 'dd MMM' : 'Asia/Kolkata' }}</strong></div>
-                  <div><span>{{ overlay.realisedPnl !== null ? 'Realised P&L' : 'Live P&L' }}</span><strong [class.good]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) >= 0" [class.bad]="(overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) < 0">₹{{ (overlay.realisedPnl ?? overlay.unrealisedPnl ?? 0) | number: '1.2-2' }}</strong></div>
-                  <div><span>Max profit observed</span><strong class="good">@if (overlay.maximumFavourablePnl !== null) { ₹{{ overlay.maximumFavourablePnl | number: '1.2-2' }} } @else { — }</strong></div>
-                  <div><span>Max adverse loss</span><strong class="bad">@if (overlay.maximumAdverseLoss !== null) { ₹{{ overlay.maximumAdverseLoss | number: '1.2-2' }} } @else { — }</strong></div>
-                  <div><span>Trade taken (IST)</span><strong>{{ overlay.entryTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata' }}</strong></div>
-                  <div><span>Exited (IST)</span><strong>{{ overlay.exitTimeUtc ? (overlay.exitTimeUtc | date: 'dd MMM, HH:mm:ss' : 'Asia/Kolkata') : 'Active' }}</strong></div>
-                  @if (selectedMarket !== 'natural-gas' && overlay.lifecycleStatus.startsWith('Active')) {
-                    <div class="trade-exit-action">
-                      <button type="button" (click)="requestTradeExit(overlay)"
-                        [disabled]="requestedTradeExits.has(selectedMarket + ':' + overlay.signalId)">
-                        {{ requestedTradeExits.has(selectedMarket + ':' + overlay.signalId) ? 'Exit requested' : 'Exit trade' }}
-                      </button>
-                    </div>
-                  }
-                </div>
-              }
-          </article>
-        </section>
-        }
-
-        <section class="logs-launch workspace-priority-audit legacy-control-section">
-          <div><span>RESEARCH LOGS</span><strong>{{ view.evaluations.length }} session records</strong></div>
-          <button type="button" (click)="openLogs()">View logs</button>
-        </section>
-
-        @if (logsOpen) {
-        <div class="logs-backdrop" (click)="closeLogs()">
-        <section class="evaluation-panel logs-modal research-modal" role="dialog" aria-modal="true" aria-label="Research logs" (click)="$event.stopPropagation()">
-          <header class="panel-heading dialog-heading">
-            <div><span>RESEARCH LOGS</span><h2>Research logs</h2><p>15-minute decisions and trade outcomes</p></div>
-            <button type="button" class="dialog-close" (click)="closeLogs()" aria-label="Close research logs">×</button>
-          </header>
           @if (view.evaluations.length) {
             <div class="evaluation-table" role="table" aria-label="Strategy evaluation history">
               @for (evaluation of view.evaluations; track evaluation.evaluationId) {
@@ -852,18 +700,7 @@
         </div>
         }
 
-        <section class="safety-panel">
-          <span>SAFETY STATE</span><strong>{{ view.mode }} mode</strong>
-          <p>
-            Live market monitoring may run, but real-order capability remains absent. Stale or
-            disconnected data blocks decisions.
-          </p>
-          <button type="button" [disabled]="killSwitchBusy"
-            (click)="setKillSwitch(!killSwitchActive)">
-            {{ killSwitchActive ? 'Clear paper kill switch' : 'Activate paper kill switch' }}
-          </button>
-          @if (killSwitchMessage) { <p>{{ killSwitchMessage }}</p> }
-        </section>
+
       }
       </div>
       </div>
