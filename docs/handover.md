@@ -1,5 +1,13 @@
 # Current handover
 
+## 4 November Sensex/Nifty incident fix
+
+Branch `fix/sensex-nifty-nov4` is isolated from the paused, uncommitted replay work. At 11:20 IST, production diagnostics showed five closed Sensex regular trades, all stop exits, net -₹25,937.22. Two same-side re-entries followed full-sized stops within ten minutes (09:44 CE and 10:37 PE). Read-only review of 27 October–3 November found one earlier such full-loss repeat (28 October 09:42 PE), also a loss; near-flat re-entries sometimes won. The new risk-normalized full-stop policy defers only rapid same-side repeats after a full stop; first/opposite-side entries and specialty strategies remain eligible. Evidence is limited, not a profitability claim.
+
+Nifty had no regular strategy evaluations recorded on 3 November despite Hero Zero activity. Existing diagnostics cannot recover which pre-evaluation prerequisite blocked it. On 4 November, regular candidates were evaluated and rejected for timing, location, maturity/room or low futures volume. The no-trade monitor now distinguishes missing regular evaluation from Hero Zero activity; no Nifty threshold was loosened without evidence.
+
+Focused tests and complete backend suite passed (126 contract, 383 unit, 2 architecture, 30 integration; 3 integration skipped). Entry-path review `docs/entry-path-reviews/sensex-full-stop-reentry-nov4.json` shows 51 historical regular Sensex entries and no paths removed. PR/deployment outcome remains to be recorded. Historical Strategy Replay remains unfinished and paused in the original worktree; it is not part of this branch.
+
 Updated: 2026-10-27 (Asia/Calcutta).
 
 ## Trade timeline and Hero Zero P&L inclusion (27 October; deployment requested)

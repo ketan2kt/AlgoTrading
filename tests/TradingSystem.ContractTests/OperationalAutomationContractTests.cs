@@ -37,6 +37,22 @@ public sealed class OperationalAutomationContractTests
     }
 
     [Fact]
+    public void HeroZeroAuditDoesNotMasqueradeAsRegularNiftyEvaluation()
+    {
+        var source = Report(new DailyTradingDiagnosticsSummary(
+            57, 0, 57, new Dictionary<string, int> { ["HeroZero:Waiting for confirmation"] = 57 },
+            0, 0, 0, 0, 0m, 0m, 0m, Now.AddHours(-2), Now, Now));
+
+        var result = OperationalAutomationService.BuildReport(
+            new("NoTradeWatch:1200", new TimeOnly(12, 0)), source, true, null, Now);
+
+        Assert.Equal("Attention", result.Status);
+        Assert.True(result.ActionRequired);
+        Assert.Equal("0", result.Metrics["regularEvaluations"]);
+        Assert.Contains("No Nifty regular-strategy evaluation", result.Headline);
+    }
+
+    [Fact]
     public void ReadinessReportsAuthenticationFailureWithoutExposingASecret()
     {
         var result = OperationalAutomationService.BuildReport(
