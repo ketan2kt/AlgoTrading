@@ -17,9 +17,8 @@ import { PaperRiskService } from './paper-risk.service';
 import { GrowwLivePosition, GrowwPositionsService } from './groww-positions.service';
 import { DailyDiagnostics, PaperPnlSummary, PaperReportService, PaperTradingReport, PaperTradeHistoryItem } from './paper-report.service';
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
-import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
-import { TradingLotConfiguration, TradingLotsService } from './trading-lots.service';
-import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, HistoricalPolicyBuild, HistoricalReplayCohortCoverage, HistoricalReplayResearchReport, HistoricalReplayService } from './historical-replay.service';
+import { ReplayPanelComponent } from './replay-panel.component';
+import { MarketControlsComponent } from './market-controls.component';
 import {
   buildMarketNarratorEvents,
   MarketNarratorEvent,
@@ -31,7 +30,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -44,10 +43,7 @@ export class App implements OnInit, OnDestroy {
   private readonly paperRisk = inject(PaperRiskService);
   private readonly growwPositionsService = inject(GrowwPositionsService);
   private readonly paperReportService = inject(PaperReportService);
-  private readonly historicalReplayService = inject(HistoricalReplayService);
   private readonly heroZeroService = inject(HeroZeroService);
-  private readonly liveExecutionService = inject(LiveExecutionService);
-  private readonly tradingLotsService = inject(TradingLotsService);
   private readonly subscriptions = new Subscription();
 
   protected user: CurrentUser | null = null;
@@ -91,40 +87,6 @@ export class App implements OnInit, OnDestroy {
   protected reportError = '';
   protected report: PaperTradingReport | null = null;
   protected replayOpen = false;
-  protected replayLoading = false;
-  protected replayError = '';
-  protected replayReport: HistoricalReplayResearchReport | null = null;
-  protected normalReplayReport: HistoricalNormalReplayReport | null = null;
-  protected normalReplayBusy = false;
-  protected normalReplayError = '';
-  protected normalReplayStopPercent = 10;
-  protected replayPolicyBuilds:HistoricalPolicyBuild[]=[];
-  protected replayBaselineBuild='';
-  protected replayProposalBuild='';
-  protected replaySavedRuns:HistoricalNormalReplayRunSummary[]=[];
-  protected replayFrozenInputRun='';
-  protected replayCohort: HistoricalReplayCohortCoverage | null = null;
-  protected replayCohortBusy = false;
-  protected replayCohortError = '';
-  protected replayFrom = this.isoDateDaysAgo(7);
-  protected replayTo = this.isoDateDaysAgo(1);
-  protected replayMarket = 'nifty';
-  protected replayStopPercent = 0.10;
-  protected replayTargetPercent = 0.15;
-  protected replayBackfillBusy = false;
-  protected replayBackfillMessage = '';
-  protected replayIndexBusy = false;
-  protected replayIndexMessage = '';
-  protected replayFutureBusy = false;
-  protected replayFutureMessage = '';
-  protected replayCoverageBusy = false;
-  protected replayCoverageMessage = '';
-  protected replayExpiries: string[] = [];
-  protected replayExpiry = '';
-  protected replayUniversePage = 0;
-  protected replayDiscoveryBusy = false;
-  protected replayUniverseBusy = false;
-  protected replayUniverseMessage = '';
   protected dailyAnalysisOpen = false;
   protected dailyAnalysisLoading = false;
   protected dailyAnalysisError = '';
@@ -149,13 +111,7 @@ export class App implements OnInit, OnDestroy {
   private marketClockTimer: ReturnType<typeof setInterval> | null = null;
   protected marketClockNow = Date.now();
   protected controlsOpen = false;
-  protected liveExecution: LiveExecutionStatus | null = null;
-  protected liveExecutionBusyMarket: string | null = null;
-  protected liveExecutionMessage = '';
-  protected tradingLots: TradingLotConfiguration = { niftyLots: 10, sensexLots: 10,
-    bankNiftyLots: 10, bankexLots: 10, updatedAtUtc: null };
-  protected tradingLotsBusy = false;
-  protected tradingLotsMessage = '';
+  protected reportsOpen = false;
   private tradeStates = new Map<string, string>();
   private initializedTradeMarkets = new Set<TradingMarketCode>();
   protected marketTabAlerts = new Map<TradingMarketCode, TradeAlertKind>();
@@ -172,6 +128,34 @@ export class App implements OnInit, OnDestroy {
   private narratorSnapshots = new Map<Exclude<TradingMarketCode, 'natural-gas'>, TradingWorkspaceSnapshot>();
   private narratedKeys = new Map<string, number>();
   private narratorToastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  protected chartHistory: TradingWorkspaceSnapshot | null = null;
+  protected chartHistoryBusy = false;
+  protected chartHistoryMessage = '';
+  private historyRequest?: Subscription;
+  private resetHistory():void {
+    this.historyRequest?.unsubscribe(); this.chartHistory=null; this.chartHistoryBusy=false; this.chartHistoryMessage='';
+  }
+  protected loadChartHistory():void {
+    const market=this.selectedMarket;
+    if(!market || !this.workspace || this.chartHistoryBusy || this.chartHistory) return;
+    this.chartHistoryBusy=true; this.chartHistoryMessage='';
+    this.historyRequest=this.workspaceService.getMarket(market,true).subscribe({
+      next:s=>{if(this.selectedMarket!==market || !this.workspace)return;
+        this.chartHistory=s;this.chartHistoryBusy=false;this.workspace=this.withHistory(this.workspace);this.refreshView();},
+      error:()=>{this.chartHistoryBusy=false;this.chartHistoryMessage='Older history unavailable. Retry when ready.';this.refreshView();}
+    });
+    this.subscriptions.add(this.historyRequest);
+  }
+  private withHistory(view:TradingWorkspaceSnapshot):TradingWorkspaceSnapshot {
+    const h=this.chartHistory;
+    if(!h || h.instrument!==view.instrument || h.exchange!==view.exchange || !view.candles.length)return view;
+    const prepend=<T extends {openTimeUtc:string}>(older:T[],live:T[])=>{
+      if(!live.length)return older.slice(-7000);
+      const first=Date.parse(live[0].openTimeUtc);
+      return [...older.filter(c=>Date.parse(c.openTimeUtc)<first),...live].slice(-7000);
+    };
+    return {...view,candles:prepend(h.candles,view.candles),futuresVolume:prepend(h.futuresVolume??[],view.futuresVolume??[])};
+  }
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];
   protected selectedMarket: TradingMarketCode | null = this.marketFromPath();
@@ -185,6 +169,7 @@ export class App implements OnInit, OnDestroy {
       if (routeChanged) this.refreshView();
       return;
     }
+    this.resetHistory();
     this.selectedMarket = market;
     this.workspace = null;
     if (market !== null) {
@@ -289,6 +274,7 @@ export class App implements OnInit, OnDestroy {
   protected openMarket(market: TradingMarketCode): void {
     if (market === this.selectedMarket && this.workspace !== null) return;
     const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
+    this.resetHistory();
     window.history.pushState({}, '', path);
     this.selectedMarket = market;
     this.workspace = null;
@@ -297,14 +283,9 @@ export class App implements OnInit, OnDestroy {
     this.refreshView();
   }
 
-  protected backToMarkets(): void {
-    window.location.assign('/');
-  }
-
   protected openControls(): void {
     this.controlsOpen = true;
-    this.loadLiveExecution();
-    this.loadTradingLots();
+
   }
   protected closeControls(): void { this.controlsOpen = false; }
   protected openNarrator(): void { this.narratorOpen = true; this.ensureTradeAlertsReady(); }
@@ -346,72 +327,6 @@ export class App implements OnInit, OnDestroy {
     this.speakNarratorMessage('Sarthi market narrator is ready for index markets.');
   }
 
-  protected loadLiveExecution(): void {
-    this.subscriptions.add(this.liveExecutionService.getStatus().subscribe({
-      next: status => { this.liveExecution = status; this.refreshView(); },
-      error: () => { this.liveExecutionMessage = 'Live execution status is unavailable.'; this.refreshView(); },
-    }));
-  }
-
-  protected loadTradingLots(): void {
-    this.subscriptions.add(this.tradingLotsService.get().subscribe({
-      next: value => { this.tradingLots = value; this.refreshView(); },
-      error: () => { this.tradingLotsMessage = 'Unable to load saved lot sizes.'; this.refreshView(); },
-    }));
-  }
-
-  protected saveTradingLots(): void {
-    const nifty = Number(this.tradingLots.niftyLots);
-    const sensex = Number(this.tradingLots.sensexLots);
-    const bankNifty = Number(this.tradingLots.bankNiftyLots);
-    if (!Number.isInteger(nifty) || !Number.isInteger(sensex) ||
-        !Number.isInteger(bankNifty) ||
-        [nifty, sensex, bankNifty].some(lots => lots < 1 || lots > 50)) {
-      this.tradingLotsMessage = 'Enter whole lot values between 1 and 50.';
-      return;
-    }
-    this.tradingLotsBusy = true;
-    this.tradingLotsMessage = '';
-    this.subscriptions.add(this.tradingLotsService.save(nifty, sensex, bankNifty,
-      this.tradingLots.bankexLots).subscribe({
-      next: value => {
-        this.tradingLots = value;
-        this.tradingLotsBusy = false;
-        this.tradingLotsMessage = 'Saved. New index entries will use these lot sizes.';
-        this.refreshView();
-      },
-      error: () => {
-        this.tradingLotsBusy = false;
-        this.tradingLotsMessage = 'Unable to save lot sizes.';
-        this.refreshView();
-      },
-    }));
-  }
-
-  protected isLiveArmed(market: string): boolean {
-    return this.liveExecution?.markets?.find(value => value.market === market)?.armed === true;
-  }
-
-  protected setLiveExecution(market: string): void {
-    if (!this.liveExecution || this.liveExecutionBusyMarket) return;
-    const armed = !this.isLiveArmed(market);
-    this.liveExecutionBusyMarket = market;
-    this.liveExecutionMessage = '';
-    this.subscriptions.add(this.liveExecutionService.setArmed(market, armed).subscribe({
-      next: status => {
-        this.liveExecution = status;
-        this.liveExecutionBusyMarket = null;
-        this.liveExecutionMessage = `${market} live entries ${armed ? 'ON' : 'OFF'}.`;
-        this.refreshView();
-      },
-      error: () => {
-        this.liveExecutionBusyMarket = null;
-        this.liveExecutionMessage = `${market} live switch change failed. Refresh and check server readiness.`;
-        this.refreshView();
-      },
-    }));
-  }
-
   protected preparedMarketName(): string {
     return this.selectedMarket === 'nifty' ? 'Nifty' :
       this.selectedMarket === 'sensex' ? 'Sensex' :
@@ -428,7 +343,7 @@ export class App implements OnInit, OnDestroy {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     return path === '/nifty' ? 'nifty' : path === '/sensex' ? 'sensex' :
       path === '/bank-nifty' ? 'bank-nifty' :
-      path === '/natural-gas' ? 'natural-gas' : null;
+      path === '/natural-gas' ? 'nifty' : path === '/bankex' ? 'bank-nifty' : null;
   }
 
   private adminPath(): boolean {
@@ -538,164 +453,7 @@ export class App implements OnInit, OnDestroy {
     }));
   }
   protected closeReport():void { this.reportOpen=false; }
-  protected openHistoricalReplay():void {
-    this.replayOpen=true; this.runHistoricalReplay();
-    this.loadSavedNormalRuns();
-    this.subscriptions.add(this.historicalReplayService.policyBuilds().subscribe({
-      next:value=>{this.replayPolicyBuilds=value;this.refreshView();},
-      error:()=>{this.normalReplayError='Unable to verify saved strategy builds. No older build will be substituted.';this.refreshView();},
-    }));
-  }
-  private loadSavedNormalRuns():void {
-    this.subscriptions.add(this.historicalReplayService.savedNormalRuns().subscribe({
-      next:value=>{this.replaySavedRuns=value;this.refreshView();},
-      error:()=>{this.normalReplayError='Unable to read saved replay runs.';this.refreshView();},
-    }));
-  }
-  protected showSavedNormalReport():void {
-    if(!this.replayFrozenInputRun)return;
-    this.normalReplayBusy=true;this.normalReplayError='';
-    this.subscriptions.add(this.historicalReplayService.savedNormalReport(this.replayFrozenInputRun).subscribe({
-      next:value=>{this.normalReplayReport=value;this.normalReplayBusy=false;this.refreshView();},
-      error:()=>{this.normalReplayBusy=false;this.normalReplayError='Saved replay report is unavailable or failed integrity validation.';this.refreshView();},
-    }));
-  }
-  protected closeHistoricalReplay():void { this.replayOpen=false; }
-  protected runNormalReplay():void {
-    if(!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo ||
-        this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75) {
-      this.normalReplayError='Choose completed dates and a premium stop between 0 and 75%.';return;
-    }
-    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
-    this.subscriptions.add(this.historicalReplayService.compareNormal(this.replayFrom,
-      this.replayTo,this.normalReplayStopPercent,this.replayBaselineBuild,this.replayProposalBuild,this.replayFrozenInputRun).subscribe({
-      next:value=>{this.normalReplayReport=value;this.normalReplayBusy=false;this.loadSavedNormalRuns();this.refreshView();},
-      error:error=>{this.normalReplayBusy=false;this.normalReplayError=
-        typeof error.error==='string'?error.error:'Normal-policy comparison failed. Check dates and frozen archive inputs.';this.refreshView();},
-    }));
-  }
-  protected checkReplayCohort():void {
-    if (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo) {
-      this.replayCohortError='Select a valid completed date range.'; return;
-    }
-    this.replayCohortBusy=true; this.replayCohortError=''; this.replayCohort=null;
-    this.subscriptions.add(this.historicalReplayService.cohortCoverage(
-      this.replayFrom,this.replayTo).subscribe({
-      next:value=>{this.replayCohort=value;this.replayCohortBusy=false;this.refreshView();},
-      error:()=>{this.replayCohortBusy=false;this.replayCohortError='Full-session coverage unavailable for this date range.';this.refreshView();},
-    }));
-  }
-  protected runHistoricalReplay():void {
-    if (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo) {
-      this.replayError='Select a valid completed date range.'; return;
-    }
-    this.replayLoading=true; this.replayError=''; this.replayReport=null;
-    this.subscriptions.add(this.historicalReplayService.get(this.replayFrom,this.replayTo,
-      this.replayMarket,this.replayStopPercent,this.replayTargetPercent).subscribe({
-      next:value=>{this.replayReport=value;this.replayLoading=false;this.refreshView();},
-      error:()=>{this.replayLoading=false;this.replayError='Replay unavailable. Check dates, parameters and archive coverage.';this.refreshView();},
-    }));
-  }
-  protected backfillReplayDate():void {
-    this.replayBackfillBusy=true; this.replayBackfillMessage='';
-    this.subscriptions.add(this.historicalReplayService.backfill(this.replayTo,
-      this.replayMarket).subscribe({
-      next:value=>{
-        this.replayBackfillBusy=false;
-        this.replayBackfillMessage=`Imported ${value.addedCandles} option bars from ${value.fetchedContracts} recorded contracts.`+
-          (value.unavailableSymbols.length ? ` ${value.unavailableSymbols.length} contracts lacked broker metadata.` : '');
-        this.runHistoricalReplay(); this.refreshView();
-      },
-      error:()=>{this.replayBackfillBusy=false;this.replayBackfillMessage='Backfill unavailable. Use a completed day outside market hours with a valid Groww connection.';this.refreshView();},
-    }));
-  }
-  protected backfillReplayIndex():void {
-    this.replayIndexBusy=true; this.replayIndexMessage='';
-    this.subscriptions.add(this.historicalReplayService.backfillIndex(this.replayTo,
-      this.replayMarket).subscribe({
-      next:value=>{
-        this.replayIndexBusy=false;
-        this.replayIndexMessage=`Stored ${value.addedCandles} new index candles; ${value.presentMinutes}/${value.expectedMinutes} session minutes covered.`;
-        this.runHistoricalReplay(); this.refreshView();
-      },
-      error:()=>{
-        this.replayIndexBusy=false;
-        this.replayIndexMessage='Index import unavailable. Use a completed session outside market hours with a valid Groww connection.';
-        this.refreshView();
-      },
-    }));
-  }
-  protected backfillReplayFuture():void {
-    this.replayFutureBusy=true; this.replayFutureMessage='';
-    this.subscriptions.add(this.historicalReplayService.backfillFuture(this.replayTo,
-      this.replayMarket).subscribe({
-      next:value=>{
-        this.replayFutureBusy=false;
-        this.replayFutureMessage=`Stored ${value.addedCandles} new front-future candles for ${value.growwSymbol}${value.matchedInstrumentMetadata?'':' in the research archive'}.`;
-        this.refreshView();
-      },
-      error:()=>{
-        this.replayFutureBusy=false;
-        this.replayFutureMessage='No verified historical future was available or import failed. Check the completed day and Groww connection.';
-        this.refreshView();
-      },
-    }));
-  }
-  protected checkReplayArchiveCoverage():void {
-    this.replayCoverageBusy=true; this.replayCoverageMessage='';
-    this.subscriptions.add(this.historicalReplayService.archiveCoverage(this.replayTo,
-      this.replayMarket).subscribe({
-      next:value=>{
-        this.replayCoverageBusy=false;
-        this.replayCoverageMessage=`Index ${value.indexPresentMinutes}/375 · futures ${value.frontFuturePresentMinutes}/375 · prior close ${value.previousCloseAvailable?'ready':'missing'} · mapped option paths ${value.mappedContractsWithPricePath}/${value.mappedOptionContracts} · unmapped paths ${value.unmappedContractsWithPricePath} · selected expiry pages ${value.completeSelectedExpiryUniverses}/${value.recordedExpiryUniverses} complete · selected contract paths ${value.selectedPageContractsWithPricePath}/${value.selectedPageContracts} (full minute paths ${value.selectedPageContractsWithCompleteMinutePath}; matched lot metadata ${value.selectedPageContractsWithMappedLotMetadata}) · dated pre-open master ${value.datedInstrumentMasterFingerprint?'captured':'missing'} · executable bid/offer ${value.executableBidOfferObservations}/${value.optionQuoteObservations} · chain receipt LTP ${value.chainLtpObservations} (OI ${value.chainLtpObservationsWithOi}) · candle-close proxies ${value.candleCloseProxyObservations} · chain snapshots ${value.receivedOptionChainSnapshots}. ${value.underlyingReady?'Underlying archive complete; full strategy inputs and executable option universe still unverified.':'Underlying archive incomplete.'}`;
-        this.refreshView();
-      },
-      error:()=>{
-        this.replayCoverageBusy=false;
-        this.replayCoverageMessage='Archive coverage unavailable for this completed day.';
-        this.refreshView();
-      },
-    }));
-  }
-  protected discoverReplayExpiries():void {
-    this.replayDiscoveryBusy=true; this.replayUniverseMessage='';
-    this.replayExpiries=[]; this.replayExpiry=''; this.replayUniversePage=0;
-    this.subscriptions.add(this.historicalReplayService.expiries(this.replayTo,
-      this.replayMarket).subscribe({
-      next:value=>{
-        this.replayDiscoveryBusy=false;
-        this.replayExpiries=value.expiries;
-        this.replayExpiry=value.expiries[0] ?? '';
-        this.replayUniverseMessage=value.expiries.length
-          ? `${value.expiries.length} historical expiries found. Select an expiry and import pages.`
-          : 'No historical expiry found for this completed day.';
-        this.refreshView();
-      },
-      error:()=>{this.replayDiscoveryBusy=false;
-        this.replayUniverseMessage='Expiry discovery unavailable. Try outside market hours with a valid Groww connection.';
-        this.refreshView();},
-    }));
-  }
-  protected backfillReplayUniversePage():void {
-    if (!this.replayExpiry || !this.replayExpiries.includes(this.replayExpiry) ||
-        !Number.isInteger(this.replayUniversePage) || this.replayUniversePage<0) {
-      this.replayUniverseMessage='Discover and select a valid expiry and page first.'; return;
-    }
-    this.replayUniverseBusy=true; this.replayUniverseMessage='';
-    this.subscriptions.add(this.historicalReplayService.backfillUniverse(this.replayTo,
-      this.replayMarket,this.replayExpiry,this.replayUniversePage).subscribe({
-      next:value=>{
-        this.replayUniverseBusy=false;
-        this.replayUniverseMessage=`Page ${value.page + 1}: imported ${value.addedCandles} bars from ${value.fetchedContracts} of ${value.totalContractsInCorridor} corridor contracts.`+
-          (value.missingInstrumentMetadata.length
-            ? ` ${value.archivedUnmappedCandles} more bars were archived for ${value.missingInstrumentMetadata.length} contracts without lot metadata; they cannot yet be priced as trades.` : '');
-        this.runHistoricalReplay(); this.refreshView();
-      },
-      error:()=>{this.replayUniverseBusy=false;
-        this.replayUniverseMessage='Universe import failed. Check the selected completed day, expiry and page; it only runs outside market hours.';
-        this.refreshView();},
-    }));
-  }
+  protected openHistoricalReplay():void {this.replayOpen=true;}
   protected openDailyAnalysis(): void {
     this.dailyAnalysisOpen = true; this.dailyAnalysisLoading = true;
     this.dailyAnalysisError = ''; this.dailyAnalysis = null;
@@ -922,7 +680,7 @@ export class App implements OnInit, OnDestroy {
         this.processMarketNarrator(market, snapshot);
         this.detectTradeAlerts(market, snapshot);
         if (this.selectedMarket !== market) return;
-        this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
+        this.workspace = this.withHistory(mergeWorkspaceSnapshot(this.workspace, snapshot));
         this.workspaceError = '';
         this.refreshView();
       }),
@@ -982,13 +740,15 @@ export class App implements OnInit, OnDestroy {
   private loadWorkspace(): void {
     if (this.selectedMarket === null) return;
     const requestedMarket = this.selectedMarket;
+    const mark='desk:chart-request:'+requestedMarket;
+    performance.clearMarks(mark); performance.mark(mark);
     this.subscriptions.add(
       this.workspaceService.getMarket(requestedMarket).subscribe({
         next: (snapshot) => {
           if (this.selectedMarket !== requestedMarket) return;
           this.processMarketNarrator(requestedMarket, snapshot);
           this.detectTradeAlerts(requestedMarket, snapshot);
-          this.workspace = mergeWorkspaceSnapshot(this.workspace, snapshot);
+          this.workspace = this.withHistory(mergeWorkspaceSnapshot(this.workspace, snapshot));
           this.workspaceError = '';
           this.refreshView();
         },

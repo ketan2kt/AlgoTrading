@@ -20,14 +20,21 @@ public sealed class AdminController(
 {
     [HttpGet("users")]
     public async Task<IActionResult> GetUsers([FromQuery] int skip = 0, [FromQuery] int take = 100,
-        CancellationToken cancellationToken = default)
+        [FromQuery, MaxLength(120)] string? search = null, CancellationToken cancellationToken = default)
     {
         Response.Headers.CacheControl = "no-store";
-        skip = Math.Clamp(skip, 0, 10_000);
+        skip = Math.Max(skip, 0);
         take = Math.Clamp(take, 1, 100);
         var query = users.Users.AsNoTracking();
         var total = await query.CountAsync(cancellationToken);
         var pending = await query.CountAsync(user => !user.IsActive || !user.EmailConfirmed, cancellationToken);
+        var term = search?.Trim().ToUpperInvariant();
+        if (!string.IsNullOrEmpty(term))
+            query = query.Where(u => (u.NormalizedEmail != null && u.NormalizedEmail.Contains(term)) ||
+                (u.NormalizedUserName != null && u.NormalizedUserName.Contains(term)) ||
+                database.UserRoles.Any(ur => ur.UserId == u.Id && database.Roles.Any(r =>
+                    r.Id == ur.RoleId && r.NormalizedName != null && r.NormalizedName.Contains(term))));
+        var matched = string.IsNullOrEmpty(term) ? total : await query.CountAsync(cancellationToken);
         var page = await query.OrderByDescending(user => user.CreatedAtUtc)
             .ThenBy(user => user.UserName)
             .Skip(skip)
@@ -41,19 +48,25 @@ public sealed class AdminController(
                 user.CreatedAtUtc, user.IsActive, user.EmailConfirmed, await users.GetRolesAsync(user)));
         }
 
-        return Ok(new AdminUsersPage(total, pending, items));
+        return Ok(new AdminUsersPage(total, pending, items, matched));
     }
 
     [HttpGet("contact-inquiries")]
     public async Task<IActionResult> GetContactInquiries([FromQuery] int skip = 0, [FromQuery] int take = 100,
-        CancellationToken cancellationToken = default)
+        [FromQuery, MaxLength(120)] string? search = null, CancellationToken cancellationToken = default)
     {
         Response.Headers.CacheControl = "no-store";
-        skip = Math.Clamp(skip, 0, 10_000);
+        skip = Math.Max(skip, 0);
         take = Math.Clamp(take, 1, 100);
         var query = database.ContactInquiries.AsNoTracking();
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderByDescending(inquiry => inquiry.CreatedAtUtc)
+        var term = search?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(term))
+            query = query.Where(i => i.Name.ToLower().Contains(term) || i.Email.ToLower().Contains(term) ||
+                (i.Company != null && i.Company.ToLower().Contains(term)) || i.Service.ToLower().Contains(term) ||
+                i.Message.ToLower().Contains(term));
+        var matched = string.IsNullOrEmpty(term) ? total : await query.CountAsync(cancellationToken);
+        var items = await query.OrderByDescending(inquiry => inquiry.CreatedAtUtc).ThenBy(inquiry => inquiry.Id)
             .Skip(skip)
             .Take(take)
             .Select(inquiry => new ContactInquiryDto(inquiry.Id, inquiry.Name, inquiry.Email, inquiry.Company,
@@ -61,7 +74,7 @@ public sealed class AdminController(
                 inquiry.CreatedAtUtc, inquiry.DeliveredAtUtc))
             .ToListAsync(cancellationToken);
 
-        return Ok(new AdminPage<ContactInquiryDto>(total, items));
+        return Ok(new AdminPage<ContactInquiryDto>(total, items, matched));
     }
 
     [ValidateAntiForgeryToken]
@@ -114,8 +127,8 @@ public sealed class AdminController(
     }
 }
 
-public sealed record AdminPage<T>(int Total, IReadOnlyList<T> Items);
-public sealed record AdminUsersPage(int Total, int Pending, IReadOnlyList<AdminUserDto> Items);
+public sealed record AdminPage<T>(int Total, IReadOnlyList<T> Items, int Matched);
+public sealed record AdminUsersPage(int Total, int Pending, IReadOnlyList<AdminUserDto> Items, int Matched);
 
 public sealed record AdminUserDto(Guid Id, string Username, string Email, DateTimeOffset CreatedAtUtc,
     bool IsActive, bool EmailConfirmed, IList<string> Roles);

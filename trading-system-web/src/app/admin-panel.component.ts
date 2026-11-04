@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { timeout } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 
-interface AdminPage<T> { total: number; items: T[] }
+interface AdminPage<T> { matched?: number; total: number; items: T[] }
 interface AdminUsersPage extends AdminPage<AdminUser> { pending: number }
 interface AdminUser {
   id: string;
@@ -53,12 +53,16 @@ export class AdminPanelComponent implements OnInit {
   protected inquiriesLoading = false;
   protected inquiriesError = '';
   protected inquirySearch = '';
+  protected inquiryMatches = 0;
+  private inquiryRequest = 0;
   protected users: AdminUser[] = [];
   protected userTotal = 0;
   protected pendingUserTotal = 0;
   protected usersLoading = false;
   protected usersError = '';
   protected userSearch = '';
+  protected userMatches = 0;
+  private userRequest = 0;
   protected showAddUser = false;
   protected newUserEmail = '';
   protected userSaveBusy = false;
@@ -125,6 +129,7 @@ export class AdminPanelComponent implements OnInit {
   }
 
   protected selectSection(section: AdminSection): void {
+    if(section==='overview' && (this.inquirySearch || this.userSearch)){this.inquirySearch=''; this.userSearch=''; this.loadAll();}
     this.section = section;
     this.notice = '';
   }
@@ -147,9 +152,7 @@ export class AdminPanelComponent implements OnInit {
         headers: new HttpHeaders({ 'X-CSRF-TOKEN': token }),
       }).subscribe({
         next: created => {
-          this.users = [created, ...this.users];
-          this.userTotal++;
-          this.pendingUserTotal++;
+          this.userSearch=''; this.loadUsers();
           this.newUserEmail = '';
           this.showAddUser = false;
           this.userSaveBusy = false;
@@ -172,20 +175,8 @@ export class AdminPanelComponent implements OnInit {
     });
   }
 
-  protected get visibleUsers(): AdminUser[] {
-    const query = this.userSearch.trim().toLowerCase();
-    if (!query) return this.users;
-    return this.users.filter(user => `${user.username} ${user.email} ${user.roles.join(' ')}`.toLowerCase().includes(query));
-  }
-
-  protected get visibleInquiries(): ContactInquiry[] {
-    const query = this.inquirySearch.trim().toLowerCase();
-    if (!query) return this.inquiries;
-    return this.inquiries.filter(inquiry =>
-      `${inquiry.name} ${inquiry.email} ${inquiry.company ?? ''} ${inquiry.service} ${inquiry.message}`
-        .toLowerCase().includes(query));
-  }
-
+  protected searchUsers():void { this.loadUsers(); }
+  protected searchInquiries():void { this.loadInquiries(); }
   protected trackById(_index: number, item: { id: string }): string { return item.id; }
 
   private loadAll(): void {
@@ -196,20 +187,22 @@ export class AdminPanelComponent implements OnInit {
   private loadUsers(append = false): void {
     this.usersLoading = true;
     this.usersError = '';
+    const id=++this.userRequest;
     const skip = append ? this.users.length : 0;
-    this.http.get<AdminUsersPage>('/api/admin/users', { params: { skip, take: 100 } }).subscribe({
-      next: page => { this.users = append ? [...this.users, ...page.items] : page.items; this.userTotal = page.total; this.pendingUserTotal = page.pending; this.usersLoading = false; this.view.markForCheck(); },
-      error: () => { this.usersError = 'User accounts could not be loaded.'; this.usersLoading = false; this.view.markForCheck(); },
+    this.http.get<AdminUsersPage>('/api/admin/users', { params: { skip, take: 100, search: this.userSearch.trim() } }).subscribe({
+      next: page => { if(id!==this.userRequest)return; this.userMatches=page.matched??page.total; this.users = append ? [...this.users, ...page.items] : page.items; this.userTotal = page.total; this.pendingUserTotal = page.pending; this.usersLoading = false; this.view.markForCheck(); },
+      error: () => { if(id!==this.userRequest)return; this.usersError = 'User accounts could not be loaded.'; this.usersLoading = false; this.view.markForCheck(); },
     });
   }
 
   private loadInquiries(append = false): void {
     this.inquiriesLoading = true;
     this.inquiriesError = '';
+    const id=++this.inquiryRequest;
     const skip = append ? this.inquiries.length : 0;
-    this.http.get<AdminPage<ContactInquiry>>('/api/admin/contact-inquiries', { params: { skip, take: 100 } }).subscribe({
-      next: page => { this.inquiries = append ? [...this.inquiries, ...page.items] : page.items; this.inquiryTotal = page.total; this.inquiriesLoading = false; this.view.markForCheck(); },
-      error: () => { this.inquiriesError = 'Contact enquiries could not be loaded.'; this.inquiriesLoading = false; this.view.markForCheck(); },
+    this.http.get<AdminPage<ContactInquiry>>('/api/admin/contact-inquiries', { params: { skip, take: 100, search: this.inquirySearch.trim() } }).subscribe({
+      next: page => { if(id!==this.inquiryRequest)return; this.inquiryMatches=page.matched??page.total; this.inquiries = append ? [...this.inquiries, ...page.items] : page.items; this.inquiryTotal = page.total; this.inquiriesLoading = false; this.view.markForCheck(); },
+      error: () => { if(id!==this.inquiryRequest)return; this.inquiriesError = 'Contact enquiries could not be loaded.'; this.inquiriesLoading = false; this.view.markForCheck(); },
     });
   }
 }

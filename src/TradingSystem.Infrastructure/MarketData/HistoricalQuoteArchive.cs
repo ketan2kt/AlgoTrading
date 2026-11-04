@@ -30,6 +30,10 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private readonly List<HistoricalQuoteObservation> pending = [];
     private DateTimeOffset storageCheckedAt = DateTimeOffset.MinValue;
     private bool storageAvailable;
+    private DateTimeOffset lastResourceSample = DateTimeOffset.MinValue;
+    private static readonly Action<ILogger, long, long, double, Exception?> ResourceSample = LoggerMessage.Define<long, long, double>(
+        LogLevel.Information, new EventId(6754, "ReplayCaptureResources"),
+        "Replay quote archive {ArchiveBytes} bytes; host working set {WorkingSetBytes} bytes; oldest receipt in write batch {ReceiptAgeSeconds}s.");
     private static readonly Action<ILogger, Exception?> WriteFailed = LoggerMessage.Define(
         LogLevel.Error, new EventId(6752, "HistoricalQuoteArchiveWriteFailed"),
         "Historical quote archive write failed; buffered observations will be retried. Research coverage is not certified.");
@@ -84,6 +88,12 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(root))!);
             storageAvailable = bytes < maximumArchiveBytes && (!drive.IsReady || drive.AvailableFreeSpace >= 512L * 1024 * 1024);
             storageCheckedAt = clock.GetUtcNow();
+            if (pending.Count > 0 && storageCheckedAt - lastResourceSample >= TimeSpan.FromMinutes(5))
+            {
+                lastResourceSample = storageCheckedAt;
+                ResourceSample(logger, bytes, Environment.WorkingSet,
+                    Math.Max(0, (storageCheckedAt - pending.Min(item => item.ReceivedAtUtc)).TotalSeconds), null);
+            }
         }
         var gaps = dropped.Where(value => value.Value > 0).ToArray();
         var dates = pending.Select(value => LocalDate(value.ReceivedAtUtc)).Concat(gaps.Select(value => value.Key)).Distinct();

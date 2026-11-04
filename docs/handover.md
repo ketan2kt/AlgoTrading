@@ -1,6 +1,10 @@
 # Current handover — 4 November 2026
 
-## Current release: normal historical replay and market-data capture
+## Trading desk cleanup — authorized after green main CI
+
+Controls distinguish unknown/loading from confirmed broker state. Lot writes update only the three supported markets. Reports/navigation and replay maintenance reorganized; older chart history on demand. Admin searches query the entire directory/inbox; capture resource samples reuse existing archive checks. No trading-policy, broker-cadence or database schema changes. CI is the verification path, per Ketan; manual desktop/mobile review and actual capture measurements remain post-release checks. Replay remains subject to the 5 November recorded-session acceptance.
+
+## Previous release: normal historical replay and market-data capture
 
 Ketan authorized publishing the isolated replay/capture changes to main after CI. This supersedes the prior release note below. The website compares normal Nifty, Sensex and Bank Nifty policies using the same frozen data and clock. Pair replay is excluded. Capture is enabled by default and attempts a read-only Groww subscription from 09:00 IST; it retains timestamped quotes, quote depth, instrument universes and coverage gaps. Controlled deployment applies the research migrations.
 

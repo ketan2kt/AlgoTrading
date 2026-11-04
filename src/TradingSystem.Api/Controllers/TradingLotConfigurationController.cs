@@ -18,22 +18,24 @@ public sealed class TradingLotConfigurationController(ITradingLotConfigurationSe
     [ValidateAntiForgeryToken]
     [HttpPut]
     public async Task<ActionResult<TradingLotConfiguration>> Put(UpdateTradingLotsRequest request,
-        CancellationToken cancellationToken) => Ok(await service.SetAsync(request.NiftyLots,
-        request.SensexLots, request.BankNiftyLots, request.BankexLots,
-        User.Identity?.Name ?? "administrator", cancellationToken));
+        CancellationToken cancellationToken)
+    {
+        var saved = await service.GetAsync(cancellationToken);
+        return Ok(await service.SetAsync(request.NiftyLots, request.SensexLots, request.BankNiftyLots,
+            saved.BankexLots, User.Identity?.Name ?? "administrator", cancellationToken));
+    }
 }
 
 public sealed class UpdateTradingLotsRequest
 {
     [Range(TradingLotConfiguration.MinimumLots, TradingLotConfiguration.MaximumLots)]
-    public int NiftyLots { get; init; } = TradingLotConfiguration.DefaultLots;
+    public int NiftyLots { get; init; }
 
     [Range(TradingLotConfiguration.MinimumLots, TradingLotConfiguration.MaximumLots)]
-    public int SensexLots { get; init; } = TradingLotConfiguration.DefaultLots;
+    public int SensexLots { get; init; }
 
     [Range(TradingLotConfiguration.MinimumLots, TradingLotConfiguration.MaximumLots)]
-    public int BankNiftyLots { get; init; } = TradingLotConfiguration.DefaultLots;
+    public int BankNiftyLots { get; init; }
 
-    [Range(TradingLotConfiguration.MinimumLots, TradingLotConfiguration.MaximumLots)]
-    public int BankexLots { get; init; } = TradingLotConfiguration.DefaultLots;
+
 }

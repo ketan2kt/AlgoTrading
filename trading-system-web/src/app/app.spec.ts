@@ -122,7 +122,8 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('Checking token status');
     expect(fixture.nativeElement.textContent).not.toContain('Enable loud trade alerts');
     expect(fixture.nativeElement.textContent).not.toContain('Trade alerts on');
-    expect(fixture.nativeElement.textContent).toContain('Add today’s token');
+    expect(fixture.nativeElement.querySelector('.desk-reports button')?.textContent).toContain('Reports');
+    expect(fixture.nativeElement.textContent).not.toContain('Add today’s token');
     http.verify();
   });
 
