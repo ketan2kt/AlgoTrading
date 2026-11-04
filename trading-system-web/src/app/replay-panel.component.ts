@@ -1,6 +1,7 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, OnInit, OnDestroy, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import type { ReplayTrial } from './historical-replay.service';
 import { Subscription } from 'rxjs';
 import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, HistoricalPolicyBuild, HistoricalReplayCohortCoverage, HistoricalReplayResearchReport, HistoricalReplayService } from './historical-replay.service';
 @Component({selector:'app-replay-panel', imports:[DatePipe,DecimalPipe,PercentPipe,FormsModule], templateUrl:'./replay-panel.component.html', styleUrl:'./replay-panel.component.scss'})
@@ -18,6 +19,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected normalReplayBusy = false;
   protected normalReplayError = '';
   protected normalReplayStopPercent = 10;
+  protected normalReplayTrial:ReplayTrial='control';
   protected replayPolicyBuilds:HistoricalPolicyBuild[]=[];
   protected replayBaselineBuild='';
   protected replayProposalBuild='';
@@ -74,15 +76,15 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected closeHistoricalReplay():void { this.closed.emit(); }
   protected runNormalReplay():void {
     if(!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo ||
-        this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75) {
+        (this.normalReplayTrial==='custom-stop' && (this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75))) {
       this.normalReplayError='Choose completed dates and a premium stop between 0 and 75%.';return;
     }
     this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
     this.subscriptions.add(this.historicalReplayService.compareNormal(this.replayFrom,
-      this.replayTo,this.normalReplayStopPercent,this.replayBaselineBuild,this.replayProposalBuild,this.replayFrozenInputRun).subscribe({
+      this.replayTo,this.normalReplayStopPercent,this.replayBaselineBuild,this.replayProposalBuild,this.replayFrozenInputRun,this.normalReplayTrial).subscribe({
       next:value=>{this.normalReplayReport=value;this.normalReplayBusy=false;this.loadSavedNormalRuns();this.refreshView();},
       error:error=>{this.normalReplayBusy=false;this.normalReplayError=
-        typeof error.error==='string'?error.error:'Normal-policy comparison failed. Check dates and frozen archive inputs.';this.refreshView();},
+        typeof error.error==='string'?error.error:error instanceof Error?error.message:'Normal-policy comparison failed. Check dates and frozen archive inputs.';this.refreshView();},
     }));
   }
   protected checkReplayCohort():void {

@@ -1,5 +1,15 @@
 # Current handover — 4 November 2026
 
+## Chart/mobile release and November replay experiments
+
+The mobile/chart release now also adds isolated controls in Historical Replay for all three normal markets: unchanged A/A, 20% smaller market-specific stops, 90% lock of current favorable move on confirmed reversal, and no target extension. No live strategy promotion. The deployed eligibility screen on 4 November returned 0 eligible / 6 excluded dates (28 Oct–4 Nov). See [experiment protocol](replay-trials-november.md). Entry-impact evidence from 30 October: five Nifty normal entries retained, none removed. CI is the release test path.
+
+The mobile desk uses one scrollable bar: Nifty, Bank Nifty and Sensex first, then reports and controls. The shared chart shows active CE/PE fills by fill time and recorded reason, the latest recorded entry decision, a short index confirmation segment only where an explicit threshold was recorded, complete 09:15–09:30 IST range or unavailable, and futures-volume labeling. Open positions distinguish observed peak, marked P&L, strategy stop and last acknowledged broker protection. Older entries can lack evidence; the chart does not infer it from later candles. No trading rules changed. Local runtime tests skipped as requested; diff whitespace checked. CI and device review are pending; no deployment dispatched.
+
+## Open positions on load — local only
+
+The three desks show a compact summary above the chart for each filled, still-open trade. Selecting a contract focuses its existing full trade row. No open trade means no extra panel. This is a display-only change; no local runtime tests requested or deployment dispatched.
+
 ## Trading desk visual feedback — authorized for main deployment after CI
 
 Reports and its menu now specify text, surface and border together. All three market tabs and desk buttons have resting borders and keyboard focus. Controls groups per-market lots/live settings, broker connection, session diagnostics and the global emergency control; existing handlers and trading policies are unchanged. Source diff inspected; no local UI tests per Ketan. These edits are not part of the [previous deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41852809649).

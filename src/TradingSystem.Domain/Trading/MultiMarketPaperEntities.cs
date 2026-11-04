@@ -82,7 +82,7 @@ public sealed class MarketPaperPosition : MutableEntity
         RecordExcursion(CurrentPnlAt(price), observedAtUtc);
     }
 
-    private decimal CurrentPnlAt(decimal price) => RealisedPnl +
+    public decimal CurrentPnlAt(decimal price) => RealisedPnl +
         (Direction == Direction.Buy ? price - EntryPrice : EntryPrice - price) * RemainingQuantity;
 
     private void RecordExcursion(decimal pnl, DateTimeOffset observedAtUtc)

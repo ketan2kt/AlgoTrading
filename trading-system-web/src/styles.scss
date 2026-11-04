@@ -796,6 +796,23 @@ app-root .control-center > .safety-panel:not(.live-execution-card) {
 }
 app-root .control-center > .safety-panel:not(.live-execution-card) > button { margin-left: auto; }
 
+/* One scrolling mobile toolbar. Neither group gets squeezed away by the other. */
+@media (max-width:900px) {
+  app-root .workspace-layout > .market-tabs {
+    box-sizing:border-box; width:100%; max-width:100%; min-width:0; overflow-x:auto;
+    justify-content:flex-start; flex-wrap:nowrap; overscroll-behavior-x:contain;
+    backdrop-filter:none; scrollbar-width:thin;
+  }
+  app-root .workspace-layout > .market-tabs :is(.market-tab-group,.workspace-nav-actions) {
+    flex:0 0 auto; width:max-content; overflow:visible; flex-wrap:nowrap;
+  }
+  app-root .workspace-layout .market-tab-group > button {
+    flex:0 0 auto; min-width:0; padding-inline:.55rem; white-space:nowrap; flex-direction:column; gap:0;
+  }
+  app-root .workspace-layout .workspace-nav-actions > button { flex:none; white-space:nowrap; }
+  app-root .workspace-layout .workspace-nav-actions > button:not(.workspace-nav-actions__primary):not(.mute-alerts-button) { display:inline-flex; }
+}
+
 /* Report filters and totals match the compact Daily Analysis KPI rhythm. */
 app-root .pnl-report-filter {
   margin: .8rem .85rem 0;
@@ -884,6 +901,19 @@ app-root .desk-advanced>summary{cursor:pointer;font-weight:650;padding:.35rem}
 @media(max-width:900px){app-root .desk-report-links{position:fixed;top:5rem;right:1rem;z-index:15;min-width:12rem;box-shadow:0 .2rem .8rem #19462b33}}
 
 /* Desk controls have a visible resting edge; hover is feedback, not discovery. */
+app-root .workspace-shell > .desk-open-trades {
+  order: 0; border: 1px solid #749881; border-left: 4px solid #327a51;
+  border-radius: .6rem; background: #edf6e9; color: #163f2b; padding: .4rem .65rem;
+}
+app-root .desk-open-trades h2 { margin: 0 0 .15rem; font-size: .86rem; }
+app-root .desk-open-trades h2 span { padding: .05rem .38rem; border-radius: .6rem; background: #d4e7cf; }
+app-root .desk-open-trade { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: .8rem; padding: .22rem 0; font-variant-numeric: tabular-nums; }
+app-root .desk-open-trade + .desk-open-trade { border-top: 1px solid #aec8b1; }
+app-root .desk-open-trade button { padding: .15rem .45rem; color: #185037; background: #edf6e9; font-weight: 700; }
+app-root .desk-open-trade button:hover:not(:disabled) { color: #123d29; background: #d2e7cf; }
+app-root .desk-open-trade strong { margin-inline-start: auto; font-size: .85rem; }
+app-root .signal-row[id] { scroll-margin-top: 3rem; }
+@media(max-width:560px) { app-root .desk-open-trade strong { margin-inline-start: 0; } }
 app-root .workspace-layout { --desk-edge: #749881; --desk-ink: #163f2b; }
 app-root .workspace-layout button { border-width: 1px; border-style: solid; border-color: var(--desk-edge); }
 app-root .workspace-layout :is(button, summary, select, input):focus-visible {

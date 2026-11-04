@@ -10,7 +10,11 @@ public sealed record StrategySignal(
     decimal ProposedStopLoss, decimal ProposedTarget, decimal RewardToRiskRatio,
     decimal Confidence, MarketRegime Regime, IReadOnlyList<string> SupportingReasons,
     IReadOnlyList<string> InvalidatingReasons, DateTimeOffset MarketDataTimestampUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc)
+{
+    // Optional display evidence; only populated by a policy that used this exact index threshold.
+    public decimal? IndexConfirmationLevel { get; init; }
+}
 
 public sealed record StrategyEvaluationContext(
     Guid InstrumentId, DateTimeOffset ObservedAtUtc, decimal CurrentPrice,

@@ -50,7 +50,10 @@ public sealed record WorkspaceTradeOverlay(
     DateTimeOffset? EntryTimeUtc,
     DateTimeOffset? ExitTimeUtc,
     decimal? MaximumFavourablePnl,
-    decimal? MaximumAdverseLoss);
+    decimal? MaximumAdverseLoss,
+    decimal? StrategyPremiumStop = null,
+    decimal? BrokerAcknowledgedStop = null,
+    IReadOnlyList<string>? EntryEvidence = null);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,
@@ -99,7 +102,11 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<WorkspaceVolumeBar>? FuturesVolume = null,
     DailyResearchPipelineReportV2? Research = null,
     IReadOnlyList<OperationalAutomationReport>? OperationalReports = null,
-    string? MarketCode = null);
+    string? MarketCode = null,
+    WorkspaceEngineRead? EngineRead = null);
+
+public sealed record WorkspaceEngineRead(DateTimeOffset CandleTimeUtc, string Outcome, string? Reason,
+    decimal? IndexConfirmationLevel = null);
 
 public interface ITradingWorkspaceReader
 {

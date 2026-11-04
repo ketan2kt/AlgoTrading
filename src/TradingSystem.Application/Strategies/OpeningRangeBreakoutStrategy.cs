@@ -83,7 +83,10 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
                  "EMA 9/21 and VWAP alignment overrode lagging regime direction."],
             ["Price returns inside opening range.", "Market-data or regime permission is withdrawn."],
             context.ObservedAtUtc.ToUniversalTime(),
-            context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime());
+            context.ObservedAtUtc.AddSeconds(options.SignalExpirySeconds).ToUniversalTime())
+        {
+            IndexConfirmationLevel = bullish ? context.OpeningRangeHigh + buffer : context.OpeningRangeLow - buffer
+        };
         return new(signal, []);
     }
 }
