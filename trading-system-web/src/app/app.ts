@@ -2,7 +2,7 @@ import { AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe } from 
 import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
-import { catchError, of, startWith, Subscription } from 'rxjs';
+import { catchError, finalize, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { PublicHomeComponent } from './public-home.component';
@@ -56,6 +56,10 @@ export class App implements OnInit, OnDestroy {
   protected username = '';
   protected password = '';
   protected workspace: TradingWorkspaceSnapshot | null = null;
+  private readonly marketViews = new Map<TradingMarketCode, TradingWorkspaceSnapshot>();
+  private readonly pendingViews = new Set<TradingMarketCode>();
+  private primedMarkets = false;
+  protected cachedPreview = false;
   protected workspaceError = '';
   protected tradeExitError = '';
   protected readonly requestedTradeExits = new Set<string>();
@@ -173,17 +177,7 @@ export class App implements OnInit, OnDestroy {
       if (routeChanged) this.refreshView();
       return;
     }
-    this.resetHistory();
-    this.selectedMarket = market;
-    this.workspace = null;
-    if (market !== null) {
-      this.loadWorkspace();
-      void this.workspaceService.connect(market).catch(() => {
-        this.workspaceError = 'Real-time dashboard connection is unavailable; manual refresh remains available.';
-        this.refreshView();
-      });
-    }
-    this.refreshView();
+    this.selectMarket(market);
   };
 
   protected readonly status$ = this.statusService.getCurrent().pipe(
@@ -278,13 +272,34 @@ export class App implements OnInit, OnDestroy {
   protected openMarket(market: TradingMarketCode): void {
     if (market === this.selectedMarket && this.workspace !== null) return;
     const path = market === 'natural-gas' ? '/natural-gas' : `/${market}`;
-    this.resetHistory();
     window.history.pushState({}, '', path);
+    this.selectMarket(market);
+  }
+
+  private selectMarket(market: TradingMarketCode | null): void {
+    this.resetHistory();
     this.selectedMarket = market;
-    this.workspace = null;
-    this.loadWorkspace();
-    void this.workspaceService.connect(market);
+    this.workspaceError = '';
+    this.tradeExitError = '';
+    this.workspace = (market && this.user ? this.marketViews.get(market) : null) ?? null;
+    this.cachedPreview = !!this.workspace && !this.recentView(this.workspace);
+    if (market && this.user) {
+      const mark = 'desk:chart-request:' + market;
+      performance.clearMarks(mark);
+      performance.mark(mark);
+      if (!this.workspace || this.cachedPreview) this.loadWorkspace();
+      void this.workspaceService.connect(market).catch(() => {
+        if (this.selectedMarket !== market) return;
+        this.workspaceError = 'Live updates unavailable. Refresh to retry.';
+        this.refreshView();
+      });
+    }
     this.refreshView();
+  }
+
+  private recentView(view: TradingWorkspaceSnapshot): boolean {
+    const age = Date.now() - Date.parse(view.observedAtUtc);
+    return age >= 0 && age < 10_000;
   }
 
   protected openControls(): void {
@@ -376,7 +391,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected requestTradeExit(overlay: WorkspaceTradeOverlay): void {
-    if (this.selectedMarket === null || !overlay.lifecycleStatus.startsWith('Active')) return;
+    if (this.cachedPreview || this.selectedMarket === null || !overlay.lifecycleStatus.startsWith('Active')) return;
     const market = this.selectedMarket;
     const key = `${market}:${overlay.signalId}`;
     if (this.requestedTradeExits.has(key)) return;
@@ -696,12 +711,7 @@ export class App implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.workspaceService.updates$().subscribe((snapshot) => {
         const market = marketCodeForSnapshot(snapshot);
-        this.processMarketNarrator(market, snapshot);
-        this.detectTradeAlerts(market, snapshot);
-        if (this.selectedMarket !== market) return;
-        this.workspace = this.withHistory(mergeWorkspaceSnapshot(this.workspace, snapshot));
-        this.workspaceError = '';
-        this.refreshView();
+        this.acceptView(market,snapshot,true);
       }),
     );
     void this.workspaceService.connect(this.selectedMarket ?? 'nifty').catch(() => {
@@ -762,22 +772,46 @@ export class App implements OnInit, OnDestroy {
     );
   }
 
-  private loadWorkspace(): void {
-    if (this.selectedMarket === null) return;
-    const requestedMarket = this.selectedMarket;
-    const mark='desk:chart-request:'+requestedMarket;
-    performance.clearMarks(mark); performance.mark(mark);
+  private acceptView(market:TradingMarketCode,snapshot:TradingWorkspaceSnapshot,notify:boolean):void {
+    if (!this.user) return;
+    const prior=this.marketViews.get(market);
+    // A slower HTTP response must not roll back a later push (including position status).
+    const older=!!prior && Date.parse(snapshot.observedAtUtc)<Date.parse(prior.observedAtUtc);
+    const view=older ? prior : mergeWorkspaceSnapshot(prior??null,snapshot);
+    this.marketViews.set(market,view);
+    if(notify && !older){this.processMarketNarrator(market,view);this.detectTradeAlerts(market,view);}
+    if(this.selectedMarket!==market)return;
+    this.workspace=this.withHistory(view);
+    if (!older) this.cachedPreview=false;
+    this.workspaceError='';
+    this.refreshView();
+  }
+
+  private loadWorkspace(requestedMarket:TradingMarketCode|null=this.selectedMarket): void {
+    if(!requestedMarket || !this.user || this.pendingViews.has(requestedMarket))return;
+    this.pendingViews.add(requestedMarket);
     this.subscriptions.add(
-      this.workspaceService.getMarket(requestedMarket).subscribe({
+      this.workspaceService.getMarket(requestedMarket).pipe(finalize(()=>this.pendingViews.delete(requestedMarket))).subscribe({
         next: (snapshot) => {
-          if (this.selectedMarket !== requestedMarket) return;
-          this.processMarketNarrator(requestedMarket, snapshot);
-          this.detectTradeAlerts(requestedMarket, snapshot);
-          this.workspace = this.withHistory(mergeWorkspaceSnapshot(this.workspace, snapshot));
-          this.workspaceError = '';
-          this.refreshView();
+          this.acceptView(requestedMarket,snapshot,this.selectedMarket===requestedMarket);
+          if(!this.primedMarkets){
+            this.primedMarkets=true;
+            for(const m of ['nifty','sensex','bank-nifty'] as const){
+              if(!this.marketViews.has(m))this.loadWorkspace(m);
+            }
+          }
         },
-        error: () => {
+        error: (error) => {
+          if (error?.status === 401) {
+            this.user = null;
+            this.marketViews.clear();
+            this.workspace = null;
+            this.cachedPreview = false;
+            this.primedMarkets = false;
+            void this.workspaceService.disconnect();
+            this.refreshView();
+            return;
+          }
           if (this.selectedMarket !== requestedMarket) return;
           this.workspaceError = `Unable to load the protected ${this.preparedMarketName()} workspace.`;
           this.refreshView();

@@ -11,7 +11,7 @@ export class TradingWorkspaceService {
   private readonly updates = new Subject<TradingWorkspaceSnapshot>();
   private connection: HubConnection | null = null;
   private connectionStart: Promise<void> | null = null;
-  private activeMarket = 'nifty';
+  private groupsReady = false;
 
   getMarket(market: string, extendedHistory = false): Observable<TradingWorkspaceSnapshot> {
     return this.http.get<TradingWorkspaceSnapshot>(`/api/trading-workspace/${market}?candleCount=${extendedHistory ? 7000 : 750}`);
@@ -29,12 +29,7 @@ export class TradingWorkspaceService {
     return this.updates.asObservable();
   }
 
-  async connect(market: string): Promise<void> {
-    this.activeMarket = market;
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke('SubscribeMarketWorkspace', market);
-      return;
-    }
+  async connect(_market: string): Promise<void> {
     if (!this.connection) {
       this.connection = new HubConnectionBuilder()
         .withUrl('/hubs/system-health')
@@ -43,22 +38,26 @@ export class TradingWorkspaceService {
       this.connection.on('marketWorkspaceUpdated', (updatedMarket, snapshot) => {
         this.updates.next({ ...(snapshot as TradingWorkspaceSnapshot), marketCode: updatedMarket });
       });
-      this.connection.onreconnected(() => this.subscribeAllMarkets());
-      this.connectionStart = this.connection.start();
+      this.connection.onreconnecting(() => { this.groupsReady = false; });
+      this.connection.onclose(() => { this.groupsReady = false; });
+      this.connection.onreconnected(() => this.connect(_market));
     }
-    await this.connectionStart;
-    await this.subscribeAllMarkets();
-  }
-
-  private async subscribeAllMarkets(): Promise<void> {
-    if (!this.connection || this.connection.state !== HubConnectionState.Connected) return;
-    await Promise.all(TradingWorkspaceService.markets.map((market) =>
-      this.connection!.invoke('SubscribeMarketWorkspace', market)));
+    const hub = this.connection;
+    if (hub.state === HubConnectionState.Reconnecting || (hub.state === HubConnectionState.Connected && this.groupsReady)) return;
+    if (this.connectionStart) return this.connectionStart;
+    const join = async () => {
+      if (hub.state === HubConnectionState.Disconnected) await hub.start();
+      await Promise.all(TradingWorkspaceService.markets.map(code => hub.invoke('SubscribeMarketWorkspace', code)));
+      if (this.connection === hub && hub.state === HubConnectionState.Connected) this.groupsReady = true;
+    };
+    this.connectionStart = join().finally(() => { if (this.connection === hub) this.connectionStart = null; });
+    return this.connectionStart;
   }
 
   async disconnect(): Promise<void> {
     if (this.connection) await this.connection.stop();
     this.connection = null;
     this.connectionStart = null;
+    this.groupsReady = false;
   }
 }

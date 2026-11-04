@@ -131,6 +131,7 @@ describe('App', () => {
   });
 
   it('keeps the desk focused on chart and trades and exposes diagnostics on demand', async () => {
+    const requests: string[] = [];
     TestBed.overrideProvider(AuthService, {
       useValue: { currentUser: () => of({ username: 'administrator', roles: ['Administrator'] }) },
     });
@@ -143,10 +144,12 @@ describe('App', () => {
     });
     TestBed.overrideProvider(TradingWorkspaceService, {
       useValue: {
-        getMarket: () => of({
-          instrument: 'NIFTY', exchange: 'NSE', timeframe: '1m', mode: 'Paper',
+        getMarket: (market: string) => {
+          requests.push(market);
+          return of({
+          instrument: market.toUpperCase(), exchange: market === 'sensex' ? 'BSE' : 'NSE', timeframe: '1m', mode: 'Paper',
           feedStatus: 'Live', isLive: true, isFresh: true,
-          lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: '2026-08-03T08:30:00Z',
+          lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: new Date().toISOString(),
           statusMessage: null, candles: [], overlays: [], evaluations: [{
             evaluationId: 'evaluation-1', candleTimeUtc: '2026-08-03T08:30:00Z',
             strategy: 'opening-range-breakout 1.0.0', outcome: 'NoSignal', currentPrice: 24600,
@@ -178,7 +181,7 @@ describe('App', () => {
                 detail: '18/21 candles' },
             ],
           },
-        }),
+        }); },
         updates$: () => NEVER,
         connect: () => Promise.resolve(),
         disconnect: () => Promise.resolve(),
@@ -199,6 +202,14 @@ describe('App', () => {
     expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')?.textContent).toContain('Unknown');
     expect(desk.textContent).not.toContain('SESSION READINESS');
     expect(desk.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
+    expect([...requests].sort()).toEqual(['bank-nifty', 'nifty', 'sensex']);
+    for (const [label, instrument] of [['Sensex','SENSEX'], ['Bank Nifty','BANK-NIFTY'], ['Nifty','NIFTY']]) {
+      const tab = Array.from(desk.querySelectorAll('button')).find(button => button.textContent?.trim() === label);
+      tab!.click();
+      expect(fixture.componentInstance['workspace']?.instrument).toBe(instrument);
+      fixture.detectChanges();
+    }
+    expect(requests).toHaveLength(3); // No network round trip during any of the three switches.
     (desk.querySelector('.desk-reports > button') as HTMLButtonElement).click();
     fixture.detectChanges();
     const logsButton = Array.from(desk.querySelectorAll('#desk-report-links button'))

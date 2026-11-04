@@ -246,6 +246,7 @@
         </div>
         }
         @if (workspaceError) { <div class="feed-notice feed-notice--warning" role="alert">{{ workspaceError }}</div> }
+        @if (cachedPreview) { <div class="feed-notice" role="status">Last snapshot · {{view.observedAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata'}} IST · awaiting a current update.</div> }
 
         @let openTrades = openDeskTrades(view);
         @if (openTrades.length) {
@@ -329,7 +330,7 @@
                   @if (selectedMarket !== 'natural-gas' && overlay.lifecycleStatus.startsWith('Active')) {
                     <div class="trade-exit-action">
                       <button type="button" (click)="requestTradeExit(overlay)"
-                        [disabled]="requestedTradeExits.has(selectedMarket + ':' + overlay.signalId)">
+                        [disabled]="cachedPreview || requestedTradeExits.has(selectedMarket + ':' + overlay.signalId)">
                         {{ requestedTradeExits.has(selectedMarket + ':' + overlay.signalId) ? 'Exit requested' : 'Exit trade' }}
                       </button>
                     </div>

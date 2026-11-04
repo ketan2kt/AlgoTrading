@@ -236,10 +236,6 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.series.setData(candles);
     const market = this.snapshot.marketCode?.toLowerCase() ?? (this.snapshot.instrument.includes('BANK') ? 'bank-nifty' : this.snapshot.exchange === 'BSE' ? 'sensex' : 'nifty');
     const mark = 'desk:chart-request:' + market;
-    if(candles.length && performance.getEntriesByName(mark,'mark').length){
-      const measure='desk:chart-series-ready:'+market;
-      performance.clearMeasures(measure); performance.measure(measure,mark); performance.clearMarks(mark);
-    }
     const candleDirectionByTime = new Map(
       displayCandles.map((value) => [
         Math.floor(new Date(value.openTimeUtc).getTime() / 1000),
@@ -340,6 +336,20 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.hasFittedContent = true;
       this.renderedTimeframeMinutes = this.timeframeMinutes;
       this.renderedSessionDate = latestSessionDate;
+    }
+    const started = candles.length ? performance.getEntriesByName(mark, 'mark').at(-1) : undefined;
+    if (started) {
+      const ready = 'desk:chart-series-ready:' + market;
+      performance.clearMeasures(ready);
+      performance.measure(ready, mark);
+      performance.clearMarks(mark);
+      // Include the chart library's scheduled canvas draw and a visible frame.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!this.chart || this.renderedInstrument !== instrumentIdentity || document.hidden) return;
+        const name = 'desk:index-switch-visible:' + market;
+        performance.clearMeasures(name);
+        performance.measure(name, { start: started.startTime, end: performance.now() });
+      }));
     }
   }
 
