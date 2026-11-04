@@ -9,6 +9,7 @@ namespace TradingSystem.Infrastructure.Diagnostics;
 internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider clock):ILiveProtectionMonitor
 {
     private static readonly string[] Markets=["NIFTY","SENSEX","BANK-NIFTY","BANKNIFTY"];
+    private static readonly string[] StopKeys=["verifiedStop","reservedStop"];
     public Task<ProtectionMonitorReport> ReadAsync(CancellationToken token)
         => db.Database.CreateExecutionStrategy().ExecuteAsync(()=>ReadSnapshotAsync(token));
     private async Task<ProtectionMonitorReport> ReadSnapshotAsync(CancellationToken token)
@@ -71,7 +72,7 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
             .ThenBy(r=>r.Market).ThenBy(r=>r.Symbol).ThenBy(r=>r.Id).ToArray());
     }
 
-    private static IEnumerable<(Guid Intent,StopComparison.Point Point)> Receipt(DateTimeOffset at,string outcome,string json)
+    private static (Guid Intent,StopComparison.Point Point)[] Receipt(DateTimeOffset at,string outcome,string json)
     {
         try{
             using var doc=JsonDocument.Parse(json);
@@ -83,7 +84,7 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
             return points.Select(p=>{
                 if(p.Type!=StopComparison.Kind.Ack)return (id,p);
                 // A historical/legacy receipt with an ambiguous broker status is not a verified working stop.
-                foreach(var key in new[]{"verifiedStop","reservedStop"}){
+                foreach(var key in StopKeys){
                     if(details.TryGetProperty(key,out var s) && s.ValueKind==JsonValueKind.Object &&
                         s.TryGetProperty("BrokerProtectionId",out var order) && order.ValueKind==JsonValueKind.String &&
                         order.GetString()==p.Order && s.TryGetProperty("UpdatedAtUtc",out var stamp) &&

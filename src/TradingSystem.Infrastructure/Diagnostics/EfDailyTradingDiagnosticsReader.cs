@@ -15,13 +15,13 @@ internal sealed class EfDailyTradingDiagnosticsReader(
     private const int MaximumEvents = 100;
 
     public Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly tradingDate, CancellationToken token)
-        => ReadCoreAsync(tradingDate, "all", token, true);
+        => ReadCoreAsync(tradingDate, "all", true, token);
     public Task<DailyTradingDiagnosticsReport> ReadAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
-        => ReadCoreAsync(tradingDate, market, cancellationToken, false);
+        => ReadCoreAsync(tradingDate, market, false, cancellationToken);
     private async Task<DailyTradingDiagnosticsReport> ReadCoreAsync(
         DateOnly tradingDate,
         string market,
-        CancellationToken cancellationToken, bool withTimeline)
+        bool withTimeline, CancellationToken cancellationToken)
     {
         var normalizedMarket = NormalizeMarket(market);
         var selectedMarkets = normalizedMarket == "ALL"

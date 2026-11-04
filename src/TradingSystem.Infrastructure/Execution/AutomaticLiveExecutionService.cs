@@ -522,7 +522,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             var restored = await broker.ConfirmProtectionAsync(intent.ProtectionId!, intent.FilledQuantity, intent.StopLoss, cancellationToken);
             intent.RetainProtectedRemainder("Add-on did not fill; original live stop verified. Manage actual size; block new entries.");
             await db.SaveChangesAsync(cancellationToken);
-            await RecordScaleOutcomeAsync(db, intent, "AddOnOutcome", paperQuantity, paperPrice, action, cancellationToken, restored);
+            await RecordScaleOutcomeAsync(db, intent, "AddOnOutcome", paperQuantity, paperPrice, action, restored, null, cancellationToken);
             return;
         }
         var resized = await broker.ModifyProtectionAsync(intent.ProtectionId!,
@@ -532,7 +532,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (action.FilledQuantity != paperQuantity)
             intent.RetainProtectedRemainder("Partial add-on fill; live stop verified on actual quantity.");
         await db.SaveChangesAsync(cancellationToken);
-        await RecordScaleOutcomeAsync(db, intent, "AddOnOutcome", paperQuantity, paperPrice, action, cancellationToken, resized);
+        await RecordScaleOutcomeAsync(db, intent, "AddOnOutcome", paperQuantity, paperPrice, action, resized, null, cancellationToken);
     }
 
     private async Task MirrorPartialExitAsync(TradingDbContext db,
@@ -574,7 +574,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 intent.StopLoss, cancellationToken);
             intent.RetainProtectedRemainder("Live partial did not fill; full-size stop verified. Continue managing actual size.");
             await db.SaveChangesAsync(cancellationToken);
-            await RecordScaleOutcomeAsync(db, intent, "PartialExitOutcome", paperQuantity, paperPrice, action, cancellationToken, restored, reserved);
+            await RecordScaleOutcomeAsync(db, intent, "PartialExitOutcome", paperQuantity, paperPrice, action, restored, reserved, cancellationToken);
             return;
         }
         BrokerProtectionSnapshot? adjusted = null;
@@ -586,12 +586,12 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (action.FilledQuantity != paperQuantity)
             intent.RetainProtectedRemainder("Partial sell filled less than requested; live stop verified on actual remainder.");
         await db.SaveChangesAsync(cancellationToken);
-        await RecordScaleOutcomeAsync(db, intent, "PartialExitOutcome", paperQuantity, paperPrice, action, cancellationToken, adjusted, reserved);
+        await RecordScaleOutcomeAsync(db, intent, "PartialExitOutcome", paperQuantity, paperPrice, action, adjusted, reserved, cancellationToken);
     }
 
     private Task RecordScaleOutcomeAsync(TradingDbContext db, LiveExecutionIntent intent, string name,
-        int paperQuantity, decimal paperPrice, BrokerOrderSnapshot action, CancellationToken token,
-        BrokerProtectionSnapshot? verifiedStop, BrokerProtectionSnapshot? reservedStop = null) =>
+        int paperQuantity, decimal paperPrice, BrokerOrderSnapshot action,
+        BrokerProtectionSnapshot? verifiedStop, BrokerProtectionSnapshot? reservedStop, CancellationToken token) =>
         TryRecordLiveEventAsync(db, intent, name, new { paperQuantity, paperPrice, action.FilledQuantity,
             action.AverageFillPrice, action.PricedQuantity, action.BrokerOrderId, action.UpdatedAtUtc, verifiedStop, reservedStop, protectedRemainder = intent.FilledQuantity }, token);
 
