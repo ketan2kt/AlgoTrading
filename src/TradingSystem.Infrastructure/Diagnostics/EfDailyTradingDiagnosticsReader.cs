@@ -14,8 +14,8 @@ internal sealed class EfDailyTradingDiagnosticsReader(
     private const int MaximumDecisions = 500;
     private const int MaximumEvents = 100;
 
-    public Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly date, CancellationToken token)
-        => ReadCoreAsync(date, "all", token, true);
+    public Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly tradingDate, CancellationToken token)
+        => ReadCoreAsync(tradingDate, "all", token, true);
     public Task<DailyTradingDiagnosticsReport> ReadAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
         => ReadCoreAsync(tradingDate, market, cancellationToken, false);
     private async Task<DailyTradingDiagnosticsReport> ReadCoreAsync(

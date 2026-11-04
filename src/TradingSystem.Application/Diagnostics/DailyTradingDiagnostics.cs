@@ -14,8 +14,8 @@ public static class DailyAnalysisAvailabilityPolicy
 
 public interface IDailyTradingDiagnosticsReader
 {
-    Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly date, CancellationToken token)
-        => ReadAsync(date, "all", token);
+    Task<DailyTradingDiagnosticsReport> ReadWithTimelineAsync(DateOnly tradingDate, CancellationToken token)
+        => ReadAsync(tradingDate, "all", token);
     Task<DailyTradingDiagnosticsReport> ReadAsync(
         DateOnly tradingDate,
         string market,

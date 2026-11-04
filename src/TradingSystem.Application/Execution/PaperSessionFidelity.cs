@@ -8,8 +8,8 @@ public sealed record FidelityTrade(string Symbol,IReadOnlyList<FidelityAction> A
 public sealed record RecordedPaperSession(IReadOnlyList<FidelityTrade> Trades,IReadOnlyList<string> Gaps);
 public interface IRecordedPaperSessionReader
 {
-    Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly date,CancellationToken token);
-    Task<RecordedPaperSession> ReadTradesAsync(DateOnly date,CancellationToken token);
+    Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly tradingDate,CancellationToken token);
+    Task<RecordedPaperSession> ReadTradesAsync(DateOnly tradingDate,CancellationToken token);
 }
 public sealed record FidelityRow(string Symbol,string Kind,string Finding,FidelityAction? Paper,FidelityAction? Replay)
 {

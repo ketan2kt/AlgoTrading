@@ -9,23 +9,23 @@ namespace TradingSystem.Infrastructure.Execution;
 internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHistoricalFeedManifestReader manifests)
     : IRecordedPaperSessionReader
 {
-    private static DateTimeOffset Time(DateOnly date,int hour,int minute) =>
-        new(date.ToDateTime(new TimeOnly(hour,minute)),TimeSpan.FromHours(5.5));
+    private static DateTimeOffset Time(DateOnly tradingDate,int hour,int minute) =>
+        new(tradingDate.ToDateTime(new TimeOnly(hour,minute)),TimeSpan.FromHours(5.5));
     private static readonly string[] EngineKeys=["EngineEvidence.nifty.regular","EngineEvidence.sensex.regular","EngineEvidence.bank-nifty.regular"];
 
-    public async Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly date,CancellationToken token)
+    public async Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly tradingDate,CancellationToken token)
     {
-        var end=Time(date,15,30).ToUniversalTime();
-        var receipt=(await manifests.ReadCompleteAsync(date,Time(date,9,15),end,token))?.PolicyReceipt;
-        if(receipt?.ValidFor(date)!=true) return null;
+        var end=Time(tradingDate,15,30).ToUniversalTime();
+        var receipt=(await manifests.ReadCompleteAsync(tradingDate,Time(tradingDate,9,15),end,token))?.PolicyReceipt;
+        if(receipt?.ValidFor(tradingDate)!=true) return null;
         if(await db.AuditLogs.AsNoTracking().AnyAsync(a=>a.Action=="IndexTradingLotsChanged" &&
             a.OccurredAtUtc>=receipt.ObservedAt && a.OccurredAtUtc<=end,token)) return null;
         return receipt;
     }
 
-    public async Task<RecordedPaperSession> ReadTradesAsync(DateOnly date,CancellationToken token)
+    public async Task<RecordedPaperSession> ReadTradesAsync(DateOnly tradingDate,CancellationToken token)
     {
-        var start=Time(date,9,15).ToUniversalTime();var end=Time(date,15,30).ToUniversalTime();
+        var start=Time(tradingDate,9,15).ToUniversalTime();var end=Time(tradingDate,15,30).ToUniversalTime();
         var trades=new List<FidelityTrade>();var gaps=new List<string>();
         var heartbeat=await db.SystemEvents.AsNoTracking().Where(e=>EngineKeys.Contains(e.EventType) &&
             e.OccurredAtUtc>=start && e.OccurredAtUtc<=end)
@@ -109,9 +109,9 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
             if(!times.TryGetValue(p.Id,out var entryAt)){entryAt=p.OpenedAtUtc;gaps.Add($"{symbol}: exact paper entry receipt unavailable; showing position time.");}
             var actions=new List<FidelityAction>{new("Entry",entryAt,p.Quantity,p.EntryPrice,p.Strategy)};
             if(p.PartialExitQuantity>0){
-                var times=partials.Where(a=>a.Outcome==$"PartialProfit:{p.Id:N}").ToArray();
-                if(times.Length!=1 || p.PartialExitPrice is null) gaps.Add($"{symbol}: partial fill evidence incomplete.");
-                else actions.Add(new("Partial",times[0].CandleTimeUtc,p.PartialExitQuantity,p.PartialExitPrice.Value));
+                var partialTimes=partials.Where(a=>a.Outcome==$"PartialProfit:{p.Id:N}").ToArray();
+                if(partialTimes.Length!=1 || p.PartialExitPrice is null) gaps.Add($"{symbol}: partial fill evidence incomplete.");
+                else actions.Add(new("Partial",partialTimes[0].CandleTimeUtc,p.PartialExitQuantity,p.PartialExitPrice.Value));
             }
             if(p.ClosedAtUtc is not { } closed || closed>end) gaps.Add($"{symbol}: no terminal exit within session.");
             else actions.Add(new("Exit",closed,p.Quantity-p.PartialExitQuantity,p.CurrentPrice,p.Status));
