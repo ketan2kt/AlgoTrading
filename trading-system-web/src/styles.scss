@@ -882,3 +882,63 @@ app-root .desk-history-message{display:block;padding-inline:.7rem}
 @media(max-width:700px){app-root .desk-chart-toolbar .desk-safety-tools{margin-inline-start:auto}}
 app-root .desk-advanced>summary{cursor:pointer;font-weight:650;padding:.35rem}
 @media(max-width:900px){app-root .desk-report-links{position:fixed;top:5rem;right:1rem;z-index:15;min-width:12rem;box-shadow:0 .2rem .8rem #19462b33}}
+
+/* Desk controls have a visible resting edge; hover is feedback, not discovery. */
+app-root .workspace-layout { --desk-edge: #749881; --desk-ink: #163f2b; }
+app-root .workspace-layout button { border-width: 1px; border-style: solid; border-color: var(--desk-edge); }
+app-root .workspace-layout :is(button, summary, select, input):focus-visible {
+  outline: 3px solid #147447; outline-offset: 2px; box-shadow: 0 0 0 2px #fff;
+}
+app-root .workspace-layout .market-tabs button {
+  border: 1px solid #71977c; background: #edf6e9; color: var(--desk-ink); font-weight: 650;
+}
+app-root .workspace-layout .market-tabs button:hover:not(:disabled) {
+  color: #103821; background: #d3e8d0; border-color: #436e50;
+}
+app-root .workspace-layout .market-tabs .market-tab-group .market-tab--active {
+  color: white; background: #20553b; border-color: #9ecba9; box-shadow: inset 3px 0 #a8e3ac;
+}
+app-root .workspace-layout .market-tabs .market-tab-group .market-tab--alert { color: #241600; border-color: #74560b; }
+app-root .workspace-layout .desk-reports > button {
+  width: 100%; text-align: left; justify-content: space-between; padding-inline: .6rem;
+}
+app-root .desk-reports > button::after { content: ''; display: inline-block; width: .38rem; height: .38rem; margin-inline-start: .5rem; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
+app-root .desk-reports > button[aria-expanded=true]::after { transform: rotate(225deg); }
+app-root .workspace-layout .desk-report-links { border: 1px solid #62886d; background: #d9ebd7; padding: .32rem; gap: .28rem; }
+app-root .workspace-layout .desk-report-links button { color: #123d29; background: #f5faf1; border-color: #73957b; text-align: start; padding: .4rem .5rem; }
+app-root .workspace-layout .market-tabs .mute-alerts-button.muted { color: #543a06; background: #fff0c5; border-color: #ad8737; }
+
+/* Execution is the primary task. Diagnostics and maintenance stay one disclosure away. */
+app-root .control-center.logs-modal { width: min(860px, calc(100% - 1rem)); grid-template-columns: minmax(0,1fr); }
+app-root .control-center > * { min-width: 0; grid-column: 1 / -1; }
+app-root .control-center .control-center-actions { display: flex; flex-wrap: wrap; align-items: center; padding: .12rem 0 .55rem; }
+app-root .control-center-actions > strong { margin-inline-end: auto; color: #345d42; font-size: .8rem; }
+app-root .control-center .trading-lots-card,
+app-root .control-center .controls-disclosure,
+app-root .control-center .controls-emergency {
+  margin: 0; padding: .75rem; border: 1px solid var(--desk-edge) !important; border-radius: .65rem;
+}
+app-root .execution-heading span { color: #466c51; font-size: .65rem; font-weight: 750; letter-spacing: .09em; }
+app-root .execution-heading h3 { margin: .15rem 0 0; font-size: 1.1rem; color: var(--desk-ink); }
+app-root .execution-markets { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .48rem; }
+app-root .execution-market { display: grid; gap: .48rem; padding: .6rem; min-width: 0; border: 1px solid #87a68e; border-radius: .5rem; background: #f2f8ee; }
+app-root .execution-market h4 { margin: 0; border-bottom: 1px solid #bdd2bf; padding-bottom: .3rem; font-size: .9rem; }
+app-root .execution-market label { display: grid; gap: .25rem; color: #3d6149; font-size: .74rem; }
+app-root .execution-market input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #749881; padding: .38rem .55rem; font-weight: 650; }
+app-root .execution-market .market-live-toggle { color: #234b32; background: #e2eee0; border: 1px solid #73957b; padding: .4rem; font-size: .78rem; }
+app-root .execution-market .market-live-toggle.is-on, app-root .execution-market .market-live-toggle:hover:not(:disabled) { color: white; background: #1f593a; border-color: #18432c; }
+app-root .execution-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; border-top: 1px solid #adcaaf; padding-top: .5rem; }
+app-root .execution-actions button:not(.execution-save) { background: #eff6eb; color: #214d32; }
+app-root .execution-actions .execution-save { color: white; background: #21603c; border-color: #17472c; }
+app-root .trading-lots-card .execution-receipt { padding: .48rem .6rem; background: #d8ead6; border-left: 3px solid #689877; overflow-wrap: anywhere; }
+app-root .controls-disclosure { background: #e4f0df; }
+app-root .controls-disclosure > summary { cursor: pointer; padding: .12rem; color: #173f2d; font-weight: 700; }
+app-root .controls-disclosure > summary small { margin-inline-start: .5rem; color: #46674d; font-weight: 500; }
+app-root .control-center .controls-emergency { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5rem; background: #f5f3e6; }
+app-root .controls-emergency small { display: block; color: #54654c; }
+@media(max-width:560px) {
+  app-root .execution-markets { grid-template-columns: 1fr; }
+  app-root .execution-market { grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items: end; }
+  app-root .execution-market h4 { grid-column: 1 / -1; }
+  app-root .controls-disclosure > summary small { display: block; margin: .2rem 0 0; }
+}

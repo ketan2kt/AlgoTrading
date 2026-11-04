@@ -1,5 +1,9 @@
 # Current handover — 4 November 2026
 
+## Trading desk visual feedback — authorized for main deployment after CI
+
+Reports and its menu now specify text, surface and border together. All three market tabs and desk buttons have resting borders and keyboard focus. Controls groups per-market lots/live settings, broker connection, session diagnostics and the global emergency control; existing handlers and trading policies are unchanged. Source diff inspected; no local UI tests per Ketan. These edits are not part of the [previous deployment](https://github.com/ketan2kt/AlgoTrading/actions/runs/41852809649).
+
 ## Trading desk cleanup — authorized for deployment after CI
 
 Nifty, Sensex and Bank Nifty now show the chart immediately followed by positions (or an empty state). Research moved to Reports → Research logs, Hero Zero to navigation, and the global paper kill switch to the chart toolbar with a fallback while the feed loads. No changes to trade decisions or kill-switch semantics. [PR 17](https://github.com/ketan2kt/AlgoTrading/pull/17) includes this layout and the admin search casing fix. Validate via CI, then deploy main once; Ketan will review the live layout.
