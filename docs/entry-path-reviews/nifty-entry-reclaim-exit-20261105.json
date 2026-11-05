@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:41.1548260+00:00",
+  "market": "nifty",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 5,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 5,
+  "strategyBreakdown": [{"strategy": "NiftyAutomation", "count": 5, "removed": false}],
+  "limitation": "Reuses dated diagnostics from target-runner-recovery-nifty.json and session-evidence-release-nifty.json; not a new query or profitability replay. Only failed-entry exit logic changes. All ordinary strategy paths, entry filters and sizing remain. Shared reclaim requires adverse option risk, weak prior progress, two completed opposing candles and fresh structure confirmation. Entry time uses the actual fill timestamp in production and replay. Synthetic scaled structural tests are not observed Nifty trades or proof of executable savings. Changed holding periods may affect subsequent opportunities."
+}

@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:52.1118802+00:00",
+  "market": "bank-nifty",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 6,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 6,
+  "strategyBreakdown": [{"strategy": "Bank index directional breakout", "count": 6, "removed": false}],
+  "limitation": "Reuses dated diagnostics from target-runner-recovery-bank-nifty.json and session-evidence-release-bank-nifty.json; not a new query or profitability replay. The existing ordinary Bank Nifty entry path now shares the guarded failed-entry reclaim exit in production and replay. No entry, sizing or broker path removed. Initial stops, winner protection and exit priority remain. Synthetic scaled structural tests are not observed Bank Nifty trades or proof of savings. Holding periods can affect subsequent opportunities."
+}

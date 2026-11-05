@@ -1077,7 +1077,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
             // Sample negative decisions too, at the existing once-per-minute cadence.
             // This distinguishes insufficient reversal evidence from missing/stale data.
-            if (recordSample && market.Code == "sensex")
+            if (recordSample && market.Code is "sensex" or "bank-nifty")
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, observedAt,
                     $"ExitAssessment:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}", 0m,

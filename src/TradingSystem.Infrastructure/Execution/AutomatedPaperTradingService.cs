@@ -1073,9 +1073,9 @@ internal sealed partial class AutomatedPaperTradingService(
             fresh, extendBeyondTarget, manualExitRequested, killSwitchActive,
             invalidation.ShouldExit, false, false);
         var confirmedFailedSetup = false;
-        if (exitReason == PaperExitReason.None && underlyingFresh &&
+        if (exitReason == PaperExitReason.None && fresh && underlyingFresh &&
             FailedSetupExitPolicy.IsAdverseCandidate(entryPrice, price,
-                initialRiskPerUnit, favourable, open.Signal.MarketDataTimestampUtc,
+                initialRiskPerUnit, favourable, open.Entry.UpdatedAtUtc,
                 timeProvider.GetUtcNow()))
         {
             var latestUnderlying = await researchDb.MarketObservations.AsNoTracking()
@@ -1089,17 +1089,20 @@ internal sealed partial class AutomatedPaperTradingService(
                 .OrderByDescending(value => value.OpenTimeUtc).Take(30)
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
             var observedAt = timeProvider.GetUtcNow();
-            if (latestUnderlying is not null && observedAt - latestUnderlying.ReceivedAtUtc <=
+            if (latestUnderlying is not null && latestUnderlying.ReceivedAtUtc <= observedAt &&
+                observedAt - latestUnderlying.ReceivedAtUtc <=
                 TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
             {
                 var completedBars = underlyingBars
                     .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= observedAt)
                     .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                         value.Open, value.High, value.Low, value.Close)).ToArray();
-                var failedSetup = FailedSetupExitPolicy.Evaluate(open.Signal.Direction,
+                var failedSetup = FailedSetupExitPolicy.EvaluateForMarket("nifty", open.Signal.StrategyId,
+                    open.Signal.Direction,
                     entryPrice, price, initialRiskPerUnit, favourable,
-                    open.Signal.MarketDataTimestampUtc, observedAt,
-                    latestUnderlying.Price, completedBars);
+                    open.Entry.UpdatedAtUtc, observedAt,
+                    latestUnderlying.Price, latestUnderlying.ReceivedAtUtc, completedBars,
+                    intervalSeconds, marketOptions.Value.MaximumAgeSeconds);
                 if (failedSetup.ShouldExit)
                 {
                     confirmedFailedSetup = true;

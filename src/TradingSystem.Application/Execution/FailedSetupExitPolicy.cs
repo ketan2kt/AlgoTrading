@@ -13,8 +13,22 @@ public sealed record FailedSetupExitDecision(bool ShouldExit, decimal AdverseR,
 /// </summary>
 public static class FailedSetupExitPolicy
 {
-    // Shared by production and replay. The extra invalidated-entry path is deliberately
-    // limited to the Sensex thesis that produced the 5 Nov failed PE entry.
+    // Shared by production and replay. Only ordinary entry paths are eligible;
+    // specialty baskets and selective hedges retain their own management.
+    public static bool AllowsEntryReclaim(string market, string strategy)
+    {
+        if (market == "sensex")
+            return strategy.Equals("Sensex persistent directional thesis", StringComparison.OrdinalIgnoreCase);
+        if (market == "bank-nifty")
+            return strategy.Equals("Bank index directional breakout", StringComparison.OrdinalIgnoreCase);
+        if (market != "nifty") return false;
+        var normalStrategy = strategy.StartsWith("exploration-", StringComparison.Ordinal)
+            ? strategy["exploration-".Length..] : strategy;
+        return normalStrategy is "opening-range-breakout" or "opening-range-retest" or
+            "vwap-trend-pullback" or "ema-pullback-continuation" or
+            "intraday-range-breakout-retest" or "vwap-rejection-reversal" or "momentum-expansion";
+    }
+
     public static FailedSetupExitDecision EvaluateForMarket(string market, string strategy,
         Direction direction, decimal entryOption, decimal optionPrice, decimal initialRisk,
         decimal peakOption, DateTimeOffset entryAt, DateTimeOffset observedAt,
@@ -30,8 +44,7 @@ public static class FailedSetupExitPolicy
             return new(false, adverseR, ["Completed underlying candle evidence is missing, incomplete or stale."]);
         var original = Evaluate(direction, entryOption, optionPrice, initialRisk,
             peakOption, entryAt, observedAt, underlyingPrice, bars);
-        if (original.ShouldExit || market != "sensex" ||
-            !strategy.Equals("Sensex persistent directional thesis", StringComparison.OrdinalIgnoreCase) ||
+        if (original.ShouldExit || !AllowsEntryReclaim(market, strategy) ||
             !IsAdverseCandidate(entryOption, optionPrice, initialRisk, peakOption, entryAt, observedAt) ||
             underlyingPrice <= 0m)
             return original;

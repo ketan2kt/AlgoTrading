@@ -19,7 +19,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v3";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v4";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,

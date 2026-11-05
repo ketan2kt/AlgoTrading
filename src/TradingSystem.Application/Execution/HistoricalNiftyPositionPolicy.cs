@@ -30,7 +30,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v8";
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v9";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
@@ -179,12 +179,13 @@ public sealed class HistoricalNiftyPositionPolicy(
             // orders that slice oldest to newest for the failed-setup rule.
             var bars = SessionBars(frame).TakeLast(30).ToArray();
             var favourable = Favourable(position, mark);
-            failedSetup = FailedSetupExitPolicy.Evaluate(direction,
+            failedSetup = FailedSetupExitPolicy.EvaluateForMarket("nifty", position.Strategy, direction,
                 position.EntryPrice, mark,
                 Math.Abs(position.EntryPrice - position.InitialStopPrice),
-                favourable, position.DecisionAtUtc,
+                favourable, position.EntryAtUtc,
                 frame.Market.AvailableAtUtc, underlyingPrice,
-                bars).ShouldExit;
+                frame.Market.LatestQuotes[spotSymbol].AvailableAtUtc, bars,
+                settings.CandleIntervalSeconds, settings.MaximumUnderlyingQuoteAgeSeconds).ShouldExit;
         }
         var reason = NiftyOpenPositionDecisionPolicy.ResolveExit(
             Direction.Buy, mark, position.StopPrice, position.TargetPrice,
