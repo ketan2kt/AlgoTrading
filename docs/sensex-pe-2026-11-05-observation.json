@@ -1,0 +1,30 @@
+{
+  "source": "Authenticated rendered /api/trading-workspace/sensex?candleCount=750 and Sensex position UI",
+  "scope": "Read-only observation; no strategy changes or counterfactual replay",
+  "tradeId": "f2ef5809-6836-4330-9822-bbeaf2f297ab",
+  "strategy": "Sensex persistent directional thesis",
+  "contract": "SENSEX26N1279300PE",
+  "expiry": "2026-11-12",
+  "entryIst": "2026-11-05T14:29:03.157778+05:30",
+  "exitIst": "2026-11-05T14:34:47.846425+05:30",
+  "quantity": 100,
+  "entryPremium": 696.35,
+  "stopPremium": 626.70,
+  "exitPremium": 623.90,
+  "status": "StopLossHit",
+  "netPnl": -7443.38,
+  "maximumObservedProfit": 385.00,
+  "grossLossCalculated": 7245.00,
+  "costsInferredFromGrossAndNet": 198.38,
+  "underlyingOneMinuteCandles": [
+    {"openTimeIst":"14:28:00","open":79266.70,"high":79266.70,"low":79220.14,"close":79220.23},
+    {"openTimeIst":"14:29:00","open":79222.41,"high":79262.18,"low":79222.41,"close":79256.30},
+    {"openTimeIst":"14:30:00","open":79254.34,"high":79271.30,"low":79249.00,"close":79271.30},
+    {"openTimeIst":"14:31:00","open":79284.75,"high":79286.01,"low":79280.78,"close":79285.29},
+    {"openTimeIst":"14:32:00","open":79274.49,"high":79302.10,"low":79264.29,"close":79298.70},
+    {"openTimeIst":"14:33:00","open":79303.80,"high":79362.15,"low":79303.80,"close":79362.15},
+    {"openTimeIst":"14:34:00","open":79362.75,"high":79387.96,"low":79350.25,"close":79374.82}
+  ],
+  "finding": "After the bearish 14:28 candle the index rebounded; all five completed one-minute closes from 14:29 through 14:33 rose, +141.92 points versus the pre-entry completed close. The option fell through the displayed 10% stop. Contract had seven calendar days until expiry, not same-day expiry.",
+  "limitations": "14:34 candle closes after the exit and is not an exact exit-time spot mark. Closed-position overlay entry/stop/target index values are not used as historical spot. Entry evidence was null and the last 40 evaluations did not reach the entry. No timestamp-aligned IV/Greeks decomposition or full option quote timeline was retrieved; do not assign the entire premium fall exclusively to delta or assert an exact theta contribution. Full report requests timed out; paginated engine evidence returned the morning page but later pages timed out. Direct database hostname did not resolve; no networking or permissions changed."
+}

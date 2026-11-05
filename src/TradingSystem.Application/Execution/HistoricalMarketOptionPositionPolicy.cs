@@ -19,7 +19,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v2";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v3";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -86,10 +86,12 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         if (TryUnderlying(frame, out var underlying) &&
             FailedSetupExitPolicy.IsAdverseCandidate(position.EntryPrice, price, Risk(position),
                 Favourable(position, price), position.EntryAtUtc, frame.Market.AvailableAtUtc))
-            failed = FailedSetupExitPolicy.Evaluate(position.UnderlyingDirection!.Value,
+            failed = FailedSetupExitPolicy.EvaluateForMarket(market, position.Strategy, position.UnderlyingDirection!.Value,
                 position.EntryPrice, price, Risk(position), Favourable(position, price),
                 position.EntryAtUtc, frame.Market.AvailableAtUtc, underlying,
-                Bars(frame, true).TakeLast(30).ToArray()).ShouldExit;
+                frame.Market.LatestQuotes[underlyingSymbol].AvailableAtUtc,
+                Bars(frame, true).TakeLast(30).ToArray(), settings.CandleIntervalSeconds,
+                settings.MaximumUnderlyingAgeSeconds).ShouldExit;
         var forced = TimeOnly.FromDateTime(frame.Market.AvailableAtUtc.ToOffset(IndiaOffset).DateTime)
             >= settings.ForcedExit;
         return MarketOptionPositionPolicy.Decide(Direction.Buy, price, position.EntryPrice,

@@ -996,8 +996,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                 observedAt.Hour, observedAt.Minute,
                 0, TimeSpan.Zero);
             var sampleOutcome = $"PositionSample:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}";
-            if (!await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
-                    value.Market == market.Code && value.Outcome == sampleOutcome, cancellationToken))
+            var recordSample = !await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+                value.Market == market.Code && value.Outcome == sampleOutcome, cancellationToken);
+            if (recordSample)
             {
                 var livePnl = (position.Direction == Direction.Buy
                     ? price - position.EntryPrice : position.EntryPrice - price) *
@@ -1029,6 +1030,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             var forced = market != TradingMarketCatalog.NaturalGas &&
                          TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
             var failedSetup = false;
+            var failedAssessment = new FailedSetupExitDecision(false, initialRisk <= 0m ? 0m :
+                Math.Max(0m, (position.EntryPrice - price) / initialRisk),
+                ["Not a weak adverse entry, or manual/stop/reversal exit already takes priority."]);
             if (market.ExecuteOptions && !manualExitRequested && !stopHit && !reversalExit &&
                 FailedSetupExitPolicy.IsAdverseCandidate(position.EntryPrice, price,
                     initialRisk, favourableExtreme, position.OpenedAtUtc, observedAt))
@@ -1038,7 +1042,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                                     value.Source == "Groww")
                     .OrderByDescending(value => value.ReceivedAtUtc)
                     .FirstOrDefaultAsync(cancellationToken);
-                if (latestUnderlying is not null && observedAt - latestUnderlying.ReceivedAtUtc <=
+                failedAssessment = failedAssessment with { Reasons = ["Fresh underlying observation unavailable."] };
+                if (latestUnderlying is not null && latestUnderlying.ReceivedAtUtc <= observedAt &&
+                    observedAt - latestUnderlying.ReceivedAtUtc <=
                     TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
                 {
                     var intervalSeconds = marketOptions.Value.CandleIntervalSeconds;
@@ -1053,9 +1059,12 @@ internal sealed partial class MultiMarketPaperTradingService(
                         .Where(value => value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= observedAt)
                         .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
                             value.Open, value.High, value.Low, value.Close)).ToArray();
-                    var failedDecision = FailedSetupExitPolicy.Evaluate(expectedUnderlyingDirection,
+                    var failedDecision = FailedSetupExitPolicy.EvaluateForMarket(market.Code,
+                        position.Strategy, expectedUnderlyingDirection,
                         position.EntryPrice, price, initialRisk, favourableExtreme,
-                        position.OpenedAtUtc, observedAt, latestUnderlying.Price, completedBars);
+                        position.OpenedAtUtc, observedAt, latestUnderlying.Price, latestUnderlying.ReceivedAtUtc,
+                        completedBars, intervalSeconds, marketOptions.Value.MaximumAgeSeconds);
+                    failedAssessment = failedDecision;
                     failedSetup = failedDecision.ShouldExit;
                     if (failedSetup)
                         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
@@ -1066,6 +1075,16 @@ internal sealed partial class MultiMarketPaperTradingService(
                                 failedDecision.Reasons })));
                 }
             }
+            // Sample negative decisions too, at the existing once-per-minute cadence.
+            // This distinguishes insufficient reversal evidence from missing/stale data.
+            if (recordSample && market.Code == "sensex")
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
+                    position.UnderlyingInstrumentId, observedAt,
+                    $"ExitAssessment:{position.Id:N}:{sampleMinute:yyyyMMddHHmm}", 0m,
+                    JsonSerializer.Serialize(new { positionId = position.Id, price, initialRisk,
+                        favourableExtreme, stopHit, reversalExit, manualExitRequested,
+                        invalidation.ShouldExit, invalidation.Behaviour, invalidation.SupportingEvidence,
+                        failedSetup = failedAssessment, observedAtUtc = observedAt })));
             var positionDecision = MarketOptionPositionPolicy.Decide(position.Direction,
                 price, position.EntryPrice, position.StopLoss, position.Target, initialRisk,
                 position.RemainingQuantity, instrument.LotSize, exitPlan, manualExitRequested,

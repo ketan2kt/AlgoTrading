@@ -13,6 +13,61 @@ public sealed record FailedSetupExitDecision(bool ShouldExit, decimal AdverseR,
 /// </summary>
 public static class FailedSetupExitPolicy
 {
+    // Shared by production and replay. The extra invalidated-entry path is deliberately
+    // limited to the Sensex thesis that produced the 5 Nov failed PE entry.
+    public static FailedSetupExitDecision EvaluateForMarket(string market, string strategy,
+        Direction direction, decimal entryOption, decimal optionPrice, decimal initialRisk,
+        decimal peakOption, DateTimeOffset entryAt, DateTimeOffset observedAt,
+        decimal underlyingPrice, DateTimeOffset underlyingAt,
+        IReadOnlyList<StrategyPriceBar> bars, int intervalSeconds, int maximumAgeSeconds)
+    {
+        var adverseR = initialRisk <= 0m ? 0m : Math.Max(0m, (entryOption - optionPrice) / initialRisk);
+        if (underlyingAt > observedAt || observedAt - underlyingAt > TimeSpan.FromSeconds(maximumAgeSeconds))
+            return new(false, adverseR, ["Underlying quote is stale or future-dated."]);
+        if (intervalSeconds <= 0 || bars.Count < 10 ||
+            bars.Any(bar => bar.OpenTimeUtc.AddSeconds(intervalSeconds) > observedAt) ||
+            observedAt - bars[^1].OpenTimeUtc.AddSeconds(intervalSeconds) > TimeSpan.FromSeconds(intervalSeconds))
+            return new(false, adverseR, ["Completed underlying candle evidence is missing, incomplete or stale."]);
+        var original = Evaluate(direction, entryOption, optionPrice, initialRisk,
+            peakOption, entryAt, observedAt, underlyingPrice, bars);
+        if (original.ShouldExit || market != "sensex" ||
+            !strategy.Equals("Sensex persistent directional thesis", StringComparison.OrdinalIgnoreCase) ||
+            !IsAdverseCandidate(entryOption, optionPrice, initialRisk, peakOption, entryAt, observedAt) ||
+            underlyingPrice <= 0m)
+            return original;
+
+        var signalIndex = -1;
+        for (var index = 0; index < bars.Count; index++)
+            if (bars[index].OpenTimeUtc.AddSeconds(intervalSeconds) <= entryAt) signalIndex = index;
+        if (signalIndex < 0 || entryAt - bars[signalIndex].OpenTimeUtc.AddSeconds(intervalSeconds) >=
+            TimeSpan.FromSeconds(intervalSeconds))
+            return new(false, adverseR, ["Entry-candle reclaim: pre-entry signal candle is unavailable."]);
+        for (var index = signalIndex + 1; index < bars.Count; index++)
+            if (bars[index].OpenTimeUtc - bars[index - 1].OpenTimeUtc != TimeSpan.FromSeconds(intervalSeconds))
+                return new(false, adverseR, ["Entry-candle reclaim: candle sequence has a gap."]);
+        var signal = bars[signalIndex];
+        var prior = bars[^2];
+        var last = bars[^1];
+        if (prior.OpenTimeUtc < entryAt)
+            return new(false, adverseR, ["Entry-candle reclaim: two fully post-entry candles are required."]);
+        var ema9 = bars[0].Close;
+        foreach (var bar in bars.Skip(1)) ema9 = bar.Close * .2m + ema9 * .8m;
+        var recent = bars.TakeLast(10).ToArray();
+        var atr = recent.Skip(1).Select((bar, index) => Math.Max(bar.High - bar.Low,
+            Math.Max(Math.Abs(bar.High - recent[index].Close), Math.Abs(bar.Low - recent[index].Close)))).Average();
+        var buffer = atr * .10m;
+        var reclaimed = atr > 0m && (direction == Direction.Sell
+            ? signal.Close < signal.Open && prior.Close > prior.Open && last.Close > last.Open &&
+              last.Close > prior.Close && prior.Close > signal.High + buffer && last.Close > signal.High + buffer &&
+              underlyingPrice > signal.High + buffer && underlyingPrice > ema9 + buffer
+            : signal.Close > signal.Open && prior.Close < prior.Open && last.Close < last.Open &&
+              last.Close < prior.Close && prior.Close < signal.Low - buffer && last.Close < signal.Low - buffer &&
+              underlyingPrice < signal.Low - buffer && underlyingPrice < ema9 - buffer);
+        return reclaimed
+            ? new(true, adverseR, [$"Entry-candle reclaim: option lost {adverseR:F2}R without +0.50R; two completed opposing candles invalidated the signal candle and the fresh quote still holds beyond that boundary and EMA9."])
+            : new(false, adverseR, ["Entry-candle reclaim is not confirmed by two opposing closes and the fresh quote; retain existing stop."]);
+    }
+
     public static bool IsAdverseCandidate(decimal entryOption, decimal optionPrice,
         decimal initialRisk, decimal peakOption, DateTimeOffset entryAt,
         DateTimeOffset observedAt) =>

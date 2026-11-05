@@ -1,5 +1,13 @@
 # Current handover — 5 November 2026
 
+## Sensex failed-thesis early exit — implementation checked, awaiting push CI
+
+Investigated the 5 Nov 14:29:03 IST SENSEX26N1279300PE trade (expiry 12 Nov, entry 696.35, exit 623.90, net -7443.38). Recorded completed spot candles confirm a rebound against the PE. Full reversal reconstruction lacked its persistent-close/EMA confirmation before exit. The faster failed-setup exit also required a fresh quote beyond the latest candle close, which can miss an already-invalidated entry during a small retracement. Missing aligned option ticks/runtime exit evaluations prevent proving exactly when the original fast gate qualified or calculating executable savings.
+
+Added a shared production/replay Sensex persistent-directional-thesis alternative: existing >=0.35R adverse, <0.50R peak and 1–15 minute gates; two fully post-entry opposing completed candles with progressive closes beyond the last pre-entry directional candle's adverse extreme by 0.10 ATR; current fresh quote still beyond that boundary and EMA9. Requires contiguous candles from the entry anchor and rejects stale/incomplete/future evidence. Full reversal and original fast exit remain; no entry filters, strategy paths, lot controls or broker order code changed. Initial/trailing stops, winner/partial protection and manual/stop exit priority retained. Shared market exit wrapper rejects stale/future candle evidence; replay version is market-option-exit-v3. Sensex ExitAssessment audits now record negative and positive gate evidence once per sampled minute; missing historical samples are not backfilled.
+
+Focused backend checks passed: 44 tests including recorded-spot conditional replay, CE symmetry, single-candle/wick rejection, ordinary pullback, prior winner, stale/future/gapped evidence, unaffected strategy scope, and stop priority. Conditional option mark in regression is explicitly synthetic, not a historical fill or profitability result. Diff check passed. Entry-path review reuses clearly attributed Nov 4 diagnostics: 15 regular Sensex entries, zero paths removed; no fresh report claim. Earlier narrator edits and unrelated handover sections are excluded from staging. User authorized main deployment after CI. No deployment dispatched yet.
+
 ## Session evidence — merged to main; deployment dispatched
 
 Release workflow: main CI publishes a single commit-stamped application ZIP from its tested binaries and browser build. Deployment validates its originating CI run, attempt and checksum before Azure access. No tests or builds in deployment; infrastructure, migration, secret, health and build-identity checks remain in place.

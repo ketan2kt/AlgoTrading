@@ -1,0 +1,17 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-05T05:12:50.3789433+00:00",
+  "market": "sensex",
+  "from": "2026-11-04",
+  "to": "2026-11-04",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 15,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 15,
+  "strategyBreakdown": [
+    {"strategy": "Sensex directional pullback participation", "count": 10, "removed": false},
+    {"strategy": "Sensex persistent directional thesis", "count": 3, "removed": false},
+    {"strategy": "Sensex controlled early pullback", "count": 2, "removed": false}
+  ],
+  "limitation": "Reuses dated diagnostics from sensex-verified-expiry-roll-20261105.json, not a new production query. Exit-only change; no entry path, filter, sizing or strategy removed. The extra failed-entry exit applies only to Sensex persistent directional thesis, with existing adverse/peak gates and two post-entry opposing completed candles reclaiming the pre-entry signal boundary, plus fresh quote confirmation. Holding-time changes may affect later opportunities. Recorded spot candles exercise the structural condition, but missing aligned option ticks prevent quantifying actual earlier execution or profit improvement. These counts do not prove profitability."
+}
