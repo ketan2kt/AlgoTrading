@@ -33,7 +33,7 @@ public sealed class SensexNovember5MorningGateReplayTests
     }
 
     [Fact]
-    public void SameRecordedMorningCanConfirmAnAlignedMove_NotABlanketNoTradeRule()
+    public void SameRecordedMorningCanConfirmAnAlignedMoveWithoutBlanketVeto()
     {
         var asOf = new DateTimeOffset(2026, 11, 5, 9, 40, 0, TimeSpan.FromHours(5.5));
         var available = Bars().Where(bar => bar.OpenTimeUtc.AddMinutes(5) <= asOf).ToArray();
