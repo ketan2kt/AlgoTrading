@@ -132,7 +132,7 @@ public sealed class HistoricalNiftyPositionPolicyTests
     }
 
     [Fact]
-    public void RecoveredProductionRegimeDoesNotInventADirectionalRunnerOrAddOn()
+    public void SavedDirectionalRegimeAllowsRunnerAndPartialButKeepsStopAndTimeExits()
     {
         var now = Start.AddMinutes(22);
         var bars = Enumerable.Range(0, 22).Select(index =>
@@ -165,8 +165,27 @@ public sealed class HistoricalNiftyPositionPolicyTests
             new(new TimeOnly(15, 15), true, true, true,
                 true, .6m, true, .55m, 3, true, .8m, 5, 5, 60));
 
-        Assert.False(policy.ShouldExtendTarget(frame, position));
+        Assert.True(policy.ShouldExtendTarget(frame, position));
+        Assert.Empty(policy.EvaluateExits(frame));
+        Assert.Equal(75, Assert.Single(policy.EvaluatePartialExits(frame)).Quantity);
         Assert.Empty(policy.EvaluateAddOns(frame));
+        var stopped = position with { StopPrice = 120m };
+        Assert.Equal("StopLoss", Assert.Single(policy.EvaluateExits(frame with
+            { OpenPosition = stopped, OpenPositions = [stopped] })).Reason);
+        var unknown = position with { SignalRegime = null };
+        Assert.False(policy.ShouldExtendTarget(frame with
+            { OpenPosition = unknown, OpenPositions = [unknown] }, unknown));
+        var lowConfidence = position with { SignalConfidence = .59m };
+        Assert.False(policy.ShouldExtendTarget(frame with
+            { OpenPosition = lowConfidence, OpenPositions = [lowConfidence] }, lowConfidence));
+        var staleQuotes = new Dictionary<string, HistoricalReplayQuote>(quotes)
+        { ["NIFTY"] = new("NIFTY", now.AddSeconds(-6), 22180m) };
+        Assert.False(policy.ShouldExtendTarget(frame with
+            { Market = new(now, bars, staleQuotes) }, position));
+        var timeExit = new HistoricalNiftyPositionPolicy(new EntryPolicy(),
+            new(TimeOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(5.5)).DateTime),
+                true, true, true, true, .6m, true, .55m, 3, true, .8m, 5, 5, 60));
+        Assert.Equal("ForcedIntradayExit", Assert.Single(timeExit.EvaluateExits(frame)).Reason);
     }
 
     [Theory]

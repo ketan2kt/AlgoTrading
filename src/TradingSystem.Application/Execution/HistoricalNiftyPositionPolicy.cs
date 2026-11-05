@@ -30,7 +30,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v7";
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v8";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
@@ -52,7 +52,7 @@ public sealed class HistoricalNiftyPositionPolicy(
             !NiftyPositions(frame).Any(value => value.Symbol == position.Symbol) ||
             !TryOptionMark(frame, position, out _)) return false;
         var invalidation = Invalidation(frame, position);
-        return ExitPlan().ExtendTarget && !invalidation.ShouldExit &&
+        return ExitPlan(position).ExtendTarget && !invalidation.ShouldExit && invalidation.DirectionAligned &&
             invalidation.Behaviour == SessionBehaviour.Trending &&
             position.SignalConfidence >= settings.TargetExtensionMinimumConfidence;
     }
@@ -65,7 +65,7 @@ public sealed class HistoricalNiftyPositionPolicy(
         {
             if (!TryOptionMark(frame, position, out var mark)) continue;
             var favourable = Favourable(position, mark);
-            var plan = ExitPlan();
+            var plan = ExitPlan(position);
             var quantity = position.OriginalQuantity > 0
                 ? position.OriginalQuantity : position.Quantity;
             var proposed = PaperProtectiveStopPolicy.CalculateNetProtected(
@@ -161,14 +161,14 @@ public sealed class HistoricalNiftyPositionPolicy(
     {
         if (!TryOptionMark(frame, position, out var mark))
             return (PaperExitReason.None, 0);
-        var plan = ExitPlan();
+        var plan = ExitPlan(position);
         var invalidation = Invalidation(frame, position);
         var reversalProtected = invalidation.ShouldExit &&
             mark > position.EntryPrice &&
             settings.ProtectProfitableConfirmedReversals;
         var confirmedInvalidation = invalidation.ShouldExit && !reversalProtected;
         var extendTarget = settings.TargetExtensionEnabled &&
-            plan.ExtendTarget && !confirmedInvalidation &&
+            plan.ExtendTarget && !confirmedInvalidation && invalidation.DirectionAligned &&
             invalidation.Behaviour == SessionBehaviour.Trending &&
             position.SignalConfidence >= settings.TargetExtensionMinimumConfidence;
         var failedSetup = false;
@@ -212,6 +212,9 @@ public sealed class HistoricalNiftyPositionPolicy(
         if (bars.Length < 21 || bars.Count(value =>
                 value.OpenTimeUtc.AddSeconds(settings.CandleIntervalSeconds) > position.DecisionAtUtc) < 2)
             return new(false, 0m, ["Completed post-entry underlying evidence is insufficient."]);
+        if (frame.Market.AvailableAtUtc - bars[^1].OpenTimeUtc.AddSeconds(settings.CandleIntervalSeconds) >
+            TimeSpan.FromSeconds(settings.CandleIntervalSeconds + settings.MaximumUnderlyingQuoteAgeSeconds))
+            return new(false, 0m, ["Completed underlying candles are stale."]);
         var closes = bars.Select(value => value.Close).ToArray();
         return UnderlyingTrendInvalidationPolicy.Evaluate(direction, bars,
             Ema(closes, 9), Ema(closes, 21),
@@ -226,6 +229,7 @@ public sealed class HistoricalNiftyPositionPolicy(
         return frame.Market.CompletedBars.Where(value =>
                 value.Symbol == spotSymbol &&
                 value.IntervalSeconds == settings.CandleIntervalSeconds &&
+                value.OpenTimeUtc.AddSeconds(settings.CandleIntervalSeconds) <= frame.Market.AvailableAtUtc &&
                 DateOnly.FromDateTime(value.OpenTimeUtc.ToOffset(
                     IndiaOffset).DateTime) == date)
             .OrderBy(value => value.OpenTimeUtc)
@@ -233,7 +237,8 @@ public sealed class HistoricalNiftyPositionPolicy(
                 value.Open, value.High, value.Low, value.Close)).ToArray();
     }
 
-    private static ProfessionalExitPlan ExitPlan() => NiftySignalRecoveryPolicy.ExitPlan();
+    private static ProfessionalExitPlan ExitPlan(HistoricalReplayOpenPosition position) =>
+        NiftySignalRecoveryPolicy.ExitPlan(position.SignalRegime);
 
     private static IEnumerable<HistoricalReplayOpenPosition> NiftyPositions(
         HistoricalReplayPortfolioFrame frame) => frame.OpenPositions.Where(value =>

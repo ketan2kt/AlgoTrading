@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:41.1548260+00:00",
+  "market": "nifty",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 5,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 5,
+  "strategyBreakdown": [{"strategy": "NiftyAutomation", "count": 5, "removed": false}],
+  "limitation": "Reuses the saved read-only diagnostic counts in session-evidence-release-nifty.json; this is not a new production query or a replay result. This release restores stored exit regime and target-runner eligibility only; no entry strategy, sizing gate or entry filter is removed. Different future holding durations can change subsequent entry availability. Retained historical entry paths do not prove profitability."
+}

@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:52.1118802+00:00",
+  "market": "bank-nifty",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 6,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 6,
+  "strategyBreakdown": [{"strategy": "Bank index directional breakout", "count": 6, "removed": false}],
+  "limitation": "Reuses saved read-only evidence in session-evidence-release-bank-nifty.json, not a new query or replay. Bank Nifty already permits directional runners; this change requires fresh aligned completed-candle confirmation. No entry paths, stops or exit protections are removed. Different holding durations can affect later opportunities; these counts are not a profitability verdict."
+}

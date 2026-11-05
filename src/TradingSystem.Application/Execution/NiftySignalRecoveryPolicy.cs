@@ -1,11 +1,12 @@
 using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
+using System.Text.Json;
 
 namespace TradingSystem.Application.Execution;
 
-// Preserve the currently deployed recovery semantics. The persisted Signal
-// does not carry a regime; rebuilding it currently selects Uncertain. Replay
-// must not silently use a more favourable original entry regime instead.
+// The entry regime is persisted in ReasonsJson by EfPaperLifecycleAuditStore.
+// Restore it on every management cycle, not just on process restart. Missing
+// legacy evidence remains Uncertain; never infer a favourable regime.
 public static class NiftySignalRecoveryPolicy
 {
     public const MarketRegime RecoveredRegime = MarketRegime.Uncertain;
@@ -20,9 +21,27 @@ public static class NiftySignalRecoveryPolicy
             SignalEntryType.Market, value.ProposedEntry, value.ProposedStopLoss, value.ProposedTarget,
             Math.Abs(value.ProposedTarget - value.ProposedEntry) /
             Math.Abs(value.ProposedEntry - value.ProposedStopLoss), value.Confidence,
-            RecoveredRegime, [], [], value.MarketDataTimestampUtc, value.ExpiresAtUtc);
+            ReadRegime(value.ReasonsJson), [], [], value.MarketDataTimestampUtc, value.ExpiresAtUtc);
     }
 
-    public static ProfessionalExitPlan ExitPlan() =>
-        ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(RecoveredRegime));
+    public static MarketRegime ReadRegime(string? reasonsJson)
+    {
+        if (string.IsNullOrWhiteSpace(reasonsJson)) return RecoveredRegime;
+        try
+        {
+            using var document = JsonDocument.Parse(reasonsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("regime", out var value)) return RecoveredRegime;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) &&
+                Enum.IsDefined(typeof(MarketRegime), number)) return (MarketRegime)number;
+            if (value.ValueKind == JsonValueKind.String &&
+                Enum.TryParse<MarketRegime>(value.GetString(), true, out var named) &&
+                Enum.IsDefined(named)) return named;
+        }
+        catch (JsonException) { }
+        return RecoveredRegime;
+    }
+
+    public static ProfessionalExitPlan ExitPlan(MarketRegime? regime = null) =>
+        ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(regime ?? RecoveredRegime));
 }

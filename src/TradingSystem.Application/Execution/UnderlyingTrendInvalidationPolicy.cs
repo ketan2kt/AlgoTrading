@@ -7,7 +7,10 @@ public sealed record UnderlyingTrendInvalidationResult(
     bool ShouldExit,
     decimal EvidenceScore,
     IReadOnlyList<string> SupportingEvidence,
-    SessionBehaviour Behaviour = SessionBehaviour.Unknown);
+    SessionBehaviour Behaviour = SessionBehaviour.Unknown)
+{
+    public bool DirectionAligned { get; init; }
+}
 
 public enum SessionBehaviour
 {
@@ -85,7 +88,12 @@ public static class UnderlyingTrendInvalidationPolicy
         var confirmed = evidence.Count >= evidenceRequired && persistent && swingBroken &&
                         (behaviour == SessionBehaviour.Trending || oppositeStructure);
         evidence.Add($"Session behaviour: {behaviour}.");
-        return new(confirmed, Math.Min(1m, (evidence.Count - 1) / 4m), evidence, behaviour);
+        return new(confirmed, Math.Min(1m, (evidence.Count - 1) / 4m), evidence, behaviour)
+        {
+            DirectionAligned = originalUnderlyingDirection == Direction.Buy
+                ? fastEma > slowEma && latest.Close >= fastEma
+                : fastEma < slowEma && latest.Close <= fastEma
+        };
     }
 
     private static SessionBehaviour ClassifySession(StrategyPriceBar[] bars,

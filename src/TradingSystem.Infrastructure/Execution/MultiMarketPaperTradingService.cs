@@ -1021,7 +1021,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             // A breached stop takes precedence over continuation and partial exits.
             var continuationConfirmed = !stopHit && !reversalExit && !reversalProtection &&
                                         targetHit && options.Value.TargetExtensionEnabled &&
-                                        exitPlan.ExtendTarget &&
+                                        MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
                                         await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken);
             var india = TimeZoneInfo.ConvertTime(observedAt, IndiaTimeZone);
@@ -1104,6 +1104,9 @@ internal sealed partial class MultiMarketPaperTradingService(
                     position.UnderlyingInstrumentId, observedAt, $"PositionClosed:{position.Id:N}", 0m,
                     JsonSerializer.Serialize(new { positionId = position.Id, exitPrice = price,
                         exitReason = position.Status, grossPnl, costs, netPnl = position.RealisedPnl,
+                        targetContinuation = new { enabled = options.Value.TargetExtensionEnabled,
+                            strategyEligible = MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+                            stopHit, reversalExit, reversalProtection, allowed = continuationConfirmed },
                         closedAtUtc = observedAt })));
             }
         }
@@ -1161,17 +1164,25 @@ internal sealed partial class MultiMarketPaperTradingService(
     private async Task<bool> HasContinuationStructureAsync(TradingDbContext db, Guid underlyingInstrumentId,
         Direction direction, CancellationToken cancellationToken)
     {
+        var observedAt = timeProvider.GetUtcNow();
+        var latestUnderlyingAt = await db.MarketObservations.AsNoTracking()
+            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+            .OrderByDescending(value => value.ReceivedAtUtc)
+            .Select(value => (DateTimeOffset?)value.ReceivedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var interval = marketOptions.Value.CandleIntervalSeconds;
+        var completedBefore = observedAt.AddSeconds(-interval);
         var candles = await db.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == underlyingInstrumentId &&
-                            value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
+                            value.IntervalSeconds == interval && value.OpenTimeUtc <= completedBefore &&
                             value.Source == "Groww")
             .OrderByDescending(value => value.OpenTimeUtc)
             .Take(21)
             .OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
-        return MarketOptionPositionPolicy.Continuation(candles.Select(value =>
+        return MarketOptionPositionPolicy.FreshContinuation(candles.Select(value =>
             new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High,
-                value.Low, value.Close)).ToArray(), direction);
+                value.Low, value.Close)).ToArray(), direction, observedAt, latestUnderlyingAt,
+            interval, marketOptions.Value.MaximumAgeSeconds);
     }
 
     private async Task<UnderlyingTrendInvalidationResult> EvaluateUnderlyingInvalidationAsync(

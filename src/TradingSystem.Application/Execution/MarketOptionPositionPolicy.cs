@@ -9,6 +9,14 @@ public sealed record MarketOptionPositionDecision(string? ExitReason, int Partia
 
 public static class MarketOptionPositionPolicy
 {
+    // These two established trend-entry paths do not contain "directional" or
+    // "continuation" in their names. Do not let naming disable their runners.
+    // Keep their existing stop/partial plan unchanged; live structure must still qualify.
+    public static bool AllowsTargetExtension(string strategy) =>
+        ProfessionalExitPolicy.For(Regime(strategy)).ExtendTarget ||
+        strategy.Equals("Index momentum breakout", StringComparison.OrdinalIgnoreCase) ||
+        strategy.Equals("Sensex controlled early pullback", StringComparison.OrdinalIgnoreCase);
+
     public static ProfessionalTradeRegime Regime(string strategy) =>
         strategy.Contains("range", StringComparison.OrdinalIgnoreCase)
             ? ProfessionalTradeRegime.Range
@@ -64,6 +72,24 @@ public static class MarketOptionPositionPolicy
         var slow = Ema(bars, Math.Min(21, bars.Length));
         return direction == Direction.Buy ? fast > slow && bars[^1].Close >= fast
             : fast < slow && bars[^1].Close <= fast;
+    }
+
+    public static bool FreshContinuation(IReadOnlyList<StrategyPriceBar> bars,
+        Direction direction, DateTimeOffset observedAt, DateTimeOffset? underlyingAt,
+        int intervalSeconds, int maximumAgeSeconds)
+    {
+        if (underlyingAt is null || underlyingAt > observedAt ||
+            observedAt - underlyingAt.Value > TimeSpan.FromSeconds(maximumAgeSeconds)) return false;
+        var indiaOffset = TimeSpan.FromHours(5.5);
+        var day = observedAt.ToOffset(indiaOffset).Date;
+        var completed = bars.Where(bar => bar.OpenTimeUtc.ToOffset(indiaOffset).Date == day &&
+                bar.OpenTimeUtc.AddSeconds(intervalSeconds) <= observedAt)
+            .OrderBy(bar => bar.OpenTimeUtc).TakeLast(21).ToArray();
+        if (completed.Length < 9 || observedAt - completed[^1].OpenTimeUtc.AddSeconds(intervalSeconds) >
+            TimeSpan.FromSeconds(intervalSeconds + maximumAgeSeconds) || !Continuation(completed, direction))
+            return false;
+        return UnderlyingTrendInvalidationPolicy.Evaluate(direction, completed,
+            Ema(completed, 9), Ema(completed, Math.Min(21, completed.Length))).Behaviour == SessionBehaviour.Trending;
     }
 
     public static UnderlyingTrendInvalidationResult Invalidation(

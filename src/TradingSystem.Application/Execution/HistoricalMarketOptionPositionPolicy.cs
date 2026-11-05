@@ -19,7 +19,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v1";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v2";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -54,11 +54,13 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         HistoricalReplayOpenPosition position)
     {
         if (!Positions(frame).Any(value => value.Symbol == position.Symbol) ||
-            !TryMark(frame, position, out var price)) return false;
+            !TryMark(frame, position, out var price) || !TryUnderlying(frame, out _)) return false;
         var reversal = Reversal(frame, position, price, position.StopPrice);
         return price > position.StopPrice && !reversal.ShouldExit && !reversal.ProtectProfit &&
-            settings.TargetExtensionEnabled && Plan(position).ExtendTarget &&
-            MarketOptionPositionPolicy.Continuation(Bars(frame, false), position.UnderlyingDirection!.Value);
+            settings.TargetExtensionEnabled && MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
+            MarketOptionPositionPolicy.FreshContinuation(Bars(frame, false), position.UnderlyingDirection!.Value,
+                frame.Market.AvailableAtUtc, frame.Market.LatestQuotes[underlyingSymbol].AvailableAtUtc,
+                settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds);
     }
 
     public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame) =>

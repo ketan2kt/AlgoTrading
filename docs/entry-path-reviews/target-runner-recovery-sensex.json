@@ -1,0 +1,17 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:46.4737106+00:00",
+  "market": "sensex",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 8,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 8,
+  "strategyBreakdown": [
+    {"strategy": "PaperOnly|persistent-directional-thesis-v1|sensex", "count": 4, "removed": false},
+    {"strategy": "Research|Sensex directional pullback participation", "count": 3, "removed": false},
+    {"strategy": "Research|Sensex range-edge rejection", "count": 1, "removed": false}
+  ],
+  "limitation": "Reuses saved read-only evidence in session-evidence-release-sensex.json, not a new query or performance replay. Only exit eligibility and fresh completed-candle runner confirmation change; all entry paths remain. Different holding durations may change later opportunities. These historical counts do not prove runner profitability."
+}

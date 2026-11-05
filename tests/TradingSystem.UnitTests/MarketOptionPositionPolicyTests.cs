@@ -5,6 +5,44 @@ namespace TradingSystem.UnitTests;
 
 public sealed class MarketOptionPositionPolicyTests
 {
+    [Theory]
+    [InlineData("Index momentum breakout", true)]
+    [InlineData("Sensex controlled early pullback", true)]
+    [InlineData("Sensex persistent directional thesis", true)]
+    [InlineData("Sensex directional pullback participation", true)]
+    [InlineData("Bank index directional breakout", true)]
+    [InlineData("Sensex range-edge rejection", false)]
+    [InlineData("unknown strategy", false)]
+    public void RunnerEligibilityIncludesNamedTrendEntriesButNotRangeOrUnknown(string strategy, bool allowed)
+        => Assert.Equal(allowed, MarketOptionPositionPolicy.AllowsTargetExtension(strategy));
+
+    [Theory]
+    [InlineData(Direction.Buy)]
+    [InlineData(Direction.Sell)]
+    public void ContinuationRequiresFreshAlignedCompletedEvidence(Direction direction)
+    {
+        var start = new DateTimeOffset(2026, 11, 5, 4, 0, 0, TimeSpan.Zero);
+        var sign = direction == Direction.Buy ? 1m : -1m;
+        var bars = Enumerable.Range(0, 21).Select(i =>
+        {
+            var open = 55000m + sign * i * 5m;
+            var close = open + sign * 5m;
+            return new TradingSystem.Application.Strategies.StrategyPriceBar(start.AddMinutes(i),
+                open, Math.Max(open, close) + 1m, Math.Min(open, close) - 1m, close);
+        }).ToArray();
+        var now = start.AddMinutes(21);
+        Assert.True(MarketOptionPositionPolicy.FreshContinuation(bars, direction, now, now, 60, 5));
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars, direction, now, null, 60, 5));
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars, direction, now, now.AddSeconds(-6), 60, 5));
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars, direction, now, now.AddSeconds(1), 60, 5));
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars, direction, now.AddMinutes(3), now.AddMinutes(3), 60, 5));
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars,
+            direction == Direction.Buy ? Direction.Sell : Direction.Buy, now, now, 60, 5));
+        // Future/forming candles cannot create a confirmation before enough bars have closed.
+        Assert.False(MarketOptionPositionPolicy.FreshContinuation(bars, direction,
+            start.AddMinutes(8), start.AddMinutes(8), 60, 5));
+    }
+
     [Fact]
     public void SharedExitAndWholeLotPartialOrderingMatchesOriginalProductionBranches()
     {

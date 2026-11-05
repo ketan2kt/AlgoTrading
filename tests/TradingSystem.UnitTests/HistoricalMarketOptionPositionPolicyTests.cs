@@ -10,11 +10,58 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
     private static readonly NiftyOptionContractCandidate Contract = new(Guid.Empty,
         Symbol, InstrumentType.CallOption, new DateOnly(2026, 11, 24), 55000m, 30, .05m);
 
+    [Theory]
+    [InlineData("sensex", "SENSEX", "Index momentum breakout")]
+    [InlineData("sensex", "SENSEX", "Sensex controlled early pullback")]
+    [InlineData("bank-nifty", "BANKNIFTY", "Bank index directional breakout")]
+    public void StrongWinnerRunsWithFreshEvidenceButStopAndTimeExitRemainAuthoritative(
+        string market, string underlying, string strategy)
+    {
+        var now = Start.AddMinutes(21);
+        var symbol = underlying + "55000CE";
+        var contract = Contract with { TradingSymbol = symbol };
+        var position = Position() with { Symbol = symbol, Strategy = strategy,
+            EntryAtUtc = Start.AddMinutes(18), LatestPrice = 115m, StopPrice = 105m };
+        var bars = Enumerable.Range(0, 21).Select(i => new HistoricalReplayBar(
+            Start.AddMinutes(i), 60, 55000m + i * 5m, 55006m + i * 5m,
+            54999m + i * 5m, 55005m + i * 5m) { Symbol = underlying }).ToArray();
+        var quotes = new Dictionary<string, HistoricalReplayQuote>
+        { [symbol] = new(symbol, now, 115m), [underlying] = new(underlying, now, 55105m) };
+        var frame = new HistoricalReplayPortfolioFrame(new(now, bars, quotes), position, [])
+            { OpenPositions = [position] };
+        var settings = new HistoricalMarketOptionExitSettings(new TimeOnly(15, 15),
+            true, true, true, .55m, 3, true, .8m, 5, 5, 60);
+        var policy = new HistoricalMarketOptionPositionPolicy(new Entry(), market, underlying, settings, [contract]);
+        Assert.True(policy.ShouldExtendTarget(frame, position));
+        Assert.Empty(policy.EvaluateExits(frame));
+        Assert.NotEmpty(policy.EvaluatePartialExits(frame));
+        var stopped = position with { StopPrice = 115m };
+        Assert.Equal("StopLossHit", Assert.Single(policy.EvaluateExits(frame with
+            { OpenPosition = stopped, OpenPositions = [stopped] })).Reason);
+        var stale = new Dictionary<string, HistoricalReplayQuote>(quotes)
+            { [underlying] = new(underlying, now.AddSeconds(-6), 55105m) };
+        Assert.False(policy.ShouldExtendTarget(frame with { Market = new(now, bars, stale) }, position));
+        Assert.Equal("TargetHit", Assert.Single(policy.EvaluateExits(
+            frame with { Market = new(now, bars, stale) })).Reason);
+        var timed = new HistoricalMarketOptionPositionPolicy(new Entry(), market, underlying,
+            settings with { ForcedExit = TimeOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(5.5)).DateTime) }, [contract]);
+        Assert.NotEmpty(timed.EvaluateExits(frame));
+        Assert.All(policy.EvaluateStopUpdates(frame), update => Assert.True(update.NewStopPrice >= position.StopPrice));
+    }
+
     [Fact]
     public void LaterBidFillsWholeLotPartialAndProtectsRemainingDirectionalWinner()
     {
         var policy = Policy(partial: true);
-        var result = HistoricalPortfolioReplay.Run(Bars(), [
+        var winnerBars = Enumerable.Range(0, 27).Select(index =>
+            new HistoricalReplayBar(Start.AddMinutes(index - 20), 60, 55000m + index * 5m,
+                55006m + index * 5m, 54999m + index * 5m, 55005m + index * 5m)
+                { Symbol = "BANKNIFTY" }).ToArray();
+        var result = HistoricalPortfolioReplay.Run(winnerBars, [
+            new("BANKNIFTY", Start.AddMinutes(3), 55115m),
+            new("BANKNIFTY", Start.AddMinutes(4), 55120m),
+            new("BANKNIFTY", Start.AddMinutes(5), 55125m),
+            new("BANKNIFTY", Start.AddMinutes(6), 55130m),
             Quote(2, 100m, 99.5m), Quote(3, 115m, 114.5m),
             Quote(4, 116m, 115.5m), Quote(5, 107m, 106.5m),
             Quote(6, 106m, 105.5m)

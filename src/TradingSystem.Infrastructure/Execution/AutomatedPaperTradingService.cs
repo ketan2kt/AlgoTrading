@@ -1026,6 +1026,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
                                  exitPlan.ExtendTarget &&
                                  !invalidation.ShouldExit &&
+                                 invalidation.DirectionAligned &&
                                  invalidation.Behaviour == SessionBehaviour.Trending &&
                                  open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence;
         var targetReachedForAddOn = open.Entry.Direction == Direction.Buy
@@ -1228,6 +1229,13 @@ internal sealed partial class AutomatedPaperTradingService(
                 estimatedCosts,
                 costBreakdown = costs,
                 realisedPnl = pnl,
+                targetContinuation = new { enabled = options.Value.TargetExtensionEnabled,
+                    entryRegime = open.Signal.Regime.ToString(), eligibleRegime = exitPlan.ExtendTarget,
+                    underlyingFresh, behaviour = invalidation.Behaviour.ToString(),
+                    directionAligned = invalidation.DirectionAligned,
+                    confidence = open.Signal.Confidence,
+                    minimumConfidence = options.Value.TargetExtensionMinimumConfidence,
+                    confirmedInvalidation = invalidation.ShouldExit, allowed = extendBeyondTarget },
                 reversalEvidenceScore = invalidation.EvidenceScore,
                 reversalEvidence = invalidation.SupportingEvidence
             }), open.Signal.SignalId.ToString("N"), timeProvider.GetUtcNow()), cancellationToken);
@@ -1242,13 +1250,18 @@ internal sealed partial class AutomatedPaperTradingService(
     {
         var db = services.GetRequiredService<TradingDbContext>();
         var interval = marketOptions.Value.CandleIntervalSeconds;
+        var evaluatedAt = timeProvider.GetUtcNow();
+        var completedBefore = evaluatedAt.AddSeconds(-interval);
         var candles = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == underlyingInstrumentId && value.Source == "Groww" &&
                 value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
-                value.OpenTimeUtc < sessionEnd)
+                value.OpenTimeUtc < sessionEnd && value.OpenTimeUtc <= completedBefore)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         if (candles.Count < 21)
             return new(false, 0m, ["At least 21 completed Nifty candles are required."]);
+        if (evaluatedAt - candles[^1].OpenTimeUtc.AddSeconds(interval) >
+            TimeSpan.FromSeconds(interval + marketOptions.Value.MaximumAgeSeconds))
+            return new(false, 0m, ["Completed Nifty candles are stale."]);
 
         var postEntryCompleted = candles.Count(value =>
             value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) > open.Signal.MarketDataTimestampUtc);
