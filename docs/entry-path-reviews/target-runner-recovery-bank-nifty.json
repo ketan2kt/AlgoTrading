@@ -9,5 +9,5 @@
   "historicallyRemoved": 0,
   "historicallyRetained": 6,
   "strategyBreakdown": [{"strategy": "Bank index directional breakout", "count": 6, "removed": false}],
-  "limitation": "Reuses saved read-only evidence in session-evidence-release-bank-nifty.json, not a new query or replay. Bank Nifty already permits directional runners; this change requires fresh aligned completed-candle confirmation. Replay also retains an identical queued partial across repeated underlying observations, without placing duplicate orders. No entry paths, stops or exit protections are removed. Different holding durations can affect later opportunities; these counts are not a profitability verdict."
+  "limitation": "Reuses saved read-only evidence in session-evidence-release-bank-nifty.json, not a new query or replay. Bank Nifty already permits directional runners; this change requires fresh aligned completed-candle confirmation. Replay retains an identical queued partial across repeated underlying observations and gives a previously queued full exit precedence over a later partial. No duplicate orders or entry paths are introduced. Stops and exit protections remain. Different holding durations can affect later opportunities; these counts are not a profitability verdict."
 }

@@ -332,6 +332,11 @@ public static class HistoricalPortfolioReplay
                 // also reduce the position while that buy is pending.
                 if (pendingAddOns.ContainsKey(partial.Symbol) ||
                     filledAddOnsThisTime.Contains(partial.Symbol)) continue;
+                // A stop/full exit may already have been queued from the earlier
+                // as-of snapshot in this timestamp. It supersedes a newly eligible
+                // partial; later evidence cannot undo the full-exit decision.
+                if (openPositions.TryGetValue(partial.Symbol, out var exiting) &&
+                    exiting.ExitTriggeredAtUtc is not null) continue;
                 if (partial.NonExecutablePaperQuantity)
                 {
                     if (!openPositions.ContainsKey(partial.Symbol) ||

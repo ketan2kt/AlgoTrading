@@ -58,10 +58,10 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
                 55006m + index * 5m, 54999m + index * 5m, 55005m + index * 5m)
                 { Symbol = "BANKNIFTY" }).ToArray();
         var result = HistoricalPortfolioReplay.Run(winnerBars, [
-            new("BANKNIFTY", Start.AddMinutes(3), 55115m),
-            new("BANKNIFTY", Start.AddMinutes(4), 55120m),
-            new("BANKNIFTY", Start.AddMinutes(5), 55125m),
-            new("BANKNIFTY", Start.AddMinutes(6), 55130m),
+            new("BANKNIFTY", Start.AddMinutes(3).AddSeconds(-1), 55115m),
+            new("BANKNIFTY", Start.AddMinutes(4).AddSeconds(-1), 55120m),
+            new("BANKNIFTY", Start.AddMinutes(5).AddSeconds(-1), 55125m),
+            new("BANKNIFTY", Start.AddMinutes(6).AddSeconds(-1), 55130m),
             Quote(2, 100m, 99.5m), Quote(3, 115m, 114.5m),
             Quote(4, 116m, 115.5m), Quote(5, 107m, 106.5m),
             Quote(6, 106m, 105.5m)

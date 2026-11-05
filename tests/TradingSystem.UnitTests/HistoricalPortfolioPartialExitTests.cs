@@ -10,6 +10,20 @@ public sealed class HistoricalPortfolioPartialExitTests
         new(.10m, 2m, 0m, 0m, 7, 0);
 
     [Fact]
+    public void QueuedFullTargetExitSupersedesPartialFromSameTimestamp()
+    {
+        var result = HistoricalPortfolioReplay.Run([Bar(0)], [
+            Quote(2, 100m), Quote(3, 130m), Quote(4, 129m)
+        ], new PartialPolicy(30), new(.10m, .20m, 0m, 0m, 7, 0),
+            Start, Start.AddMinutes(6));
+        var closed = Assert.Single(result.Trades);
+        Assert.False(closed.IsPartialExit);
+        Assert.Equal(75, closed.Quantity);
+        Assert.Equal("ObservedTarget", closed.ExitReason);
+        Assert.Equal(Start.AddMinutes(4), closed.ExitAtUtc);
+    }
+
+    [Fact]
     public void PartialExitFillsOnLaterQuoteAndRemainderKeepsStop()
     {
         var policy = new PartialPolicy(30);
