@@ -1,0 +1,25 @@
+{
+  "kind": "bounded-entry-gate-comparison-not-full-portfolio-replay",
+  "market": "sensex",
+  "policy": "sensex-mature-pullback-v1",
+  "sources": ["Read-only daily diagnostics 2026-11-02 through 2026-11-05", "Authenticated workspace recorded one-minute candles, retrieved 2026-11-05"],
+  "rule": "Only directional pullback participation: move maturity >4.25 ATR and nearest earlier observed opposing level <0.5 ATR away require a directional completed close strictly beyond the preceding four-bar high (CE) or low (PE).",
+  "thresholdSelection": "Existing maturity budget and limited-room warning, fixed before comparing outcomes. No threshold search.",
+  "comparisonCoverage": {"recordedParticipationTrades": 23, "matchedLinkedDecisionSnapshots": 5, "unassessed": 18},
+  "limitations": [
+    "Daily diagnostics returns its last 500 decisions. Earlier linked snapshots not returned are unassessed, not missing from the database and not presumed retained.",
+    "Recorded candles were queried retrospectively; matching decision closes were checked, but full original OHLC input hashes are unavailable in this comparison.",
+    "Only completed candles up to each recorded decision were used; later outcomes were attached after applying the rule.",
+    "Other entry paths, new subsequent entries, changed exit timing, occupancy, spreads and counterfactual fills were not simulated. This is not a measured change in portfolio P&L or expectancy.",
+    "November 5 motivated the hypothesis; November 2-4 are earlier cross-session comparisons, not independent forward validation. Sample is too small and bounded to establish profitability."
+  ],
+  "cases": [
+    {"decisionCandleIst":"2026-11-02T14:43:00+05:30","side":"CE","originalNet":-2659.47,"maturityAtr":7.536773,"roomAtr":0.030805,"close":75329.83,"confirmationLevel":75336.84,"newGatePermitted":false},
+    {"decisionCandleIst":"2026-11-03T14:23:00+05:30","side":"PE","originalNet":1199.24,"maturityAtr":5.217085,"roomAtr":0.037288,"close":76599.19,"confirmationLevel":76570.62,"newGatePermitted":false},
+    {"decisionCandleIst":"2026-11-04T13:30:00+05:30","side":"CE","originalNet":6712.94,"maturityAtr":7.178311,"roomAtr":0.333423,"close":77090.73,"confirmationLevel":77105.12,"newGatePermitted":false},
+    {"decisionCandleIst":"2026-11-04T13:54:00+05:30","side":"CE","originalNet":-4212.26,"maturityAtr":7.681907,"roomAtr":0.030983,"close":77171.10,"confirmationLevel":77165.37,"newGatePermitted":true},
+    {"decisionCandleIst":"2026-11-05T13:51:00+05:30","side":"CE","originalNet":-7991.63,"maturityAtr":8.890549,"roomAtr":0.151387,"close":79434.19,"confirmationLevel":79464.35,"newGatePermitted":false}
+  ],
+  "outcomeComposition": {"filteredOriginalLosers":2,"filteredOriginalWinners":2,"retainedOriginalLosers":1,"filteredLoserNet":-10651.10,"filteredWinnerNet":7912.18},
+  "conclusion": "Corrects the weak-confirmation condition but also filters winners. Not evidence of consistently superior net performance; retain local pending review and full CI."
+}

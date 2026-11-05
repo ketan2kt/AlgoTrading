@@ -107,6 +107,19 @@ public static class SensexEntrySelectionPolicy
                 supplemental = true;
             }
         }
+        if (candidate.Strategy == DirectionalParticipationPolicy.SensexStrategy &&
+            candidate.Direction is { } participationDirection)
+        {
+            var confirmation = SensexMaturePullbackConfirmationPolicy.Evaluate(
+                bars, participationDirection, marketState.MoveMaturityAtr);
+            candidate = candidate with
+            {
+                Direction = confirmation.Permitted ? candidate.Direction : null,
+                Reasons = [.. candidate.Reasons, .. confirmation.Reasons]
+            };
+            // Do not fall back to another candidate on this same candle after
+            // rejecting its selected pullback. The reason reaches NoSignal audit.
+        }
         return new(candidate, supplemental, persistent,
             earlyCandidate, earlyAssessment);
     }
