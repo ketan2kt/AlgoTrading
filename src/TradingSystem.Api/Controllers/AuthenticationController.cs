@@ -33,7 +33,7 @@ public sealed class AuthenticationController(
         var result = await signInManager.PasswordSignInAsync(
             user.UserName,
             request.Password,
-            isPersistent: false,
+            isPersistent: true,
             lockoutOnFailure: true);
         if (!result.Succeeded)
         {
