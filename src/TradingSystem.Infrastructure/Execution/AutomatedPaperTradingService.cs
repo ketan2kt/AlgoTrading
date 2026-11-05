@@ -825,32 +825,8 @@ internal sealed partial class AutomatedPaperTradingService(
             maximumLots, pricing.EntryPrice,
             protective.StopLoss, protective.Target);
         var decision = admission.RiskDecision!;
-        if (decision.Approved)
-        {
-            var configuredQuantity = checked(selectedOption.LotSize * configuredLots);
-            if (decision.ApprovedQuantity < configuredQuantity)
-            {
-                var reasons = new[]
-                {
-                    $"Configured Nifty size is {configuredLots} lots, but current risk/capital limits approve only {decision.ApprovedQuantity / selectedOption.LotSize} complete lots.",
-                    "The system rejects the entry instead of silently changing the saved lot size."
-                };
-                await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
-                    latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                    relativeVolume, regime, "ConfiguredLotSizeRejected", reasons,
-                    signal, selectedOption, pricing.EntryPrice, cancellationToken, shadowStructure);
-                state.Record("ConfiguredLotSizeRejected", true, string.Join(" ", reasons),
-                    tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
-                    direction: signal.Direction.ToString(), optionSymbol: selectedOption.TradingSymbol);
-                return;
-            }
-            decision = decision with
-            {
-                ApprovedQuantity = configuredQuantity,
-                RiskAmount = Math.Abs(decision.FinalStopLoss - pricing.EntryPrice) * configuredQuantity,
-                CapitalExposure = pricing.EntryPrice * configuredQuantity
-            };
-        }
+        // Shared admission returns whole lots within the cost-inclusive risk budget.
+        // Never restore the configured ceiling after it has reduced the approved size.
         await audit.PersistRiskDecisionAsync(signal.SignalId, decision, cancellationToken,
             optionProposal);
         if (!decision.Approved)

@@ -1,4 +1,5 @@
 using TradingSystem.Application.Strategies;
+using TradingSystem.Application.Broker;
 using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Application.Execution;
@@ -75,13 +76,29 @@ public static class HeroZeroCandidatePolicy
     {
         if (spot is null || maximumStrikeDistance is null) return true;
         if (maximumStrikeDistance <= 0m) return false;
-        var distance = candidate.Strike - spot.Value;
-        return candidate.OptionType switch
+        return IsEligibleStrike(candidate.OptionType, candidate.Strike, spot.Value, maximumStrikeDistance.Value);
+    }
+
+    public static bool IsEligibleStrike(string optionType, decimal strike, decimal spot,
+        decimal maximumStrikeDistance)
+    {
+        if (maximumStrikeDistance <= 0m) return false;
+        var distance = strike - spot;
+        return optionType switch
         {
-            "CE" => distance >= 0m && distance <= maximumStrikeDistance.Value,
-            "PE" => distance <= 0m && -distance <= maximumStrikeDistance.Value,
+            "CE" => distance >= 0m && distance <= maximumStrikeDistance,
+            "PE" => distance <= 0m && -distance <= maximumStrikeDistance,
             _ => false
         };
+    }
+
+    public static bool IsFreshQuote(long? sourceEpochMilliseconds, DateTimeOffset receivedAt,
+        DateTimeOffset now)
+    {
+        if (receivedAt > now || now - receivedAt > TimeSpan.FromSeconds(30)) return false;
+        if (sourceEpochMilliseconds is null) return true; // Receipt-based, not claimed exchange coverage.
+        var sourceAt = GrowwQuoteTimestamp.ToUtc(sourceEpochMilliseconds);
+        return sourceAt is { } at && at >= now.AddSeconds(-30) && at <= now;
     }
 }
 

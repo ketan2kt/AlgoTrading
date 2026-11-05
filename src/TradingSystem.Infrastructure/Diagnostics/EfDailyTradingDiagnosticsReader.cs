@@ -119,6 +119,13 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 .ToDictionaryAsync(value => value.Id, value => value.TradingSymbol, cancellationToken);
 
         var signalIds = paperRows.Select(value => value.Result.SignalId).Distinct().ToArray();
+        var entryReferences = signalIds.Select(id => $"{id:N}-ENTRY").ToArray();
+        var entryFills = await (from order in db.Orders.AsNoTracking()
+            join fill in db.Trades.AsNoTracking() on order.Id equals fill.OrderId
+            where entryReferences.Contains(order.ClientReference)
+            select new { order.ClientReference, fill.ExecutedAtUtc }).ToListAsync(cancellationToken);
+        var entryTimes = entryFills.GroupBy(fill => fill.ClientReference)
+            .ToDictionary(group => group.Key, group => group.Min(fill => fill.ExecutedAtUtc));
         var samples = signalIds.Length == 0
             ? []
             : await db.PaperTradePriceSamples.AsNoTracking()
@@ -131,9 +138,15 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         var trades = new List<DailyTradingTrade>(paperRows.Count + marketPositions.Count);
         foreach (var row in paperRows)
         {
+            var hasFillTime = entryTimes.TryGetValue($"{row.Result.SignalId:N}-ENTRY", out var enteredAt);
+            if (!hasFillTime)
+            {
+                enteredAt = row.Signal.MarketDataTimestampUtc;
+                warnings.Add($"Trade {row.Result.Id}: actual entry fill timestamp unavailable; displayed entry is signal time.");
+            }
             samplesBySignal.TryGetValue(row.Result.SignalId, out var tradeSamples);
             var path = CalculateBoughtOptionExcursionPath(row.Result.EntryPrice, row.Result.Quantity,
-                row.Signal.MarketDataTimestampUtc, row.Result.ExitPrice,
+                enteredAt, row.Result.ExitPrice,
                 row.Result.ClosedAtUtc, tradeSamples ?? []);
             trades.Add(new DailyTradingTrade(
                 MarketFromSymbol(row.Instrument.TradingSymbol),
@@ -146,7 +159,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 row.Result.Quantity,
                 row.Result.EntryPrice,
                 row.Result.ExitPrice,
-                row.Signal.MarketDataTimestampUtc,
+                enteredAt,
                 row.Result.ClosedAtUtc,
                 "Closed",
                 row.Result.ExitReason,
@@ -200,6 +213,9 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             if (hasPersistedPath && position.ExcursionObservedFromUtc is { } observedFrom &&
                 observedFrom > position.OpenedAtUtc)
                 coverage = $"Quote observations since {observedFrom:HH:mm:ss} UTC; earlier path unavailable";
+            coverage += position.ExcursionBasisVersion == 1
+                ? "; excursions are gross before fees"
+                : "; legacy excursion accounting may mix gross and net; not suitable for exact giveback comparisons";
             trades.Add(new DailyTradingTrade(
                 position.Market.ToUpperInvariant(),
                 "MarketPaperPosition",

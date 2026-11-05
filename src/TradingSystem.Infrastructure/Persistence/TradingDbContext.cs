@@ -221,6 +221,7 @@ public sealed class TradingDbContext(
 
         builder.Entity<MarketPaperPosition>(entity =>
         {
+            entity.Property(value => value.ExcursionBasisVersion).HasDefaultValue(0);
             ConfigureMutable(entity, "market_paper_positions");
             entity.Property(value => value.Market).HasMaxLength(40);
             entity.Property(value => value.Strategy).HasMaxLength(120);

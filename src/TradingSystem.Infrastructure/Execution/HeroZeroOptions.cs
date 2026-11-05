@@ -11,6 +11,8 @@ public sealed class HeroZeroOptions
     public decimal TargetPremium { get; init; } = 20m;
     public decimal MinimumPremium { get; init; } = 5m;
     public decimal MaximumPremium { get; init; } = 40m;
+    public decimal SensexTargetPremium { get; init; } = 50m;
+    public decimal SensexMaximumPremium { get; init; } = 100m;
     public decimal MaximumSpreadPercent { get; init; } = 15m;
     public decimal MinimumCandidateScore { get; init; } = 0.55m;
     public decimal MaximumCombinedPremium { get; init; } = 70m;

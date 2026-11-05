@@ -16,7 +16,7 @@ public sealed class HistoricalBankNiftySignalPolicy(
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => candleIntervalSeconds is 60 or 300;
-    public string CodeVersion => "bank-nifty-deferred-admission-v5";
+    public string CodeVersion => "bank-nifty-deferred-admission-v6/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         tradingDate, candleIntervalSeconds, entryStart, entryCutoff, lots,
@@ -123,8 +123,12 @@ public sealed class HistoricalBankNiftySignalPolicy(
             optionQuote.LastPrice, optionQuote.BidPrice, optionQuote.OfferPrice,
             contract.LotSize, contract.TickSize, optionStopPercent);
         if (!admission.Permitted) return null;
+        var sizing = OptionRiskBudgetPolicy.Size(admission.Entry, admission.Stop,
+            contract.LotSize, pending.Quantity / contract.LotSize, "NSE");
+        if (sizing.Quantity == 0) return null;
         return pending with
         {
+            Quantity = sizing.Quantity,
             DecidedAtUtc = optionQuote.AvailableAtUtc,
             PlannedStopPrice = admission.Stop,
             PlannedTargetPrice = admission.Target,

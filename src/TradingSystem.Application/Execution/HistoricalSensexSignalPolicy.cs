@@ -23,7 +23,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v3";
+    public string CodeVersion => "sensex-normal-entry-v4/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,
@@ -156,8 +156,11 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
             optionQuote.BidPrice, null, optionQuote.OfferPrice, null, optionQuote.Volume, optionQuote.OpenInterest, null);
         var admission = SensexOptionAdmissionPolicy.Evaluate(new(quote, settings.StopPercent,
             contract.TickSize, contract.LotSize, context));
-        return !admission.Permitted ? null : pending with
+        var sizing = OptionRiskBudgetPolicy.Size(admission.Entry, admission.Stop,
+            contract.LotSize, pending.Quantity / contract.LotSize, "BSE");
+        return !admission.Permitted || sizing.Quantity == 0 ? null : pending with
         {
+            Quantity = sizing.Quantity,
             DecidedAtUtc = optionQuote.AvailableAtUtc, PlannedStopPrice = admission.Stop,
             PlannedTargetPrice = admission.Target, RequiresDeferredQuoteAdmission = false,
             DeferredSensexProfessionalContext = null

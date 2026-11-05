@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-05T11:27:44Z",
+  "market": "nifty",
+  "from": "2026-11-05",
+  "to": "2026-11-05",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 1,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 1,
+  "strategyBreakdown": [{"strategy":"NiftyAutomation","count":1,"removed":false}],
+  "limitation": "Reuses the complete saved 5 Nov daily diagnostics report, not a new performance replay. NiftyAutomation is the report route label. No strategy path removed. New ordinary entries use configured lots as a ceiling and whole-lot planned stop risk plus estimated fees capped at 5000; an unaffordable single lot is rejected. This path-count check does not establish acceptance of every old entry or profitability. Hero Zero premium settings remain unchanged for Nifty."
+}

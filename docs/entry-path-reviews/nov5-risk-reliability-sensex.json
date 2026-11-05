@@ -1,0 +1,16 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-05T11:27:44Z",
+  "market": "sensex",
+  "from": "2026-11-05",
+  "to": "2026-11-05",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 4,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 4,
+  "strategyBreakdown": [
+    {"strategy":"Sensex directional pullback participation","count":2,"removed":false},
+    {"strategy":"Sensex persistent directional thesis","count":2,"removed":false}
+  ],
+  "limitation": "Reuses the complete saved 5 Nov daily report. No normal strategy removed; cost-inclusive 5000 planned-risk sizing, entry quote-age checks and degraded-protection entry pause can change future acceptance. Path counts do not prove profitability. Hero Zero separately has user-approved preferred premium50/max100 and a whole-pair purchase-cost-plus-estimated-fees budget5000; no measured profitability claim and no change to its expansion, strike-distance or timing gates."
+}

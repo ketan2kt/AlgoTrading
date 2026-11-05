@@ -89,18 +89,21 @@ public static class NiftyOptionAdmissionPolicy
         risk = risk with { FinalTarget = protective.Target };
         if (risk.Approved)
         {
-            var quantity = checked(input.LotSize * input.ConfiguredLots);
-            if (risk.ApprovedQuantity < quantity)
+            var sizing = OptionRiskBudgetPolicy.Size(pricing.EntryPrice, protective.StopLoss,
+                input.LotSize, Math.Min(input.ConfiguredLots, risk.ApprovedQuantity / input.LotSize), "NSE");
+            var quantity = sizing.Quantity;
+            if (quantity == 0)
                 return new(pricing, protective.StopLoss, protective.Target,
                     professional, risk with
                     {
                         Approved = false,
-                        RejectionReasons = ["Configured lot size exceeds approved risk size."]
+                        ApprovedQuantity = 0, RiskAmount = 0m, CapitalExposure = 0m,
+                        RejectionReasons = ["One complete lot exceeds the cost-inclusive ₹5,000 planned-risk budget."]
                     });
             risk = risk with
             {
                 ApprovedQuantity = quantity,
-                RiskAmount = Math.Abs(protective.StopLoss - pricing.EntryPrice) * quantity,
+                RiskAmount = sizing.PlannedLoss,
                 CapitalExposure = pricing.EntryPrice * quantity
             };
         }

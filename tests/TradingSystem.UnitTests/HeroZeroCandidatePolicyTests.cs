@@ -6,6 +6,34 @@ namespace TradingSystem.UnitTests;
 
 public sealed class HeroZeroCandidatePolicyTests
 {
+    [Theory]
+    [InlineData("CE", 79400, true)]
+    [InlineData("CE", 79300, false)]
+    [InlineData("CE", 79700, false)]
+    [InlineData("PE", 79300, true)]
+    [InlineData("PE", 79400, false)]
+    [InlineData("PE", 79000, false)]
+    public void DiscoveryPrunesOnlyStrikesAlreadyIneligibleForSelection(string side, decimal strike, bool eligible)
+    {
+        Assert.Equal(eligible, HeroZeroCandidatePolicy.IsEligibleStrike(side, strike, 79345m, 250m));
+        var candidate = Candidate("OPTION", side, 20m, 19.8m, 20.2m, 1000m, 1000m, 1m,
+            new DateOnly(2026, 11, 5), strike);
+        Assert.Equal(eligible, HeroZeroCandidatePolicy.Select([candidate], side, 20m, 15m, 79345m, 250m) is not null);
+    }
+
+    [Fact]
+    public void FinalRevalidationRejectsAgedAndFutureQuotesWithoutInventingSourceTime()
+    {
+        var now = new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero);
+        Assert.True(HeroZeroCandidatePolicy.IsFreshQuote(null, now, now));
+        Assert.False(HeroZeroCandidatePolicy.IsFreshQuote(null, now.AddSeconds(-31), now));
+        Assert.False(HeroZeroCandidatePolicy.IsFreshQuote(now.AddSeconds(-31).ToUnixTimeMilliseconds(), now, now));
+        Assert.False(HeroZeroCandidatePolicy.IsFreshQuote(now.AddSeconds(1).ToUnixTimeMilliseconds(), now, now));
+        Assert.True(HeroZeroCandidatePolicy.IsFreshQuote(now.AddSeconds(-30).ToUnixTimeMilliseconds(), now, now));
+        Assert.True(HeroZeroCandidatePolicy.IsFreshQuote(now.AddSeconds(-10).ToUnixTimeSeconds(), now, now));
+        Assert.False(HeroZeroCandidatePolicy.IsFreshQuote(now.AddSeconds(-31).ToUnixTimeSeconds(), now, now));
+    }
+
     [Fact]
     public void DefaultsUseLateExpansionWindowAndMarketSpecificAtmCaps()
     {

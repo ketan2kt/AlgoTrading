@@ -1,0 +1,13 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-05T11:27:44Z",
+  "market": "bank-nifty",
+  "from": "2026-11-05",
+  "to": "2026-11-05",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 3,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 3,
+  "strategyBreakdown": [{"strategy":"Bank index directional breakout","count":3,"removed":false}],
+  "limitation": "Reuses the complete saved 5 Nov daily report. No strategy path removed. Whole-lot sizing caps planned stop risk plus estimated fees at5000; configured lots are a maximum. Degraded position protection pauses fresh entries. This check proves retained historical route usage, not future acceptance, broker fills or improved expectancy. Production/replay share the same sizing function."
+}

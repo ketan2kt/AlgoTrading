@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -108,8 +109,25 @@ internal sealed partial class TradingEngineEvidenceRecorder(
     public static object FailureEvidence(Exception exception)
     {
         var cause = exception.GetBaseException();
+        var category = cause switch
+        {
+            DbUpdateConcurrencyException => "OptimisticConcurrency",
+            InvalidOperationException when cause.Message.Contains("could not be translated", StringComparison.Ordinal) => "QueryTranslation",
+            InvalidOperationException when cause.Message.Contains("second operation", StringComparison.OrdinalIgnoreCase) => "ConcurrentDbContextUse",
+            InvalidOperationException when cause.Message.Contains("cannot be tracked", StringComparison.OrdinalIgnoreCase) => "DuplicateTrackedEntity",
+            InvalidOperationException when cause.Message.Contains("append-only", StringComparison.OrdinalIgnoreCase) => "AppendOnlyMutation",
+            InvalidOperationException when cause.Message.Contains("already closed", StringComparison.OrdinalIgnoreCase) => "ClosedPositionMutation",
+            _ => "Unclassified"
+        };
+        // Exception messages/SQL/paths can contain credentials or customer data.
+        // Persist only types and application method names with source line numbers.
+        var frames = new StackTrace(cause, true).GetFrames()
+            .Where(frame => frame.GetMethod()?.DeclaringType?.FullName?.StartsWith("TradingSystem.", StringComparison.Ordinal) == true)
+            .Take(12).Select(frame => new { method = frame.GetMethod()!.DeclaringType!.FullName + "." + frame.GetMethod()!.Name,
+                line = frame.GetFileLineNumber() }).ToArray();
         return new { exceptionType = cause.GetType().FullName,
-            sqlState = (cause as PostgresException)?.SqlState };
+            outerExceptionType = exception.GetType().FullName,
+            sqlState = (cause as PostgresException)?.SqlState, category, frames };
     }
 
     public override void Dispose()

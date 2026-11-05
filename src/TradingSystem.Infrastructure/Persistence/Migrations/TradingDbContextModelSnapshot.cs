@@ -896,6 +896,11 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("ExcursionBasisVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("ExcursionSampleCount")
                         .HasColumnType("integer");
 

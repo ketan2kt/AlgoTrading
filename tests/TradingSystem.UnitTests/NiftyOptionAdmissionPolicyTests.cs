@@ -35,6 +35,20 @@ public sealed class NiftyOptionAdmissionPolicyTests
     }
 
     [Fact]
+    public void ApprovedLotSettingIsACeilingAndIncludesStopExitCosts()
+    {
+        var input = Input() with { ConfiguredLots = 20 };
+        var decision = NiftyOptionAdmissionPolicy.Evaluate(input);
+        Assert.True(decision.Approved);
+        var sized = OptionRiskBudgetPolicy.Size(decision.Pricing.EntryPrice, decision.StopLoss,
+            input.LotSize, input.ConfiguredLots, "NSE");
+        Assert.Equal(sized.Quantity, decision.RiskDecision!.ApprovedQuantity);
+        Assert.Equal(sized.PlannedLoss, decision.RiskDecision.RiskAmount);
+        Assert.True(sized.Quantity < input.LotSize * input.ConfiguredLots);
+        Assert.True(decision.RiskDecision.RiskAmount <= 5000m);
+    }
+
+    [Fact]
     public void QuoteOrKillSwitchRejectionCannotBecomeAReplayCandidate()
     {
         var missingSides = NiftyOptionAdmissionPolicy.Evaluate(Input() with

@@ -5,6 +5,31 @@ namespace TradingSystem.UnitTests;
 public sealed class MarketPaperPositionTests
 {
     [Fact]
+    public void ClosedLossExcursionExcludesFeesJustLikeOpenMarks()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var position = new MarketPaperPosition(Guid.NewGuid(), "sensex", Guid.NewGuid(), Guid.NewGuid(),
+            "directional", Direction.Buy, 100, 756.55m, 680.90m, 832.20m, now);
+        position.Mark(678.75m, 680.90m, now.AddMinutes(3));
+        position.Close(678.75m, 211.63m, "StopLossHit", now.AddMinutes(3));
+        Assert.Equal(-7780m, position.MaximumAdversePnl);
+        Assert.Equal(-7991.63m, position.RealisedPnl);
+        Assert.Equal(1, position.ExcursionBasisVersion);
+    }
+
+    [Fact]
+    public void PartialAndFinalExcursionsIncludeGrossRealisedProfitConsistently()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var position = new MarketPaperPosition(Guid.NewGuid(), "sensex", Guid.NewGuid(), Guid.NewGuid(),
+            "directional", Direction.Buy, 100, 100m, 90m, 120m, now);
+        position.TakePartial(110m, 40, 50m, now.AddMinutes(1));
+        Assert.Equal(1000m, position.MaximumFavourablePnl);
+        position.Close(120m, 50m, "TargetHit", now.AddMinutes(2));
+        Assert.Equal(1600m, position.MaximumFavourablePnl);
+        Assert.Equal(1500m, position.RealisedPnl);
+    }
+    [Fact]
     public void LegacyPriceSampleBucketNowTracksTwoSecondQuoteCadence()
     {
         var start = DateTimeOffset.FromUnixTimeSeconds(0);

@@ -11,7 +11,7 @@ public sealed record SensexOptionAdmissionDecision(decimal Entry, decimal Stop,
 }
 
 // Existing Sensex premium geometry and professional assessment, shared with
-// historical admission. Quantity remains exactly the administrator's lot size.
+// historical admission. Shared cost-inclusive risk sizing caps the lot ceiling separately.
 public static class SensexOptionAdmissionPolicy
 {
     public static (decimal Stop, decimal Target) ProtectivePrices(decimal entry,

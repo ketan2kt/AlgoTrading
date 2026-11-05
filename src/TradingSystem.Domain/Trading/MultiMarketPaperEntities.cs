@@ -19,6 +19,7 @@ public sealed class MarketPaperPosition : MutableEntity
         MaximumAdverseAtUtc = OpenedAtUtc;
         ExcursionSampleCount = 1;
         ExcursionObservedFromUtc = OpenedAtUtc;
+        ExcursionBasisVersion = 1;
     }
 
     public string Market { get; private init; }
@@ -45,13 +46,15 @@ public sealed class MarketPaperPosition : MutableEntity
     public DateTimeOffset? MaximumAdverseAtUtc { get; private set; }
     public int ExcursionSampleCount { get; private set; }
     public DateTimeOffset? ExcursionObservedFromUtc { get; private set; }
+    // 0: legacy mixed gross/net marks. 1: consistently gross, including realised partials.
+    public int ExcursionBasisVersion { get; private set; }
 
     public void Mark(decimal price, decimal trailingStop, DateTimeOffset observedAtUtc)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(price);
         CurrentPrice = price;
         StopLoss = Direction == Direction.Buy ? Math.Max(StopLoss, trailingStop) : Math.Min(StopLoss, trailingStop);
-        RecordExcursion(CurrentPnlAt(price), observedAtUtc);
+        RecordExcursion(CurrentPnlAt(price) + CostsPaid, observedAtUtc);
     }
 
     public void Close(decimal price, decimal costs, string status, DateTimeOffset closedAtUtc)
@@ -64,7 +67,7 @@ public sealed class MarketPaperPosition : MutableEntity
         RemainingQuantity = 0;
         Status = status;
         ClosedAtUtc = closedAtUtc.ToUniversalTime();
-        RecordExcursion(RealisedPnl, closedAtUtc);
+        RecordExcursion(RealisedPnl + CostsPaid, closedAtUtc);
     }
 
     public void TakePartial(decimal price, int quantity, decimal costs, DateTimeOffset observedAtUtc)
@@ -79,7 +82,7 @@ public sealed class MarketPaperPosition : MutableEntity
         RemainingQuantity -= quantity;
         PartialExitQuantity += quantity;
         PartialExitPrice = price;
-        RecordExcursion(CurrentPnlAt(price), observedAtUtc);
+        RecordExcursion(CurrentPnlAt(price) + CostsPaid, observedAtUtc);
     }
 
     public decimal CurrentPnlAt(decimal price) => RealisedPnl +

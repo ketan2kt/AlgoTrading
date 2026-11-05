@@ -37,10 +37,14 @@ internal sealed partial class HeroZeroPaperTradingService(
                     new { options.Value.Enabled }, stoppingToken);
             return;
         }
+        await Task.WhenAll(new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex }
+            .Select(market => RunMarketLoopAsync(market, stoppingToken)));
+    }
+
+    private async Task RunMarketLoopAsync(TradingMarketDefinition market, CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var market in new[] { TradingMarketCatalog.Nifty, TradingMarketCatalog.Sensex })
-            {
                 try { await ScanAsync(market, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                 catch (Exception exception)
@@ -53,7 +57,6 @@ internal sealed partial class HeroZeroPaperTradingService(
                         "Hero Zero scan or position management failed.", timeProvider.GetUtcNow(),
                         TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
                 }
-            }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.ScanIntervalSeconds), stoppingToken);
         }
     }
@@ -100,6 +103,14 @@ internal sealed partial class HeroZeroPaperTradingService(
                 localTime, cancellationToken);
             return;
         }
+        if (india.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ||
+            localTime < market.SessionStart || localTime > market.SessionEnd)
+        {
+            state.Set(new(market.Code, expiry == today, expiry, "Market closed",
+                "Hero Zero discovery resumes during the market session.", now,
+                null, null, null, [], 0m, 0m, 0m));
+            return;
+        }
         if (expiry is null || expiry != today)
         {
             await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "ExpirySelection", "NoCurrentExpiry",
@@ -123,14 +134,19 @@ internal sealed partial class HeroZeroPaperTradingService(
             return;
         }
 
-        var candidates = await LoadCandidatesAsync(db, market, expiry.Value, spotQuote.LastPrice,
+        var discovery = await LoadCandidatesAsync(db, market, expiry.Value, spotQuote.LastPrice,
             cancellationToken);
+        now = timeProvider.GetUtcNow();
+        localTime = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, IndiaTimeZone).DateTime);
+        var candidates = discovery.Candidates;
+        var targetPremium = market == TradingMarketCatalog.Sensex
+            ? options.Value.SensexTargetPremium : options.Value.TargetPremium;
         var maximumStrikeDistance = market == TradingMarketCatalog.Sensex
             ? options.Value.SensexMaximumStrikeDistance
             : options.Value.NiftyMaximumStrikeDistance;
-        var call = HeroZeroCandidatePolicy.Select(candidates, "CE", options.Value.TargetPremium,
+        var call = HeroZeroCandidatePolicy.Select(candidates, "CE", targetPremium,
             options.Value.MaximumSpreadPercent, spotQuote.LastPrice, maximumStrikeDistance);
-        var put = HeroZeroCandidatePolicy.Select(candidates, "PE", options.Value.TargetPremium,
+        var put = HeroZeroCandidatePolicy.Select(candidates, "PE", targetPremium,
             options.Value.MaximumSpreadPercent, spotQuote.LastPrice, maximumStrikeDistance);
         var status = "Waiting for confirmation";
         var explanation = "Monitoring expiry expansion; the HZ button is view-only.";
@@ -145,9 +161,57 @@ internal sealed partial class HeroZeroPaperTradingService(
         var openedToday = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
             value.Market == market.Code && value.Strategy.StartsWith("Hero Zero|") &&
             value.OpenedAtUtc >= StartOfIndiaDay(now), cancellationToken);
+        var finalEntryFresh = true;
         if (canEnter && !openedToday)
         {
-            await OpenPairAsync(db, market, underlying.Id, call!, put!, configuredLots, now,
+            // Reprice only the selected legs and underlying. Discovery can take time;
+            // never open against its old premiums or its old entry-window clock.
+            var originalCallScore = call!.Score;
+            var originalPutScore = put!.Score;
+            var refreshed = await LoadCandidatesAsync(db, market, expiry.Value, spotQuote.LastPrice,
+                cancellationToken, new HashSet<Guid> { call!.InstrumentId, put!.InstrumentId });
+            var freshSpot = await gateway.GetQuoteAsync(new(market.Exchange, market.QuoteSegment,
+                market.UnderlyingSymbol), cancellationToken);
+            now = timeProvider.GetUtcNow();
+            localTime = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, IndiaTimeZone).DateTime);
+            call = HeroZeroCandidatePolicy.Select(refreshed.Candidates, "CE", targetPremium,
+                options.Value.MaximumSpreadPercent, freshSpot.LastPrice, maximumStrikeDistance);
+            put = HeroZeroCandidatePolicy.Select(refreshed.Candidates, "PE", targetPremium,
+                options.Value.MaximumSpreadPercent, freshSpot.LastPrice, maximumStrikeDistance);
+            // A two-leg refresh must not improve relative OI/volume scores merely
+            // because the other discovered contracts were not refreshed.
+            if (call is not null) call = call with { Score = Math.Min(call.Score, originalCallScore) };
+            if (put is not null) put = put with { Score = Math.Min(put.Score, originalPutScore) };
+            finalEntryFresh = refreshed.Observations.All(value => value.ReceivedAtUtc is { } received &&
+                HeroZeroCandidatePolicy.IsFreshQuote(value.SourceTime, received, now)) &&
+                refreshed.Observations.Count == 2 && freshSpot.LastPrice > 0 &&
+                HeroZeroCandidatePolicy.IsFreshQuote(freshSpot.LastTradeTimeEpochMilliseconds, now, now);
+            candidateReady = call is not null && put is not null &&
+                call.Score >= options.Value.MinimumCandidateScore && put.Score >= options.Value.MinimumCandidateScore;
+            inEntryWindow = IndexEntryWindowPolicy.AllowsEntry(localTime,
+                ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff));
+            expansion = await ExpansionTriggerAsync(db, underlying.Id, cancellationToken);
+            now = timeProvider.GetUtcNow();
+            localTime = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, IndiaTimeZone).DateTime);
+            inEntryWindow = IndexEntryWindowPolicy.AllowsEntry(localTime,
+                ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff));
+            finalEntryFresh = finalEntryFresh && refreshed.Observations.All(value =>
+                value.ReceivedAtUtc is { } received && HeroZeroCandidatePolicy.IsFreshQuote(value.SourceTime, received, now));
+            canEnter = candidateReady && inEntryWindow && finalEntryFresh && expansion.Permitted;
+            discovery.Observations.AddRange(refreshed.Observations);
+        }
+        HeroZeroPairBudgetDecision? pairBudget = null;
+        var entryLots = configuredLots;
+        if (candidateReady && market == TradingMarketCatalog.Sensex)
+        {
+            pairBudget = HeroZeroPairBudgetPolicy.Size(call!.Premium, put!.Premium,
+                call.LotSize, put.LotSize, configuredLots);
+            entryLots = pairBudget.Lots;
+            canEnter &= entryLots > 0;
+        }
+        if (canEnter && !openedToday)
+        {
+            await OpenPairAsync(db, market, underlying.Id, call!, put!, entryLots, now,
                 cancellationToken);
             scope.ServiceProvider.GetRequiredService<LiveExecutionWakeSignal>().Notify();
             status = "Pair opened";
@@ -162,10 +226,23 @@ internal sealed partial class HeroZeroPaperTradingService(
             explanation = $"Candidates update automatically; entries begin after {options.Value.EntryWindowStart} IST.";
         else if (localTime >= ParseTime(options.Value.EntryCutoff))
             explanation = $"The {options.Value.EntryWindowStart}–{options.Value.EntryCutoff} IST Hero Zero entry window has closed.";
+        else if (!finalEntryFresh)
+        {
+            status = "Waiting for fresh quotes";
+            explanation = "Selected legs could not be revalidated with fresh quotes; no pair opened.";
+        }
+        else if (pairBudget is { Lots: 0 })
+        {
+            status = "Pair budget exceeded";
+            explanation = "One whole Sensex CE+PE lot exceeds the ₹5,000 purchase-cost-plus-fees budget.";
+        }
         else if (call is null || put is null)
         {
             status = "Waiting for pair";
-            explanation = $"Both liquid near-ATM CE and PE candidates are not available within {maximumStrikeDistance:0} index points.";
+            var missing = call is null && put is null ? "CE and PE" : call is null ? "CE" : "PE";
+            var premiumLimit = market == TradingMarketCatalog.Sensex
+                ? options.Value.SensexMaximumPremium : options.Value.MaximumPremium;
+            explanation = $"No eligible {missing}: requires ₹{options.Value.MinimumPremium:0}–₹{premiumLimit:0} premium, liquid OTM contracts within {maximumStrikeDistance:0} index points. Per-contract rejection evidence is saved.";
         }
         else if (call.Score < options.Value.MinimumCandidateScore || put.Score < options.Value.MinimumCandidateScore)
         {
@@ -180,7 +257,8 @@ internal sealed partial class HeroZeroPaperTradingService(
         await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "EntryDecision", status,
             explanation, now, new { expiry, spotQuote.LastPrice, candidateReady,
                 inEntryWindow, openedToday, call, put, expansion,
-                options.Value.MinimumCandidateScore }, cancellationToken);
+                options.Value.MinimumCandidateScore, finalEntryFresh, pairBudget, entryLots, targetPremium,
+                discovery.Observations }, cancellationToken);
         if (inEntryWindow && !openedToday)
         {
             // The 15-minute monitor audit can miss transient CE/PE pairs. Persist
@@ -190,15 +268,23 @@ internal sealed partial class HeroZeroPaperTradingService(
                 JsonSerializer.Serialize(new { call = call?.Symbol, callScore = call?.Score,
                     put = put?.Symbol, putScore = put?.Score, candidateReady,
                     expansionPermitted = expansion?.Permitted, expansionReasons = expansion?.Reasons,
-                    opened = canEnter, explanation })));
+                    opened = canEnter, explanation, finalEntryFresh, pairBudget, entryLots, targetPremium,
+                    discovery.Observations })));
             await db.SaveChangesAsync(cancellationToken);
         }
         await AuditAsync(db, market.Code, underlying.Id, now, status, call, put, explanation,
             cancellationToken);
     }
 
-    private async Task<List<HeroZeroCandidateInput>> LoadCandidatesAsync(TradingDbContext db,
-        TradingMarketDefinition market, DateOnly expiry, decimal spot, CancellationToken cancellationToken)
+    private sealed record CandidateObservation(string Symbol, decimal Strike, string OptionType,
+        decimal? Premium, DateTimeOffset? ReceivedAtUtc, long? SourceTime, string Result, GrowwQuote? Quote);
+
+    private sealed record CandidateDiscovery(List<HeroZeroCandidateInput> Candidates,
+        List<CandidateObservation> Observations);
+
+    private async Task<CandidateDiscovery> LoadCandidatesAsync(TradingDbContext db,
+        TradingMarketDefinition market, DateOnly expiry, decimal spot, CancellationToken cancellationToken,
+        HashSet<Guid>? selected = null)
     {
         var available = await db.Instruments.AsNoTracking().Where(value => value.Exchange == market.Exchange &&
                 value.IsActive && value.ExpiryDate == expiry && value.StrikePrice != null &&
@@ -206,25 +292,52 @@ internal sealed partial class HeroZeroPaperTradingService(
                 value.TradingSymbol.StartsWith(market.ExecutionUnderlying))
             .OrderBy(value => Math.Abs(value.StrikePrice!.Value - spot))
             .ToListAsync(cancellationToken);
+        var maximumDistance = market == TradingMarketCatalog.Sensex
+            ? options.Value.SensexMaximumStrikeDistance : options.Value.NiftyMaximumStrikeDistance;
+        // Apply the EXISTING strike eligibility before spending quote requests on contracts
+        // that Select would always reject. Keep the shared gateway's rate limiter intact.
+        available = available.Where(value => (selected is null || selected.Contains(value.Id)) &&
+            HeroZeroCandidatePolicy.IsEligibleStrike(value.Type == InstrumentType.CallOption ? "CE" : "PE",
+                value.StrikePrice!.Value, spot, maximumDistance)).ToList();
         // Guarantee equal discovery depth. A combined Take could silently crowd out CE or PE.
         var instruments = available.Where(value => value.Type == InstrumentType.CallOption)
             .Take(options.Value.NearbyContractsPerSide)
             .Concat(available.Where(value => value.Type == InstrumentType.PutOption)
                 .Take(options.Value.NearbyContractsPerSide)).ToArray();
         var result = new List<HeroZeroCandidateInput>();
+        var observations = new List<CandidateObservation>();
+        var maximumPremium = market == TradingMarketCatalog.Sensex
+            ? options.Value.SensexMaximumPremium : options.Value.MaximumPremium;
         foreach (var instrument in instruments)
         {
-            var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
-                instrument.TradingSymbol), cancellationToken);
+            var optionType = instrument.Type == InstrumentType.CallOption ? "CE" : "PE";
+            GrowwQuote quote;
+            try
+            {
+                quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
+                    instrument.TradingSymbol), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                observations.Add(new(instrument.TradingSymbol, instrument.StrikePrice!.Value, optionType,
+                    null, null, null, $"QuoteFailure:{exception.GetType().Name}", null));
+                continue;
+            }
+            var receivedAt = timeProvider.GetUtcNow();
             var premium = quote.OfferPrice ?? quote.LastPrice;
-            if (premium < options.Value.MinimumPremium || premium > options.Value.MaximumPremium) continue;
-            result.Add(new(instrument.Id, instrument.TradingSymbol,
-                instrument.Type == InstrumentType.CallOption ? "CE" : "PE",
+            var reason = !HeroZeroCandidatePolicy.IsFreshQuote(quote.LastTradeTimeEpochMilliseconds, receivedAt, receivedAt)
+                ? "StaleQuote" : premium < options.Value.MinimumPremium ? "BelowMinimumPremium" :
+                premium > maximumPremium ? "AboveMaximumPremium" : "Candidate";
+            observations.Add(new(instrument.TradingSymbol, instrument.StrikePrice!.Value, optionType,
+                premium, receivedAt, quote.LastTradeTimeEpochMilliseconds, reason, quote));
+            if (reason != "Candidate") continue;
+            result.Add(new(instrument.Id, instrument.TradingSymbol, optionType,
                 instrument.StrikePrice!.Value, expiry, instrument.LotSize, premium,
                 quote.BidPrice ?? 0m, quote.OfferPrice ?? 0m, quote.Volume ?? 0m,
                 quote.OpenInterest ?? 0m, quote.OpenInterestDayChange ?? 0m));
         }
-        return result;
+        return new(result, observations);
     }
 
     private static async Task OpenPairAsync(TradingDbContext db, TradingMarketDefinition market, Guid underlyingId,
@@ -296,7 +409,7 @@ internal sealed partial class HeroZeroPaperTradingService(
             if (leg.Status != "Active") return;
             var costs = PaperTradingCostModel.CalculateOptionCharges([
                 new(PaperOptionTransactionSide.Buy, leg.EntryPrice, leg.Quantity),
-                new(PaperOptionTransactionSide.Sell, leg.CurrentPrice, leg.Quantity)]).Total;
+                new(PaperOptionTransactionSide.Sell, leg.CurrentPrice, leg.Quantity)], market.Exchange).Total;
             leg.Close(leg.CurrentPrice, costs, reason, now);
         }
     }
@@ -304,10 +417,16 @@ internal sealed partial class HeroZeroPaperTradingService(
     private async Task<HeroZeroExpansionDecision> ExpansionTriggerAsync(TradingDbContext db, Guid instrumentId,
         CancellationToken cancellationToken)
     {
+        var now = timeProvider.GetUtcNow();
+        var sessionStart = StartOfIndiaDay(now);
+        var interval = marketData.Value.CandleIntervalSeconds;
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == instrumentId &&
-                value.IntervalSeconds == marketData.Value.CandleIntervalSeconds && value.Source == "Groww")
+                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc <= now.AddSeconds(-interval))
             .OrderByDescending(value => value.OpenTimeUtc).Take(15).OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);
+        if (candles.Count == 0 || now - candles[^1].OpenTimeUtc > TimeSpan.FromSeconds(interval + 30))
+            return new(false, null, ["Current-session completed expansion candle is unavailable or stale."]);
         return HeroZeroExpansionPolicy.Evaluate(candles.Select(value => new StrategyPriceBar(
             value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray());
     }
