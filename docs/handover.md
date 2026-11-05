@@ -1,8 +1,12 @@
 # Current handover — 5 November 2026
 
-## Combined release — authorized, publishing
+## Historical Replay design refresh — ready for authorized publication
 
-Ketan explicitly authorized deploying all current risk-cap, Sensex Hero Zero, recovery/reporting and timestamp fixes together. Publish task code/tests/reviews and this handover to main, retain required push CI, then dispatch exactly once through tasks.ps1. Exclude private `.analysis-*` evidence/harness and unrelated narrator edits. Completed local checks are recorded below; do not repeat them without a new failure. Deployment has not yet been dispatched.
+User requested matching the polished green reporting screens, then explicitly authorized deployment when ready. Updated replay-panel.component.html/scss and moved the old global replay overrides out of styles.scss into the component. Compact session-range and comparison sections, bordered green controls, after-cost result cards, readable tables, fixed header with scrollable body, mobile stacking, empty/loading states and collapsed advanced tools. Existing actions, request bindings, strategy logic and replay calculations unchanged. Production frontend compilation and encoding check passed; existing overall bundle/app.scss budget warnings remain below error limits. No browser visual verification or local full test suite; required CI will run before dispatch. Preserve unrelated narrator edits and private analysis files. Publish only these three UI files plus handover, wait for CI, dispatch once to authorized main; do not inspect production after dispatch.
+
+## Combined release — deployment dispatched
+
+Ketan explicitly authorized deploying all current risk-cap, Sensex Hero Zero, recovery/reporting and timestamp fixes together. Published task-only commit `cbc46f6` to main; [CI42022052564](https://github.com/ketan2kt/AlgoTrading/actions/runs/42022052564) passed backend/frontend, entry-path checks, dependency audits and release packaging. Dispatched exactly once via tasks.ps1 deploy -Ref main: [deployment42022460796](https://github.com/ketan2kt/AlgoTrading/actions/runs/42022460796). Completion unverified; no post-dispatch polling or production inspection. Private `.analysis-*` evidence/harness and unrelated narrator edits remain local/excluded. This dispatch-status handover update is local; no extra release needed.
 
 ## Partial historical comparison — requested after local fixes
 

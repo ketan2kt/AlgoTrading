@@ -1,13 +1,16 @@
         <div class="logs-backdrop" (click)="closeHistoricalReplay()">
-          <section class="evaluation-panel logs-modal performance-modal historical-replay-modal" role="dialog" aria-modal="true" aria-label="Historical strategy replay research" (click)="$event.stopPropagation()">
-            <header class="panel-heading dialog-heading"><div><span>RESEARCH ONLY</span><h2>Historical Replay</h2><p>Full-session normal-strategy comparison · same frozen data · baseline versus proposal</p></div><button type="button" class="dialog-close" (click)="closeHistoricalReplay()" aria-label="Close historical replay">×</button></header>
-            <div class="historical-replay-form">
-              <label>From<input type="date" name="replayFrom" [(ngModel)]="replayFrom" required /></label>
-              <label>To<input type="date" name="replayTo" [(ngModel)]="replayTo" required /></label>
+          <section class="historical-replay-modal" role="dialog" aria-modal="true" aria-labelledby="replay-title" (click)="$event.stopPropagation()">
+            <header class="dialog-heading"><div><span class="eyebrow">STRATEGY LAB <span class="research-badge">Research only</span></span><h2 id="replay-title">Historical Replay</h2><p>Compare your baseline and proposed strategy on the same recorded sessions.</p></div><button type="button" class="dialog-close" (click)="closeHistoricalReplay()" aria-label="Close historical replay">×</button></header>
+            <div class="replay-body">
+            <section class="replay-setup" aria-labelledby="replay-session-title">
+            <div class="section-heading"><div><span class="eyebrow">01 · SESSION RANGE</span><h3 id="replay-session-title">Choose your history</h3></div><span class="market-badge">Nifty · Sensex · Bank Nifty</span></div>
+            <div class="historical-replay-form session-controls">
+              <label>From date<input type="date" name="replayFrom" [(ngModel)]="replayFrom" required /></label>
+              <label>To date<input type="date" name="replayTo" [(ngModel)]="replayTo" required /></label>
+              <button type="button" (click)="checkReplayCohort()" [disabled]="replayCohortBusy">{{replayCohortBusy?'Checking…':'Check session eligibility'}}</button>
             </div>
             <div class="historical-replay-backfill">
-              <button type="button" (click)="checkReplayCohort()" [disabled]="replayCohortBusy">{{replayCohortBusy?'Checking…':'Check full-session eligibility'}}</button>
-              <small>Nifty, Sensex and Bank Nifty on the same dates · incomplete dates excluded before strategy comparison</small>
+              <small>All three markets use the same dates. Incomplete sessions are excluded from comparison.</small>
               @if(replayCohortError){<p role="alert">{{replayCohortError}}</p>}
               @if(replayCohort; as cohort){
                 @if(cohort.from===replayFrom && cohort.to===replayTo){
@@ -22,12 +25,12 @@
                 }
               }
             </div>
+            </section>
             <section class="daily-analysis-section historical-normal-preview" aria-label="Normal strategy replay comparison">
-              <div class="daily-analysis-section-heading"><div><span>FULL-SESSION NORMAL STRATEGIES · RESEARCH</span><h3>Nifty + Sensex + Bank Nifty</h3></div></div>
-              <p>Test one change at a time on identical inputs for all three markets. Presets use the same strategy build on both sides; custom comparison allows different builds. Costs and slippage are modeled, not broker fills. Hero Zero and pairs are excluded.</p>
+              <div class="section-heading"><div><span class="eyebrow">02 · STRATEGY COMPARISON</span><h3>Baseline vs proposal</h3></div><span class="market-badge">Normal strategies</span></div>
+              <p class="section-description">Test one change at a time. Presets use the same strategy build; custom comparisons can use different builds. Costs and slippage are modeled. Hero Zero and pairs are excluded.</p>
               <div class="historical-normal-controls">
-                <label>Dataset<select [(ngModel)]="replayFrozenInputRun"><option value="">Archive · dates selected above</option>@for(run of replaySavedRuns;track run.id){<option [value]="run.id">Frozen {{run.from}} → {{run.to}} · {{run.id.slice(0,8)}}</option>}</select></label>
-                <button type="button" (click)="showSavedNormalReport()" [disabled]="normalReplayBusy || !replayFrozenInputRun">View saved result</button>
+                <div class="field"><label for="replay-dataset">Dataset</label><div class="dataset-picker"><select id="replay-dataset" [(ngModel)]="replayFrozenInputRun"><option value="">Archive · dates selected above</option>@for(run of replaySavedRuns;track run.id){<option [value]="run.id">Frozen {{run.from}} → {{run.to}} · {{run.id.slice(0,8)}}</option>}</select><button type="button" (click)="showSavedNormalReport()" [disabled]="normalReplayBusy || !replayFrozenInputRun">View saved result</button></div></div>
                 <label>Baseline strategy code<select [(ngModel)]="replayBaselineBuild"><option value="">{{replayFrozenInputRun?'Saved baseline build':'Current approved build'}}</option>@for(build of replayPolicyBuilds;track build.id){<option [value]="build.id">{{build.capturedAtUtc|date:'dd MMM yyyy HH:mm'}} · {{build.id.slice(0,8)}}</option>}</select></label>
                 <label>Replay experiment<select [(ngModel)]="normalReplayTrial">
                   <option value="control">Control · no change</option>
@@ -40,14 +43,23 @@
                   <label>Proposal strategy code<select [(ngModel)]="replayProposalBuild"><option value="">Current approved build</option>@for(build of replayPolicyBuilds;track build.id){<option [value]="build.id">{{build.capturedAtUtc|date:'dd MMM yyyy HH:mm'}} · {{build.id.slice(0,8)}}</option>}</select></label>
                   <label>Proposal premium stop (%)<input type="number" min="0.1" max="75" step="0.5" [(ngModel)]="normalReplayStopPercent" aria-label="Normal replay proposal premium stop percentage" /></label>
                 }
-                <button type="button" (click)="runNormalReplay()" [disabled]="normalReplayBusy">{{normalReplayBusy?'Comparing…':'Compare normal strategies'}}</button>
-                <button type="button" (click)="verifyPaperSession()" [disabled]="normalReplayBusy || !replayTo">Verify replay against paper · {{replayTo}}</button>
-                <small>Uses only the “To” session and its recorded pre-open settings, not the selected experiment. Normal trades only.</small>
-                <small>Frozen datasets keep their saved dates, baseline settings and execution assumptions. Comparisons run outside market hours.</small>
               </div>
+              <div class="replay-actions">
+                <button type="button" class="primary-action" (click)="runNormalReplay()" [disabled]="normalReplayBusy">{{normalReplayBusy?'Comparing…':'Compare strategies'}}</button>
+                <button type="button" (click)="verifyPaperSession()" [disabled]="normalReplayBusy || !replayTo">Verify replay against paper · {{replayTo}}</button>
+              </div>
+              <div class="replay-notes"><small>Paper verification uses only the “To” session and its recorded pre-open settings, not the experiment.</small><small>Frozen datasets retain their saved dates, settings and execution assumptions. Comparisons run outside market hours.</small></div>
               @if(normalReplayError){<p class="historical-replay-warning" role="alert">{{normalReplayError}}</p>}
+              @if(normalReplayBusy){<p class="replay-empty" role="status">Preparing the comparison. Results will appear here when the request completes.</p>}
+              @if(!normalReplayReport && !normalReplayBusy && !normalReplayError){<div class="replay-empty"><strong>Your comparison will appear here</strong><span>Select a session range and experiment, then compare strategies or open a saved result.</span></div>}
               @if(normalReplayReport;as result){
                 @let c=result.comparison;
+                <div class="section-heading results-heading"><div><span class="eyebrow">03 · RESULTS</span><h3>Comparison overview</h3></div></div>
+                <div class="historical-replay-metrics comparison-metrics">
+                  <article><span>Baseline net P&amp;L</span><strong [class.good]="c.baselineNet>0" [class.bad]="c.baselineNet<0">₹{{c.baselineNet|number:'1.2-2'}}</strong><small>After modeled costs</small></article>
+                  <article><span>Proposal net P&amp;L</span><strong [class.good]="c.proposalNet>0" [class.bad]="c.proposalNet<0">₹{{c.proposalNet|number:'1.2-2'}}</strong><small>After modeled costs</small></article>
+                  <article><span>Net difference</span><strong [class.good]="c.proposalNet>c.baselineNet" [class.bad]="c.proposalNet<c.baselineNet">₹{{c.proposalNet-c.baselineNet|number:'1.2-2'}}</strong><small>Proposal minus baseline</small></article>
+                </div>
                 @if(result.paperFidelity;as f){
                   <section class="daily-analysis-section"><h4>Replay vs recorded paper · {{f.verdict}}</h4>
                     <p>{{f.paperTrades}} recorded positions · {{f.replayTrades}} replay positions compared.
@@ -68,7 +80,7 @@
                   <button type="button" [disabled]="normalReplayBusy" (click)="testRunnerOnControl(result)">Test fixed targets on these exact inputs</button>
                 }
                 <p role="status">{{c.cohort.includedDates.length}} included days · {{c.cohort.excludedDates.length}} excluded · {{c.evidenceStatus}}</p>
-                <div class="daily-analysis-table"><table><thead><tr><th>After-cost measure</th><th>Baseline</th><th>Proposal</th></tr></thead><tbody>
+                <div class="daily-analysis-table" tabindex="0" role="region" aria-label="Strategy performance comparison"><table><caption>Performance · after costs</caption><thead><tr><th>Measure</th><th>Baseline</th><th>Proposal</th></tr></thead><tbody>
                   <tr><td>Net P&amp;L</td><td>₹{{c.baselineNet|number:'1.2-2'}}</td><td>₹{{c.proposalNet|number:'1.2-2'}}</td></tr>
                   <tr><td>Completed trades</td><td>{{c.baselineTrades}}</td><td>{{c.proposalTrades}}</td></tr>
                   <tr><td>Win rate</td><td>{{c.baselineWinRate*100|number:'1.1-1'}}%</td><td>{{c.proposalWinRate*100|number:'1.1-1'}}%</td></tr>
@@ -77,7 +89,7 @@
                   <tr><td>Costs</td><td>₹{{c.baselineCosts|number:'1.2-2'}}</td><td>₹{{c.proposalCosts|number:'1.2-2'}}</td></tr>
                   <tr><td>Sampled giveback</td><td>{{c.baselineSampledGiveback===null?'Unavailable':'₹'+(c.baselineSampledGiveback|number:'1.2-2')}}</td><td>{{c.proposalSampledGiveback===null?'Unavailable':'₹'+(c.proposalSampledGiveback|number:'1.2-2')}}</td></tr>
                 </tbody></table></div>
-                @if(c.days.length){<div class="daily-analysis-table"><table><thead><tr><th>Session</th><th>Split</th><th>Baseline net</th><th>Proposal net</th><th>Difference</th></tr></thead><tbody>
+                @if(c.days.length){<div class="daily-analysis-table" tabindex="0" role="region" aria-label="Session by session comparison"><table><caption>Session-by-session results</caption><thead><tr><th>Session</th><th>Split</th><th>Baseline net</th><th>Proposal net</th><th>Difference</th></tr></thead><tbody>
                   @for(day of c.days;track day.date;let index=$index){<tr><td>{{day.date}}</td><td>{{index >= c.trainingDays ? 'Held-out' : 'Training'}}</td><td>₹{{day.baseline.netPnl|number:'1.2-2'}}</td><td>₹{{day.proposal.netPnl|number:'1.2-2'}}</td><td [class.good]="day.netDifference>0" [class.bad]="day.netDifference<0">₹{{day.netDifference|number:'1.2-2'}}</td></tr>}
                 </tbody></table></div>}
                 <details><summary>Exclusions, limitations and reproducibility</summary>
@@ -87,7 +99,7 @@
                 </details>
               }
             </section>
-            <details class="desk-advanced"><summary>Advanced · archive maintenance and recorded-candidate study</summary>
+            <details class="desk-advanced"><summary>Advanced tools <span>Archive maintenance &amp; legacy candidate study</span></summary>
             <details><summary>Legacy recorded-candidate study — not a full-strategy replay</summary>
             <form class="historical-replay-form" (ngSubmit)="runHistoricalReplay()">
               <label>Market<select name="replayMarket" [(ngModel)]="replayMarket"><option value="nifty">Nifty</option><option value="sensex">Sensex</option><option value="bank-nifty">Bank Nifty</option></select></label>
@@ -115,5 +127,6 @@
               <details><summary>Assumptions, limitations and reproducibility</summary><p>{{r.simulation.executionAssumption}}</p><ul>@for(l of r.limitations;track l){<li>{{l}}</li>}</ul><small>Dataset fingerprint: {{r.dataFingerprint}}</small></details>
             }
             </details>
+            </div>
           </section>
         </div>
