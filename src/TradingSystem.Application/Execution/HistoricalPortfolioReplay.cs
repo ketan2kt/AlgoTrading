@@ -341,6 +341,12 @@ public static class HistoricalPortfolioReplay
                     unsupportedPartials.Add(partial.Symbol);
                     continue;
                 }
+                // A new underlying observation or bar may re-evaluate the same
+                // desired partial before the next executable option quote. Keep
+                // the original queued order/time; do not submit it twice.
+                if (pendingPartials.TryGetValue(partial.Symbol, out var pendingPartial) &&
+                    partial.DecidedAtUtc == atUtc && partial.Quantity == pendingPartial.Quantity &&
+                    partial.Reason == pendingPartial.Reason) continue;
                 if (partial.DecidedAtUtc != atUtc ||
                     string.IsNullOrWhiteSpace(partial.Reason) ||
                     !openPositions.TryGetValue(partial.Symbol, out var position) ||

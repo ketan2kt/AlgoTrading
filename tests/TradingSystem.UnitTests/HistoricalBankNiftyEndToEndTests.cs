@@ -37,6 +37,9 @@ public sealed class HistoricalBankNiftyEndToEndTests
             new(symbol, signalAt.AddSeconds(second), last)
                 { BidPrice = last - .5m, OfferPrice = last };
         var result = HistoricalPortfolioReplay.Run(bars, [
+            new("BANKNIFTY", signalAt.AddSeconds(8), 54988.5m),
+            new("BANKNIFTY", signalAt.AddSeconds(10), 54988.4m),
+            new("BANKNIFTY", signalAt.AddSeconds(12), 54988.3m),
             Quote(2, 100m), Quote(4, 100m), Quote(8, 120m),
             Quote(10, 119m), Quote(12, 105m), Quote(14, 104m)
         ], policy, new(.1m, .1m, 0m, 0m, 30, 0), signalAt, signalAt.AddMinutes(1));

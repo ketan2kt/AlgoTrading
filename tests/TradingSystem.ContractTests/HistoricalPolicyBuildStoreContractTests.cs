@@ -90,7 +90,10 @@ public sealed class HistoricalPolicyBuildStoreContractTests : IDisposable
         const string symbol = "BANKNIFTY55000PE";
         HistoricalReplayQuote Quote(int second, decimal price) => new(symbol, at.AddSeconds(second), price)
             { BidPrice = price - .5m, OfferPrice = price };
-        var quotes = new[] { Quote(2, 100), Quote(4, 100), Quote(8, 120), Quote(10, 119), Quote(12, 105), Quote(14, 104) };
+        var quotes = new[] { Quote(2, 100), Quote(4, 100), Quote(8, 120), Quote(10, 119), Quote(12, 105), Quote(14, 104),
+            new HistoricalReplayQuote("BANKNIFTY", at.AddSeconds(8), 54988.5m),
+            new HistoricalReplayQuote("BANKNIFTY", at.AddSeconds(10), 54988.4m),
+            new HistoricalReplayQuote("BANKNIFTY", at.AddSeconds(12), 54988.3m) };
         var slice = new HistoricalReplayArchiveSlice(new(date, "BANKNIFTY", bars, quotes, at, at.AddMinutes(1)),
             55000m, "BANKNIFTY-FUT", [new(Guid.NewGuid(), symbol, InstrumentType.PutOption,
                 date.AddDays(20), 55000m, 30, .05m)], []) { UnderlyingInstrumentId = Guid.NewGuid() };

@@ -168,7 +168,10 @@ public sealed class HistoricalNiftyPositionPolicyTests
         Assert.True(policy.ShouldExtendTarget(frame, position));
         Assert.Empty(policy.EvaluateExits(frame));
         Assert.Equal(75, Assert.Single(policy.EvaluatePartialExits(frame)).Quantity);
-        Assert.Empty(policy.EvaluateAddOns(frame));
+        Assert.Equal(75, Assert.Single(policy.EvaluateAddOns(frame)).Quantity);
+        var alreadyAdded = position with { AddOnQuantity = 75 };
+        Assert.Empty(policy.EvaluateAddOns(frame with
+            { OpenPosition = alreadyAdded, OpenPositions = [alreadyAdded] }));
         var stopped = position with { StopPrice = 120m };
         Assert.Equal("StopLoss", Assert.Single(policy.EvaluateExits(frame with
             { OpenPosition = stopped, OpenPositions = [stopped] })).Reason);
