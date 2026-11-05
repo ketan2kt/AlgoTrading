@@ -531,7 +531,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ? Math.Max(0, expiry.DayNumber - today.DayNumber)
                 : -1;
             var evidenceGate = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(
-                adaptiveSetup!, localTime, daysToExpiry, decision.Confidence);
+                adaptiveSetup!, localTime, daysToExpiry, decision.Confidence,
+                rolledFromSameDayExpiry: sensexExpiryRolled);
             if (!evidenceGate.Permitted && !supplementalSensexEntry)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,

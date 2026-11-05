@@ -136,6 +136,54 @@ public sealed class SensexAdaptiveSetupPolicyTests
         Assert.True(decision.Permitted);
     }
 
+    [Theory]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void VerifiedSameDayRollDoesNotBecomeABlanketAfternoonVeto(int daysToExpiry)
+    {
+        Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(13, 10), daysToExpiry, .70m).Permitted);
+        Assert.True(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(13, 10), daysToExpiry, .70m, rolledFromSameDayExpiry: true).Permitted);
+    }
+
+    [Fact]
+    public void SameDayRollRetainsEveryLateQualityRequirement()
+    {
+        var baseline = PreferredTrend();
+        var weak = new[] {
+            baseline with { State = SensexMarketState.Transition },
+            baseline with { Verdict = SensexSetupVerdict.Observe },
+            baseline with { Efficiency = .44m },
+            baseline with { EmaSeparationAtr = .34m },
+            baseline with { MoveFromTriggerAtr = -.01m },
+            baseline with { MoveFromTriggerAtr = .66m },
+            baseline with { RoomToOpposingLevelAtr = .74m }
+        };
+        foreach (var assessment in weak)
+            Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(assessment,
+                new TimeOnly(13, 10), 7, .70m, rolledFromSameDayExpiry: true).Permitted);
+        Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(baseline,
+            new TimeOnly(13, 10), 7, .59m, rolledFromSameDayExpiry: true).Permitted);
+        Assert.False(SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(baseline,
+            new TimeOnly(13, 10), 1, .70m, rolledFromSameDayExpiry: true).Permitted);
+    }
+
+    [Theory]
+    [InlineData(9, 30)]
+    [InlineData(10, 35)]
+    [InlineData(12, 59)]
+    public void ExpiryRollCorrectionDoesNotChangeMorningDecisions(int hour, int minute)
+    {
+        var before = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(hour, minute), 7, .70m);
+        var after = SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(PreferredTrend(),
+            new TimeOnly(hour, minute), 7, .70m, rolledFromSameDayExpiry: true);
+        Assert.Equal(before.Permitted, after.Permitted);
+        Assert.Equal(before.Reasons, after.Reasons);
+    }
+
     [Fact]
     public void LateTransitionIsRejectedEvenWhenBaseTransitionRulePermitsIt()
     {

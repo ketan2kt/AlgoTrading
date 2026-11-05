@@ -112,7 +112,7 @@ public static class SensexAdaptiveSetupPolicy
 
     public static SensexEvidenceGateDecision EvaluateEvidenceGate(
         SensexAdaptiveSetupAssessment assessment, TimeOnly localTime,
-        int daysToExpiry, decimal confidence)
+        int daysToExpiry, decimal confidence, bool rolledFromSameDayExpiry = false)
     {
         var reasons = new List<string>();
         if (!AllowsMomentumEntry(assessment))
@@ -123,7 +123,9 @@ public static class SensexAdaptiveSetupPolicy
             // September evidence is sharply negative for late Sensex entries one day and
             // six-or-more days from expiry. Keep other expiry distances available, but
             // demand a genuinely clean directional structure after 13:00.
-            if (daysToExpiry == 1 || daysToExpiry >= 6)
+            // A deliberate same-day safety roll is not an ordinary far-expiry
+            // entry. Keep all directional/room/extension checks below intact.
+            if (daysToExpiry == 1 || daysToExpiry >= 6 && !rolledFromSameDayExpiry)
                 reasons.Add($"Late Sensex entries are disabled at {daysToExpiry} days to expiry based on observed negative expectancy.");
             if (assessment.State != SensexMarketState.DirectionalTrend ||
                 assessment.Verdict != SensexSetupVerdict.Prefer)

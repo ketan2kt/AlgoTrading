@@ -23,7 +23,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v1";
+    public string CodeVersion => "sensex-normal-entry-v2";
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,
@@ -121,7 +121,9 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
             frame.OpenPositions.Any(value => value.Symbol == contract.TradingSymbol)) return new([], "ContractSelection");
         var dte = contract.ExpiryDate.DayNumber - tradingDate.DayNumber;
         if (!selection.Supplemental && !SensexAdaptiveSetupPolicy.EvaluateEvidenceGate(adaptive,
-                time, dte, selection.Candidate.Confidence).Permitted) return new([], "EvidenceGate");
+                time, dte, selection.Candidate.Confidence,
+                rolledFromSameDayExpiry: IsSameDayExpiryRoll(contracts, tradingDate, direction))
+                .Permitted) return new([], "EvidenceGate");
         var professional = new ProfessionalTradeAssessmentInput("sensex",
             selection.PersistentDirectional ? ProfessionalTradeRegime.Directional : ProfessionalTradeFramework.Map(state),
             selection.Candidate.Confidence, confirmation.RelativeVolume, adaptive.RoomToOpposingLevelAtr,
@@ -183,13 +185,18 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
         Math.Max(bar.High - bar.Low, Math.Max(Math.Abs(bar.High - bars[index].Close),
             Math.Abs(bar.Low - bars[index].Close)))).DefaultIfEmpty(0m).Average();
 
+    internal static bool IsSameDayExpiryRoll(IReadOnlyList<NiftyOptionContractCandidate> contracts,
+        DateOnly date, Direction direction) => contracts.Any(value =>
+            value.Type == (direction == Direction.Buy ? InstrumentType.CallOption : InstrumentType.PutOption) &&
+            value.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal) && value.ExpiryDate == date);
+
     internal static NiftyOptionContractCandidate? Select(IReadOnlyList<NiftyOptionContractCandidate> contracts,
         DateOnly date, Direction direction, decimal price, int inTheMoneySteps)
     {
         var type = direction == Direction.Buy ? InstrumentType.CallOption : InstrumentType.PutOption;
         var eligible = contracts.Where(value => value.Type == type &&
             value.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal)).ToArray();
-        var start = eligible.Any(value => value.ExpiryDate == date) ? date.AddDays(1) : date;
+        var start = IsSameDayExpiryRoll(contracts, date, direction) ? date.AddDays(1) : date;
         var strike = price + (direction == Direction.Buy ? -1 : 1) * inTheMoneySteps * 100m;
         return eligible.Where(value => value.ExpiryDate >= start && value.ExpiryDate <= start.AddDays(10))
             .OrderBy(value => value.ExpiryDate).ThenBy(value => Math.Abs(value.StrikePrice - strike))
