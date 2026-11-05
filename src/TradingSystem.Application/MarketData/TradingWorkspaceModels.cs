@@ -103,7 +103,10 @@ public sealed record TradingWorkspaceSnapshot(
     DailyResearchPipelineReportV2? Research = null,
     IReadOnlyList<OperationalAutomationReport>? OperationalReports = null,
     string? MarketCode = null,
-    WorkspaceEngineRead? EngineRead = null);
+    WorkspaceEngineRead? EngineRead = null,
+    WorkspacePreviousClose? PreviousSessionClose = null);
+
+public sealed record WorkspacePreviousClose(decimal Price, DateOnly SessionDate);
 
 public sealed record WorkspaceEngineRead(DateTimeOffset CandleTimeUtc, string Outcome, string? Reason,
     decimal? IndexConfirmationLevel = null);

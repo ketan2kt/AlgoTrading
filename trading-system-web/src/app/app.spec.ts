@@ -162,7 +162,7 @@ describe('App', () => {
           }],
           paperAutomation: {
             status: 'WarmingUp', tradingPermitted: false, message: 'Waiting for confirmation.',
-            observedAtUtc: '2026-08-03T08:30:00Z', tradesToday: 0, realisedPnl: 0,
+            observedAtUtc: new Date().toISOString(), tradesToday: 0, realisedPnl: 0,
             unrealisedPnl: 0, activeSignalId: null, activeDirection: null,
             activeQuantity: null, entryPrice: null, stopLoss: null, target: null,
             selectedOptionSymbol: null, selectedOptionType: null, selectedOptionExpiry: null,
@@ -198,9 +198,13 @@ describe('App', () => {
     fixture.detectChanges();
 
     const desk: HTMLElement = fixture.nativeElement;
-    expect(desk.querySelector('.chart-panel--compact .desk-chart-title')?.textContent).toContain('NIFTY');
-    expect(desk.querySelectorAll('.chart-panel--compact .chart-status-rail > div')).toHaveLength(4);
-    expect(desk.querySelector('select[aria-label="Chart timeframe"]')).not.toBeNull();
+    expect(desk.querySelector('.chart-panel--compact .desk-chart-title')?.textContent).toContain('Nifty');
+    expect(desk.querySelector('.chart-panel--compact .chart-status-rail')).toBeNull();
+    expect(desk.querySelector('.desk-chart-toolbar .legend')).toBeNull();
+    expect(desk.querySelector('select[aria-label="Chart timeframe"]')).toBeNull();
+    expect(desk.querySelector('.desk-session-summary')?.textContent).toContain('Session P&L');
+    expect(desk.querySelector('.desk-session-summary')?.textContent).toContain('Updated');
+    expect(desk.querySelector('.desk-previous-close')?.textContent).toContain('Prev close');
     expect(desk.querySelector('.workspace-priority-chart')?.nextElementSibling?.classList.contains('workspace-priority-events')).toBe(true);
     expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')?.textContent).toContain('Unknown');
     expect(desk.textContent).not.toContain('SESSION READINESS');
@@ -220,6 +224,20 @@ describe('App', () => {
     logsButton.click();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Relative futures volume 0.62 is below 0.75.');
+    const sensex = fixture.componentInstance['marketViews'].get('sensex')!;
+    const active = {signalId:'sensex-active',fillPrice:100,exitTimeUtc:null,lifecycleStatus:'Active'};
+    fixture.componentInstance['acceptView']('sensex', {...sensex,
+      observedAtUtc:new Date().toISOString(),
+      paperAutomation:{...sensex.paperAutomation,realisedPnl:1200,unrealisedPnl:300},
+      overlays:[active as TradingWorkspaceSnapshot['overlays'][number]]}, false);
+    fixture.detectChanges();
+    expect(desk.querySelector('.market-tab--positions')?.textContent).toContain('Sensex');
+    expect(desk.querySelector('.market-position-count')?.textContent).toContain('1 active');
+    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('1,500.00');
+    expect(fixture.componentInstance['selectedMarket']).toBe('nifty');
+    fixture.componentInstance['acceptView']('sensex', {...sensex,observedAtUtc:new Date().toISOString()}, false);
+    fixture.detectChanges();
+    expect(desk.querySelector('.market-tab--positions')).toBeNull();
   });
 
   it('opens the Sensex workspace while Natural Gas is hidden', async () => {

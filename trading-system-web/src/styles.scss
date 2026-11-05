@@ -896,6 +896,21 @@ app-root .chart-panel.chart-panel--compact > .desk-chart-toolbar {
 }
 app-root .chart-panel--compact .desk-chart-title { white-space: nowrap; font-size: .88rem; }
 app-root .chart-panel--compact .desk-chart-title small { color: #557460; font-size: .68rem; font-weight: 500; }
+app-root .chart-panel--compact .desk-index-quote { display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 10px; min-width:0; font-variant-numeric:tabular-nums; }
+app-root .chart-panel--compact .desk-index-price { font-size:1.05rem; color:#173f2e; }
+app-root .chart-panel--compact .desk-index-change { padding:2px 6px; border:1px solid #b0c8ad; border-radius:5px; font-size:.77rem; font-weight:650; white-space:nowrap; }
+app-root .chart-panel--compact .desk-previous-close { color:#476250; font-size:.69rem; white-space:nowrap; }
+app-root .chart-panel--compact .desk-quote-status { color:#815b12; font-size:.66rem; }
+app-root .chart-panel--compact .desk-session-summary { display:flex; flex-wrap:wrap; gap:4px 12px; margin-left:auto; padding-left:10px; border-left:1px solid #b8d0b5; font-size:.69rem; color:#476250; font-variant-numeric:tabular-nums; }
+app-root .chart-panel--compact .desk-session-summary > span { white-space:nowrap; }
+app-root .chart-panel--compact .desk-session-summary strong { font-size:.83rem; margin-left:4px; }
+app-root .chart-preferences { gap:8px 14px; }
+app-root .chart-preferences label { display:flex; align-items:center; gap:8px; }
+app-root .chart-preferences select { border:1px solid #82a98a; border-radius:6px; padding:5px 8px; background:#edf6e9; color:#173f2e; }
+@media(max-width:760px) {
+  app-root .chart-panel--compact .desk-index-quote { flex-basis:100%; gap:3px 8px; }
+  app-root .chart-panel--compact .desk-session-summary { border-left:0; padding-left:0; margin-left:0; }
+}
 app-root .chart-panel--compact .timeframe-control select,
 app-root .chart-panel--compact :is(.desk-history-button,.desk-paper-stop) {
   min-height: 28px; height: 28px; box-sizing: border-box; padding: 2px 8px; line-height: 1.2; font-size: .74rem;
@@ -964,6 +979,20 @@ app-root .workspace-layout .market-tabs .market-tab-group .market-tab--active {
   color: white; background: #20553b; border-color: #9ecba9; box-shadow: inset 3px 0 #a8e3ac;
 }
 app-root .workspace-layout .market-tabs .market-tab-group .market-tab--alert { color: #241600; border-color: #74560b; }
+app-root .workspace-layout .market-tabs .market-tab-group .market-tab--positions {
+  background:#fff0bd; color:#57400b; border:1px solid #ac7e20; box-shadow:inset 3px 0 #ce931c;
+}
+app-root .workspace-layout .market-tabs .market-tab-group .market-tab--positions.market-tab--active {
+  background:#ffdfa0; outline:2px solid #20553b; outline-offset:-3px;
+}
+app-root .market-position-count { display:inline-block; padding:1px 5px; border:1px solid #b58b3b; border-radius:10px; font-size:.66rem; white-space:nowrap; }
+app-root .mode-banner .desk-total-pnl { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 8px; margin-left:auto; padding:2px 9px; border:1px solid #91b494; border-radius:5px; background:#edf6e9; color:#234c35; font-variant-numeric:tabular-nums; }
+app-root .desk-total-pnl small { color:#75561f; font-size:.65rem; }
+@media(max-width:700px) {
+  app-root .mode-banner { gap:3px 8px; padding-block:3px; }
+  app-root .mode-banner .mode-banner__label { width:auto; margin-right:0; }
+  app-root .mode-banner .desk-total-pnl { margin-left:0; font-size:.74rem; }
+}
 app-root .workspace-layout .desk-reports > button {
   width: 100%; text-align: left; justify-content: space-between; padding-inline: .6rem;
 }

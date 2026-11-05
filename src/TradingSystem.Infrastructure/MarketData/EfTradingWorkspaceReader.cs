@@ -91,8 +91,9 @@ internal sealed class EfTradingWorkspaceReader(
         closed = closed
             .Where(value => IsTradableSessionTimestamp(
                 value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd))
-            .TakeLast(candleCount)
             .ToList();
+        var previousSessionClose = WorkspacePreviousClosePolicy.Read(closed, sessionDate, definition.SessionEnd);
+        closed = closed.TakeLast(candleCount).ToList();
         var displayedSessionDates = closed
             .Select(value => DateOnly.FromDateTime(
                 TimeZoneInfo.ConvertTime(value.OpenTimeUtc, IndiaTimeZone).Date))
@@ -524,7 +525,7 @@ internal sealed class EfTradingWorkspaceReader(
             futuresVolume,
             research,
             operationalReports,
-            definition.Code, engineRead);
+            definition.Code, engineRead, previousSessionClose);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,

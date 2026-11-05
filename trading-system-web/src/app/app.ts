@@ -11,6 +11,8 @@ import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
 import { mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
+import { indexChange } from './index-change';
+import { activeTradeCount, deskPortfolio } from './desk-portfolio';
 import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMarketCode } from './trade-alerts';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
@@ -38,6 +40,16 @@ import {
   styleUrl: './app.scss',
 })
 export class App implements OnInit, OnDestroy {
+  protected readonly indexChange = indexChange;
+  protected readonly deskMarketTabs: {code:TradingMarketCode; label:string}[] = [
+    {code:'nifty',label:'Nifty'}, {code:'bank-nifty',label:'Bank Nifty'}, {code:'sensex',label:'Sensex'}
+  ];
+  protected portfolioSummary() { return deskPortfolio(this.marketViews); }
+  protected activeMarketTrades(market:TradingMarketCode) { return activeTradeCount(this.marketViews.get(market)); }
+  protected marketPositionHint(market:TradingMarketCode):string {
+    const view=this.marketViews.get(market);
+    return view ? `${activeTradeCount(view)} active trades · snapshot ${new Date(view.observedAtUtc).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})} IST` : 'Waiting for market snapshot';
+  }
   private readonly statusService = inject(SystemStatusService);
   private readonly auth = inject(AuthService);
   private readonly workspaceService = inject(TradingWorkspaceService);
@@ -780,7 +792,7 @@ export class App implements OnInit, OnDestroy {
     const view=older ? prior : mergeWorkspaceSnapshot(prior??null,snapshot);
     this.marketViews.set(market,view);
     if(notify && !older){this.processMarketNarrator(market,view);this.detectTradeAlerts(market,view);}
-    if(this.selectedMarket!==market)return;
+    if(this.selectedMarket!==market){this.refreshView();return;}
     this.workspace=this.withHistory(view);
     if (!older) this.cachedPreview=false;
     this.workspaceError='';

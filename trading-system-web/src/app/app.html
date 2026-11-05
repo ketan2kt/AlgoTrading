@@ -9,6 +9,14 @@
       <strong>{{ status.mode }}</strong>
       <span>{{ status.status }}</span>
       <span>Live orders {{ status.liveTradingAvailable ? 'available' : 'prohibited' }}</span>
+      @if (portfolioSummary(); as portfolio) {
+        <div class="desk-total-pnl" title="Paper strategy P&L: realised plus open P&L across Nifty, Sensex and Bank Nifty. Not broker-account P&L.">
+          <span>All 3 · Paper P&amp;L</span>
+          <strong [class.good]="portfolio.total !== null && portfolio.total > 0" [class.bad]="portfolio.total !== null && portfolio.total < 0">{{portfolio.total !== null ? '₹' + (portfolio.total | number:'1.2-2') : '—'}}</strong>
+          @if (!portfolio.complete) { <small>{{portfolio.count}}/3 loaded</small> }
+          @else if (portfolio.stale) { <small>Last snapshot</small> }
+        </div>
+      }
     </header>
   }
 
@@ -59,9 +67,16 @@
           <span><strong>Sarthi</strong><small>Trading desk</small></span>
         </div>
         <div class="market-tab-group">
-        <button type="button" [class.market-tab--active]="selectedMarket === 'nifty'" [attr.aria-current]="selectedMarket === 'nifty' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('nifty')" (click)="openMarket('nifty')">Nifty @if (marketTabAlert('nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'bank-nifty'" [attr.aria-current]="selectedMarket === 'bank-nifty' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('bank-nifty')" (click)="openMarket('bank-nifty')">Bank Nifty @if (marketTabAlert('bank-nifty'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
-        <button type="button" [class.market-tab--active]="selectedMarket === 'sensex'" [attr.aria-current]="selectedMarket === 'sensex' ? 'page' : null" [class.market-tab--alert]="marketTabAlert('sensex')" (click)="openMarket('sensex')">Sensex @if (marketTabAlert('sensex'); as alert) { <small>{{ alert === 'entry' ? 'ENTRY' : 'EXIT' }}</small> }</button>
+        @for (market of deskMarketTabs; track market.code) {
+          <button type="button" [class.market-tab--active]="selectedMarket === market.code"
+            [attr.aria-current]="selectedMarket === market.code ? 'page' : null"
+            [class.market-tab--positions]="activeMarketTrades(market.code) > 0"
+            [class.market-tab--alert]="marketTabAlert(market.code)" [title]="marketPositionHint(market.code)"
+            (click)="openMarket(market.code)">{{market.label}}
+            @if (activeMarketTrades(market.code); as count) { <small class="market-position-count">{{count}} active</small> }
+            @if (marketTabAlert(market.code); as alert) { <small>{{alert === 'entry' ? 'ENTRY' : 'EXIT'}}</small> }
+          </button>
+        }
         </div>
         <div class="workspace-nav-actions">
           <app-live-protection-monitor />
@@ -120,6 +135,18 @@
             @if (selectedMarket !== 'natural-gas') {
               <app-market-controls />
             }
+            <section class="control-center-actions chart-preferences" aria-label="Chart settings">
+              <strong>Chart settings</strong>
+              <label class="timeframe-control">Timeframe
+                <select [ngModel]="chartTimeframeMinutes" (ngModelChange)="setChartTimeframe($event)" aria-label="Chart timeframe">
+                  @for (minutes of chartTimeframes; track minutes) { <option [ngValue]="minutes">{{minutes}}m</option> }
+                </select>
+              </label>
+              <button type="button" (click)="loadChartHistory()" [disabled]="chartHistoryBusy || !!chartHistory || !workspace">{{ chartHistoryBusy ? 'Loading…' : chartHistory ? 'History loaded' : 'Load older candles' }}</button>
+              @if (workspace; as view) {
+                <small>Automation: {{view.paperAutomation.status}} · {{view.paperAutomation.selectedOptionSymbol || 'Scanning market'}}</small>
+              }
+            </section>
             <details class="desk-advanced controls-disclosure" [open]="!tokenStatus.isConfigured || tokenStatus.isExpired || !!tokenError || workspace?.feedStatus === 'InstrumentUnavailable'"><summary>Broker connection <small>Groww token &amp; instruments</small></summary>
             <section class="token-card control-center-card" [class.token-card--required]="!tokenStatus.isConfigured || tokenStatus.isExpired">
               <div class="token-card__status"><span>GROWW ACCESS</span><strong>{{ tokenStatus.isConfigured && !tokenStatus.isExpired ? 'Token ready' : 'Token required' }}</strong><p>{{ tokenStatus.expiresAtUtc ? ('Protected until ' + (tokenStatus.expiresAtUtc | date:'dd MMM, HH:mm':'Asia/Kolkata') + ' IST') : 'Add today’s token for live market data.' }}</p></div>
@@ -273,30 +300,24 @@
         }
         <section class="chart-panel chart-panel--compact workspace-priority-chart">
           <div class="panel-heading desk-chart-toolbar">
-            <strong class="desk-chart-title">{{ view.instrument }} <small>· IST</small></strong>
-            <label class="timeframe-control">
-              <select
-                [ngModel]="chartTimeframeMinutes"
-                (ngModelChange)="setChartTimeframe($event)"
-                aria-label="Chart timeframe"
-              >
-                @for (minutes of chartTimeframes; track minutes) {
-                  <option [ngValue]="minutes">{{ minutes }}m</option>
-                }
-              </select>
-            </label>
-            <button type="button" class="desk-history-button" (click)="loadChartHistory()" [disabled]="chartHistoryBusy || !!chartHistory">{{ chartHistoryBusy ? 'Loading…' : chartHistory ? 'History loaded' : 'Older candles' }}</button>
-            <div class="legend">
-              <span class="dot dot--entry"></span>{{ selectedMarket === 'natural-gas' ? 'Futures entry' : 'Index trigger' }} <span class="dot dot--risk"></span>Invalidation
-              <span class="dot dot--reward"></span>Objective
+            <div class="desk-index-quote">
+              <strong class="desk-chart-title">{{ preparedMarketName() }} <small>· {{chartTimeframeMinutes}}m</small></strong>
+              @if (indexChange(view); as quote) {
+                <strong class="desk-index-price">{{quote.price !== null ? (quote.price | number:'1.2-2') : '—'}}</strong>
+                <span class="desk-index-change" [class.good]="quote.points !== null && quote.points > 0" [class.bad]="quote.points !== null && quote.points < 0">
+                  @if (quote.points !== null) {
+                    {{quote.points > 0 ? '+' : ''}}{{quote.points | number:'1.2-2'}} pts ({{quote.points > 0 ? '+' : ''}}{{quote.percent | number:'1.2-2'}}%)
+                  } @else { Change unavailable }
+                </span>
+                <small class="desk-previous-close" [attr.title]="'Last recorded regular-session closing candle · ' + (quote.previousDate || 'unavailable')">Prev close <b>{{quote.previousClose !== null ? (quote.previousClose | number:'1.2-2') : '—'}}</b></small>
+                @if (!quote.fresh) { <small class="desk-quote-status">{{quote.price === null ? 'Waiting for session price' : 'Last recorded · not live'}}</small> }
+              }
+            </div>
+            <div class="desk-session-summary">
+              <span>Session P&amp;L <strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></span>
+              <span>Updated <time>{{view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') : '—'}} IST</time></span>
             </div>
             <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
-          </div>
-          <div class="chart-status-rail" aria-label="Live decision status">
-            <div><span>Automation</span><strong [class.good]="view.paperAutomation.tradingPermitted">{{ view.paperAutomation.status }}</strong></div>
-            <div><span>Selected contract</span><strong>{{ view.paperAutomation.selectedOptionSymbol || 'Scanning market' }}</strong></div>
-            <div><span>Session P&amp;L</span><strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></div>
-            <div><span>Updated</span><strong>{{ view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') : 'Waiting' }}</strong></div>
           </div>
 
           @if (chartHistoryMessage) { <small class="desk-history-message" role="status">{{ chartHistoryMessage }}</small> }

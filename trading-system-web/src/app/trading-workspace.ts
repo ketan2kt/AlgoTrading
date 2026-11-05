@@ -54,6 +54,7 @@ export interface WorkspaceTradeOverlay {
 }
 
 export interface TradingWorkspaceSnapshot {
+  previousSessionClose?: { price: number; sessionDate: string } | null;
   marketCode?: string;
   engineRead?: { candleTimeUtc:string; outcome:string; reason:string|null; indexConfirmationLevel?:number|null } | null;
   instrument: string;
