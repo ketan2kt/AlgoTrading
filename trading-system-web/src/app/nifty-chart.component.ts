@@ -43,13 +43,22 @@ import { activeFills } from './chart-active-fills';
   standalone: true,
   template: `
     <div class="chart-shell">
-      <div class="engine-read"><b>Engine decision</b>
+      <details class="engine-read">
+        <summary>
+          <b>Decision</b>
         @if (snapshot?.engineRead; as d) {
           <span>{{timeIst(d.candleTimeUtc)}} IST · {{humanize(d.outcome)}}</span>
-          @if (d.reason) { <span>{{d.reason}}</span> }
-          @if (d.indexConfirmationLevel != null) { <span>Index confirmation {{d.indexConfirmationLevel.toFixed(2)}}</span> }
-        } @else { <span>No recorded entry decision for this session yet.</span> }
-      </div>
+          <span class="decision-preview">{{d.reason || 'View details'}}</span>
+        } @else { <span class="decision-preview">No recorded entry decision for this session yet.</span> }
+          <span class="decision-expand" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="decision-details">
+          @if (snapshot?.engineRead; as d) {
+            <span>{{d.reason || 'No additional reason recorded.'}}</span>
+            @if (d.indexConfirmationLevel != null) { <span>Index confirmation {{d.indexConfirmationLevel.toFixed(2)}}</span> }
+          } @else { <span>Waiting for the first recorded entry decision.</span> }
+        </div>
+      </details>
       <div class="chart-stage">
         <div class="overlay-controls" aria-label="Chart overlays">
           <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
@@ -118,7 +127,15 @@ import { activeFills } from './chart-active-fills';
       .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
       .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
       .engine-read,.fill-key,.fill-readout { margin:0; padding:4px 9px; border-bottom:1px solid #aac5ac; background:#edf6eb; color:#254c37; font-size:.75rem; }
-      .engine-read { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
+      .engine-read { padding:0; min-width:0; }
+      .engine-read summary { display:flex; align-items:center; gap:8px; min-height:24px; padding:2px 9px; box-sizing:border-box; list-style:none; cursor:pointer; font-size:.72rem; }
+      .engine-read summary::-webkit-details-marker { display:none; }
+      .engine-read summary > b,.engine-read summary > span:not(.decision-preview) { flex-shrink:0; }
+      .decision-preview { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
+      .decision-expand { margin-left:auto; }
+      .engine-read[open] .decision-expand { transform:rotate(180deg); }
+      .decision-details { display:grid; gap:3px; padding:5px 9px; border-top:1px solid #c6dac5; overflow-wrap:anywhere; }
+      @media(max-width:560px) { .engine-read summary { min-height:30px; } .decision-preview { display:none; } }
       .fill-key summary { cursor:pointer; } .fill-key p { margin:3px 0; }
     `,
   ],

@@ -198,6 +198,9 @@ describe('App', () => {
     fixture.detectChanges();
 
     const desk: HTMLElement = fixture.nativeElement;
+    expect(desk.querySelector('.chart-panel--compact .desk-chart-title')?.textContent).toContain('NIFTY');
+    expect(desk.querySelectorAll('.chart-panel--compact .chart-status-rail > div')).toHaveLength(4);
+    expect(desk.querySelector('select[aria-label="Chart timeframe"]')).not.toBeNull();
     expect(desk.querySelector('.workspace-priority-chart')?.nextElementSibling?.classList.contains('workspace-priority-events')).toBe(true);
     expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')?.textContent).toContain('Unknown');
     expect(desk.textContent).not.toContain('SESSION READINESS');

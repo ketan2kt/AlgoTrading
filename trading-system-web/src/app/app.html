@@ -271,11 +271,10 @@
             }
           </section>
         }
-        <section class="chart-panel workspace-priority-chart">
+        <section class="chart-panel chart-panel--compact workspace-priority-chart">
           <div class="panel-heading desk-chart-toolbar">
-            <div><span>{{ view.instrument }}</span><strong>Live {{ chartTimeframeMinutes }}-minute candles · IST</strong></div>
+            <strong class="desk-chart-title">{{ view.instrument }} <small>· IST</small></strong>
             <label class="timeframe-control">
-              <span>Timeframe</span>
               <select
                 [ngModel]="chartTimeframeMinutes"
                 (ngModelChange)="setChartTimeframe($event)"
