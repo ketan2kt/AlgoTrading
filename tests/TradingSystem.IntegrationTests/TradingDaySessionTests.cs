@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Globalization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -14,12 +15,12 @@ public sealed class TradingDaySessionTests
     [InlineData("2026-11-05T18:30:00Z", "2026-11-06T18:30:00Z")]
     [InlineData("2026-12-31T20:00:00Z", "2027-01-01T18:30:00Z")]
     public void SessionExpiresAtNextIstMidnight(string login, string expected) =>
-        Assert.Equal(DateTimeOffset.Parse(expected), TradingDaySession.ExpiresAt(DateTimeOffset.Parse(login)));
+        Assert.Equal(Parse(expected), TradingDaySession.ExpiresAt(Parse(login)));
 
     [Fact]
     public async Task SignInPersistsAcrossBrowserRestartsWithoutSlidingIntoAnotherDay()
     {
-        var now = DateTimeOffset.Parse("2026-11-05T04:00:00Z");
+        var now = Parse("2026-11-05T04:00:00Z");
         var options = new CookieAuthenticationOptions { TimeProvider = new FixedClock(now) };
         var properties = new AuthenticationProperties { IsPersistent = false, ExpiresUtc = now.AddMinutes(30) };
         var context = new CookieSigningInContext(new DefaultHttpContext(),
@@ -30,9 +31,11 @@ public sealed class TradingDaySessionTests
 
         Assert.True(properties.IsPersistent);
         Assert.False(properties.AllowRefresh);
-        Assert.Equal(DateTimeOffset.Parse("2026-11-05T18:30:00Z"), properties.ExpiresUtc);
+        Assert.Equal(Parse("2026-11-05T18:30:00Z"), properties.ExpiresUtc);
         Assert.True(properties.ExpiresUtc > now.AddHours(8));
     }
+
+    private static DateTimeOffset Parse(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture);
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
