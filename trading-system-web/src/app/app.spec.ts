@@ -199,6 +199,12 @@ describe('App', () => {
 
     const desk: HTMLElement = fixture.nativeElement;
     expect(desk.querySelector('.chart-panel--compact .desk-chart-title')?.textContent).toContain('Nifty');
+    // The quote header must not inherit the generic dialog heading's stacked first child.
+    expect(desk.querySelector('.desk-quote-header')?.classList.contains('panel-heading')).toBe(false);
+    expect(desk.querySelector('.positions-heading')?.textContent).toContain('Positions & outcomes');
+    expect(Array.from(desk.querySelectorAll('.market-tab-group .market-name')).map(item => item.textContent?.trim()))
+      .toEqual(['Nifty', 'Bank Nifty', 'Sensex']);
+    expect(desk.querySelector('.desk-mode-bar')?.textContent).toContain('Live execution unavailable');
     expect(desk.querySelector('.chart-panel--compact .chart-status-rail')).toBeNull();
     expect(desk.querySelector('.desk-chart-toolbar .legend')).toBeNull();
     expect(desk.querySelector('select[aria-label="Chart timeframe"]')).toBeNull();

@@ -37,7 +37,7 @@ import {
   selector: 'app-root',
   imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
-  styleUrl: './app.scss',
+  styleUrls: ['./app.scss', './trading-desk.scss'],
 })
 export class App implements OnInit, OnDestroy {
   protected readonly indexChange = indexChange;

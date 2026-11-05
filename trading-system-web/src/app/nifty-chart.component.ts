@@ -59,15 +59,15 @@ import { activeFills } from './chart-active-fills';
           } @else { <span>Waiting for the first recorded entry decision.</span> }
         </div>
       </details>
-      <div class="chart-stage">
         <div class="overlay-controls" aria-label="Chart overlays">
-          <button type="button" [class.active]="visibility.day" (click)="toggle('day')">Day H/L</button>
-          <button type="button" [class.active]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
-          <button type="button" [class.active]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
-          <button type="button" [class.active]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
-          <button type="button" [class.active]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
+          <button type="button" [class.active]="visibility.day" [attr.aria-pressed]="visibility.day" (click)="toggle('day')">Day H/L</button>
+          <button type="button" [class.active]="visibility.previous" [attr.aria-pressed]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
+          <button type="button" [class.active]="visibility.openingRange" [attr.aria-pressed]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
+          <button type="button" [class.active]="visibility.vwap" [attr.aria-pressed]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
+          <button type="button" [class.active]="visibility.ema" [attr.aria-pressed]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
+      <div class="chart-stage">
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
         <div class="volume-label">FUTURES VOLUME</div>
         @if (!snapshot?.candles?.length) {
@@ -91,13 +91,13 @@ import { activeFills } from './chart-active-fills';
       :host,
       .chart-shell {
         display: block;
-        min-height: clamp(340px, calc(70vh - 110px), 520px);
+        min-width: 0;
       }
-      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#e6f2e2; }
-      .chart-stage { position:relative; min-width:0; min-height:clamp(340px,calc(70vh - 110px),520px); }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#edf5e8; }
+      .chart-stage { position:relative; min-width:0; min-height:clamp(280px,50dvh,440px); }
       .chart {
         width: 100%;
-        height: clamp(340px, calc(70vh - 110px), 520px);
+        height: clamp(280px, 50dvh, 440px);
       }
       .chart-empty {
         position: absolute;
@@ -122,10 +122,12 @@ import { activeFills } from './chart-active-fills';
         letter-spacing: 0.08em;
         pointer-events: none;
       }
-      .overlay-controls { position:absolute; z-index:2; top:7px; left:8px; display:flex; flex-wrap:wrap; gap:4px; max-width:calc(100% - 110px); }
-      .overlay-controls button { padding:3px 7px; border:1px solid #a9c6ad; border-radius:5px; background:#e6f2e2ee; color:#315b43; font-size:.7rem; }
-      .overlay-controls button.active { border-color:#25834d; color:#176c3c; background:#e5f1e3; }
-      .overlay-controls span { align-self:center; padding:2px 6px; color:#315b43; font-size:.7rem; background:#e6f2e2ee; }
+      .overlay-controls { display:flex; align-items:center; gap:5px; padding:6px 10px; overflow-x:auto; border-bottom:1px solid #c1d7be; background:#e6f0e0; }
+      .overlay-controls button { flex-shrink:0; min-height:28px; padding:4px 8px; border:1px solid #a2bea8; border-radius:5px; background:#f2f7ee; color:#42604a; font:inherit; font-size:.68rem; cursor:pointer; white-space:nowrap; }
+      .overlay-controls button.active { border-color:#6d987b; color:#205b39; background:#d7e8d1; }
+      .overlay-controls button:hover { background:#c9dfc3; }
+      .overlay-controls button:focus-visible,.engine-read summary:focus-visible { outline:2px solid #176c3c; outline-offset:2px; }
+      .overlay-controls span { margin-left:auto; padding-left:8px; color:#526d5a; font-size:.68rem; white-space:nowrap; }
       .engine-read,.fill-key,.fill-readout { margin:0; padding:4px 9px; border-bottom:1px solid #aac5ac; background:#edf6eb; color:#254c37; font-size:.75rem; }
       .engine-read { padding:0; min-width:0; }
       .engine-read summary { display:flex; align-items:center; gap:8px; min-height:24px; padding:2px 9px; box-sizing:border-box; list-style:none; cursor:pointer; font-size:.72rem; }
@@ -175,8 +177,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: '#e6f2e2' }, textColor: '#45644d' },
-      grid: { vertLines: { color: '#c9dec7' }, horzLines: { color: '#c9dec7' } },
+      layout: { background: { type: ColorType.Solid, color: '#edf5e8' }, textColor: '#526d5a' },
+      grid: { vertLines: { color: '#dfebd9' }, horzLines: { color: '#dfebd9' } },
       rightPriceScale: { borderColor: '#b7cfba' },
       localization: { timeFormatter: formatCrosshairTimeIst },
       timeScale: {

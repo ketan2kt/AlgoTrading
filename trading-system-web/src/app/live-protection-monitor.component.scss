@@ -1,6 +1,6 @@
 :host{display:block;min-width:0;max-width:100%}
 button{cursor:pointer;font:inherit}
-.trigger{box-sizing:border-box;width:100%;display:grid;gap:.15rem;text-align:left;line-height:1.2;padding:.38rem .5rem}
+.trigger{box-sizing:border-box;width:100%;display:grid;gap:.2rem;text-align:left;line-height:1.2;padding:.55rem .65rem;border:1px solid #8fb69a;border-radius:6px;background:#e3efdc;color:#214b34;font-size:.78rem}
 .trigger small{color:#45614e;font-size:.67rem}.trigger .flag,.finding.warn{color:#704409;background:#fff0ce;border-radius:.3rem;padding:.1rem .25rem}
 dialog{box-sizing:border-box;width:min(37rem,calc(100vw - 1.5rem));max-height:85dvh;overflow:auto;padding:0;border:1px solid #86a58b;border-radius:.85rem;background:#f7fbf4;color:#163d2a;text-align:left;white-space:normal;box-shadow:0 16px 48px #102f2540}
 dialog::backdrop{background:#102e234d}

@@ -4,11 +4,10 @@
   <app-public-home />
 } @else if (status$ | async; as status) {
   @if (user) {
-    <header class="mode-banner" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
-      <span class="mode-banner__label">Operating mode</span>
-      <strong>{{ status.mode }}</strong>
-      <span>{{ status.status }}</span>
-      <span>Live orders {{ status.liveTradingAvailable ? 'available' : 'prohibited' }}</span>
+    <header class="mode-banner desk-mode-bar" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
+      <span class="mode-banner__label">Trading workspace</span>
+      <strong class="desk-mode-pill">{{ status.mode }}</strong>
+      <span class="desk-availability" [attr.title]="status.status">{{ status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live execution available · per-market switches apply' : 'Live execution unavailable' }}</span>
       @if (portfolioSummary(); as portfolio) {
         <div class="desk-total-pnl" title="Paper strategy P&L: realised plus open P&L across Nifty, Sensex and Bank Nifty. Not broker-account P&L.">
           <span>All 3 · Paper P&amp;L</span>
@@ -60,7 +59,7 @@
         </form>
       </section>
     } @else {
-      <div class="workspace-layout">
+      <div class="workspace-layout desk-refined">
       <nav class="market-tabs" aria-label="Switch trading market">
         <div class="workspace-brand" aria-label="Sarthi trading workspace">
           <span class="workspace-brand__mark">S</span>
@@ -72,7 +71,7 @@
             [attr.aria-current]="selectedMarket === market.code ? 'page' : null"
             [class.market-tab--positions]="activeMarketTrades(market.code) > 0"
             [class.market-tab--alert]="marketTabAlert(market.code)" [title]="marketPositionHint(market.code)"
-            (click)="openMarket(market.code)">{{market.label}}
+            (click)="openMarket(market.code)"><span class="market-name">{{market.label}}</span>
             @if (activeMarketTrades(market.code); as count) { <small class="market-position-count">{{count}} active</small> }
             @if (marketTabAlert(market.code); as alert) { <small>{{alert === 'entry' ? 'ENTRY' : 'EXIT'}}</small> }
           </button>
@@ -299,7 +298,7 @@
           </section>
         }
         <section class="chart-panel chart-panel--compact workspace-priority-chart">
-          <div class="panel-heading desk-chart-toolbar">
+          <div class="desk-chart-toolbar desk-quote-header">
             <div class="desk-index-quote">
               <strong class="desk-chart-title">{{ preparedMarketName() }} <small>· {{chartTimeframeMinutes}}m</small></strong>
               @if (indexChange(view); as quote) {
@@ -331,8 +330,8 @@
 
         <section class="detail-grid workspace-priority-events">
           <article class="positions-panel">
-            <div class="panel-heading">
-              <div><span>PAPER TRADES</span><strong>{{ selectedMarket === 'natural-gas' ? 'Natural Gas Mini futures calls and outcomes' : 'Option positions and outcomes' }}</strong></div>
+            <div class="positions-heading">
+              <strong>{{ selectedMarket === 'natural-gas' ? 'Futures positions' : 'Positions & outcomes' }}</strong><span>Paper ledger · {{ preparedMarketName() }}</span>
             </div>
             @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
               @for (overlay of executedTrades(view); track overlay.signalId) {
