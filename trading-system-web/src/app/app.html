@@ -247,6 +247,12 @@
         }
         @if (workspaceError) { <div class="feed-notice feed-notice--warning" role="alert">{{ workspaceError }}</div> }
         @if (cachedPreview) { <div class="feed-notice" role="status">Last snapshot · {{view.observedAtUtc | date:'dd MMM, HH:mm:ss':'Asia/Kolkata'}} IST · awaiting a current update.</div> }
+        @if (!view.isFresh && view.feedStatus !== 'MarketClosed') {
+          <div class="feed-notice feed-notice--warning" role="status">
+            {{view.feedStatus}} · Last valid quote: {{view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'+0530') + ' IST' : 'not received'}}.
+            {{view.statusMessage || 'Waiting for valid market data.'}}
+          </div>
+        }
 
         @let openTrades = openDeskTrades(view);
         @if (openTrades.length) {

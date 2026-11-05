@@ -220,6 +220,8 @@ public static class DependencyInjection
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
         services.AddSingleton<MultiMarketFeedState>();
+        services.AddSingleton<MarketWorkspaceRefreshQueue>();
+        services.AddHostedService<MarketWorkspaceRefreshService>();
         services.AddSingleton<HeroZeroMonitorState>();
         services.AddSingleton<IHeroZeroMonitorReader>(provider => provider.GetRequiredService<HeroZeroMonitorState>());
         services.AddScoped<ITradingWorkspaceReader, EfTradingWorkspaceReader>();

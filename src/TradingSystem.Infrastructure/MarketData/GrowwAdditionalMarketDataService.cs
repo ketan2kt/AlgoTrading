@@ -16,48 +16,57 @@ internal sealed partial class GrowwAdditionalMarketDataService(
     IGrowwReadOnlyGateway gateway,
     GrowwQuoteNormalizer normalizer,
     MultiMarketFeedState feedState,
+    MarketWorkspaceRefreshQueue refreshQueue,
     IOptions<LiveNiftyOptions> options,
     TimeProvider timeProvider,
     ILogger<GrowwAdditionalMarketDataService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
-    private readonly Dictionary<string, DateOnly> bootstrappedSessions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTimeOffset> lastBankPolls = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!options.Value.Enabled) return;
+        // Separate lifetimes and DbContexts: one index/history request cannot block another index loop.
+        await Task.WhenAll(
+            RunMarketAsync(TradingMarketCatalog.Sensex, stoppingToken),
+            RunMarketAsync(TradingMarketCatalog.BankNifty, stoppingToken),
+            BootstrapHistoryAsync(TradingMarketCatalog.Sensex, stoppingToken),
+            BootstrapHistoryAsync(TradingMarketCatalog.BankNifty, stoppingToken));
+    }
+
+    private async Task RunMarketAsync(TradingMarketDefinition market, CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Natural Gas is intentionally paused; keep its feed quiet even if its UI is hidden.
-            foreach (var market in new[] { TradingMarketCatalog.Sensex,
-                         TradingMarketCatalog.BankNifty })
+            try
             {
-                try
+                if (IsMarketWindow(market, timeProvider.GetUtcNow()))
                 {
-                    var now = timeProvider.GetUtcNow();
-                    // The bank index must not double the existing two-second quote load.
-                    // Position protection keeps its independent two-second cadence.
-                    if (market.Code == "bank-nifty" &&
-                        lastBankPolls.TryGetValue(market.Code, out var lastPoll) &&
-                        now - lastPoll < TimeSpan.FromSeconds(6)) continue;
-                    if (IsMarketWindow(market, timeProvider.GetUtcNow()))
-                    {
-                        await PollAsync(market, stoppingToken);
-                        if (market.Code == "bank-nifty")
-                            lastBankPolls[market.Code] = timeProvider.GetUtcNow();
-                    }
-                    else
-                        feedState.RecordStatus(market.Code, "MarketClosed", $"Waiting for the {market.Exchange} session.");
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                    await PollAsync(market, timeout.Token);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                catch (Exception exception)
-                {
-                    feedState.RecordStatus(market.Code, "Disconnected", "Groww quote polling failed.");
-                    LogPollingFailed(logger, market.Code, exception);
-                }
+                else
+                    feedState.RecordStatus(market.Code, "MarketClosed", $"Waiting for the {market.Exchange} session.");
             }
-            await Task.Delay(TimeSpan.FromSeconds(options.Value.PollIntervalSeconds), stoppingToken);
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (OperationCanceledException)
+            {
+                feedState.RecordStatus(market.Code, "Disconnected", "Quote ingestion exceeded 15 seconds; retrying automatically.");
+            }
+            catch (Exception exception)
+            {
+                var detail = exception is GrowwApiException { StatusCode: not null } api
+                    ? FormattableString.Invariant($"Groww HTTP {api.StatusCode}; quote polling will retry.")
+                    : "Quote ingestion failed; awaiting recovery.";
+                feedState.RecordStatus(market.Code, "Disconnected", detail);
+                LogPollingFailed(logger, market.Code, exception);
+            }
+            refreshQueue.Request(market.Code);
+            // Six-second Bank Nifty sleep exceeded the five-second entry freshness window.
+            // Use the same cadence as Nifty/Sensex; the shared gateway still enforces API limits.
+            var seconds = IsMarketWindow(market, timeProvider.GetUtcNow()) ? options.Value.PollIntervalSeconds : 30;
+            await Task.Delay(TimeSpan.FromSeconds(seconds), stoppingToken);
         }
     }
 
@@ -65,6 +74,7 @@ internal sealed partial class GrowwAdditionalMarketDataService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        feedState.RecordStage(market.Code, "Resolving the active index instrument.");
         var now = timeProvider.GetUtcNow();
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, IndiaTimeZone).Date);
         var query = db.Instruments.Where(value => value.Exchange == market.Exchange &&
@@ -82,29 +92,56 @@ internal sealed partial class GrowwAdditionalMarketDataService(
             return;
         }
 
-        if (market.InstrumentType == InstrumentType.Index && instrument.GrowwSymbol is not null &&
-            bootstrappedSessions.GetValueOrDefault(market.Code) != today)
-        {
-            var localStart = TimeZoneInfo.ConvertTime(now, IndiaTimeZone).Date.AddDays(-7).AddHours(9).AddMinutes(15);
-            var start = new DateTimeOffset(localStart, IndiaTimeZone.GetUtcOffset(localStart)).ToUniversalTime();
-            var history = await gateway.GetHistoricalCandlesAsync(new(market.Exchange, market.QuoteSegment,
-                instrument.GrowwSymbol, start, now, "1minute"), cancellationToken);
-            await scope.ServiceProvider.GetRequiredService<GrowwHistoricalCandleImporter>()
-                .ImportAsync(instrument, history, now, cancellationToken);
-            bootstrappedSessions[market.Code] = today;
-        }
-
+        feedState.RecordStage(market.Code, "Waiting for Groww quote / rate-limit queue.");
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.QuoteSegment,
             instrument.TradingSymbol), cancellationToken);
-        var observation = normalizer.Normalize(instrument.Id, quote, now);
+        var observation = normalizer.Normalize(instrument.Id, quote, timeProvider.GetUtcNow());
+        feedState.RecordStage(market.Code, "Validating and persisting the received quote.");
         var processed = await scope.ServiceProvider.GetRequiredService<MarketDataProcessor>()
             .ProcessAsync(observation, cancellationToken);
         if (processed.Validation.Accepted)
             feedState.RecordSuccess(market.Code, observation.SourceTimestampUtc, observation.ReceivedAtUtc);
-        var snapshot = await scope.ServiceProvider.GetRequiredService<ITradingWorkspaceReader>()
-            .GetAsync(market.Code, options.Value.WorkspaceCandleCount, cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<ILiveMarketDataPublisher>()
-            .PublishAsync(market.Code, snapshot, cancellationToken);
+        else feedState.RecordStage(market.Code, $"Latest quote rejected: {processed.Validation.Reason}; awaiting a valid observation.");
+    }
+
+    private async Task BootstrapHistoryAsync(TradingMarketDefinition market, CancellationToken stoppingToken)
+    {
+        DateOnly? completedSession = null;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var now = timeProvider.GetUtcNow();
+                var local = TimeZoneInfo.ConvertTime(now, IndiaTimeZone);
+                var today = DateOnly.FromDateTime(local.Date);
+                // Preload before the open when possible; retry failures without stalling live quotes.
+                if (local.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) &&
+                    TimeOnly.FromDateTime(local.DateTime) >= new TimeOnly(9, 5) &&
+                    TimeOnly.FromDateTime(local.DateTime) <= market.SessionEnd && completedSession != today)
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(60));
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+                    var instrument = await db.Instruments.AsNoTracking().SingleOrDefaultAsync(value =>
+                        value.Exchange == market.Exchange && value.Type == market.InstrumentType &&
+                        value.IsActive && value.TradingSymbol == market.UnderlyingSymbol, timeout.Token);
+                    if (instrument?.GrowwSymbol is not null)
+                    {
+                        var start = new DateTimeOffset(local.Date.AddDays(-7).AddHours(9).AddMinutes(15), local.Offset).ToUniversalTime();
+                        var history = await gateway.GetHistoricalCandlesAsync(new(market.Exchange, market.QuoteSegment,
+                            instrument.GrowwSymbol, start, now, "1minute"), timeout.Token);
+                        await scope.ServiceProvider.GetRequiredService<GrowwHistoricalCandleImporter>()
+                            .ImportAsync(instrument, history, now, timeout.Token);
+                        completedSession = today;
+                        refreshQueue.Request(market.Code);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception exception) { LogHistoryFailed(logger, market.Code, exception); }
+            await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+        }
     }
 
     private static bool IsMarketWindow(TradingMarketDefinition market, DateTimeOffset now)
@@ -123,4 +160,7 @@ internal sealed partial class GrowwAdditionalMarketDataService(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Groww {Market} polling failed.")]
     private static partial void LogPollingFailed(ILogger logger, string market, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Groww {Market} history bootstrap failed; live quote polling remains independent.")]
+    private static partial void LogHistoryFailed(ILogger logger, string market, Exception exception);
 }

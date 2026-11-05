@@ -9,6 +9,12 @@ internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
     private string? message = "Live Nifty ingestion is disabled.";
     private DateTimeOffset? lastMarketTimestampUtc;
     private DateTimeOffset? lastReceivedAtUtc;
+    private string? pendingStage;
+
+    public void RecordStage(string value)
+    {
+        lock (sync) pendingStage = value;
+    }
 
     public void RecordSuccess(DateTimeOffset marketTimestampUtc, DateTimeOffset receivedAtUtc)
     {
@@ -16,6 +22,7 @@ internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
         {
             status = "Connected";
             message = null;
+            pendingStage = null;
             lastMarketTimestampUtc = marketTimestampUtc.ToUniversalTime();
             lastReceivedAtUtc = receivedAtUtc.ToUniversalTime();
         }
@@ -26,7 +33,7 @@ internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
         lock (sync)
         {
             status = value;
-            message = detail;
+            message = value == "Disconnected" && pendingStage is not null ? $"{detail} Last stage: {pendingStage}" : detail;
         }
     }
 
@@ -35,7 +42,7 @@ internal sealed class LiveNiftyFeedState(TimeProvider timeProvider)
         lock (sync)
         {
             var result = FeedFreshnessPolicy.Resolve(status, message, lastReceivedAtUtc,
-                timeProvider.GetUtcNow(), freshnessLimit);
+                timeProvider.GetUtcNow(), freshnessLimit, lastMarketTimestampUtc, pendingStage);
             return new(result.Status, result.Message, lastMarketTimestampUtc, result.IsFresh);
         }
     }

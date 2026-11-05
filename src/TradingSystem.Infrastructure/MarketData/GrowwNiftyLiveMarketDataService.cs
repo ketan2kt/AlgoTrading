@@ -18,6 +18,7 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
     MarketDataValidator validator,
     CandleAggregator aggregator,
     LiveNiftyFeedState feedState,
+    MarketWorkspaceRefreshQueue refreshQueue,
     IGrowwAccessTokenProvider accessTokenProvider,
     IOptions<LiveNiftyOptions> options,
     TimeProvider timeProvider,
@@ -33,14 +34,23 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
             return;
         }
 
-        await RestoreProjectionAsync(stoppingToken);
+        var restored = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var delay = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
             try
             {
-                if (!await HasAccessTokenAsync(stoppingToken))
+                using var cycleTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                cycleTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+                if (!restored)
+                {
+                    feedState.RecordStatus("Starting", "Restoring persisted Nifty quote cursor.");
+                    feedState.RecordStage("Restoring persisted Nifty quote cursor.");
+                    await RestoreProjectionAsync(cycleTimeout.Token);
+                    restored = true;
+                }
+                if (!await HasAccessTokenAsync(cycleTimeout.Token))
                 {
                     feedState.RecordStatus("CredentialsRequired", "Groww access token is not configured on the server.");
                     delay = TimeSpan.FromSeconds(5);
@@ -52,7 +62,7 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
                 }
                 else
                 {
-                    // A stalled quote, database read, or SignalR publish must not permanently
+                    // A stalled quote or database write must not permanently
                     // stop the single Nifty ingestion loop while other market feeds continue.
                     using var pollTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     pollTimeout.CancelAfter(TimeSpan.FromSeconds(
@@ -77,11 +87,14 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
             }
             catch (Exception exception)
             {
-                feedState.RecordStatus("Disconnected", "Groww live quote polling failed; trading remains blocked.");
+                var detail = exception is GrowwApiException { StatusCode: not null } api
+                    ? FormattableString.Invariant($"Groww HTTP {api.StatusCode}; quote polling will retry.")
+                    : "Quote ingestion failed; trading remains blocked until recovery.";
+                feedState.RecordStatus("Disconnected", detail);
                 LogPollingFailed(logger, exception);
                 delay = TimeSpan.FromSeconds(Math.Max(5, options.Value.PollIntervalSeconds));
             }
-
+            refreshQueue.Request("nifty");
             await Task.Delay(delay, stoppingToken);
         }
     }
@@ -136,6 +149,7 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
 
     private async Task PollAsync(CancellationToken cancellationToken)
     {
+        feedState.RecordStage("Resolving the active Nifty instrument.");
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
         var instrument = await dbContext.Instruments.AsNoTracking()
@@ -145,23 +159,20 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
                                            value.IsActive,
                 cancellationToken) ?? throw new InvalidOperationException(
                     "The active NSE NIFTY cash instrument is not synchronised.");
-        var receivedAt = timeProvider.GetUtcNow();
+        feedState.RecordStage("Waiting for Groww quote / rate-limit queue.");
         var quote = await gateway.GetQuoteAsync(new(
             options.Value.Exchange,
             options.Value.Segment,
             options.Value.TradingSymbol), cancellationToken);
-        var observation = normalizer.Normalize(instrument.Id, quote, receivedAt);
+        var observation = normalizer.Normalize(instrument.Id, quote, timeProvider.GetUtcNow());
+        feedState.RecordStage("Validating and persisting the received quote.");
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
         var result = await processor.ProcessAsync(observation, cancellationToken);
         if (result.Validation.Accepted)
         {
             feedState.RecordSuccess(observation.SourceTimestampUtc, observation.ReceivedAtUtc);
         }
-
-        var reader = scope.ServiceProvider.GetRequiredService<ITradingWorkspaceReader>();
-        var snapshot = await reader.GetNiftyAsync(options.Value.WorkspaceCandleCount, cancellationToken);
-        var publisher = scope.ServiceProvider.GetRequiredService<ILiveMarketDataPublisher>();
-        await publisher.PublishNiftyAsync(snapshot, cancellationToken);
+        else feedState.RecordStage($"Latest quote rejected: {result.Validation.Reason}; awaiting a valid observation.");
     }
 
     private static bool IsMarketWindow(DateTimeOffset utcNow)
