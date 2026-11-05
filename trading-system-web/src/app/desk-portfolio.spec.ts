@@ -13,7 +13,7 @@ describe('three-market desk summary',()=>{
     const views=new Map([['nifty',view(1000,200)],['sensex',view(-400,100)],['bank-nifty',view(500,-50)],['bankex',view(999,999)]]);
     expect(deskPortfolio(views,now)).toMatchObject({total:1350,complete:true,stale:false});
     views.set('sensex',view(600,0));
-    expect(deskPortfolio(views,now).total).toBe(2350);
+    expect(deskPortfolio(views,now).total).toBe(2250);
   });
   it('never labels a partial or mixed-day subtotal as the overall result',()=>{
     const views=new Map([['nifty',view(1000,200)],['sensex',view(-400,100)]]);
