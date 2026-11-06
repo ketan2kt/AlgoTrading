@@ -276,8 +276,8 @@ public static class HistoricalPortfolioComparison
                 value.StrategyInputsComplete &&
                 value.ExecutableQuoteSidesComplete &&
                 value.HistoricalChargesVerified &&
-                value.Quotes.Count > 0 && value.Quotes.All(quote =>
-                    quote.BidPrice is > 0m && quote.OfferPrice is > 0m) &&
+                value.Quotes.Count > 0 && value.Quotes.Where(quote => quote.Symbol != value.IndexSymbol &&
+                    !quote.Symbol.EndsWith("FUT", StringComparison.Ordinal)).All(quote => quote.HasRecordedBookEvidence()) &&
                 !string.IsNullOrWhiteSpace(value.PolicyInputManifest)) &&
             policyManifests.All(value =>
                 !string.IsNullOrWhiteSpace(value.Baseline) &&
@@ -299,8 +299,8 @@ public static class HistoricalPortfolioComparison
         if (ordered.Any(value => !value.StrategyInputsComplete))
             gaps.Add("As-of strategy inputs such as option OI, spread and risk state are incomplete.");
         if (ordered.Any(value => !value.ExecutableQuoteSidesComplete ||
-            value.Quotes.Count == 0 || value.Quotes.Any(quote =>
-                quote.BidPrice is not > 0m || quote.OfferPrice is not > 0m)))
+            value.Quotes.Count == 0 || value.Quotes.Where(quote => quote.Symbol != value.IndexSymbol &&
+                !quote.Symbol.EndsWith("FUT", StringComparison.Ordinal)).Any(quote => !quote.HasRecordedBookEvidence())))
             gaps.Add("Observed, executable option bid/offer sides are incomplete; candle closes are only modeled fill proxies.");
         if (ordered.Any(value => !value.HistoricalChargesVerified))
             gaps.Add("Date-effective exchange, broker and statutory charges have not been verified for every session.");

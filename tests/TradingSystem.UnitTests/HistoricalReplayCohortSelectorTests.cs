@@ -5,6 +5,18 @@ namespace TradingSystem.UnitTests;
 public sealed class HistoricalReplayCohortSelectorTests
 {
     [Fact]
+    public void ObservedEmptyBookIsNotConfusedWithMissingDepthCapture()
+    {
+        var session = Session(new(2026, 11, 6));
+        var unavailable = new HistoricalReplayQuote("NIFTY22000PE", session.StartUtc.AddSeconds(2), 100)
+            { Source = "GrowwFeedSample", DepthSourceAtUtc = session.StartUtc.AddSeconds(2) };
+        Assert.Single(HistoricalReplayCohortSelector.Select([session with { Quotes = [.. session.Quotes, unavailable] }], ["NIFTY"]).IncludedDates);
+        Assert.Empty(HistoricalReplayCohortSelector.Select([session with { Quotes = [.. session.Quotes,
+            unavailable with { Source = "GrowwQuoteReceipt", DepthSourceAtUtc = null }] }], ["NIFTY"]).IncludedDates);
+        Assert.False(unavailable.HasExecutableBook());
+        Assert.True(unavailable.HasRecordedBookEvidence());
+    }
+    [Fact]
     public void SpotLtpDoesNotRequireAnOptionOrderBook()
     {
         var session = Session(new DateOnly(2026, 11, 3));

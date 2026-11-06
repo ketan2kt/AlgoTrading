@@ -590,7 +590,30 @@ public sealed class HistoricalPortfolioReplayTests
         Assert.Empty(result.CompletedPositions);
     }
 
-    private sealed class GenericDeferredEntryPolicy : IHistoricalReplayPortfolioPolicy
+    [Fact]
+    public void QuoteArrivingAfterProductionAdmissionDeadlineIsAMissingDataOutcomeNotStrategyRejection()
+    {
+        var result = HistoricalPortfolioReplay.Run([Bar(0)], [
+            new HistoricalReplayQuote("BANKNIFTY55000CE", Start.AddMinutes(1).AddSeconds(32), 100m)
+            { BidPrice = 99m, OfferPrice = 100m }
+        ], new GenericDeferredEntryPolicy(5), Parameters, Start, Start.AddMinutes(7));
+        Assert.Empty(result.Trades);
+        Assert.Equal(1, result.MissingEntryQuoteCount);
+        Assert.Equal(1, result.StaleQuoteCount);
+    }
+
+    [Fact]
+    public void RecordedEmptyBookNeverFillsAtLastPrice()
+    {
+        var result = HistoricalPortfolioReplay.Run([Bar(0)], [
+            Quote(2, 100) with { Source = "GrowwFeedSample", DepthSourceAtUtc = Start.AddMinutes(2) },
+            Quote(3, 120) with { Source = "GrowwFeedSample", DepthSourceAtUtc = Start.AddMinutes(3) }
+        ], new ObservePortfolioPolicy(), Parameters, Start, Start.AddMinutes(6));
+        Assert.Empty(result.Trades);
+        Assert.Equal(1, result.MissingEntryQuoteCount);
+    }
+
+    private sealed class GenericDeferredEntryPolicy(int? maximumDelay = null) : IHistoricalReplayPortfolioPolicy
     {
         public string CodeVersion => "generic-deferred-test-v1";
         public IReadOnlyList<HistoricalReplayCandidate> Evaluate(
@@ -599,6 +622,7 @@ public sealed class HistoricalPortfolioReplayTests
                 ? [new HistoricalReplayCandidate("BANKNIFTY55000CE",
                     frame.Market.AvailableAtUtc, CodeVersion, .8m, 30)
                 { RequiresDeferredQuoteAdmission = true,
+                  MaximumAdmissionQuoteDelaySeconds = maximumDelay,
                   StrategyDecisionAtUtc = frame.Market.AvailableAtUtc }]
                 : [];
 

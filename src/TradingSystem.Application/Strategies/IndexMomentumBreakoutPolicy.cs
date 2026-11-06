@@ -69,8 +69,8 @@ public static class IndexMomentumBreakoutPolicy
 
         if (rangeLike)
             return new(null, confidence,
-                [$"Current-session structure is range-like (efficiency {efficiency:P0}, direction flips {flipRatio:P0}, EMA separation {emaSeparationAtr:F2} ATR).",
-                 "Momentum entry is blocked until price closes decisively outside the session range."]);
+                [$"Recent {recent.Length}-candle structure is range-like (efficiency {efficiency:P0}, direction flips {flipRatio:P0}, EMA separation {emaSeparationAtr:F2} ATR).",
+                 "Momentum entry is blocked until price closes decisively outside that recent range; this is not a full-session trend classification."]);
 
         return new(null, confidence,
             ["No qualified EMA-aligned breakout: structure, candle close quality, persistence, or impulse filter failed."]);

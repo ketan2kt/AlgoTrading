@@ -41,7 +41,7 @@ internal static class GrowwHistoricalFeedCodec
             {
                 var value = payload.Double();
                 if (field == 1) stamp = value;
-                else if (kind == "index" && field == 2 || kind == "price" && field == 13) last = Price(value);
+                else if (kind == "index" && field == 2 || kind == "price" && field == 13) last = value == 0 ? null : Price(value);
                 else if (kind == "price" && field == 6) volume = NonNegative(value);
                 else if (kind == "price" && field == 14) oi = NonNegative(value);
             }
@@ -58,8 +58,11 @@ internal static class GrowwHistoricalFeedCodec
         if (!double.IsFinite(stamp) || stamp < 1_577_836_800_000 || stamp > receivedAtUtc.ToUnixTimeMilliseconds() + 1000)
             throw new InvalidDataException("Groww feed timestamp is invalid or in the future.");
         var source = DateTimeOffset.FromUnixTimeMilliseconds(checked((long)stamp));
-        if (kind != "depth" && last is not > 0m || kind == "depth" && (bid is not > 0m || offer is not > 0m || bid > offer))
-            throw new InvalidDataException("Groww feed prices are absent or crossed.");
+        // An untraded contract or an empty/one-sided book is valid market state,
+        // not a reason to disconnect the other subscribed instruments. Clear the
+        // old book so replay cannot keep using withdrawn liquidity.
+        if (kind == "depth" && bid > offer)
+            throw new InvalidDataException("Groww feed prices are crossed.");
         return new(source, last, volume, oi, bid, bidQuantity, offer, offerQuantity);
     }
 
@@ -77,7 +80,7 @@ internal static class GrowwHistoricalFeedCodec
         {
             if (wire != 1) { book.Skip(wire); continue; }
             var number = book.Double();
-            if (field == 1) price = Price(number);
+            if (field == 1) price = number == 0 ? null : Price(number);
             if (field == 2) quantity = checked((long)NonNegative(number));
         }
         return price is > 0m && quantity > 0 ? (price.Value, quantity) : null;

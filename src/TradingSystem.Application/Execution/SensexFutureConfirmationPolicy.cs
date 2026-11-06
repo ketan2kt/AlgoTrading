@@ -16,10 +16,12 @@ public static class SensexFutureConfirmationPolicy
 {
     public static SensexFutureConfirmation Evaluate(
         IReadOnlyList<StrategyPriceBar> indexBars,
-        IReadOnlyList<SensexFutureVolumeBar> futureBars)
+        IReadOnlyList<SensexFutureVolumeBar> futureBars,
+        int intervalSeconds = 60)
     {
         ArgumentNullException.ThrowIfNull(indexBars);
         ArgumentNullException.ThrowIfNull(futureBars);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(intervalSeconds);
         if (futureBars.Count == 0 || indexBars.Count == 0)
             return new(0m, 0m);
         if (indexBars.Zip(indexBars.Skip(1)).Any(pair =>
@@ -36,12 +38,16 @@ public static class SensexFutureConfirmationPolicy
         var aligned = indexBars.Where(value =>
             volumeByTime.ContainsKey(value.OpenTimeUtc)).ToArray();
         var totalVolume = aligned.Sum(value => volumeByTime[value.OpenTimeUtc]);
-        var latestFuture = futureBars.LastOrDefault(value => value.Volume > 0);
-        var baseline = futureBars.Where(value => value.Volume > 0)
-            .TakeLast(Math.Min(20, futureBars.Count)).SkipLast(1).ToArray();
+        // A quiet/latest zero-volume minute is not the older active minute.
+        // Allow one interval of historical-endpoint delivery lag, never hours
+        // of stale confirmation after a futures-feed failure.
+        var latestFuture = futureBars[^1];
+        var timely = indexBars[^1].OpenTimeUtc - latestFuture.OpenTimeUtc <=
+            TimeSpan.FromSeconds(intervalSeconds);
+        var baseline = futureBars.SkipLast(1).TakeLast(20).ToArray();
         var averageVolume = baseline.Length == 0 ? 0m :
             baseline.Average(value => (decimal)value.Volume);
-        var relativeVolume = latestFuture is null || averageVolume <= 0m
+        var relativeVolume = !timely || latestFuture.Volume <= 0 || averageVolume <= 0m
             ? 0m : latestFuture.Volume / averageVolume;
         var vwap = totalVolume <= 0m ? 0m : aligned.Sum(value =>
             ((value.High + value.Low + value.Close) / 3m) *

@@ -41,7 +41,7 @@ public sealed class NiftyPreQuoteEntryGatePolicyTests
         var timeframes = MultiTimeframeDecisionPolicy.Analyze(session,
             Direction.Buy, 104m, 100m);
         var mature = MatureEdgeEntryPolicy.Evaluate(move, timeframes,
-            Direction.Buy);
+            Direction.Buy, session, 300);
 
         var shared = NiftyPreQuoteEntryGatePolicy.Evaluate(new TimeOnly(10, 0),
             session, previous, Direction.Buy,

@@ -110,9 +110,7 @@ public static class HistoricalReplayCohortSelector
                 var optionQuotes = session.Quotes.Where(value => optionSymbols.Count > 0 ? optionSymbols.Contains(value.Symbol) :
                     value.Symbol != session.IndexSymbol && !value.Symbol.EndsWith("FUT", StringComparison.Ordinal));
                 if (!session.ExecutableQuoteSidesComplete ||
-                    !optionQuotes.Any() || optionQuotes.Any(value =>
-                        value.BidPrice is not > 0m ||
-                        value.OfferPrice is not > 0m || value.BidPrice > value.OfferPrice))
+                    !optionQuotes.Any() || optionQuotes.Any(value => !value.HasRecordedBookEvidence()))
                     reasons.Add($"{market}: executable option bid/offer coverage incomplete");
                 if (!session.HistoricalChargesVerified && !allowModeledHistoricalCosts)
                     reasons.Add($"{market}: date-effective charges unverified");

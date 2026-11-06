@@ -116,6 +116,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         [
             "Normal-session policy comparison only: Hero Zero and expansion pairs are deliberately excluded, as requested.",
             "Both versions use the same frozen data, execution model and date cohort; insufficient old dates are excluded.",
+            "Streaming capture may use declared pre-session strike bands within the broker subscription limit. Selected contracts outside those bands remain missing evidence, not assumed fills; a session crossing a band boundary is excluded.",
             "Approved archived compiled normal-policy builds can be compared using explicit frozen configurations. Arbitrary uploaded code is not accepted.",
             "Intraday, flat-start research only. Enabled overnight carry is rejected. Unmatched original manual interventions and reconciliation-outage dates are excluded, not silently applied to different simulated trades.",
             "Verified decision scope: normal 1/5-minute entries and protection, with as-of pre-session state. Fill latency, spreads, slippage and charges remain explicit models. Non-whole-lot paper partials invalidate execution coverage instead of silently being credited or rounded.",

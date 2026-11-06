@@ -1,0 +1,78 @@
+name: Independent replay recorder deployment
+on:
+  workflow_call:
+    inputs:
+      ci_run_id:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main CI run matching the website's deployed package
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: azure-replay-recorder
+  cancel-in-progress: false
+jobs:
+  recorder:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: azure-paper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outside market hours only
+        run: |
+          day=$(TZ=Asia/Kolkata date +%u)
+          hour=$(TZ=Asia/Kolkata date +%H)
+          if (( day <= 5 && 10#$hour >= 8 && 10#$hour < 16 )); then
+            echo 'Recorder restarts are prohibited during capture/trading hours.' >&2
+            exit 1
+          fi
+      - name: Use exact checked main package
+        env:
+          CI_RUN: ${{ inputs.ci_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN" =~ ^[1-9][0-9]*$ ]]
+          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -er \
+            --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
+            'select(.path == ".github/workflows/ci.yml" and .event == "push" and .head_branch == "main" and .head_sha == $sha and .head_repository.full_name == $repo and .conclusion == "success" and .status == "completed") | .run_attempt')
+          gh run download "$CI_RUN" --repo "$GITHUB_REPOSITORY" --name "deploy-$GITHUB_SHA-$attempt" --dir "$RUNNER_TEMP/recorder-release"
+          cd "$RUNNER_TEMP/recorder-release"
+          test "$(cat source.sha)" = "$GITHUB_SHA"
+          sha256sum trading-system.zip | cmp - package.sha256
+          unzip -tq trading-system.zip
+          unzip -p trading-system.zip TradingSystem.Application.dll | sha256sum | cut -d' ' -f1 > application.sha256
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Stage private recorder settings
+        shell: pwsh
+        run: ./scripts/configure-replay-recorder.ps1 -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")
+      - name: Deploy recorder only
+        run: |
+          az webapp deploy --resource-group rg-sarthi-trading-centralindia \
+            --name sarthirecorder5amvyarepxaci --src-path "$RUNNER_TEMP/recorder-release/trading-system.zip" \
+            --type zip --clean true --restart true
+      - name: Verify database and private archive before switching capture
+        run: |
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error https://sarthirecorder5amvyarepxaci.azurewebsites.net/health/ready; then
+              echo 'Recorder database and private archive round-trip passed. Market-session capture verification is still required.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Recorder failed readiness; investigate before the next session.' >&2
+          exit 1
+      - name: Activate independent capture
+        shell: pwsh
+        run: ./scripts/configure-replay-recorder.ps1 -Activate -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")

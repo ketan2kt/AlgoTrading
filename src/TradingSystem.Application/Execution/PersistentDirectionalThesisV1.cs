@@ -187,7 +187,14 @@ public static class PersistentDirectionalThesisAnalyzerV1
             confidence >= .68m && alignedBars >= 8 && extensionFromFast <= 1.75m &&
             HasControlledContinuationResumption(recent, direction.Value, atr);
         var pullbackWindow = recentFailure && alignedBars >= 7 && extensionFromFast <= 1.85m;
-        var wouldEnter = direction is not null && !changeOfCharacter &&
+        // Retaining a thesis through a pullback is not permission to open a new
+        // opposing-momentum position. Wait for alignment to resume; this does
+        // not invalidate the thesis or close an existing position.
+        var entryAligned = direction == Direction.Buy
+            ? fast > slow && latest.Close > fast && latest.Close > vwap
+            : direction == Direction.Sell && fast < slow &&
+              latest.Close < fast && latest.Close < vwap;
+        var wouldEnter = direction is not null && !changeOfCharacter && entryAligned &&
                          (pullbackWindow || continuationResumption);
         if (wouldEnter) phase = DirectionalThesisPhaseV1.EntryWindow;
 
@@ -197,6 +204,7 @@ public static class PersistentDirectionalThesisAnalyzerV1
             $"{failedPullbacks} failed countertrend attempt(s) were observed.",
             $"Opening-range break held: {rangeBreak}.",
             $"EMA 9/21: {fast:F2}/{slow:F2}; extension from EMA 9 is {extensionFromFast:F2} ATR.",
+            $"New-entry price/VWAP/EMA alignment: {entryAligned}.",
             wouldEnter
                 ? continuationResumption && !pullbackWindow
                     ? "A compact continuation base completed and resumed in the persistent direction."

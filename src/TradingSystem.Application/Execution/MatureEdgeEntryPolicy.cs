@@ -12,19 +12,32 @@ public sealed record MatureEdgeEntryDecision(bool Permitted, IReadOnlyList<strin
 public static class MatureEdgeEntryPolicy
 {
     public static MatureEdgeEntryDecision Evaluate(SessionMoveQualityDecision move,
-        MultiTimeframeDecisionAssessment timeframes, Direction direction)
+        MultiTimeframeDecisionAssessment timeframes, Direction direction,
+        IReadOnlyList<StrategyPriceBar> completedSession, int candleIntervalSeconds = 60)
     {
         if (move.PeakMoveAtr < 8m || move.DistanceFromExtremeAtr > .75m)
             return new(true, ["The candidate is not a mature near-extreme entry."]);
 
-        var immediate = timeframes.Timeframes.FirstOrDefault(value => value.Timeframe == "1m");
-        if (immediate is not null && immediate.Direction == direction &&
-            immediate.Strength >= .45m && timeframes.CandidateAligned)
-            return new(true, ["A mature near-extreme entry has fresh one-minute participation and multi-timeframe alignment."]);
+        // The 1m timeframe's Strength describes the entire supplied session.
+        // Immediate participation must instead use the latest completed window:
+        // morning chop cannot veto a fresh resumption for the rest of the day,
+        // and an efficient morning cannot disguise a currently weakening move.
+        var recent = completedSession.TakeLast(5).ToArray();
+        var contiguous = recent.Length == 5 && candleIntervalSeconds > 0 &&
+            recent.Zip(recent.Skip(1)).All(pair =>
+                pair.Second.OpenTimeUtc - pair.First.OpenTimeUtc == TimeSpan.FromSeconds(candleIntervalSeconds));
+        var travelled = recent.Zip(recent.Skip(1), (left, right) => Math.Abs(right.Close - left.Close)).Sum();
+        var net = recent.Length == 0 ? 0m : recent[^1].Close - recent[0].Close;
+        var strength = travelled <= 0m ? 0m : Math.Abs(net) / travelled;
+        var aligned = recent.Length >= 2 && (direction == Direction.Buy
+            ? net > 0m && recent[^1].Close > recent[^1].Open && recent[^1].Close > recent[^2].Close
+            : net < 0m && recent[^1].Close < recent[^1].Open && recent[^1].Close < recent[^2].Close);
+        if (contiguous && aligned && strength >= .45m && timeframes.CandidateAligned)
+            return new(true, [$"A mature near-extreme entry has fresh five-bar participation ({strength:P0}) and multi-timeframe alignment."]);
 
         return new(false,
             [$"The same-direction move is {move.PeakMoveAtr:F2} ATR mature and only " +
-             $"{move.DistanceFromExtremeAtr:F2} ATR from its extreme; fresh one-minute " +
-             "participation is too weak for a near-extreme entry."]);
+             $"{move.DistanceFromExtremeAtr:F2} ATR from its extreme; fresh five-bar " +
+             $"participation ({strength:P0}), contiguous data or timeframe alignment is insufficient."]);
     }
 }

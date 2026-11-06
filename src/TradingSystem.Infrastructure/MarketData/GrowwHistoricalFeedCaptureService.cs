@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
@@ -53,11 +54,11 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
-                pulse.Failed();
-                archive.MarkCaptureGap(date);
+                pulse.Failed(exception.GetType().Name, IsSessionStarted(date));
+                MarkSessionGap(date);
                 // Never log transport/auth exception messages or NATS options:
                 // credentials may be embedded in third-party error details.
-                CaptureFailed(logger, exception.GetType().Name, null);
+                CaptureFailed(logger, pulse.Read(date, true).LastFailure ?? exception.GetType().Name, null);
                 await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken);
             }
         }
@@ -65,16 +66,28 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
 
     internal async Task CaptureSessionAsync(DateOnly date, CancellationToken stoppingToken)
     {
-        var now = clock.GetUtcNow();
+        pulse.Stage("Instrument plan / pre-session anchors");
         var plan = await LoadPlanAsync(date, stoppingToken);
+        await RecordSessionAsync(date, plan, CapturePolicyReceiptAsync, CapturePriorThesisAsync, root, stoppingToken);
+    }
+
+    // Separate input retrieval from the recording lifecycle so disconnect,
+    // shutdown and checkpoint behavior can be exercised without a broker account.
+    internal async Task RecordSessionAsync(DateOnly date, IReadOnlyList<HistoricalFeedInstrument> plan,
+        Func<DateOnly, CancellationToken, Task<SessionPolicyReceipt?>> captureReceipt,
+        Func<DateOnly, CancellationToken, Task<(bool Captured, PersistentDirectionalThesisV1? Thesis)>> capturePriorThesis,
+        string outputDirectory, CancellationToken stoppingToken)
+    {
+        var now = clock.GetUtcNow();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(plan);
         var fingerprint = Convert.ToHexString(SHA256.HashData(bytes));
         var manifest = new HistoricalFeedCaptureManifest(date, now, null, null, fingerprint,
             options.Value.SampleSeconds, now > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India), plan)
-        { SensexPriorThesisStateCaptured = true, PriorSensexThesis = await LoadPriorThesisAsync(date, stoppingToken) };
+        { UniverseScope = "PreSessionStrikeBand" };
         if (manifest.HasGaps) archive.MarkCaptureGap(date);
-        Directory.CreateDirectory(root);
-        var path = Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N") + ".json");
+        pulse.Stage("Manifest storage");
+        Directory.CreateDirectory(outputDirectory);
+        var path = Path.Combine(outputDirectory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N") + ".json");
         await WriteManifestAsync(path, manifest, stoppingToken);
         var accumulator = new GrowwHistoricalFeedAccumulator(archive);
         var end = new DateTimeOffset(date.ToDateTime(new TimeOnly(15, 35)), India).ToUniversalTime();
@@ -82,16 +95,22 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         var timer = Task.Delay(end - now, clock, lifetime.Token);
         var failed = false;
         DateTimeOffset? subscribedAt = null;
+        pulse.Stage("Broker authorization / subscription");
         var consume = transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
             { accumulator.Observe(instrument, kind, point, received); pulse.Received(instrument.Market, received); },
-            () => { failed = true; pulse.Failed(); archive.MarkCaptureGap(date); },
-            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count); }, lifetime.Token);
-        var sampling = SampleAsync(accumulator, lifetime.Token);
+            () => { failed = true; pulse.Failed("Transport interrupted or invalid frame", IsSessionStarted(date)); MarkSessionGap(date); },
+            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count); pulse.Stage("Recording"); }, lifetime.Token);
+        var sampling = SampleAsync(date, accumulator, lifetime.Token);
         // Never hold subscription startup waiting for optional fidelity metadata.
-        var receipt = CapturePolicyReceiptAsync(date, lifetime.Token);
+        var receipt = captureReceipt(date, lifetime.Token);
+        var priorThesis = capturePriorThesis(date, lifetime.Token);
+        // Persist metadata and progress DURING the session, not only at shutdown.
+        // A crash must not erase an already captured pre-open policy receipt.
+        var checkpoint = CheckpointAsync();
         try
         {
-            var completed = await Task.WhenAny(consume, timer, sampling);
+            var completed = await Task.WhenAny(consume, timer, sampling, checkpoint);
+            if (completed == checkpoint) await checkpoint;
             if (completed == sampling) await sampling;
             if (completed == consume)
             {
@@ -108,7 +127,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         catch
         {
             manifest = manifest with { SubscribedAtUtc = subscribedAt, HasGaps = true };
-            archive.MarkCaptureGap(date);
+            MarkSessionGap(date);
             throw;
         }
         finally
@@ -120,16 +139,72 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             try { await sampling; }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception) when (sampling.IsFaulted) { manifest = manifest with { HasGaps = true }; }
-            manifest = manifest with { PolicyReceipt = await receipt };
+            try { await checkpoint; }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            catch (Exception) when (checkpoint.IsFaulted) { manifest = manifest with { HasGaps = true }; }
+            var prior = await priorThesis;
+            manifest = manifest with { PolicyReceipt = await receipt,
+                SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
             await WriteManifestAsync(path, manifest, CancellationToken.None);
         }
+
+        async Task CheckpointAsync()
+        {
+            using var ticker = new PeriodicTimer(TimeSpan.FromSeconds(5), clock);
+            while (await ticker.WaitForNextTickAsync(lifetime.Token))
+            {
+                var prior = priorThesis.IsCompletedSuccessfully ? priorThesis.Result : default;
+                var policy = receipt.IsCompletedSuccessfully ? receipt.Result : null;
+                pulse.Metadata(policy?.ValidFor(date) == true, prior.Captured);
+                await WriteManifestAsync(path, manifest with { SubscribedAtUtc = subscribedAt,
+                    LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
+                        subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India),
+                    PolicyReceipt = policy,
+                    SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis }, lifetime.Token);
+            }
+        }
+    }
+
+    private void MarkSessionGap(DateOnly date)
+    {
+        if (IsSessionStarted(date))
+            archive.MarkCaptureGap(date);
+    }
+    private bool IsSessionStarted(DateOnly date) =>
+        clock.GetUtcNow() >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
+
+    private async Task<(bool Captured, PersistentDirectionalThesisV1? Thesis)> CapturePriorThesisAsync(DateOnly date, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try { return (true, await LoadPriorThesisAsync(date, token)); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return default; }
+            catch (Exception ex) { PolicyReceiptFailed(logger, ex.GetType().Name, null); }
+            try { await Task.Delay(TimeSpan.FromSeconds(15), clock, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return default; }
+        }
+        return default;
     }
 
     private async Task<SessionPolicyReceipt?> CapturePolicyReceiptAsync(DateOnly date,CancellationToken token)
     {
+        do
+        {
+            var captured = await CapturePolicyReceiptOnceAsync(date, token);
+            if (captured is not null || IsSessionStarted(date) || token.IsCancellationRequested) return captured;
+            try { await Task.Delay(TimeSpan.FromSeconds(5), clock, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return null; }
+        } while (!token.IsCancellationRequested);
+        return null;
+    }
+
+    private async Task<SessionPolicyReceipt?> CapturePolicyReceiptOnceAsync(DateOnly date,CancellationToken token)
+    {
         try
         {
             await using var scope = scopes.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<IConfiguration>() is { } configuration && ReplayRecorderHosting.IsRecorder(configuration))
+                return await scope.ServiceProvider.GetRequiredService<ReplayBlobStorage>().ReadWebsitePolicyAsync(date, token);
             var started = clock.GetUtcNow();
             var build = await scope.ServiceProvider.GetRequiredService<IHistoricalPolicyBuildStore>().CaptureCurrentAsync(token);
             var config = await scope.ServiceProvider.GetRequiredService<SessionPolicySettings>().ReadAsync(token);
@@ -146,10 +221,21 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     private static readonly Action<ILogger,string,Exception?> PolicyReceiptFailed = LoggerMessage.Define<string>(
         LogLevel.Warning,new EventId(6755,"ReplayPolicyReceiptMissing"),"Paper fidelity settings capture unavailable ({FailureType}).");
 
-    private async Task SampleAsync(GrowwHistoricalFeedAccumulator accumulator, CancellationToken token)
+    private async Task SampleAsync(DateOnly date, GrowwHistoricalFeedAccumulator accumulator, CancellationToken token)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.Value.SampleSeconds), clock);
-        while (await timer.WaitForNextTickAsync(token)) accumulator.Sample(clock.GetUtcNow());
+        while (await timer.WaitForNextTickAsync(token))
+        {
+            var now = clock.GetUtcNow();
+            if (now >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India) &&
+                now < new DateTimeOffset(date.ToDateTime(new TimeOnly(15, 30)), India) &&
+                pulse.Read(date, true).HasStalledMarket(now))
+            {
+                pulse.Stage("Feed silence over 30 seconds");
+                throw new TimeoutException("Historical feed stalled; reconnect required.");
+            }
+            accumulator.Sample(now);
+        }
     }
 
     private async Task<IReadOnlyList<HistoricalFeedInstrument>> LoadPlanAsync(DateOnly date, CancellationToken token)
@@ -161,12 +247,24 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             (value.TradingSymbol.StartsWith("NIFTY") || value.TradingSymbol.StartsWith("BANKNIFTY") || value.TradingSymbol.StartsWith("SENSEX")) &&
             (value.Type == InstrumentType.Index || value.Type == InstrumentType.Future ||
              value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption)).ToArrayAsync(token);
+        var anchors = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        foreach (var market in new[] { "NIFTY", "SENSEX", "BANKNIFTY" })
+        {
+            var index = rows.Single(value => value.TradingSymbol == market && value.Type == InstrumentType.Index);
+            var oldest = new DateTimeOffset(date.AddDays(-7).ToDateTime(TimeOnly.MinValue), India);
+            var before = new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
+            var anchor = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == index.Id &&
+                    value.IntervalSeconds == 60 && value.Source == "Groww" && value.OpenTimeUtc >= oldest && value.OpenTimeUtc < before)
+                .OrderByDescending(value => value.OpenTimeUtc).Select(value => (decimal?)value.Close).FirstOrDefaultAsync(token);
+            if (anchor is not > 0m) throw new InvalidOperationException("Replay pre-session index anchor is unavailable: " + market);
+            anchors.Add(market, anchor.Value);
+        }
         return HistoricalFeedSubscriptionPlanner.Select(date, rows.Select(value => new HistoricalFeedInstrument(
             value.TradingSymbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
                 value.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY",
             value.Exchange, value.Segment == InstrumentSegment.Cash ? "CASH" : "FNO", value.ExchangeToken ?? "",
             value.TradingSymbol, value.Type, value.ExpiryDate, value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
-            options.Value.MaximumInstruments);
+            options.Value.MaximumInstruments, anchors);
     }
 
     private async Task<PersistentDirectionalThesisV1?> LoadPriorThesisAsync(DateOnly date, CancellationToken token)

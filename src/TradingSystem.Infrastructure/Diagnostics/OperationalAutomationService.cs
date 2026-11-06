@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradingSystem.Application.Diagnostics;
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
 using TradingSystem.Infrastructure.MarketData;
@@ -40,7 +41,8 @@ internal sealed class OperationalAutomationService(
         new("NoTradeWatch:1200", new TimeOnly(12, 0)),
         new("NoTradeWatch:1400", new TimeOnly(14, 0)),
         new("DailyReport", new TimeOnly(16, 0)),
-        new("TelemetryAudit", new TimeOnly(16, 5))
+        new("TelemetryAudit", new TimeOnly(16, 5)),
+        new("ReplayInputAudit", new TimeOnly(16, 20))
     ];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -125,8 +127,27 @@ internal sealed class OperationalAutomationService(
                 continue;
             }
 
-            var source = await diagnostics.ReadAsync(tradingDate, market, cancellationToken);
-            var report = BuildReport(slot, source, tokenReady, tokenFailure, now);
+            OperationalAutomationReport report;
+            if (slot.Name == "ReplayInputAudit")
+            {
+                try
+                {
+                    var slice = await scope.ServiceProvider.GetRequiredService<IHistoricalReplayArchiveReader>()
+                        .ReadAsync(tradingDate, market, cancellationToken);
+                    report = BuildReplayInputReport(slice, market, now);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    report = new("operational-automation-v1", market, tradingDate, slot.Name,
+                        "Attention", "Replay input audit could not read the recorded session.",
+                        new Dictionary<string, string>(), ["Archive read failed: " + exception.GetType().Name], true, now);
+                }
+            }
+            else
+            {
+                var source = await diagnostics.ReadAsync(tradingDate, market, cancellationToken);
+                report = BuildReport(slot, source, tokenReady, tokenFailure, now);
+            }
             db.MarketStrategyAudits.Add(new MarketStrategyAudit(
                 Guid.NewGuid(), market, instrumentId.Value, now, outcome,
                 report.Status == "Healthy" || report.Status == "Ready" ? 1m : .5m,
@@ -139,6 +160,29 @@ internal sealed class OperationalAutomationService(
             }
             await db.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    // Use the exact website input gate, after hours. This verifies inputs,
+    // not hypothetical future fills or profitability, and never starts trading.
+    internal static OperationalAutomationReport BuildReplayInputReport(
+        HistoricalReplayArchiveSlice slice, string market, DateTimeOffset now)
+    {
+        var session = slice.Session;
+        var cohort = HistoricalReplayCohortSelector.Select([session], [session.IndexSymbol],
+            [session.Date], allowModeledHistoricalCosts: true);
+        var issues = cohort.ExcludedDates.SelectMany(value => value.Reasons)
+            .Concat(slice.ControlStateGaps).Distinct().ToArray();
+        var metrics = new Dictionary<string, string>
+        {
+            ["recordedQuotes"] = session.Quotes.Count.ToString(CultureInfo.InvariantCulture),
+            ["charges"] = session.HistoricalChargesVerified ? "date-verified" : "modeled",
+            ["scope"] = "normal-strategy recorded inputs; execution paths checked during replay"
+        };
+        return new("operational-automation-v1", market, session.Date, "ReplayInputAudit",
+            issues.Length == 0 ? "Healthy" : "Attention",
+            issues.Length == 0 ? "Recorded inputs passed the normal-session replay coverage gate."
+                : "Recorded session has replay input gaps; review the listed evidence.",
+            metrics, issues, issues.Length > 0, now);
     }
 
     internal static OperationalAutomationReport BuildReport(

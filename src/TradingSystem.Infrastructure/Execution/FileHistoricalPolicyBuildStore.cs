@@ -5,13 +5,14 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
+using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.Infrastructure.Execution;
 
 // Preserve only approved application/domain assemblies from this deployment.
 // No code-upload endpoint exists. Archived policies get JSON frames in an
 // isolated load context, never the application's service provider or secrets.
-internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string? directory = null)
+internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string? directory = null, ReplayBlobStorage? cloud = null)
     : IHistoricalPolicyBuildStore, IDisposable
 {
     private readonly string root = directory ?? Path.Combine(
@@ -60,28 +61,33 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
 
     public async Task<IReadOnlyList<HistoricalPolicyBuild>> ListAsync(CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(root)) return [];
+        if (cloud?.Enabled == true) await cloud.HydrateAsync("policies", null, cancellationToken);
         var builds = new List<HistoricalPolicyBuild>();
-        foreach (var path in Directory.EnumerateDirectories(root))
+        var roots = new[] { root, cloud is null ? root : Path.Combine(cloud.CacheRoot, "policies") };
+        foreach (var path in roots.Distinct().Where(Directory.Exists).SelectMany(Directory.EnumerateDirectories))
         {
             var id = Path.GetFileName(path);
             if (!Guid.TryParseExact(id, "N", out _) || !File.Exists(Path.Combine(path, "manifest.json"))) continue;
             builds.Add(await VerifyAsync(id, cancellationToken));
         }
-        return builds.OrderByDescending(value => value.CapturedAtUtc).ToArray();
+        return builds.DistinctBy(value => value.Id).OrderByDescending(value => value.CapturedAtUtc).ToArray();
     }
 
     public async Task<IHistoricalPolicyModuleFactory> LoadAsync(string buildId, CancellationToken cancellationToken)
     {
+        if (cloud?.Enabled == true) await cloud.HydrateAsync("policies", null, cancellationToken);
         var build = await VerifyAsync(buildId, cancellationToken);
-        return new ArchivedFactory(Path.Combine(root, build.Id), build.Id);
+        return new ArchivedFactory(BuildPath(build.Id), build.Id);
     }
+
+    private string BuildPath(string id) => Directory.Exists(Path.Combine(root, id)) || cloud is null
+        ? Path.Combine(root, id) : Path.Combine(cloud.CacheRoot, "policies", id);
 
     private async Task<HistoricalPolicyBuild> VerifyAsync(string id, CancellationToken token)
     {
         if (!Guid.TryParseExact(id, "N", out var parsed) || id != parsed.ToString("N"))
             throw new ArgumentException("Invalid archived build identifier.", nameof(id));
-        var path = Path.Combine(root, id);
+        var path = BuildPath(id);
         if (new DirectoryInfo(path).LinkTarget is not null)
             throw new InvalidDataException("Linked policy artifact paths are not permitted.");
         var manifestPath = Path.Combine(path, "manifest.json");

@@ -38,16 +38,20 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
                 var now = timeProvider.GetUtcNow();
                 if (IsMarketWindow(now))
                 {
-                    await ProcessAsync(TradingMarketCatalog.Sensex, now, stoppingToken);
-                    foreach (var bank in new[] { TradingMarketCatalog.BankNifty })
+                    // One provider/contract failure must not suppress the other
+                    // market's confirmation feed for the entire polling cycle.
+                    await FuturesFeedPollingCycle.RunAsync(async market =>
                     {
-                        if (lastBankQuoteUtc.TryGetValue(bank.Code, out var last) &&
-                            now - last < TimeSpan.FromSeconds(30)) continue;
-                        try { await ProcessAsync(bank, now, stoppingToken); }
-                        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                        catch (Exception exception) { LogPollingFailed(logger, exception); }
-                        lastBankQuoteUtc[bank.Code] = timeProvider.GetUtcNow();
-                    }
+                        if (market.Code == TradingMarketCatalog.BankNifty.Code &&
+                            lastBankQuoteUtc.TryGetValue(market.Code, out var last) &&
+                            now - last < TimeSpan.FromSeconds(30)) return;
+                        try { await ProcessAsync(market, now, stoppingToken); }
+                        finally
+                        {
+                            if (market.Code == TradingMarketCatalog.BankNifty.Code)
+                                lastBankQuoteUtc[market.Code] = timeProvider.GetUtcNow();
+                        }
+                    }, exception => LogPollingFailed(logger, exception), stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
@@ -88,7 +92,7 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
             cancellationToken);
         var observation = normalizer.Normalize(future.Id, quote, now);
         await scope.ServiceProvider.GetRequiredService<MarketDataProcessor>()
-            .ProcessAsync(observation, cancellationToken);
+            .ProcessAsync(observation, cancellationToken, aggregateCandles: false);
     }
 
     private static bool IsMarketWindow(DateTimeOffset now)

@@ -39,7 +39,7 @@ public sealed class BankIndexPreQuoteGatePolicyTests
         var move = SessionMoveQualityPolicy.Evaluate(session, Direction.Buy, 1m);
         var mature = MatureEdgeEntryPolicy.Evaluate(move,
             MultiTimeframeDecisionPolicy.Analyze(session, Direction.Buy,
-                104m, 100m), Direction.Buy);
+                104m, 100m), Direction.Buy, session);
 
         var shared = BankIndexPreQuoteGatePolicy.Evaluate(session, previous,
             Direction.Buy, 1m, 104m, 100m);

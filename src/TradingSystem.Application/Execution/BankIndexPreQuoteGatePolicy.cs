@@ -33,7 +33,7 @@ public static class BankIndexPreQuoteGatePolicy
         var move = SessionMoveQualityPolicy.Evaluate(completedSession, direction, atr);
         var mature = MatureEdgeEntryPolicy.Evaluate(move,
             MultiTimeframeDecisionPolicy.Analyze(completedSession, direction,
-                openingRangeHigh, openingRangeLow), direction);
+                openingRangeHigh, openingRangeLow), direction, completedSession, candleIntervalSeconds);
         return new(move.Permitted && mature.Permitted,
             move.Permitted && mature.Permitted ? "" : "SessionMoveQualityRejected",
             [.. move.Reasons, .. mature.Reasons], location, move, mature);

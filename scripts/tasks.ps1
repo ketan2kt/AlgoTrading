@@ -16,7 +16,8 @@ param(
     [ValidateRange(1, 90)]
     [int]$Days = 30,
     [switch]$Install,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$IncludeRecorder
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,6 +130,7 @@ try {
             if ([string]::IsNullOrWhiteSpace($Ref)) { throw 'Supply -Ref with the authorized remote branch or tag.' }
             $ciRunId = Assert-DeploymentCiPassed $Ref
             $dispatchArguments = @('workflow', 'run', $workflow, '--repo', $repo, '--ref', $Ref, '-f', 'deploy=DEPLOY-LIVE', '-f', "ci_run_id=$ciRunId")
+            if ($IncludeRecorder) { $dispatchArguments += @('-f', 'include_recorder=true') }
             if ($DryRun) {
                 Write-Output ('Would invoke gh with arguments: ' + ($dispatchArguments | ConvertTo-Json -Compress))
                 Write-Output 'No deployment dispatched.'

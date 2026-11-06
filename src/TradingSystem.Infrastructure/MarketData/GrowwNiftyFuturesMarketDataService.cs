@@ -100,7 +100,8 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
             cancellationToken);
         var observation = normalizer.Normalize(future.Id, quote, now);
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
-        var result = await processor.ProcessAsync(observation, cancellationToken);
+        var result = await processor.ProcessAsync(observation, cancellationToken,
+            aggregateCandles: false);
         if (historyRefreshed || result.Validation.Accepted)
             feedHealth.RecordSuccess(now);
     }

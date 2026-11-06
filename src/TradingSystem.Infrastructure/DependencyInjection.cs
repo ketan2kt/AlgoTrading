@@ -159,6 +159,8 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
+        services.AddSingleton<ReplayBlobStorage>();
+        services.AddHostedService(provider => provider.GetRequiredService<ReplayBlobStorage>());
         services.AddSingleton<HistoricalQuoteArchive>();
         services.AddSingleton<IHistoricalQuoteArchive>(provider => provider.GetRequiredService<HistoricalQuoteArchive>());
         services.AddHostedService(provider => provider.GetRequiredService<HistoricalQuoteArchive>());
@@ -169,8 +171,8 @@ public static class DependencyInjection
         }).RedactLoggedHeaders(static _ => true);
         services.AddOptions<HistoricalFeedCaptureOptions>()
             .Bind(configuration.GetSection(HistoricalFeedCaptureOptions.SectionName))
-            .Validate(value => value.MaximumInstruments is >= 1 and <= 1000 && value.SampleSeconds is >= 1 and <= 10,
-                "Historical feed limits must respect Groww's instrument cap and a 1–10 second sample cadence.")
+            .Validate(value => value.MaximumInstruments is >= 1 and <= 1000 && value.SampleSeconds is >= 1 and <= 2,
+                "Historical feed limits must respect Groww's instrument cap and a 1–2 second sample cadence for two-stage quote admission.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
         services.AddSingleton<ResearchCapturePulse>();

@@ -226,7 +226,8 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         var replayQuoteSymbols = names.Values.Append(index.TradingSymbol).ToDictionary(value => value, value => value, StringComparer.Ordinal);
         foreach (var pair in mappedProviderSymbols) replayQuoteSymbols[pair.Key] = pair.Value;
         var quoteDay = quoteArchive is null ? new HistoricalReplayQuoteArchiveDay([], true) :
-            await quoteArchive.ReadReplayAsync(tradingDate, underlying, exchange, replayQuoteSymbols, start, end, cancellationToken);
+            await quoteArchive.ReadReplayAsync(tradingDate, underlying, exchange, replayQuoteSymbols, start, end, cancellationToken,
+                streamingOnly: feedManifest is not null);
         var observedQuotes = quoteDay.Quotes;
         var proxyQuotes = HistoricalArchivePathCanonicalizer.Quotes(
             candles.Where(value => names.ContainsKey(value.InstrumentId))
@@ -254,7 +255,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                     value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
                 exchange, underlying, tradingDate).ToArray();
         var streamingUniverse = feedManifest is not null && !quoteDay.HasCaptureGaps &&
-            datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate);
+            datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars);
         if (streamingUniverse)
         {
             quotes = observedQuotes;
@@ -264,7 +265,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             bars = bars.Where(value => value.Symbol == index.TradingSymbol || value.Symbol == frontFutureSymbol).ToArray();
         }
         var optionSymbols = contracts.Select(value => value.TradingSymbol).ToHashSet(StringComparer.Ordinal);
-        var optionObservations = observedQuotes.Where(value => optionSymbols.Contains(value.Symbol));
+        var optionObservations = quotes.Where(value => optionSymbols.Contains(value.Symbol));
         var manifest = "datedMaster=" + datedMaster?.Fingerprint +
             "|datedMasterCapturedAt=" + datedMaster?.CapturedAtUtc.ToString("O") +
             "|observedQuoteCaptureGaps=" + quoteDay.HasCaptureGaps +
@@ -272,6 +273,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             "|controlStateVerified=" + controls.InitialStateVerified +
             "|controlStateGaps=" + string.Join(';', controls.Gaps) +
             "|streamingUniverse=" + feedManifest?.UniverseFingerprint +
+            "|streamingUniverseScope=" + feedManifest?.UniverseScope +
             "|sessionPolicy=" + feedManifest?.PolicyReceipt?.Fingerprint +
             "|sensexPriorThesisCaptured=" + feedManifest?.SensexPriorThesisStateCaptured +
             "|priorSensexThesis=" + JsonSerializer.Serialize(feedManifest?.PriorSensexThesis) +
@@ -300,7 +302,10 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             ExecutionOptionSymbols = optionSymbols.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
             EligibleOptionUniverseComplete = streamingUniverse,
             ExecutableQuoteSidesComplete = streamingUniverse && optionObservations.Any() &&
-                optionObservations.All(value => value.BidPrice is > 0m && value.OfferPrice is > 0m && value.BidPrice <= value.OfferPrice),
+                // Feed snapshots include empty/withdrawn books explicitly. Those
+                // are unavailable liquidity, not missing recording; fills still
+                // require actual sides and cannot fall back to their LTP.
+                optionObservations.All(value => value.Source == "GrowwFeedSample" && value.DepthSourceAtUtc.HasValue),
             StrategyInputsComplete = streamingUniverse && (underlying == "BANKNIFTY" ||
                 optionObservations.All(value => value.Volume.HasValue && value.OpenInterest.HasValue)),
             PolicyInputManifest = manifest,

@@ -14,6 +14,10 @@ on:
         description: Successful main push CI run that produced the release package
         required: true
         type: string
+      include_recorder:
+        description: Deploy and activate the approved independent recorder after the website
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +29,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  recorder:
+    needs: deploy
+    if: inputs.include_recorder && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/replay-recorder-deploy.yml
+    with:
+      ci_run_id: ${{ inputs.ci_run_id }}
+    secrets: inherit
   deploy:
     if: inputs.deploy == 'DEPLOY-LIVE' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

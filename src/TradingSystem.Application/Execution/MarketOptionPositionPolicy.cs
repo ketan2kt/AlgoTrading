@@ -26,7 +26,7 @@ public static class MarketOptionPositionPolicy
 
     public static decimal ProtectedStop(Direction direction, decimal entry,
         decimal initialRisk, decimal favourablePrice, decimal existingStop,
-        int remainingQuantity, ProfessionalExitPlan plan)
+        int remainingQuantity, ProfessionalExitPlan plan, string exchangeCode = "NSE")
     {
         var initialStop = direction == Direction.Buy ? entry - initialRisk : entry + initialRisk;
         var stop = PaperProtectiveStopPolicy.Calculate(direction, entry, initialStop,
@@ -35,10 +35,9 @@ public static class MarketOptionPositionPolicy
         var gain = direction == Direction.Buy ? favourablePrice - entry : entry - favourablePrice;
         if (gain >= initialRisk * plan.BreakEvenTriggerR)
         {
-            // Preserve the production path's current option-cost convention.
             var costs = PaperTradingCostModel.CalculateOptionCharges([
                 new(PaperOptionTransactionSide.Buy, entry, remainingQuantity),
-                new(PaperOptionTransactionSide.Sell, Math.Max(.05m, stop), remainingQuantity)]).Total;
+                new(PaperOptionTransactionSide.Sell, Math.Max(.05m, stop), remainingQuantity)], exchangeCode).Total;
             stop = PaperProtectiveStopPolicy.ProtectNetProfit(direction, entry, stop,
                 remainingQuantity, costs);
         }

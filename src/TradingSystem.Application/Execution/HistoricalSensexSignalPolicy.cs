@@ -23,7 +23,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v4/" + OptionRiskBudgetPolicy.Version;
+    public string CodeVersion => "sensex-normal-entry-v5/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,
@@ -136,6 +136,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
             LotSize = contract.LotSize, UnderlyingDirection = direction, ContractExpiryDate = contract.ExpiryDate,
             StrategyDecisionAtUtc = now, RequiresDeferredQuoteAdmission = true, TriggerOnLastPrice = true,
             DeferredSensexProfessionalContext = professional,
+            MaximumAdmissionQuoteDelaySeconds = settings.MaximumOptionAgeSeconds,
             PlannedExitAtUtc = new DateTimeOffset(tradingDate.ToDateTime(settings.ForcedExit), IndiaOffset).ToUniversalTime()
         }], "Candidate");
     }
@@ -167,10 +168,10 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
         };
     }
 
-    private static SensexFutureConfirmation Confirmation(HistoricalReplayBar[] session,
+    private SensexFutureConfirmation Confirmation(HistoricalReplayBar[] session,
         HistoricalReplayBar[] futures) => SensexFutureConfirmationPolicy.Evaluate(session.Select(ToBar).ToArray(),
         futures.Where(value => value.OpenTimeUtc <= session[^1].OpenTimeUtc).TakeLast(40)
-            .Select(value => new SensexFutureVolumeBar(value.OpenTimeUtc, value.Volume)).ToArray());
+            .Select(value => new SensexFutureVolumeBar(value.OpenTimeUtc, value.Volume)).ToArray(), settings.IntervalSeconds);
     private static bool IsSide(string symbol, Direction direction) =>
         symbol.EndsWith(direction == Direction.Buy ? "CE" : "PE", StringComparison.Ordinal);
     private static bool Specialty(string strategy) => strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) ||

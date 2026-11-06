@@ -12,7 +12,8 @@ public sealed class MarketDataProcessor(
 {
     public async Task<MarketDataProcessingResult> ProcessAsync(
         MarketObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool aggregateCandles = true)
     {
         var validation = validator.Validate(observation);
         healthMonitor.Record(observation.Source, observation.ReceivedAtUtc, validation);
@@ -22,6 +23,11 @@ public sealed class MarketDataProcessor(
             return new(validation, null);
 
         await persistence.PersistObservationAsync(observation, cancellationToken);
+
+        // Futures minute bars come from the historical candle endpoint. Polling
+        // deltas must not race those complete bars under the same source/key.
+        // Observations and freshness remain recorded even when not aggregating.
+        if (!aggregateCandles) return new(validation, null);
 
         var completed = aggregator.Add(observation);
         if (completed is not null)

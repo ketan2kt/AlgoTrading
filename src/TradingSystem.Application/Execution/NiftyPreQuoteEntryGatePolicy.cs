@@ -42,7 +42,8 @@ public static class NiftyPreQuoteEntryGatePolicy
             return new(false, "SessionMoveMaturityRejected", move.Reasons,
                 location.Context, location);
 
-        var mature = MatureEdgeEntryPolicy.Evaluate(move, timeframes, direction);
+        var mature = MatureEdgeEntryPolicy.Evaluate(move, timeframes, direction,
+            completedSession, candleIntervalSeconds);
         return new(mature.Permitted,
             mature.Permitted ? "" : "MatureEdgeConfirmationRejected",
             mature.Reasons, location.Context, location);

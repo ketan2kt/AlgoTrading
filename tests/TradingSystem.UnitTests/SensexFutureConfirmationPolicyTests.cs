@@ -13,7 +13,7 @@ public sealed class SensexFutureConfirmationPolicyTests
     {
         var result = SensexFutureConfirmationPolicy.Evaluate([
             Bar(0, 100m), Bar(5, 110m), Bar(10, 120m)
-        ], [new(At, 100), new(At.AddMinutes(5), 200)]);
+        ], [new(At, 100), new(At.AddMinutes(5), 200)], 300);
 
         Assert.Equal(106.66666666666666666666666667m, result.Vwap);
         Assert.Equal(2m, result.RelativeVolume);
@@ -47,7 +47,7 @@ public sealed class SensexFutureConfirmationPolicyTests
     }
 
     [Fact]
-    public void ExtractedCalculationMatchesTheFormerProductionFormula()
+    public void RecentVolumeBaselineExcludesCurrentBarAndNeverUsesAnOlderActiveMark()
     {
         var random = new Random(72931);
         for (var example = 0; example < 100; example++)
@@ -64,12 +64,12 @@ public sealed class SensexFutureConfirmationPolicyTests
             var aligned = index.Where(value =>
                 volumeByTime.ContainsKey(value.OpenTimeUtc)).ToArray();
             var totalVolume = aligned.Sum(value => volumeByTime[value.OpenTimeUtc]);
-            var latestFuture = future.LastOrDefault(value => value.Volume > 0);
-            var baseline = future.Where(value => value.Volume > 0)
-                .TakeLast(Math.Min(20, future.Length)).SkipLast(1).ToArray();
+            var latestFuture = future.LastOrDefault();
+            var baseline = future.SkipLast(1).TakeLast(20).ToArray();
             var averageVolume = baseline.Length == 0 ? 0m :
                 baseline.Average(value => (decimal)value.Volume);
-            var priorRelative = latestFuture is null || averageVolume <= 0m
+            var priorRelative = latestFuture is null || averageVolume <= 0m ||
+                latestFuture.Volume <= 0 || index[^1].OpenTimeUtc - latestFuture.OpenTimeUtc > TimeSpan.FromMinutes(1)
                 ? 0m : latestFuture.Volume / averageVolume;
             var priorVwap = totalVolume <= 0m ? 0m : aligned.Sum(value =>
                 ((value.High + value.Low + value.Close) / 3m) *
@@ -77,6 +77,18 @@ public sealed class SensexFutureConfirmationPolicyTests
             Assert.Equal(priorVwap, actual.Vwap);
             Assert.Equal(priorRelative, actual.RelativeVolume);
         }
+    }
+
+    [Fact]
+    public void ZeroVolumeAndStaleLatestMinuteCannotBorrowEarlierConfirmation()
+    {
+        var index = new[] { Bar(0, 100m), Bar(1, 101m), Bar(2, 102m) };
+        Assert.False(SensexFutureConfirmationPolicy.Evaluate(index,
+            [new(At, 100), new(At.AddMinutes(1), 200), new(At.AddMinutes(2), 0)]).Ready);
+        Assert.False(SensexFutureConfirmationPolicy.Evaluate(
+            [.. index, Bar(4, 104m)], [new(At, 100), new(At.AddMinutes(1), 200)]).Ready);
+        Assert.True(SensexFutureConfirmationPolicy.Evaluate(index,
+            [new(At, 100), new(At.AddMinutes(1), 200)]).Ready);
     }
 
     private static StrategyPriceBar Bar(int minutes, decimal close) =>

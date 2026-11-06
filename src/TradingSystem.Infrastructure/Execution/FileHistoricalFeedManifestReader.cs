@@ -3,10 +3,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TradingSystem.Application.Execution;
+using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.Infrastructure.Execution;
 
-internal sealed class FileHistoricalFeedManifestReader(string? directory = null)
+internal sealed class FileHistoricalFeedManifestReader(string? directory = null, ReplayBlobStorage? cloud = null)
 {
     private readonly string root = directory ?? Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory,
         "data", "historical-replay", "feed");
@@ -14,9 +15,16 @@ internal sealed class FileHistoricalFeedManifestReader(string? directory = null)
     public async Task<HistoricalFeedCaptureManifest?> ReadCompleteAsync(DateOnly tradingDate,
         DateTimeOffset start, DateTimeOffset end, CancellationToken token)
     {
-        if (!Directory.Exists(root)) return null;
-        var paths = Directory.GetFiles(root, tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-*.json");
-        if (paths.Length > 100) throw new InvalidDataException("Too many historical feed manifests for one date.");
+        var sourceRoot = root;
+        if (cloud?.Enabled == true)
+        {
+            await cloud.HydrateAsync("feed", tradingDate, token);
+            sourceRoot = Path.Combine(cloud.CacheRoot, "feed");
+        }
+        if (!Directory.Exists(sourceRoot)) return null;
+        var paths = Directory.GetFiles(sourceRoot, tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-*.json");
+        // One retry per 30 seconds can exceed 100 without exhausting a session.
+        if (paths.Length > 1000) throw new InvalidDataException("Too many historical feed manifests for one date.");
         foreach (var path in paths.OrderBy(value => value, StringComparer.Ordinal))
         {
             var info = new FileInfo(path);

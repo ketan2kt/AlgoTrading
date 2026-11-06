@@ -178,6 +178,30 @@ public sealed class MarketDataEngineTests
         Assert.Equal(3, persistence.HealthWrites);
     }
 
+    [Fact]
+    public async Task HistoryOwnedCandlesStillRecordFreshQuotesButNeverCreatePollingBars()
+    {
+        var persistence = new StubPersistence();
+        var processor = new MarketDataProcessor(
+            new MarketDataValidator(new FixedTimeProvider(Now), TimeSpan.FromSeconds(5)),
+            new CandleAggregator(60), new MarketDataHealthMonitor(), persistence);
+        var instrument = Guid.NewGuid();
+        var first = await processor.ProcessAsync(Observation(instrument, Now.AddSeconds(-1), 1),
+            CancellationToken.None, aggregateCandles: false);
+        var next = await processor.ProcessAsync(Observation(instrument, Now, 2),
+            CancellationToken.None, aggregateCandles: false);
+        var stale = await processor.ProcessAsync(Observation(instrument, Now.AddMinutes(-1), 0),
+            CancellationToken.None, aggregateCandles: false);
+
+        Assert.True(first.Validation.Accepted);
+        Assert.True(next.Validation.Accepted);
+        Assert.False(stale.Validation.Accepted);
+        Assert.Null(next.CompletedCandle);
+        Assert.Equal(2, persistence.Observations.Count);
+        Assert.Equal(3, persistence.HealthWrites);
+        Assert.Empty(persistence.Candles);
+    }
+
     private static MarketObservation Observation(Guid instrument, DateTimeOffset timestamp, long sequence) =>
         new(instrument, "Groww", timestamp, Now, 100m, 1, null, sequence);
 

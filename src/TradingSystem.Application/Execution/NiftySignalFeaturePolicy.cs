@@ -30,7 +30,10 @@ public static class NiftySignalFeaturePolicy
             value.OpenTimeUtc.ToOffset(IndiaOffset).DateTime) < openingRangeEnd)
             .ToArray();
         var totalVolume = alignedFutures.Sum(value => value.Volume);
-        var averageVolume = alignedFutures.SkipLast(1).Average(value =>
+        // Compare participation with recent completed minutes, not the opening
+        // auction/first-minute spike for the entire remaining session. Keep the
+        // current candle out of the reference window and retain zero-volume bars.
+        var averageVolume = alignedFutures.SkipLast(1).TakeLast(20).Average(value =>
             value.Volume);
         if (opening.Length == 0 || totalVolume <= 0m ||
             averageVolume <= 0m) return null;

@@ -55,6 +55,24 @@ public sealed class NiftySignalFeaturePolicyTests
             new TimeOnly(9, 20)));
     }
 
+    [Theory]
+    [InlineData(100, 1)]
+    [InlineData(25, .25)]
+    [InlineData(0, 0)]
+    public void OpeningSpikeDoesNotPoisonLaterParticipationAndWeakCurrentVolumeStaysWeak(
+        decimal latestVolume, decimal expectedRelativeVolume)
+    {
+        var spot = Enumerable.Range(0, 22).Select(index =>
+            Bar(index, 100m, 102m, 99m, 101m)).ToArray();
+        var futures = spot.Select((bar, index) => bar with
+        {
+            Volume = index == 0 ? 600_000m : index == 21 ? latestVolume : 100m
+        }).ToArray();
+        var result = Assert.IsType<NiftySignalFeatures>(NiftySignalFeaturePolicy.Calculate(
+            spot, futures, new TimeOnly(9, 20)));
+        Assert.Equal(expectedRelativeVolume, result.RelativeFuturesVolume);
+    }
+
     private static StrategyPriceBar Bar(int index, decimal open,
         decimal high, decimal low, decimal close) =>
         new(Start.AddMinutes(index * 5), open, high, low, close);

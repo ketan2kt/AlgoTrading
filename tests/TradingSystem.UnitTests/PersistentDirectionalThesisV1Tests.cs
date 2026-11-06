@@ -218,6 +218,41 @@ public sealed class PersistentDirectionalThesisV1Tests
         Assert.Contains(result.Reasons, value => value.Contains("bounded"));
     }
 
+    [Theory]
+    [InlineData(Direction.Sell)]
+    [InlineData(Direction.Buy)]
+    public void RetainedThesisCannotOpenAgainstCurrentEmaAlignment(Direction direction)
+    {
+        // Price remains below session VWAP, but the last 30 minutes recovered.
+        // A single red confirmation must not revive the old bearish entry.
+        var bars = Enumerable.Range(0, 30).Select(index =>
+            Bar(index, 90m + index * .2m, 90.4m + index * .2m,
+                89.8m + index * .2m, 90.2m + index * .2m)).ToArray();
+        bars[^1] = Bar(29, 95.8m, 95.9m, 95.3m, 95.35m);
+        if (direction == Direction.Buy)
+            bars = bars.Select(bar => bar with
+            {
+                Open = 200m - bar.Open, High = 200m - bar.Low,
+                Low = 200m - bar.High, Close = 200m - bar.Close
+            }).ToArray();
+        var previous = new PersistentDirectionalThesisV1(
+            PersistentDirectionalThesisAnalyzerV1.Version, "PaperEligible",
+            new DateOnly(2026, 10, 26), direction, .75m,
+            DirectionalThesisPhaseV1.Maintained, 10, 2, true, false, false, []);
+        Assert.True(PersistentDirectionalThesisAnalyzerV1.HasFreshFailedPullbackConfirmation(
+            bars.TakeLast(10).ToArray(), direction));
+
+        var result = PersistentDirectionalThesisAnalyzerV1.Analyze(bars,
+            direction == Direction.Sell ? 110m : 90m,
+            direction == Direction.Sell ? 111m : 91m,
+            direction == Direction.Sell ? 109m : 89m, previous);
+
+        Assert.Equal(direction, result.Direction);
+        Assert.False(result.ChangeOfCharacter);
+        Assert.False(result.WouldEnter);
+        Assert.Contains("New-entry price/VWAP/EMA alignment: False.", result.Evidence);
+    }
+
     private static StrategyPriceBar Bar(int minute, decimal open, decimal high,
         decimal low, decimal close) => new(
         new DateTimeOffset(2026, 10, 8, 3, 45, 0, TimeSpan.Zero).AddMinutes(minute),

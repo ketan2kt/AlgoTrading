@@ -6,6 +6,22 @@ namespace TradingSystem.ContractTests;
 
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
+    [Fact]
+    public async Task FeedPathFiltersRestBeforeSortingSoSameTimeRestCannotEraseDepthOrBreakReplay()
+    {
+        using var archive = Archive();
+        var observation = Observation();
+        archive.TryRecord(observation with { Source = "GrowwFeedSample", DepthSourceAtUtc = At });
+        archive.TryRecord(observation with { Id = Guid.NewGuid(), Quote = observation.Quote with { BidPrice = null, OfferPrice = null } });
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var path = await archive.ReadReplayAsync(Date, "NIFTY", "NSE",
+            new Dictionary<string,string> { [observation.Request.TradingSymbol] = observation.Request.TradingSymbol },
+            At, At.AddMinutes(1), CancellationToken.None, streamingOnly: true);
+        var quote = Assert.Single(path.Quotes);
+        Assert.Equal(99, quote.BidPrice);
+        Assert.Equal("GrowwFeedSample", quote.Source);
+        Assert.False(path.HasCaptureGaps);
+    }
     private readonly string directory = Directory.CreateTempSubdirectory("sarthi-quote-archive-").FullName;
     private static readonly DateOnly Date = new(2026, 11, 4);
     private static readonly DateTimeOffset At = new(2026, 11, 4, 4, 0, 0, TimeSpan.Zero);
@@ -105,20 +121,22 @@ public sealed class HistoricalQuoteArchiveContractTests : IDisposable
     }
 
     [Fact]
-    public async Task CompressedBatchesAndHourShardsRoundTripWithoutLosingEarlierMembers()
+    public async Task CompressedBatchesAndMinuteShardsRoundTripWithoutLosingEarlierMembers()
     {
         using var archive = Archive();
         archive.TryRecord(Observation());
         await archive.FlushBatchAsync(CancellationToken.None);
         archive.TryRecord(Observation() with { ReceivedAtUtc = At.AddSeconds(3) });
         await archive.FlushBatchAsync(CancellationToken.None);
-        archive.TryRecord(Observation() with { ReceivedAtUtc = At.AddHours(1) });
+        archive.TryRecord(Observation() with { ReceivedAtUtc = At.AddMinutes(1) });
+        archive.TryRecord(Observation() with { ReceivedAtUtc = At.AddMinutes(2) });
         await archive.FlushBatchAsync(CancellationToken.None);
         using var restarted = Archive();
         var result = await restarted.ReadAsync(Date, CancellationToken.None);
-        Assert.Equal(3, result.Observations.Count);
+        Assert.Equal(4, result.Observations.Count);
         Assert.False(result.HasCaptureGaps);
-        Assert.Equal(2, Directory.GetFiles(directory, "*.gz").Length);
+        Assert.Equal(3, Directory.GetFiles(directory, "*.gz").Length);
+        Assert.True(File.Exists(Path.Combine(directory, "2026-11-04-04-01.ndjson.gz")));
     }
 
     private HistoricalQuoteArchive Archive(int capacity = 10) => new(TimeProvider.System,

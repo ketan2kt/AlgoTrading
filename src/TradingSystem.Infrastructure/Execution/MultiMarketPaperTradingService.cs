@@ -293,7 +293,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
             var confirmation = SensexFutureConfirmationPolicy.Evaluate(priceBars,
                 futureCandles.Select(value => new SensexFutureVolumeBar(
-                    value.OpenTimeUtc, value.Volume)).ToArray());
+                    value.OpenTimeUtc, value.Volume)).ToArray(), interval);
             var vwapV2 = confirmation.Vwap;
             var relativeVolumeV2 = confirmation.RelativeVolume;
             sensexVwap = vwapV2;
@@ -1069,7 +1069,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 favourableExtreme = favourablePrice;
                 trailing = MarketOptionPositionPolicy.ProtectedStop(position.Direction,
                     position.EntryPrice, initialRisk, favourablePrice, position.StopLoss,
-                    position.RemainingQuantity, exitPlan);
+                    position.RemainingQuantity, exitPlan, market.Exchange);
             }
             var expectedUnderlyingDirection = market.ExecuteOptions
                 ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
@@ -1182,9 +1182,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                             position.UnderlyingInstrumentId, observedAt,
                             $"FailedSetupExit:{position.Id:N}", 0m,
-                            JsonSerializer.Serialize(new { positionId = position.Id,
-                                price, latestUnderlying.Price, failedDecision.AdverseR,
-                                failedDecision.Reasons })));
+                            FailedSetupExitAudit.Serialize(position.Id, price,
+                                latestUnderlying.Price, failedDecision)));
                 }
             }
             // Sample negative decisions too, at the existing once-per-minute cadence.

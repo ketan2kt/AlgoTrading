@@ -40,6 +40,7 @@ var dataProtection = builder.Services
     .AddDataProtection()
     .SetApplicationName("TradingSystem")
     .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory));
+await ReplayRecorderHosting.ConfigureSharedKeysAsync(dataProtection, builder.Configuration, new DirectoryInfo(keyDirectory));
 if (OperatingSystem.IsWindows())
 {
     dataProtection.ProtectKeysWithDpapi();
@@ -103,7 +104,22 @@ builder.Services
     .AddHttpClient("resilient-external")
     .AddStandardResilienceHandler();
 
+var recorder = ReplayRecorderHosting.IsRecorder(builder.Configuration);
+if (recorder)
+{
+    ReplayRecorderHosting.RestrictToRecorder(builder.Services);
+    builder.Services.AddHealthChecks().AddCheck<TradingSystem.Infrastructure.MarketData.RecorderStorageHealthCheck>(
+        "private-replay-storage", tags: ["ready"]);
+}
 var app = builder.Build();
+if (recorder)
+{
+    // No controllers, hubs, cookies, trading UI or order endpoints in this host.
+    app.MapHealthChecks("/health/live", new() { Predicate = _ => false }).AllowAnonymous();
+    app.MapHealthChecks("/health/ready", new() { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
+    app.Run();
+    return;
+}
 
 if (app.Environment.IsDevelopment())
 {

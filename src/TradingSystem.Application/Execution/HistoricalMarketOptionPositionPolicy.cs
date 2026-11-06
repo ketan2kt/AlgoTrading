@@ -19,7 +19,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v4";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v5";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -42,7 +42,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             var plan = Plan(position);
             var stop = MarketOptionPositionPolicy.ProtectedStop(Direction.Buy,
                 position.EntryPrice, Risk(position), Favourable(position, price),
-                position.StopPrice, position.Quantity, plan);
+                position.StopPrice, position.Quantity, plan, market == "sensex" ? "BSE" : "NSE");
             var reversal = Reversal(frame, position, price, stop);
             if (reversal.Stop > position.StopPrice)
                 updates.Add(new(position.Symbol, frame.Market.AvailableAtUtc, reversal.Stop));

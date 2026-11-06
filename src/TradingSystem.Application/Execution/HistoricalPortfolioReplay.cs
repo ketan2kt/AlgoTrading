@@ -117,7 +117,7 @@ public interface IHistoricalReplayPortfolioPolicy
 
 public static class HistoricalPortfolioReplay
 {
-    public const string EngineVersion = "portfolio-replay-v10";
+    public const string EngineVersion = "portfolio-replay-v11";
     private static readonly TimeSpan MaximumQuoteAge = TimeSpan.FromSeconds(90);
 
     public static HistoricalReplayResult Run(
@@ -554,6 +554,13 @@ public static class HistoricalPortfolioReplay
                 ApplyStopUpdates(Snapshot(time), recomputeBeforeQuotes: true);
             foreach (var quote in quoteBatch)
             {
+                // A recorded withdrawn/one-sided book must invalidate the latest
+                // liquidity, not silently fill at LTP. Keep it in the as-of frame.
+                if (quote.Source == "GrowwFeedSample" && !quote.HasExecutableBook())
+                {
+                    if (openPositions.TryGetValue(quote.Symbol, out var illiquid)) illiquid.Unpriced = true;
+                    continue;
+                }
                 if (openPositions.TryGetValue(quote.Symbol, out var open))
                 {
                     if (quote.AvailableAtUtc - open.LastQuoteAtUtc > MaximumQuoteAge)
@@ -738,6 +745,15 @@ public static class HistoricalPortfolioReplay
                 foreach (var symbol in quoteAdmissions)
                 {
                     var pending = pendingEntries[symbol];
+                    if (pending.MaximumAdmissionQuoteDelaySeconds is { } maximumDelay &&
+                        (time - pending.DecidedAtUtc > TimeSpan.FromSeconds(maximumDelay) ||
+                        latest[symbol].BidPrice is not > 0m || latest[symbol].OfferPrice is not > 0m))
+                    {
+                        pendingEntries.Remove(symbol);
+                        missingEntry++;
+                        stale++;
+                        continue;
+                    }
                     var admitted = policy.AssessDeferredEntry(snapshot, pending,
                         latest[symbol]);
                     pendingEntries.Remove(symbol);

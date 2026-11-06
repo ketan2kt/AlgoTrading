@@ -6,6 +6,21 @@ namespace TradingSystem.UnitTests;
 public sealed class MarketOptionPositionPolicyTests
 {
     [Theory]
+    [InlineData("BSE")]
+    [InlineData("NSE")]
+    public void BreakEvenProtectionUsesTheActualExchangeCharges(string exchange)
+    {
+        var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Transition);
+        var charges = PaperTradingCostModel.CalculateOptionCharges([
+            new(PaperOptionTransactionSide.Buy, 800m, 20),
+            new(PaperOptionTransactionSide.Sell, 800m, 20)], exchange).Total;
+        var expected = PaperProtectiveStopPolicy.ProtectNetProfit(Direction.Buy,
+            800m, 800m, 20, charges);
+        Assert.Equal(expected, MarketOptionPositionPolicy.ProtectedStop(Direction.Buy,
+            800m, 80m, 840m, 720m, 20, plan, exchange));
+    }
+
+    [Theory]
     [InlineData("Index momentum breakout", true)]
     [InlineData("Sensex controlled early pullback", true)]
     [InlineData("Sensex persistent directional thesis", true)]

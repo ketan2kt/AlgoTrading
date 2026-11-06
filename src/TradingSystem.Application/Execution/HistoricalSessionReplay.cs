@@ -18,6 +18,13 @@ public sealed record HistoricalReplayQuote(string Symbol, DateTimeOffset Availab
     public DateTimeOffset? SourceAtUtc { get; init; }
     public DateTimeOffset? DepthSourceAtUtc { get; init; }
 
+    public bool HasExecutableBook() => BidPrice is > 0m && OfferPrice is > 0m && BidPrice <= OfferPrice;
+    // A received empty book explicitly records unavailable liquidity. It is
+    // different from a REST LTP response which never supplied depth evidence.
+    public bool HasRecordedBookEvidence() => HasExecutableBook() ||
+        Source == "GrowwFeedSample" && DepthSourceAtUtc.HasValue &&
+        DepthSourceAtUtc <= AvailableAtUtc && BidPrice is null or > 0m && OfferPrice is null or > 0m && !(BidPrice > OfferPrice);
+
     public bool IsFreshAsOf(DateTimeOffset asOf, TimeSpan maximumAge) =>
         AvailableAtUtc <= asOf && asOf - AvailableAtUtc <= maximumAge &&
         // Match the production receipt-age gate. A current standing bid/offer
@@ -69,6 +76,7 @@ public sealed record HistoricalReplayCandidate(string Symbol, DateTimeOffset Dec
     public ProfessionalTradeAssessmentInput? DeferredSensexProfessionalContext { get; init; }
     // Other markets may also require an as-of option quote after signal discovery.
     public bool RequiresDeferredQuoteAdmission { get; init; }
+    public int? MaximumAdmissionQuoteDelaySeconds { get; init; }
     public DateTimeOffset? StrategyDecisionAtUtc { get; init; }
     // Multi-market paper positions trigger on quote LTP, while Nifty's paper
     // position manager triggers on the observed bid. The modeled exit still

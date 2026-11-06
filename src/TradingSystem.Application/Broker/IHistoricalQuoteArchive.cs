@@ -13,6 +13,13 @@ public sealed record HistoricalQuoteArchiveDay(IReadOnlyList<HistoricalQuoteObse
     bool HasCaptureGaps);
 
 public sealed record HistoricalReplayQuoteArchiveDay(IReadOnlyList<HistoricalReplayQuote> Quotes, bool HasCaptureGaps);
+public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserved,
+    DateTimeOffset? LastPersistedAtUtc, string? Failure)
+{
+    public long ArchiveBytes { get; init; }
+    public long ArchiveLimitBytes { get; init; }
+    public long? DiskFreeBytes { get; init; }
+}
 
 public static class HistoricalQuoteProjection
 {
@@ -33,6 +40,7 @@ public interface IHistoricalQuoteArchive
     // This must not request quotes or throw into the live quote path.
     void TryRecord(HistoricalQuoteObservation observation);
     void MarkCaptureGap(DateOnly tradingDate);
+    HistoricalQuoteArchiveHealth? ReadHealth(DateOnly tradingDate) => null;
     Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken);
     async Task<HistoricalQuoteArchiveDay> ReadMarketAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
     {
@@ -41,10 +49,11 @@ public interface IHistoricalQuoteArchive
             day.HasCaptureGaps);
     }
     async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly tradingDate, string market, string exchange,
-        IReadOnlyDictionary<string, string> symbols, DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken token)
+        IReadOnlyDictionary<string, string> symbols, DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken token,
+        bool streamingOnly = false)
     {
         var day = await ReadMarketAsync(tradingDate, market, token);
-        return new(day.Observations.Where(value => value.Request.Exchange == exchange &&
+        return new(day.Observations.Where(value => (!streamingOnly || value.Source == "GrowwFeedSample") && value.Request.Exchange == exchange &&
             value.ReceivedAtUtc >= startUtc && value.ReceivedAtUtc <= endUtc && symbols.ContainsKey(value.Request.TradingSymbol))
             .Select(value => HistoricalQuoteProjection.ToReplay(value, symbols[value.Request.TradingSymbol])).ToArray(), day.HasCaptureGaps);
     }

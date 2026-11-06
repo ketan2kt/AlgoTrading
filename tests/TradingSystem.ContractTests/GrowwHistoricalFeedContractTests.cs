@@ -99,6 +99,50 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
     }
 
     [Fact]
+    public async Task WithdrawnBookClearsOldLiquidityWithoutBreakingOtherInstrumentRecording()
+    {
+        var empty = GrowwHistoricalFeedCodec.Decode(Envelope(5, Join(Double(1, At.ToUnixTimeMilliseconds()),
+            Chunk(2, Book(0, 0)), Chunk(3, Book(0, 0)))), "depth", At, "NSE", "FNO");
+        Assert.Null(empty.Bid);
+        Assert.Null(empty.Offer);
+        using var archive = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, directory);
+        var accumulator = new GrowwHistoricalFeedAccumulator(archive);
+        accumulator.Observe(Instrument, "price", new(At, 100, 1000, 5000, null, null, null, null), At);
+        accumulator.Observe(Instrument, "depth", new(At, null, null, null, 99, 65, 101, 65), At);
+        accumulator.Sample(At);
+        accumulator.Observe(Instrument, "depth", empty, At.AddSeconds(1));
+        accumulator.Sample(At.AddSeconds(2));
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var path = await archive.ReadReplayAsync(new(2026, 11, 4), "NIFTY", "NSE",
+            new Dictionary<string,string> { [Instrument.TradingSymbol] = Instrument.TradingSymbol }, At, At.AddMinutes(1), CancellationToken.None);
+        Assert.False(path.HasCaptureGaps);
+        Assert.Equal(2, path.Quotes.Count);
+        Assert.Equal(99, path.Quotes[0].BidPrice);
+        Assert.Null(path.Quotes[1].BidPrice);
+        Assert.NotNull(path.Quotes[1].DepthSourceAtUtc);
+        var health = archive.ReadHealth(new(2026, 11, 4));
+        Assert.Equal(0, health.Buffered);
+        Assert.NotNull(health.LastPersistedAtUtc);
+        Assert.Null(health.Failure);
+    }
+
+    [Fact]
+    public void SilentMarketIsDetectedEvenIfOtherMarketsStillReceiveTicks()
+    {
+        var pulse = new ResearchCapturePulse();
+        var date = new DateOnly(2026, 11, 4);
+        pulse.Starting(date);
+        pulse.Subscribed(At, 995);
+        pulse.Received("NIFTY", At.AddSeconds(31));
+        pulse.Received("BANKNIFTY", At.AddSeconds(31));
+        Assert.True(pulse.Read(date, true).HasStalledMarket(At.AddSeconds(31)));
+        pulse.Received("SENSEX", At.AddSeconds(31));
+        Assert.False(pulse.Read(date, true).HasStalledMarket(At.AddSeconds(31)));
+        pulse.Stage("Recording"); pulse.Failed("TimeoutException"); pulse.Starting(date);
+        Assert.Equal("Recording: TimeoutException", pulse.Read(date, true).LastFailure);
+    }
+
+    [Fact]
     public async Task SeparatePriceAndDepthUpdatesProducePersistedTwoSidedSamplesWithoutManufacturingQuotes()
     {
         using var archive = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, directory);

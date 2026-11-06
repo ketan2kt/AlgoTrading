@@ -18,7 +18,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 // requested-contract quotes do not imply a complete counterfactual universe.
 internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<HistoricalQuoteArchive> logger,
     string? directory = null, int capacity = 12500, int maximumReadObservations = 1_000_000,
-    long maximumArchiveBytes = 5L * 1024 * 1024 * 1024) : BackgroundService, IHistoricalQuoteArchive
+    long maximumArchiveBytes = 5L * 1024 * 1024 * 1024, ReplayBlobStorage? cloud = null) : BackgroundService, IHistoricalQuoteArchive
 {
     private readonly string root = directory ?? Path.Combine(
         Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory,
@@ -27,9 +27,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         new BoundedChannelOptions(capacity) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly ConcurrentDictionary<DateOnly, long> dropped = new();
     private readonly ConcurrentDictionary<DateOnly, long> buffered = new();
+    private readonly ConcurrentDictionary<DateOnly, bool> knownGaps = new();
+    private readonly ConcurrentDictionary<DateOnly, DateTimeOffset> persisted = new();
+    private string? failure;
     private readonly List<HistoricalQuoteObservation> pending = [];
     private DateTimeOffset storageCheckedAt = DateTimeOffset.MinValue;
     private bool storageAvailable;
+    private long archiveBytes;
+    private long diskFreeBytes = -1;
     private DateTimeOffset lastResourceSample = DateTimeOffset.MinValue;
     private static readonly Action<ILogger, long, long, double, Exception?> ResourceSample = LoggerMessage.Define<long, long, double>(
         LogLevel.Information, new EventId(6754, "ReplayCaptureResources"),
@@ -48,10 +53,24 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         {
             buffered.AddOrUpdate(date, 0, static (_, count) => Math.Max(0, count - 1));
             dropped.AddOrUpdate(date, 1, static (_, count) => count + 1);
+            knownGaps[date] = true;
+            Volatile.Write(ref failure, "Quote archive queue overflow");
         }
     }
 
-    public void MarkCaptureGap(DateOnly tradingDate) => dropped.AddOrUpdate(tradingDate, 1, static (_, count) => count + 1);
+    public void MarkCaptureGap(DateOnly tradingDate)
+    {
+        dropped.AddOrUpdate(tradingDate, 1, static (_, count) => count + 1);
+        knownGaps[tradingDate] = true;
+    }
+
+    public HistoricalQuoteArchiveHealth ReadHealth(DateOnly tradingDate) => new(
+        buffered.GetValueOrDefault(tradingDate), knownGaps.GetValueOrDefault(tradingDate),
+        persisted.TryGetValue(tradingDate, out var at) ? at : null, Volatile.Read(ref failure))
+    {
+        ArchiveBytes = Interlocked.Read(ref archiveBytes), ArchiveLimitBytes = maximumArchiveBytes,
+        DiskFreeBytes = Interlocked.Read(ref diskFreeBytes) is >= 0 and var free ? free : null
+    };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -72,6 +91,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
+                Volatile.Write(ref failure, "Quote archive write failed: " + exception.GetType().Name);
                 WriteFailed(logger, exception);
                 await Task.Delay(TimeSpan.FromSeconds(2), clock, stoppingToken);
             }
@@ -86,6 +106,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         {
             var bytes = Directory.EnumerateFiles(root, "*.ndjson*").Sum(path => new FileInfo(path).Length);
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(root))!);
+            Interlocked.Exchange(ref archiveBytes, bytes);
+            Interlocked.Exchange(ref diskFreeBytes, drive.IsReady ? drive.AvailableFreeSpace : -1);
             storageAvailable = bytes < maximumArchiveBytes && (!drive.IsReady || drive.AvailableFreeSpace >= 512L * 1024 * 1024);
             storageCheckedAt = clock.GetUtcNow();
             if (pending.Count > 0 && storageCheckedAt - lastResourceSample >= TimeSpan.FromMinutes(5))
@@ -101,26 +123,43 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         {
             if (!storageAvailable)
             {
+                knownGaps[date] = true;
+                Volatile.Write(ref failure, "Quote archive storage limit / insufficient disk space");
                 // Preserve existing history; never fill the application disk
                 // or retry an unlimited research backlog into the live host.
                 await File.WriteAllTextAsync(Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".capture-gap"),
                     "Research quote storage capacity reached.", token);
                 continue;
             }
-            var lines = pending.Where(value => LocalDate(value.ReceivedAtUtc) == date)
-                .Select(value => JsonSerializer.Serialize(new ArchiveLine(value, 0))).ToList();
             var loss = gaps.FirstOrDefault(value => value.Key == date).Value;
-            if (loss > 0) lines.Add(JsonSerializer.Serialize(new ArchiveLine(null, loss)));
-            // A leading newline resynchronises after an interrupted partial write.
-            var hour = pending.Where(value => LocalDate(value.ReceivedAtUtc) == date)
-                .Select(value => value.ReceivedAtUtc.Hour).DefaultIfEmpty(0).Min();
-            var path = Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) +
-                "-" + hour.ToString("D2", CultureInfo.InvariantCulture) + ".ndjson.gz");
-            await using var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read,
-                bufferSize: 65536, useAsync: true);
-            await using var gzip = new GZipStream(file, CompressionLevel.Fastest);
-            var bytes = Encoding.UTF8.GetBytes("\n" + string.Join('\n', lines) + "\n");
-            await gzip.WriteAsync(bytes, token);
+            // Partition by receipt minute, including batches spanning a boundary.
+            // A full 1,000-instrument session must not create hourly members
+            // exceeding the reader's compressed/decompressed shard safety limits.
+            var shards = pending.Where(value => LocalDate(value.ReceivedAtUtc) == date)
+                .GroupBy(value => value.ReceivedAtUtc.UtcDateTime.ToString("HH-mm", CultureInfo.InvariantCulture))
+                .ToDictionary(group => group.Key,
+                    group => group.Select(value => JsonSerializer.Serialize(new ArchiveLine(value, 0))).ToList());
+            if (loss > 0)
+            {
+                if (!shards.TryGetValue("gaps", out var lines)) shards["gaps"] = lines = [];
+                lines.Add(JsonSerializer.Serialize(new ArchiveLine(null, loss)));
+            }
+            foreach (var shard in shards)
+            {
+                var path = Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) +
+                    "-" + shard.Key + ".ndjson.gz");
+                await using var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read,
+                    bufferSize: 65536, useAsync: true);
+                await using var gzip = new GZipStream(file, CompressionLevel.Fastest, leaveOpen: true);
+                // A leading newline resynchronises after an interrupted partial write.
+                var bytes = Encoding.UTF8.GetBytes("\n" + string.Join('\n', shard.Value) + "\n");
+                await gzip.WriteAsync(bytes, token);
+                // Dispose the compressed member before reporting a durable receipt.
+                await gzip.DisposeAsync();
+                await file.FlushAsync(token);
+            }
+            persisted[date] = clock.GetUtcNow();
+            Volatile.Write(ref failure, null);
         }
         foreach (var gap in gaps) dropped.AddOrUpdate(gap.Key, 0, (_, count) => Math.Max(0, count - gap.Value));
         foreach (var group in pending.GroupBy(value => LocalDate(value.ReceivedAtUtc)))
@@ -132,10 +171,17 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         ReadCoreAsync(tradingDate, null, cancellationToken);
 
     public async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly date, string market, string exchange,
-        IReadOnlyDictionary<string, string> symbols, DateTimeOffset start, DateTimeOffset end, CancellationToken token)
+        IReadOnlyDictionary<string, string> symbols, DateTimeOffset start, DateTimeOffset end, CancellationToken token,
+        bool streamingOnly = false)
     {
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY") || exchange is not ("NSE" or "BSE"))
             throw new ArgumentException("Unsupported research market.");
+        if (streamingOnly && cloud?.Enabled == true)
+        {
+            await cloud.HydrateAsync("quotes", date, token);
+            using var remote = new HistoricalQuoteArchive(clock, logger, Path.Combine(cloud.CacheRoot, "quotes"));
+            return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token, streamingOnly: true);
+        }
         if (!Directory.Exists(root)) return new([], true);
         var gaps = false;
         var result = await FileHistoricalReplayQuotePath.BuildAsync(Path.Combine(root, "replay-paths"), ProjectAsync(token), token);
@@ -144,6 +190,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
             await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken)){
+                if (streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
                     value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
                 yield return HistoricalQuoteProjection.ToReplay(value, symbol);

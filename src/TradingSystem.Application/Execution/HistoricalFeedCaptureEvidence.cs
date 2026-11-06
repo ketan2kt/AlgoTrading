@@ -5,6 +5,8 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
     string UniverseFingerprint, int SampleSeconds, bool HasGaps,
     IReadOnlyList<HistoricalFeedInstrument> Instruments)
 {
+    public string UniverseScope { get; init; } = "FullSelectedExpiry";
+    public DateTimeOffset? LastCheckpointAtUtc { get; init; }
     public bool SensexPriorThesisStateCaptured { get; init; }
     public PersistentDirectionalThesisV1? PriorSensexThesis { get; init; }
     public SessionPolicyReceipt? PolicyReceipt { get; init; }
@@ -19,7 +21,8 @@ public static class HistoricalFeedCaptureEvidence
         manifest.CompletedAtUtc >= end && manifest.Instruments.Count is > 0 and <= 1000;
 
     public static bool CoversNormalUniverse(HistoricalFeedCaptureManifest manifest, string market,
-        IReadOnlyList<NiftyOptionContractCandidate> contracts, DateOnly tradingDate)
+        IReadOnlyList<NiftyOptionContractCandidate> contracts, DateOnly tradingDate,
+        IReadOnlyList<HistoricalReplayBar>? sessionBars = null)
     {
         var eligible = contracts.Where(value => value.ExpiryDate > tradingDate).ToArray();
         if (eligible.Length == 0) return false;
@@ -29,6 +32,20 @@ public static class HistoricalFeedCaptureEvidence
         var captured = manifest.Instruments.Where(value => value.Market == market &&
                 value.Type is TradingSystem.Domain.Trading.InstrumentType.CallOption or TradingSystem.Domain.Trading.InstrumentType.PutOption)
             .OrderBy(value => value.TradingSymbol, StringComparer.Ordinal).ToArray();
+        if (manifest.UniverseScope == "PreSessionStrikeBand")
+        {
+            if (captured.Length == 0 || sessionBars is null) return false;
+            var bars = sessionBars.Where(bar => bar.Symbol == market &&
+                DateOnly.FromDateTime(bar.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).DateTime) == tradingDate).ToArray();
+            if (bars.Length == 0 || captured.Any(value => value.StrikePrice is null)) return false;
+            var lower = captured.Min(value => value.StrikePrice!.Value);
+            var upper = captured.Max(value => value.StrikePrice!.Value);
+            // Require a guard strike on each side of the entire observed path.
+            // Never certify a session that moved outside the preselected band.
+            if (bars.Min(value => value.Low) <= lower || bars.Max(value => value.High) >= upper) return false;
+            expected = expected.Where(value => value.StrikePrice >= lower && value.StrikePrice <= upper).ToArray();
+        }
+        else if (manifest.UniverseScope != "FullSelectedExpiry") return false;
         return expected.Length == captured.Length && expected.Zip(captured).All(pair =>
             pair.First.TradingSymbol == pair.Second.TradingSymbol && pair.First.Type == pair.Second.Type &&
             pair.First.ExpiryDate == pair.Second.ExpiryDate && pair.First.StrikePrice == pair.Second.StrikePrice &&
