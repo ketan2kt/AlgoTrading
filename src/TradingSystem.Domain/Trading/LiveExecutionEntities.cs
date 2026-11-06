@@ -146,9 +146,22 @@ public sealed class LiveExecutionIntent : MutableEntity
 
     public void BeginScaleAction(string phase)
     {
-        if (Status != "Protected" || phase is not ("PartialSubmitting" or "AddOnSubmitting"))
+        if (Status != "Protected" || phase is not ("PartialProtectionResizing" or "PartialSubmitting" or "AddOnSubmitting"))
             throw new InvalidOperationException("Invalid live scale action.");
         Status = phase;
+    }
+
+    public void BeginPartialSubmission()
+    {
+        if (Status != "PartialProtectionResizing") throw new InvalidOperationException("Partial protection was not reserved.");
+        Status = "PartialSubmitting";
+    }
+
+    public void RecoverUnsentPartial()
+    {
+        if (Status is not ("PartialProtectionResizing" or "PartialSubmitting"))
+            throw new InvalidOperationException("No partial preparation to recover.");
+        Status = "PartialProtectionResizing";
     }
 
     public void ResidualProtected(string id, DateTimeOffset atUtc)

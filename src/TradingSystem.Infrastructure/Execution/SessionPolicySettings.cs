@@ -23,18 +23,21 @@ public sealed class SessionPolicySettings(ITradingLotConfigurationService lots, 
             value.MaximumDailyLoss, TimeOnly.ParseExact(value.EntryWindowStart, "HH:mm"),
             TimeOnly.ParseExact(value.EntryCutoff, "HH:mm"), TimeOnly.ParseExact(value.ForcedExit, "HH:mm"),
             feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, value.SelectiveHedgingEnabled,
-            value.HedgeMinimumAtrPercent, value.HedgeMinimumRelativeFuturesVolume, value.HedgeMinimumSignalConfidence);
+            value.HedgeMinimumAtrPercent, value.HedgeMinimumRelativeFuturesVolume, value.HedgeMinimumSignalConfidence,
+            value.EnforceDailyLossLimit);
         var exits = new HistoricalNiftyExitSettings(admission.ForcedExitTime, value.BreakEvenEnabled,
             value.TrailingStopEnabled, value.PartialProfitEnabled, value.TargetExtensionEnabled,
             value.TargetExtensionMinimumConfidence, value.UnderlyingTrendInvalidationEnabled,
             value.MinimumReversalStructureStrength, value.RequiredReversalEvidenceCount,
             value.ProtectProfitableConfirmedReversals, value.ReversalProfitLockFraction,
-            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds);
+            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds,
+            value.DifferentiatedRunnerEnabled);
         var marketExits = new HistoricalMarketOptionExitSettings(new TimeOnly(15, 15),
             value.PartialProfitEnabled, value.TargetExtensionEnabled, value.UnderlyingTrendInvalidationEnabled,
             value.MinimumReversalStructureStrength, value.RequiredReversalEvidenceCount,
             value.ProtectProfitableConfirmedReversals, value.ReversalProfitLockFraction,
-            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds);
+            feed.MaximumAgeSeconds, feed.MaximumAgeSeconds, feed.CandleIntervalSeconds,
+            value.DifferentiatedRunnerEnabled);
         return new HistoricalNormalPolicyConfiguration(feed.CandleIntervalSeconds,
             value.MinimumSignalCandles, value.MinimumFuturesConfirmationCandles,
             TimeOnly.ParseExact(value.OpeningRangeEnd, "HH:mm"), sizes.NiftyLots, sizes.BankNiftyLots,

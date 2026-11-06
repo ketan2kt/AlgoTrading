@@ -10,6 +10,7 @@ public sealed record UnderlyingTrendInvalidationResult(
     SessionBehaviour Behaviour = SessionBehaviour.Unknown)
 {
     public bool DirectionAligned { get; init; }
+    public bool RunnerStructureIntact { get; init; }
 }
 
 public enum SessionBehaviour
@@ -88,8 +89,20 @@ public static class UnderlyingTrendInvalidationPolicy
         var confirmed = evidence.Count >= evidenceRequired && persistent && swingBroken &&
                         (behaviour == SessionBehaviour.Trending || oppositeStructure);
         evidence.Add($"Session behaviour: {behaviour}.");
+        var runnerBars = session.TakeLast(21).ToArray();
+        var interval = runnerBars.Length > 1 ? runnerBars[1].OpenTimeUtc - runnerBars[0].OpenTimeUtc : TimeSpan.Zero;
+        var continuous = runnerBars.Length == 21 && interval.TotalSeconds is 60 or 300 &&
+            runnerBars.Zip(runnerBars.Skip(1)).All(pair => pair.Second.OpenTimeUtc - pair.First.OpenTimeUtc == interval);
         return new(confirmed, Math.Min(1m, (evidence.Count - 1) / 4m), evidence, behaviour)
         {
+            // A banked runner may dip below EMA9 during a normal pullback.
+            // It still needs aligned EMAs, the EMA21 side, a recent trending
+            // structure, contiguous observations and no confirmed reversal.
+            RunnerStructureIntact = continuous && !confirmed &&
+                ClassifySession(runnerBars, fastEma, slowEma) == SessionBehaviour.Trending &&
+                (originalUnderlyingDirection == Direction.Buy
+                    ? fastEma > slowEma && latest.Close >= slowEma
+                    : fastEma < slowEma && latest.Close <= slowEma),
             DirectionAligned = originalUnderlyingDirection == Direction.Buy
                 ? fastEma > slowEma && latest.Close >= fastEma
                 : fastEma < slowEma && latest.Close <= fastEma

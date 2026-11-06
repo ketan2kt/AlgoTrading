@@ -78,13 +78,15 @@ public static class NiftyOptionAdmissionPolicy
         if (!professional.Permitted)
             return new(pricing, protective.StopLoss, protective.Target,
                 professional, null);
-        var risk = PaperPortfolioRiskPolicy.EvaluateUncappedPaper(
+        var risk = PaperPortfolioRiskPolicy.Evaluate(
             input.PortfolioContext with
             {
                 EntryPrice = pricing.EntryPrice,
                 StopLoss = protective.StopLoss,
                 LotSize = input.LotSize,
-                MaximumLots = input.ConfiguredLots
+                MaximumLots = input.ConfiguredLots,
+                MaximumRiskPerTrade = Math.Max(0m, pricing.EntryPrice - protective.StopLoss) *
+                    input.LotSize * input.ConfiguredLots
             });
         risk = risk with { FinalTarget = protective.Target };
         if (risk.Approved)
@@ -98,7 +100,7 @@ public static class NiftyOptionAdmissionPolicy
                     {
                         Approved = false,
                         ApprovedQuantity = 0, RiskAmount = 0m, CapitalExposure = 0m,
-                        RejectionReasons = ["One complete lot exceeds the cost-inclusive ₹5,000 planned-risk budget."]
+                        RejectionReasons = ["Selected lots or option stop geometry are invalid."]
                     });
             risk = risk with
             {

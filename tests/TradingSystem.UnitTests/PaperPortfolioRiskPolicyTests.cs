@@ -5,26 +5,26 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperPortfolioRiskPolicyTests
 {
     [Fact]
-    public void UncappedPaperUsesSavedLotsDespiteLossCapitalAndPositionLimits()
+    public void SavedLotMaximumCannotBypassLossCapitalAndPositionLimits()
     {
-        var result = PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+        var result = PaperPortfolioRiskPolicy.Evaluate(Valid() with
         {
             MaximumLots = 10, LotSize = 65, EntryPrice = 100m, StopLoss = 80m,
             MaximumRiskPerTrade = 5000m, MaximumPortfolioExposure = 1000m,
             ExistingCapitalExposure = 200000m, DailyRealisedPnl = -20000m,
             DailyUnrealisedPnl = -10000m, OpenPositions = 20, MaximumOpenPositions = 1
         });
-        Assert.True(result.Approved);
-        Assert.Equal(650, result.ApprovedQuantity);
-        Assert.Equal(13000m, result.RiskAmount);
+        Assert.False(result.Approved);
+        Assert.Equal(0, result.ApprovedQuantity);
+        Assert.Equal(0m, result.RiskAmount);
     }
 
     [Fact]
-    public void UncappedPaperStillHonoursEmergencyStopAndFreshData()
+    public void PortfolioGateHonoursEmergencyStopAndFreshData()
     {
-        Assert.False(PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+        Assert.False(PaperPortfolioRiskPolicy.Evaluate(Valid() with
             { KillSwitchActive = true }).Approved);
-        Assert.False(PaperPortfolioRiskPolicy.EvaluateUncappedPaper(Valid() with
+        Assert.False(PaperPortfolioRiskPolicy.Evaluate(Valid() with
             { MarketDataFresh = false }).Approved);
     }
 

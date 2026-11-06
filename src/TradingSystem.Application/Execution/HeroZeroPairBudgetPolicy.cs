@@ -10,7 +10,8 @@ public static class HeroZeroPairBudgetPolicy
     public static HeroZeroPairBudgetDecision Size(decimal callPremium, decimal putPremium,
         int callLotSize, int putLotSize, int maximumLots)
     {
-        const decimal budget = OptionRiskBudgetPolicy.MaximumPlannedLoss;
+        // Separate specialty-pair debit budget; not the ordinary option sizing rule.
+        const decimal budget = 5000m;
         if (callPremium <= 0m || putPremium <= 0m || callLotSize <= 0 || putLotSize <= 0 || maximumLots <= 0)
             return new(0, 0m, 0m, budget);
         var low = 0;

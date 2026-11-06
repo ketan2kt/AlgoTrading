@@ -1,0 +1,15 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:46.4737106+00:00",
+  "market": "sensex", "from": "2026-10-30", "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 8, "historicallyRemoved": 0, "historicallyRetained": 8,
+  "sessions": [{"Date": "2026-10-30", "RegularEntries": 8}],
+  "strategyBreakdown": [
+    {"strategy": "PaperOnly|persistent-directional-thesis-v1|sensex", "count": 4, "removed": false},
+    {"strategy": "Research|Sensex directional pullback participation", "count": 3, "removed": false},
+    {"strategy": "Research|Sensex range-edge rejection", "count": 1, "removed": false}
+  ],
+  "reusedEvidenceFrom": "session-evidence-release-sensex.json",
+  "limitation": "Retained diagnostics reused, not a new production query. No entry path removed. User-approved ordinary sizing uses selected lots instead of fixed5000 risk cap. Banked runner protection changes only normal positions with confirmed structure. Hero Zero debit budget and specialty rules unchanged. These historical counts do not prove replay eligibility or profitability."
+}

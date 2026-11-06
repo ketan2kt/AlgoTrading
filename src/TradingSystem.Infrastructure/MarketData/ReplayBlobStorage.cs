@@ -32,6 +32,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     private readonly string keyDirectory;
     private string? keyRingHash;
     private readonly SemaphoreSlim hydrateGate = new(1, 1);
+    private readonly ReplayQuoteCacheBudget quoteCache;
     private readonly Dictionary<string, (long Length, DateTime Modified)> uploaded = new(StringComparer.Ordinal);
     internal readonly string Root;
     public string CacheRoot => Path.Combine(Root, "remote");
@@ -71,6 +72,8 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         var configuredKeys = configuration["DataProtection:KeysPath"];
         keyDirectory = string.IsNullOrWhiteSpace(configuredKeys) ? Path.Combine(environment.ContentRootPath, ".data-protection-keys") : configuredKeys;
         Root = Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory, "data", "historical-replay");
+        quoteCache = new ReplayQuoteCacheBudget(Path.Combine(CacheRoot, "quotes"),
+            configuration.GetValue<long?>("ReplayStorage:MaximumQuoteCacheBytes") ?? 3L * 1024 * 1024 * 1024);
         recorder = configuration["ApplicationRole"] == "ReplayRecorder";
         var endpoint = configuration["ReplayStorage:ContainerUri"];
         if (!string.IsNullOrWhiteSpace(endpoint))
@@ -261,15 +264,23 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             parts[2] is "manifest.json" or "TradingSystem.Application.dll" or "TradingSystem.Domain.dll";
     }
 
+    public IDisposable Pin(DateOnly tradingDate) => quoteCache.Pin(tradingDate);
+
     public async Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token)
     {
         var date = tradingDate;
         if (container is null) return;
         if (category is not ("quotes" or "feed" or "policies") || category != "policies" && date is null)
             throw new ArgumentException("A bounded archive category/date is required.");
+        using var pinned = date is { } requested ? Pin(requested) : null;
         await hydrateGate.WaitAsync(token);
         try
         {
+            if (category == "quotes")
+            {
+                var disk = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(CacheRoot))!);
+                quoteCache.Reserve(0, disk.IsReady ? disk.AvailableFreeSpace : -1, 1024L * 1024 * 1024);
+            }
             var prefix = category + "/" + date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             await foreach (var item in container.GetBlobsAsync(BlobTraits.Metadata, BlobStates.None, prefix: prefix, cancellationToken: token))
             {
@@ -280,10 +291,16 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                 if (File.Exists(path) && new FileInfo(path).Length == item.Properties.ContentLength)
                 {
                     await using var existing = File.OpenRead(path);
-                    if (Convert.ToHexString(await SHA256.HashDataAsync(existing, token)) == hash) continue;
+                    if (Convert.ToHexString(await SHA256.HashDataAsync(existing, token)) == hash)
+                    {
+                        File.SetLastAccessTimeUtc(path, clock.GetUtcNow().UtcDateTime);
+                        continue;
+                    }
                 }
                 var pending = path + ".pending";
                 var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!);
+                if (category == "quotes") quoteCache.Reserve(item.Properties.ContentLength ?? 0,
+                    drive.IsReady ? drive.AvailableFreeSpace : -1, 1024L * 1024 * 1024);
                 if (drive.IsReady && drive.AvailableFreeSpace < (item.Properties.ContentLength ?? 0) + 1024L * 1024 * 1024)
                     throw new IOException("Replay cache needs additional free space; cloud history is retained.");
                 try
@@ -294,6 +311,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                         if (Convert.ToHexString(await SHA256.HashDataAsync(input, token)) != hash)
                             throw new InvalidDataException("Replay cloud artifact checksum mismatch.");
                     File.Move(pending, path, overwrite: true);
+                    File.SetLastAccessTimeUtc(path, clock.GetUtcNow().UtcDateTime);
                 }
                 finally { if (File.Exists(pending)) File.Delete(pending); }
             }

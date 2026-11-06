@@ -26,12 +26,13 @@ public static class MarketOptionPositionPolicy
 
     public static decimal ProtectedStop(Direction direction, decimal entry,
         decimal initialRisk, decimal favourablePrice, decimal existingStop,
-        int remainingQuantity, ProfessionalExitPlan plan, string exchangeCode = "NSE")
+        int remainingQuantity, ProfessionalExitPlan plan, string exchangeCode = "NSE",
+        bool differentiatedRunner = false)
     {
         var initialStop = direction == Direction.Buy ? entry - initialRisk : entry + initialRisk;
         var stop = PaperProtectiveStopPolicy.Calculate(direction, entry, initialStop,
             favourablePrice, plan.BreakEvenTriggerR, plan.TrailDistanceR,
-            plan.ProfitLockTriggerR, plan.ProfitLockR);
+            plan.ProfitLockTriggerR, plan.ProfitLockR, differentiatedRunner);
         var gain = direction == Direction.Buy ? favourablePrice - entry : entry - favourablePrice;
         if (gain >= initialRisk * plan.BreakEvenTriggerR)
         {

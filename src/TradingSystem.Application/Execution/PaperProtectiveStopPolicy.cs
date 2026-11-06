@@ -16,7 +16,7 @@ public static class PaperProtectiveStopPolicy
     public static decimal CalculateNetProtected(Direction direction, decimal entry,
         decimal initialStop, decimal favourable, ProfessionalExitPlan plan,
         bool breakEvenEnabled, bool trailingEnabled, int costQuantity,
-        int protectionQuantity, string exchangeCode)
+        int protectionQuantity, string exchangeCode, bool differentiatedRunner = false)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(costQuantity);
@@ -26,7 +26,7 @@ public static class PaperProtectiveStopPolicy
             stop = Calculate(direction, entry, initialStop, favourable,
                 breakEvenEnabled ? plan.BreakEvenTriggerR : decimal.MaxValue,
                 trailingEnabled ? plan.TrailDistanceR : decimal.MaxValue,
-                plan.ProfitLockTriggerR, plan.ProfitLockR);
+                plan.ProfitLockTriggerR, plan.ProfitLockR, differentiatedRunner);
         var risk = Math.Abs(entry - initialStop);
         if (risk <= 0m) throw new ArgumentOutOfRangeException(nameof(initialStop));
         var favourableMove = direction == Direction.Buy ? favourable - entry :
@@ -73,7 +73,8 @@ public static class PaperProtectiveStopPolicy
 
     public static decimal Calculate(Direction direction, decimal entry, decimal initialStop,
         decimal highWater, decimal breakEvenTriggerR, decimal trailingDistanceR,
-        decimal profitLockTriggerR = decimal.MaxValue, decimal profitLockR = 0m)
+        decimal profitLockTriggerR = decimal.MaxValue, decimal profitLockR = 0m,
+        bool differentiatedRunner = false)
     {
         var risk = Math.Abs(entry - initialStop);
         if (risk <= 0) throw new ArgumentOutOfRangeException(nameof(initialStop));
@@ -87,8 +88,9 @@ public static class PaperProtectiveStopPolicy
             if (profitLockTriggerR != decimal.MaxValue &&
                 highWater >= entry + risk * profitLockTriggerR)
                 result = Math.Max(result, entry + Math.Max(risk * profitLockR,
-                    (highWater - entry) * PeakProfitLockFraction((highWater - entry) / risk)));
-            if (highWater >= entry + risk * (breakEvenTriggerR + trailingDistanceR))
+                    (highWater - entry) * (differentiatedRunner ? DifferentiatedRunnerPolicy.PeakGainLockFraction
+                        : PeakProfitLockFraction((highWater - entry) / risk))));
+            if (!differentiatedRunner && highWater >= entry + risk * (breakEvenTriggerR + trailingDistanceR))
                 result = Math.Max(result, highWater - risk * trailingDistanceR);
             return result;
         }
@@ -97,8 +99,9 @@ public static class PaperProtectiveStopPolicy
         if (profitLockTriggerR != decimal.MaxValue &&
             highWater <= entry - risk * profitLockTriggerR)
             resultForShort = Math.Min(resultForShort, entry - Math.Max(risk * profitLockR,
-                (entry - highWater) * PeakProfitLockFraction((entry - highWater) / risk)));
-        if (highWater <= entry - risk * (breakEvenTriggerR + trailingDistanceR))
+                (entry - highWater) * (differentiatedRunner ? DifferentiatedRunnerPolicy.PeakGainLockFraction
+                    : PeakProfitLockFraction((entry - highWater) / risk))));
+        if (!differentiatedRunner && highWater <= entry - risk * (breakEvenTriggerR + trailingDistanceR))
             resultForShort = Math.Min(resultForShort, highWater + risk * trailingDistanceR);
         return resultForShort;
     }

@@ -22,4 +22,6 @@ public sealed record NiftyOptionAdmissionSettings(
     bool SelectiveHedgingEnabled,
     decimal HedgeMinimumAtrPercent,
     decimal HedgeMinimumRelativeFuturesVolume,
-    decimal HedgeMinimumSignalConfidence);
+    decimal HedgeMinimumSignalConfidence,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool EnforceDailyLossLimit = false);

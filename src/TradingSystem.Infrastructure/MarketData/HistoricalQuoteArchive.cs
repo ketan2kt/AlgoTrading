@@ -176,6 +176,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     {
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY") || exchange is not ("NSE" or "BSE"))
             throw new ArgumentException("Unsupported research market.");
+        using var pinned = cloud?.Pin(date);
         if (streamingOnly && cloud?.Enabled == true)
         {
             await cloud.HydrateAsync("quotes", date, token);
@@ -229,6 +230,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private async IAsyncEnumerable<HistoricalQuoteObservation> StreamDay(DateOnly date, Action gap,
         [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true)
     {
+            using var pinned = cloud?.Pin(date);
             var remoteAvailable = false;
             if (includeCloud && cloud?.Enabled == true)
             {

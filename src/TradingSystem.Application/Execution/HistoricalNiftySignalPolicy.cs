@@ -32,7 +32,7 @@ public sealed class HistoricalNiftySignalPolicy(
     // quote and risk policies. The discovery-only constructor is not certified.
     public bool ProductionPolicyParityVerified => admissionSettings is not null;
 
-    public string CodeVersion => $"nifty-signal-adapter-v11:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}";
+    public string CodeVersion => $"nifty-signal-adapter-v12:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}";
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         spotSymbol, futuresSymbol, tradingDate, previousClose,
@@ -261,7 +261,7 @@ public sealed class HistoricalNiftySignalPolicy(
                     frame.OpenPositions.Count,
                     admissionSettings.MaximumConcurrentPositions,
                     frame.Controls.NiftyKillSwitch, !frame.Controls.NiftyReconciliationHold, true,
-                    frame.Controls.NiftyDailyLossOverride));
+                    !admissionSettings.EnforceDailyLossLimit || frame.Controls.NiftyDailyLossOverride));
             return [new HistoricalReplayCandidate(contract.TradingSymbol,
                 asOf, strategyId, signal.Confidence,
                 checked(contract.LotSize * lots))
@@ -318,7 +318,7 @@ public sealed class HistoricalNiftySignalPolicy(
             OpenPositions = open.Count,
             KillSwitchActive = frame.Controls.NiftyKillSwitch,
             BrokerReconciled = !frame.Controls.NiftyReconciliationHold,
-            DailyLossLimitOverridden = frame.Controls.NiftyDailyLossOverride
+            DailyLossLimitOverridden = !admissionSettings.EnforceDailyLossLimit || frame.Controls.NiftyDailyLossOverride
         };
         var professional = frozen.ProfessionalContext with
         {

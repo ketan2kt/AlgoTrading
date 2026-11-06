@@ -9,7 +9,7 @@
     </article>
   }
   </div>
-  <p class="execution-help">Normal trades use up to these lots within ₹5,000 planned stop risk including estimated fees. Slippage can exceed that budget. Specialty trades retain their separate sizing. Live switches apply immediately and stay set. OFF blocks new live entries but keeps existing positions managed.</p>
+  <p class="execution-help">Normal-trade risk scales with your lots, premium and stop distance, plus estimated fees—there is no fixed ₹5,000 per-trade cap. Portfolio safeguards still apply; gaps and slippage can increase losses. Specialty trades retain their separate sizing. Live switches apply immediately and stay set. OFF blocks new live entries but keeps existing positions managed.</p>
   <div class="execution-actions">
   <button type="button" class="execution-save" [disabled]="!lots || saving" (click)="save()">{{saving?'Saving…':'Save lot sizes'}}</button>
   @if (!lots && !loadingLots) { <button type="button" (click)="loadLots()">Reload lot sizes</button> }

@@ -18,7 +18,9 @@ public sealed record HistoricalNiftyExitSettings(
     decimal ReversalProfitLockFraction,
     int MaximumOptionQuoteAgeSeconds,
     int MaximumUnderlyingQuoteAgeSeconds,
-    int CandleIntervalSeconds);
+    int CandleIntervalSeconds,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool DifferentiatedRunnerEnabled = false);
 
 // Replays the production's pure Nifty stop, target, confirmed-reversal,
 // failed-setup and partial decisions on timestamped observations. This is not
@@ -30,7 +32,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v9";
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v10";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
@@ -52,8 +54,9 @@ public sealed class HistoricalNiftyPositionPolicy(
             !NiftyPositions(frame).Any(value => value.Symbol == position.Symbol) ||
             !TryOptionMark(frame, position, out _)) return false;
         var invalidation = Invalidation(frame, position);
-        return ExitPlan(position).ExtendTarget && !invalidation.ShouldExit && invalidation.DirectionAligned &&
-            invalidation.Behaviour == SessionBehaviour.Trending &&
+        return ExitPlan(position).ExtendTarget && !invalidation.ShouldExit &&
+            (invalidation.DirectionAligned && invalidation.Behaviour == SessionBehaviour.Trending ||
+             RunnerEligible(position, invalidation)) &&
             position.SignalConfidence >= settings.TargetExtensionMinimumConfidence;
     }
 
@@ -73,7 +76,8 @@ public sealed class HistoricalNiftyPositionPolicy(
                 position.InitialStopPrice, favourable, plan,
                 settings.BreakEvenEnabled, settings.TrailingStopEnabled,
                 quantity, position.BaseQuantity > 0
-                    ? position.BaseQuantity : quantity, "NSE");
+                    ? position.BaseQuantity : quantity, "NSE",
+                RunnerEligible(position, Invalidation(frame, position)));
             var invalidation = Invalidation(frame, position);
             if (invalidation.ShouldExit && mark > position.EntryPrice &&
                 settings.ProtectProfitableConfirmedReversals)
@@ -167,10 +171,7 @@ public sealed class HistoricalNiftyPositionPolicy(
             mark > position.EntryPrice &&
             settings.ProtectProfitableConfirmedReversals;
         var confirmedInvalidation = invalidation.ShouldExit && !reversalProtected;
-        var extendTarget = settings.TargetExtensionEnabled &&
-            plan.ExtendTarget && !confirmedInvalidation && invalidation.DirectionAligned &&
-            invalidation.Behaviour == SessionBehaviour.Trending &&
-            position.SignalConfidence >= settings.TargetExtensionMinimumConfidence;
+        var extendTarget = ShouldExtendTarget(frame, position);
         var failedSetup = false;
         if (TryUnderlyingMark(frame, out var underlyingPrice) &&
             position.UnderlyingDirection is { } direction)
@@ -201,6 +202,13 @@ public sealed class HistoricalNiftyPositionPolicy(
             position.Quantity != position.OriginalQuantity, reason);
         return (reason, partial);
     }
+
+    private bool RunnerEligible(HistoricalReplayOpenPosition position, UnderlyingTrendInvalidationResult invalidation) =>
+        DifferentiatedRunnerPolicy.Eligible(settings.DifferentiatedRunnerEnabled && settings.TrailingStopEnabled &&
+            settings.TargetExtensionEnabled && ExitPlan(position).ExtendTarget &&
+            position.SignalConfidence >= settings.TargetExtensionMinimumConfidence,
+            position.OriginalQuantity, position.Quantity, position.Quantity < position.OriginalQuantity,
+            !invalidation.ShouldExit && invalidation.RunnerStructureIntact);
 
     private UnderlyingTrendInvalidationResult Invalidation(
         HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)

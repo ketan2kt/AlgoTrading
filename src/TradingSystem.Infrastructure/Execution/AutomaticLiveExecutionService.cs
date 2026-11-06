@@ -69,7 +69,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         var blockers = await db.LiveExecutionIntents.Where(value =>
                 value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" ||
                 value.Status == "ResidualStopSubmitting" || value.Status == "ResidualProtected" ||
-                value.Status == "PartialSubmitting" || value.Status == "AddOnSubmitting" || value.Status == "ProtectedScaleMismatch" ||
+                value.Status == "PartialProtectionResizing" || value.Status == "PartialSubmitting" || value.Status == "AddOnSubmitting" || value.Status == "ProtectedScaleMismatch" ||
                 value.Status == "ReconciliationRequired" || value.Status == "EntrySubmitting" ||
                 value.Status == "ProtectionSubmitting" ||
                 (value.Status == "Protected" && value.LastError != null))
@@ -78,7 +78,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             stale.Reject(stale.LastError!, timeProvider.GetUtcNow());
         if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(cancellationToken);
         if (blockers.Any(value => value.Status is "FinalExitPending" or "FinalSellSubmitting" or "ResidualStopSubmitting" or
-                                  "ResidualProtected" or "PartialSubmitting" or "AddOnSubmitting" or "ProtectedScaleMismatch" or
+                                  "ResidualProtected" or "PartialProtectionResizing" or "PartialSubmitting" or "AddOnSubmitting" or "ProtectedScaleMismatch" or
                                   "ReconciliationRequired" or "EntrySubmitting" or "ProtectionSubmitting" ||
                                   value.Status == "Protected" && value.LastError is not null))
         {
@@ -264,13 +264,15 @@ internal sealed partial class AutomaticLiveExecutionService(
     {
         var managed = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch" ||
             value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" || value.Status == "ResidualStopSubmitting" ||
-            value.Status == "ResidualProtected" || value.Status == "AddOnSubmitting" || value.Status == "PartialSubmitting")
+            value.Status == "ResidualProtected" || value.Status == "AddOnSubmitting" || value.Status == "PartialProtectionResizing" || value.Status == "PartialSubmitting")
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
         foreach (var intent in managed)
         {
             try
             {
-                if (intent.Status is "ResidualStopSubmitting" or "ResidualProtected")
+                if (intent.Status == "PartialProtectionResizing")
+                    await RestoreUnsentPartialProtectionAsync(db, intent, cancellationToken);
+                else if (intent.Status is "ResidualStopSubmitting" or "ResidualProtected")
                 {
                     var existing = await broker.GetOrderAsync(Reference("LR", intent.Id), cancellationToken)
                         ?? throw new BrokerOrderOutcomeUnknownException(Reference("LR", intent.Id));
@@ -301,9 +303,11 @@ internal sealed partial class AutomaticLiveExecutionService(
                 // position while the existing one needs operator reconciliation.
                 const string issue = "Paper/live lifecycle update needs broker reconciliation.";
                 if (intent.Status is "FinalExitPending" or "FinalSellSubmitting" or "ResidualStopSubmitting" or
-                    "ResidualProtected" or "PartialSubmitting" or "AddOnSubmitting")
+                    "ResidualProtected" or "PartialProtectionResizing" or "PartialSubmitting" or "AddOnSubmitting")
                 {
-                    if (intent.LastError == issue) continue; // Keep recovering by reference; record the alert only once.
+                    // A recovery attempt may have advanced the durable phase even
+                    // when its error text is unchanged. Never skip that state write.
+                    if (intent.LastError == issue && !db.ChangeTracker.HasChanges()) continue;
                     intent.RecordExitUncertainty(issue);
                 }
                 else intent.RequireReconciliation(issue);
@@ -557,13 +561,14 @@ internal sealed partial class AutomaticLiveExecutionService(
             throw new BrokerOrderOutcomeUnknownException(reference);
         BrokerProtectionSnapshot? reserved = null;
         if (existingAction is null)
-            reserved = await broker.ModifyProtectionAsync(intent.ProtectionId!,
-                intent.FilledQuantity - paperQuantity, intent.StopLoss,
-                cancellationToken);
-        if (intent.Status == "Protected")
         {
-            intent.BeginScaleAction("PartialSubmitting");
-            await db.SaveChangesAsync(cancellationToken);
+            // Persist before reducing protection. A crash in this phase proves
+            // no sell was sent and restart recovery restores the full stop.
+            reserved = await PreparePartialProtectionAsync(intent, paperQuantity,
+                async () => { await db.SaveChangesAsync(cancellationToken); },
+                quantity => broker.ModifyProtectionAsync(intent.ProtectionId!, quantity, intent.StopLoss, cancellationToken),
+                () => RestoreUnsentPartialProtectionAsync(db, intent, cancellationToken));
+            if (reserved is null) return; // Partial skipped; actual position re-protected.
         }
         var action = existingAction is null ? await SubmitPaperActionAsync(intent, instrument, Direction.Sell,
             paperQuantity, paperPrice, reference, cancellationToken) :
@@ -587,6 +592,79 @@ internal sealed partial class AutomaticLiveExecutionService(
             intent.RetainProtectedRemainder("Partial sell filled less than requested; live stop verified on actual remainder.");
         await db.SaveChangesAsync(cancellationToken);
         await RecordScaleOutcomeAsync(db, intent, "PartialExitOutcome", paperQuantity, paperPrice, action, adjusted, reserved, cancellationToken);
+    }
+
+    internal static async Task<BrokerProtectionSnapshot?> PreparePartialProtectionAsync(
+        LiveExecutionIntent intent, int quantity, Func<Task> persist,
+        Func<int, Task<BrokerProtectionSnapshot>> resize, Func<Task> restore)
+    {
+        intent.BeginScaleAction("PartialProtectionResizing");
+        await persist(); // Never modify broker protection if this write fails.
+        try
+        {
+            var reserved = await resize(intent.FilledQuantity - quantity);
+            intent.BeginPartialSubmission();
+            await persist();
+            return reserved;
+        }
+        catch
+        {
+            // This method NEVER sends an exit. Restoration is safe here even if
+            // the resize response or the subsequent database acknowledgement was lost.
+            intent.RecoverUnsentPartial();
+            await restore();
+            return null;
+        }
+    }
+
+    private async Task RestoreUnsentPartialProtectionAsync(TradingDbContext db,
+        LiveExecutionIntent intent, CancellationToken token)
+    {
+        if (intent.Status != "PartialProtectionResizing") throw new InvalidOperationException("Partial recovery phase mismatch.");
+        var reference = Reference("LQ", intent.SourceId);
+        if (await broker.GetOrderAsync(reference, token) is not null)
+            throw new BrokerOrderOutcomeUnknownException(reference);
+        var stop = await broker.GetOrderAsync(Reference("LP", intent.Id), token)
+            ?? throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+        if (stop.BrokerOrderId != intent.ProtectionId)
+            throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+        if (stop.FilledQuantity > 0 || stop.State is OrderState.Cancelled or OrderState.RejectedByBroker)
+        {
+            if (stop.State == OrderState.PartiallyFilled)
+            {
+                await broker.CancelProtectionAsync(intent.ProtectionId!, token);
+                stop = await broker.GetOrderAsync(Reference("LP", intent.Id), token)
+                    ?? throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+            }
+            if (stop.State is not (OrderState.Filled or OrderState.Cancelled or OrderState.RejectedByBroker) ||
+                stop.FilledQuantity < 0 || stop.FilledQuantity > intent.FilledQuantity)
+                throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+            var remaining = intent.FilledQuantity - stop.FilledQuantity;
+            if (await AvailableManagedQuantityAsync(db, intent, token) != remaining)
+                throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+            if (remaining == 0)
+            {
+                intent.Closed(timeProvider.GetUtcNow());
+                await db.SaveChangesAsync(token);
+                return;
+            }
+            var instrument = await db.Instruments.AsNoTracking().SingleAsync(value => value.Id == intent.InstrumentId, token);
+            if (instrument.LotSize <= 0 || remaining % instrument.LotSize != 0)
+                throw new InvalidOperationException("Partial-recovery residual is not a whole lot.");
+            intent.ReserveResidualProtection(remaining);
+            await db.SaveChangesAsync(token);
+            var residual = await broker.CreateProtectionAsync(new(Reference("LR", intent.Id), instrument.Id,
+                instrument.TradingSymbol, instrument.Exchange, remaining, intent.StopLoss), token);
+            await VerifyResidualProtectionAsync(db, intent, residual.BrokerProtectionId, token);
+            return;
+        }
+        if (stop.State != OrderState.BrokerAcknowledged ||
+            await AvailableManagedQuantityAsync(db, intent, token) != intent.FilledQuantity)
+            throw new BrokerOrderOutcomeUnknownException(intent.ProtectionId!);
+        var verified = await broker.ModifyProtectionAsync(intent.ProtectionId!, intent.FilledQuantity, intent.StopLoss, token);
+        intent.RetainProtectedRemainder("Partial preparation interrupted; full live stop restored. Partial skipped; actual exposure remains managed.");
+        await db.SaveChangesAsync(token);
+        await TryRecordLiveEventAsync(db, intent, "PartialPreparationRecovered", new { verifiedStop = verified }, token);
     }
 
     private Task RecordScaleOutcomeAsync(TradingDbContext db, LiveExecutionIntent intent, string name,

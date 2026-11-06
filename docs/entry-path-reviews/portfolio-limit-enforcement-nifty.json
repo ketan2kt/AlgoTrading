@@ -1,0 +1,15 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-04T19:15:41.1548260+00:00",
+  "market": "nifty",
+  "from": "2026-10-30",
+  "to": "2026-10-30",
+  "removeStrategies": ["NoEntryPathsRemoved"],
+  "historicalRegularEntries": 5,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 5,
+  "sessions": [{"Date": "2026-10-30", "RegularEntries": 5}],
+  "strategyBreakdown": [{"strategy": "NiftyAutomation", "count": 5, "removed": false}],
+  "reusedEvidenceFrom": "session-evidence-release-nifty.json",
+  "limitation": "Reuses the original retained diagnostics, not a new production query. No strategy entry path is removed. Latest user instruction removes the fixed per-trade rupee sizing cap: normal-trade risk now scales with selected lots and stop distance plus costs. Portfolio capital, position-count, freshness, kill and explicitly enabled daily-loss controls remain. Differentiated runners affect only banked normal positions, not entry selection. Counts prove retained historical path usage, not improved performance or future fills."
+}

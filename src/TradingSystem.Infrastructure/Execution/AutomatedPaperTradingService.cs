@@ -488,13 +488,14 @@ internal sealed partial class AutomatedPaperTradingService(
         }
         if (signal is null)
         {
+            var noSignalReasons = strategyEvaluation.FailedConditions;
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "NoSignal", strategyEvaluation.FailedConditions,
+                relativeVolume, regime, "NoSignal", noSignalReasons,
                 null, null, null, cancellationToken, shadowStructure);
             state.Record("Scanning", true,
                 $"Scanning each completed candle across the price-action portfolio. " +
-                $"{string.Join(" ", strategyEvaluation.FailedConditions)} " +
+                $"{string.Join(" ", noSignalReasons)} " +
                 "The no-trade reason is stored for this completed candle.",
                 tradeState.TradesToday, tradeState.RealisedPnl);
             return;
@@ -960,11 +961,23 @@ internal sealed partial class AutomatedPaperTradingService(
             : Math.Min(favourable, persistedFavourable);
         favourable = open.Entry.Direction == Direction.Buy ? Math.Max(favourable, price) : Math.Min(favourable, price);
         favourablePriceBySignal[open.Signal.SignalId] = favourable;
+        var invalidation = options.Value.UnderlyingTrendInvalidationEnabled && underlyingFresh
+            ? await EvaluateUnderlyingInvalidationAsync(services, open, underlyingInstrumentId,
+                sessionStart, sessionEnd, cancellationToken)
+            : new UnderlyingTrendInvalidationResult(false, 0m,
+                underlyingFresh ? ["Underlying trend invalidation is disabled."] :
+                    ["Fresh Nifty data is unavailable; reversal exits fail closed."]);
+        var differentiatedRunner = DifferentiatedRunnerPolicy.Eligible(
+            options.Value.DifferentiatedRunnerEnabled && options.Value.TrailingStopEnabled,
+            open.TotalQuantity, open.RemainingQuantity, open.PartialExit is { FilledQuantity: > 0 },
+            options.Value.TargetExtensionEnabled && exitPlan.ExtendTarget && underlyingFresh &&
+            !invalidation.ShouldExit && invalidation.RunnerStructureIntact &&
+            open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence);
         var effectiveStop = PaperProtectiveStopPolicy.CalculateNetProtected(
             open.Entry.Direction, entryPrice, open.StopLoss, favourable,
             exitPlan, options.Value.BreakEvenEnabled,
             options.Value.TrailingStopEnabled, open.TotalQuantity,
-            open.Entry.FilledQuantity, "NSE");
+            open.Entry.FilledQuantity, "NSE", differentiatedRunner);
         var initialRiskPerUnit = Math.Abs(entryPrice - open.StopLoss);
         var favourableMove = (favourable - entryPrice) * multiplier;
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
@@ -972,14 +985,7 @@ internal sealed partial class AutomatedPaperTradingService(
             price, effectiveStop, peakPoint?.OptionPrice ?? price,
             peakPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(),
             worstPoint?.OptionPrice ?? price,
-            worstPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(), cancellationToken);
-
-        var invalidation = options.Value.UnderlyingTrendInvalidationEnabled && underlyingFresh
-            ? await EvaluateUnderlyingInvalidationAsync(services, open, underlyingInstrumentId,
-                sessionStart, sessionEnd, cancellationToken)
-            : new UnderlyingTrendInvalidationResult(false, 0m,
-                underlyingFresh ? ["Underlying trend invalidation is disabled."] :
-                    ["Fresh Nifty data is unavailable; reversal exits fail closed."]);
+            worstPoint?.ObservedAtUtc ?? timeProvider.GetUtcNow(), differentiatedRunner, cancellationToken);
 
         var reversalProtected = invalidation.ShouldExit && unrealised > 0 &&
                                 options.Value.ProtectProfitableConfirmedReversals;
@@ -1002,8 +1008,8 @@ internal sealed partial class AutomatedPaperTradingService(
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
                                  exitPlan.ExtendTarget &&
                                  !invalidation.ShouldExit &&
-                                 invalidation.DirectionAligned &&
-                                 invalidation.Behaviour == SessionBehaviour.Trending &&
+                                 (differentiatedRunner || invalidation.DirectionAligned &&
+                                  invalidation.Behaviour == SessionBehaviour.Trending) &&
                                  open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence;
         var targetReachedForAddOn = open.Entry.Direction == Direction.Buy
             ? price >= open.Target : price <= open.Target;
@@ -1312,7 +1318,7 @@ internal sealed partial class AutomatedPaperTradingService(
     private async Task PersistProfitProtectionSnapshotAsync(TradingDbContext db, OpenTrade open,
         Guid underlyingInstrumentId, decimal currentPrice, decimal effectiveStop,
         decimal peakPrice, DateTimeOffset peakAtUtc, decimal worstPrice,
-        DateTimeOffset worstAtUtc, CancellationToken cancellationToken)
+        DateTimeOffset worstAtUtc, bool differentiatedRunner, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         var minute = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0,
@@ -1345,6 +1351,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 initialStop = open.StopLoss,
                 effectiveStop,
                 protectionStage = stage,
+                differentiatedRunner,
                 favourableR,
                 peakPrice,
                 peakGrossPnl,

@@ -8,7 +8,9 @@ public sealed record HistoricalMarketOptionExitSettings(TimeOnly ForcedExit,
     bool PartialEnabled, bool TargetExtensionEnabled, bool InvalidationEnabled,
     decimal MinimumReversalStrength, int RequiredReversalEvidence,
     bool ProtectProfitableReversals, decimal ReversalLockFraction,
-    int MaximumOptionAgeSeconds, int MaximumUnderlyingAgeSeconds, int CandleIntervalSeconds);
+    int MaximumOptionAgeSeconds, int MaximumUnderlyingAgeSeconds, int CandleIntervalSeconds,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool DifferentiatedRunnerEnabled = false);
 
 // Offline wrapper around the same normal-session option position policies used
 // by MultiMarketPaperTradingService. LTP drives paper decisions; the runner
@@ -19,7 +21,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v5";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v6";
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -42,7 +44,8 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             var plan = Plan(position);
             var stop = MarketOptionPositionPolicy.ProtectedStop(Direction.Buy,
                 position.EntryPrice, Risk(position), Favourable(position, price),
-                position.StopPrice, position.Quantity, plan, market == "sensex" ? "BSE" : "NSE");
+                position.StopPrice, position.Quantity, plan, market == "sensex" ? "BSE" : "NSE",
+                RunnerEligible(frame, position));
             var reversal = Reversal(frame, position, price, stop);
             if (reversal.Stop > position.StopPrice)
                 updates.Add(new(position.Symbol, frame.Market.AvailableAtUtc, reversal.Stop));
@@ -58,9 +61,9 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         var reversal = Reversal(frame, position, price, position.StopPrice);
         return price > position.StopPrice && !reversal.ShouldExit && !reversal.ProtectProfit &&
             settings.TargetExtensionEnabled && MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
-            MarketOptionPositionPolicy.FreshContinuation(Bars(frame, false), position.UnderlyingDirection!.Value,
+            (RunnerEligible(frame, position) || MarketOptionPositionPolicy.FreshContinuation(Bars(frame, false), position.UnderlyingDirection!.Value,
                 frame.Market.AvailableAtUtc, frame.Market.LatestQuotes[underlyingSymbol].AvailableAtUtc,
-                settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds);
+                settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds));
     }
 
     public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame) =>
@@ -105,17 +108,26 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position,
         decimal price, decimal stop)
     {
-        var invalidation = settings.InvalidationEnabled && TryUnderlying(frame, out _)
-            ? MarketOptionPositionPolicy.Invalidation(Bars(frame, true),
-                position.UnderlyingDirection!.Value, position.EntryAtUtc, frame.Market.AvailableAtUtc,
-                settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds,
-                settings.MinimumReversalStrength, settings.RequiredReversalEvidence)
-            : new UnderlyingTrendInvalidationResult(false, 0m, []);
+        var invalidation = Invalidation(frame, position);
         var contract = contracts.Single(value => value.TradingSymbol == position.Symbol);
         return MarketOptionPositionPolicy.Reversal(market, invalidation, Direction.Buy,
             position.EntryPrice, price, stop, settings.ProtectProfitableReversals,
             settings.ReversalLockFraction, contract.TickSize);
     }
+
+    private bool RunnerEligible(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position) =>
+        DifferentiatedRunnerPolicy.Eligible(settings.DifferentiatedRunnerEnabled && settings.TargetExtensionEnabled &&
+            MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+            position.OriginalQuantity, position.Quantity, position.Quantity < position.OriginalQuantity,
+            Invalidation(frame, position).RunnerStructureIntact);
+
+    private UnderlyingTrendInvalidationResult Invalidation(HistoricalReplayPortfolioFrame frame,
+        HistoricalReplayOpenPosition position) => settings.InvalidationEnabled && TryUnderlying(frame, out _)
+            ? MarketOptionPositionPolicy.Invalidation(Bars(frame, true),
+                position.UnderlyingDirection!.Value, position.EntryAtUtc, frame.Market.AvailableAtUtc,
+                settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds,
+                settings.MinimumReversalStrength, settings.RequiredReversalEvidence)
+            : new UnderlyingTrendInvalidationResult(false, 0m, []);
 
     private IEnumerable<HistoricalReplayOpenPosition> Positions(HistoricalReplayPortfolioFrame frame) =>
         frame.OpenPositions.Where(value => value.Symbol.StartsWith(underlyingSymbol, StringComparison.Ordinal) &&

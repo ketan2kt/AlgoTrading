@@ -713,7 +713,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             if (quantity == 0)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "RiskBudgetRejected",
-                    decision.Confidence, ["One complete lot exceeds the cost-inclusive ₹5,000 planned-risk budget."], cancellationToken);
+                    decision.Confidence, ["Selected lots or option stop geometry are invalid."], cancellationToken);
                 return;
             }
         }
@@ -976,7 +976,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         if (quantity == 0)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "RiskBudgetRejected",
-                decision.Confidence, ["One complete lot exceeds the cost-inclusive ₹5,000 planned-risk budget."], cancellationToken);
+                decision.Confidence, ["Selected lots or option stop geometry are invalid."], cancellationToken);
             return;
         }
         var filledAt = timeProvider.GetUtcNow();
@@ -1041,6 +1041,27 @@ internal sealed partial class MultiMarketPaperTradingService(
             var favourableExtreme = price;
             var trailing = position.StopLoss;
             var previousStop = position.StopLoss;
+            var expectedUnderlyingDirection = market.ExecuteOptions
+                ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
+                : position.Direction;
+            var india = TimeZoneInfo.ConvertTime(observedAt, IndiaTimeZone);
+            var forced = market != TradingMarketCatalog.NaturalGas &&
+                         TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
+            var priorStopHit = position.Direction == Direction.Buy ? price <= previousStop : price >= previousStop;
+            var invalidation = !protectionOnly && !priorStopHit && !forced &&
+                               market is { Code: "sensex" or "bank-nifty" } &&
+                               market.ExecuteOptions && !manualExitRequested &&
+                               options.Value.UnderlyingTrendInvalidationEnabled
+                ? await EvaluateUnderlyingInvalidationAsync(db, position.UnderlyingInstrumentId,
+                    expectedUnderlyingDirection, position.OpenedAtUtc, observedAt, cancellationToken)
+                : new UnderlyingTrendInvalidationResult(false, 0m, []);
+            var differentiatedRunner = DifferentiatedRunnerPolicy.Eligible(
+                options.Value.DifferentiatedRunnerEnabled && !protectionOnly &&
+                !invalidation.ShouldExit && !priorStopHit &&
+                market.Code is "sensex" or "bank-nifty" && options.Value.TargetExtensionEnabled &&
+                MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+                position.Quantity, position.RemainingQuantity, position.PartialExitQuantity > 0,
+                invalidation.RunnerStructureIntact);
             if (market == TradingMarketCatalog.NaturalGas)
             {
                 trailing = NaturalGasMiniPositionPolicy.ApplyTrailingStop(position.Direction,
@@ -1069,22 +1090,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                 favourableExtreme = favourablePrice;
                 trailing = MarketOptionPositionPolicy.ProtectedStop(position.Direction,
                     position.EntryPrice, initialRisk, favourablePrice, position.StopLoss,
-                    position.RemainingQuantity, exitPlan, market.Exchange);
+                    position.RemainingQuantity, exitPlan, market.Exchange, differentiatedRunner);
             }
-            var expectedUnderlyingDirection = market.ExecuteOptions
-                ? instrument.Type == InstrumentType.PutOption ? Direction.Sell : Direction.Buy
-                : position.Direction;
-            var india = TimeZoneInfo.ConvertTime(observedAt, IndiaTimeZone);
-            var forced = market != TradingMarketCatalog.NaturalGas &&
-                         TimeOnly.FromDateTime(india.DateTime) >= market.SessionEnd.AddMinutes(-15);
-            var premiumStopHit = position.Direction == Direction.Buy ? price <= trailing : price >= trailing;
-            var invalidation = !protectionOnly && !premiumStopHit && !forced &&
-                               market is { Code: "sensex" or "bank-nifty" } &&
-                               market.ExecuteOptions && !manualExitRequested &&
-                               options.Value.UnderlyingTrendInvalidationEnabled
-                ? await EvaluateUnderlyingInvalidationAsync(db, position.UnderlyingInstrumentId,
-                    expectedUnderlyingDirection, position.OpenedAtUtc, observedAt, cancellationToken)
-                : new UnderlyingTrendInvalidationResult(false, 0m, []);
             var reversal = ConfirmedReversalResponse(market, invalidation, position.Direction,
                 position.EntryPrice, price, trailing,
                 options.Value.ProtectProfitableConfirmedReversals,
@@ -1130,7 +1137,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                         initialStop = position.Direction == Direction.Buy
                             ? position.EntryPrice - initialRisk : position.EntryPrice + initialRisk,
                         previousStop, stop = position.StopLoss, position.Target,
-                        livePnl, favourableR, protectionStage, observedAtUtc = observedAt })));
+                        livePnl, favourableR, protectionStage, differentiatedRunner, observedAtUtc = observedAt })));
             }
             var stopHit = position.Direction == Direction.Buy ? price <= position.StopLoss : price >= position.StopLoss;
             var targetHit = position.Direction == Direction.Buy ? price >= position.Target : price <= position.Target;
@@ -1139,8 +1146,8 @@ internal sealed partial class MultiMarketPaperTradingService(
                                         !stopHit && !reversalExit && !reversalProtection &&
                                         targetHit && options.Value.TargetExtensionEnabled &&
                                         MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
-                                        await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
-                                            expectedUnderlyingDirection, cancellationToken);
+                                        (differentiatedRunner || await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
+                                            expectedUnderlyingDirection, cancellationToken));
             var failedSetup = false;
             var failedAssessment = new FailedSetupExitDecision(false, initialRisk <= 0m ? 0m :
                 Math.Max(0m, (position.EntryPrice - price) / initialRisk),
@@ -1326,7 +1333,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             .OrderByDescending(value => value.ReceivedAtUtc)
             .Select(value => (DateTimeOffset?)value.ReceivedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
-        if (latestUnderlyingAtUtc is null ||
+        if (latestUnderlyingAtUtc is null || latestUnderlyingAtUtc > observedAtUtc ||
             observedAtUtc - latestUnderlyingAtUtc >
                 TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds))
             return new(false, 0m, ["Fresh underlying data is unavailable; reversal exits fail closed."]);

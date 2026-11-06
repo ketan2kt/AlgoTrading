@@ -6,6 +6,15 @@ namespace TradingSystem.UnitTests;
 
 public sealed class NiftyOptionAdmissionPolicyTests
 {
+    [Fact]
+    public void DailyLossSettingIsCapturedWithoutChangingLegacyDefaultReceiptJson()
+    {
+        var settings = System.Text.Json.JsonSerializer.Deserialize<NiftyOptionAdmissionSettings>("{}")!;
+        Assert.False(settings.EnforceDailyLossLimit);
+        Assert.DoesNotContain("EnforceDailyLossLimit", System.Text.Json.JsonSerializer.Serialize(settings), StringComparison.Ordinal);
+        var json = System.Text.Json.JsonSerializer.Serialize(settings with { EnforceDailyLossLimit = true });
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<NiftyOptionAdmissionSettings>(json)!.EnforceDailyLossLimit);
+    }
     private static readonly DateOnly Day = new(2026, 11, 4);
 
     [Fact]
@@ -16,7 +25,7 @@ public sealed class NiftyOptionAdmissionPolicyTests
         var directPricing = OptionPaperTradePricing.ForPermissiveSimulation(input.Quote);
         var directLevels = OptionPaperTradePricing.ProtectivePrices(
             directPricing.EntryPrice, 10m, 1m, .05m);
-        var directRisk = PaperPortfolioRiskPolicy.EvaluateUncappedPaper(
+        var directRisk = PaperPortfolioRiskPolicy.Evaluate(
             input.PortfolioContext with
             {
                 EntryPrice = directPricing.EntryPrice,
@@ -34,6 +43,25 @@ public sealed class NiftyOptionAdmissionPolicyTests
         Assert.Equal(150, decision.RiskDecision.ApprovedQuantity);
     }
 
+    [Theory]
+    [InlineData("capital")]
+    [InlineData("positions")]
+    [InlineData("loss")]
+    public void ConfiguredPortfolioLimitsCannotBeBypassed(string limit)
+    {
+        var input = Input();
+        var context = limit switch
+        {
+            "capital" => input.PortfolioContext with { MaximumPortfolioExposure = 1000m },
+            "positions" => input.PortfolioContext with { OpenPositions = 8 },
+            _ => input.PortfolioContext with { MaximumDailyLoss = 5000m, DailyRealisedPnl = -5100m }
+        };
+        Assert.False(NiftyOptionAdmissionPolicy.Evaluate(input with { PortfolioContext = context }).Approved);
+        if (limit == "loss")
+            Assert.True(NiftyOptionAdmissionPolicy.Evaluate(input with
+                { PortfolioContext = context with { DailyLossLimitOverridden = true } }).Approved);
+    }
+
     [Fact]
     public void ApprovedLotSettingIsACeilingAndIncludesStopExitCosts()
     {
@@ -44,8 +72,11 @@ public sealed class NiftyOptionAdmissionPolicyTests
             input.LotSize, input.ConfiguredLots, "NSE");
         Assert.Equal(sized.Quantity, decision.RiskDecision!.ApprovedQuantity);
         Assert.Equal(sized.PlannedLoss, decision.RiskDecision.RiskAmount);
-        Assert.True(sized.Quantity < input.LotSize * input.ConfiguredLots);
-        Assert.True(decision.RiskDecision.RiskAmount <= 5000m);
+        Assert.Equal(input.LotSize * input.ConfiguredLots, sized.Quantity);
+        Assert.True(decision.RiskDecision.RiskAmount > 5000m);
+        var legacyCap = NiftyOptionAdmissionPolicy.Evaluate(input with
+            { PortfolioContext = input.PortfolioContext with { MaximumRiskPerTrade = 1m } });
+        Assert.Equal(sized.Quantity, legacyCap.RiskDecision!.ApprovedQuantity);
     }
 
     [Fact]
