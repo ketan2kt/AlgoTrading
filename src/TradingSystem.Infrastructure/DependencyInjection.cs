@@ -160,6 +160,7 @@ public static class DependencyInjection
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
         services.AddSingleton<ReplayBlobStorage>();
+        services.AddSingleton<IReplayArchiveCache>(provider => provider.GetRequiredService<ReplayBlobStorage>());
         services.AddHostedService(provider => provider.GetRequiredService<ReplayBlobStorage>());
         services.AddSingleton<HistoricalQuoteArchive>();
         services.AddSingleton<IHistoricalQuoteArchive>(provider => provider.GetRequiredService<HistoricalQuoteArchive>());

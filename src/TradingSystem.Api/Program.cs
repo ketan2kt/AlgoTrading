@@ -105,18 +105,26 @@ builder.Services
     .AddStandardResilienceHandler();
 
 var recorder = ReplayRecorderHosting.IsRecorder(builder.Configuration);
+if (!recorder)
+    builder.Services.AddHealthChecks().AddCheck<TradingSystem.Infrastructure.MarketData.RecorderPrerequisiteHealthCheck>(
+        "recorder-key-ring", tags: ["recorder-prerequisite"]);
 if (recorder)
 {
     ReplayRecorderHosting.RestrictToRecorder(builder.Services);
     builder.Services.AddHealthChecks().AddCheck<TradingSystem.Infrastructure.MarketData.RecorderStorageHealthCheck>(
         "private-replay-storage", tags: ["ready"]);
+    builder.Services.AddHealthChecks().AddCheck<TradingSystem.Infrastructure.MarketData.RecorderActivationHealthCheck>(
+        "capture-enabled", tags: ["capture-enabled"]);
 }
 var app = builder.Build();
+if (!recorder)
+    app.MapHealthChecks("/health/replay-source", new() { Predicate = check => check.Tags.Contains("recorder-prerequisite") }).AllowAnonymous();
 if (recorder)
 {
     // No controllers, hubs, cookies, trading UI or order endpoints in this host.
     app.MapHealthChecks("/health/live", new() { Predicate = _ => false }).AllowAnonymous();
     app.MapHealthChecks("/health/ready", new() { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
+    app.MapHealthChecks("/health/recorder-active", new() { Predicate = check => check.Tags.Contains("ready") || check.Tags.Contains("capture-enabled") }).AllowAnonymous();
     app.Run();
     return;
 }

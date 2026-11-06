@@ -1,6 +1,24 @@
 # Current handover — 6 November 2026
 
+## System audit and recorder corrective release
+
+User requested end-to-end audit after repeated regressions; separately confirmed permission to publish website + recorder to main after checks. Audit is NOT a certification that every system path is fault-free. No strategy thresholds or live execution code changed in this follow-up.
+
+Confirmed deployment failure: run42244097208 website job succeeded, recorder job failed. Startup logs prove `Website must initialize the shared key ring first` at15:46/15:48UTC. Recorder later started15:50UTC, but workflow failed and never activated it. Read-only Azure inspection: website feed setting absent(default enabled), recorder feed=false, cloud storage configured on both. No silent claim that independent recording is operational.
+
+Corrective changes: dedicated website key-publication health gate before recorder package deployment; post-activation check requires capture-enabled plus DB/blob readiness; cutover failure disables recorder before restoring website capture. Research readiness is separate from trading readiness. Capture-health UI uses local producer until ownership actually switches. Cloud readers preserve local-only historical sessions; trade timelines and market quote readers also consume recorder files with duplicate suppression. New IReplayArchiveCache seam tests actual reader routing without Azure secrets/network. Focused40contract checks passed; workflow actionlint and PowerShell parse passed; additional manifest fallback assertion goes through push CI. Full prior release CI passed; follow-up CI pending.
+
+Other audit findings requiring separate work/decision, NOT claimed fixed:
+- Live partial-exit failure window: AutomaticLiveExecutionService shrinks stop quantity before persisting PartialSubmitting/submitting sell. A failed/ambiguous modification can leave intent ReconciliationRequired with reduced protection; operator reconciliation blocks fresh entries but is not automatic full-quantity protection. Applies all3; existing code, not introduced by recorder changes. Needs durable pre-resize state and failure-injection broker tests before changing live lifecycle.
+- Nifty ordinary admission still calls EvaluateUncappedPaper, bypassing configured daily-loss/portfolio-capital/open-position limits. Existing intentional change909745b(23Oct); newer cost-inclusive5000 initial-entry cap remains enforced. Do not silently replace owner's risk policy; get explicit choice for portfolio/daily limits. Sensex/Bank also have per-entry5000 sizing, not a proven common cross-index portfolio budget.
+- Cloud history does not mean unlimited local replay capacity: downloaded remote cache has1GB reserve but no bounded eviction; recorder spool has5GB cap. Large multi-day cache/storage load remains a capacity concern, not a proved full-session performance pass.
+- Real full-session feed/execution evidence remains unverified. Prior synthetic full-session tests do not establish broker-feed uptime or executable historical prices. Account/exchange behavior cannot be proven by source review.
+
+Reviewed high-risk boundaries: current release workflow/startup/settings; capture subscription cap/lifecycle/metadata/storage routing; archive coverage rejection; shared ordinary entry sizing and exit policies; live discovery, partial/final exits and reconciliation; replay authentication/isolation and existing regression coverage. UI visual/browser behavior and every broker failure interleaving are not exhaustively revalidated by this audit. Preserve unrelated narrator edits/private .analysis files. Do not run a second deployment for these without checking dispatch state.
+
 ## Future-session replay capture — code local; approved infrastructure provisioned
+
+Release57cb7d2c6fa8beb60dad90f0e12de4319b443019 pushed to main; CI42243551063 passed. https://github.com/ketan2kt/AlgoTrading/actions/runs/42244097208 was inspected under the subsequent audit authorization: WEBSITE SUCCEEDED, RECORDER FAILED as detailed above. Local narrator edits/private analysis remain uncommitted and were NOT deployed.
 
 Latest requirement: reliable FUTURE-session replay, no historical recovery or premature completion claim. Ketan approved paid storage/independent recorder, then explicitly said DEPLOY; main corrective batch plus recorder deployment is now authorized. Worktree `.worktree-session-evidence`, branch `codex/instant-index-switch`. Preserve unrelated narrator edits/private `.analysis-*` files. No subagents unless explicitly authorized.
 

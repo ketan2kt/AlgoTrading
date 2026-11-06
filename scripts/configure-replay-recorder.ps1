@@ -47,8 +47,35 @@ try {
     # Website disables its recorder before the independent recorder is enabled.
     Invoke-RestMethod -Method Put -Uri "$baseUri/$website/config/appsettings?api-version=2024-11-01" -Headers $headers `
         -ContentType 'application/json' -Body (@{ properties = $web } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
-    Invoke-RestMethod -Method Put -Uri "$baseUri/$recorder/config/appsettings?api-version=2024-11-01" -Headers $headers `
-        -ContentType 'application/json' -Body (@{ properties = $rec } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+    try {
+        Invoke-RestMethod -Method Put -Uri "$baseUri/$recorder/config/appsettings?api-version=2024-11-01" -Headers $headers `
+            -ContentType 'application/json' -Body (@{ properties = $rec } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+        if ($Activate) {
+            $active = $false
+            for ($attempt = 0; $attempt -lt 36; $attempt++) {
+                try {
+                    $response = Invoke-WebRequest -Uri "https://$recorder.azurewebsites.net/health/recorder-active" -TimeoutSec 10
+                    if ($response.StatusCode -eq 200) { $active = $true; break }
+                } catch { } # Deliberately omit HTTP bodies/settings from logs.
+                Start-Sleep -Seconds 5
+            }
+            if (-not $active) { throw 'Recorder did not become healthy with capture enabled.' }
+        }
+    } catch {
+        if ($Activate) {
+            # Fail safe: confirm recorder disabled BEFORE restoring the website
+            # producer. Never knowingly run competing feeds after failed cutover.
+            $rec['MarketData__HistoricalReplayFeed__Enabled'] = 'false'
+            Invoke-RestMethod -Method Put -Uri "$baseUri/$recorder/config/appsettings?api-version=2024-11-01" -Headers $headers `
+                -ContentType 'application/json' -Body (@{ properties = $rec } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+            $web['MarketData__HistoricalReplayFeed__Enabled'] = 'true'
+            $web['MarketData__HistoricalReplayFeed__AfterMarketBackfillEnabled'] = 'true'
+            Invoke-RestMethod -Method Put -Uri "$baseUri/$website/config/appsettings?api-version=2024-11-01" -Headers $headers `
+                -ContentType 'application/json' -Body (@{ properties = $web } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+            throw 'Recorder cutover failed; recorder disabled and website capture restored. Deployment is NOT complete.'
+        }
+        throw
+    }
     Write-Host $(if ($Activate) { 'Recorder activated; website capture disabled. Verify recorder health before declaring ready.' } else { 'Recorder configuration staged; capture remains disabled until checked packages are deployed.' })
 } finally {
     $managementToken = $null; $headers = $null; $webSettings = $null; $recSettings = $null; $web = $null; $rec = $null

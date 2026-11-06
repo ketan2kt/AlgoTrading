@@ -7,7 +7,7 @@ using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.Infrastructure.Execution;
 
-internal sealed class FileHistoricalFeedManifestReader(string? directory = null, ReplayBlobStorage? cloud = null)
+internal sealed class FileHistoricalFeedManifestReader(string? directory = null, IReplayArchiveCache? cloud = null)
 {
     private readonly string root = directory ?? Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory,
         "data", "historical-replay", "feed");
@@ -19,7 +19,10 @@ internal sealed class FileHistoricalFeedManifestReader(string? directory = null,
         if (cloud?.Enabled == true)
         {
             await cloud.HydrateAsync("feed", tradingDate, token);
-            sourceRoot = Path.Combine(cloud.CacheRoot, "feed");
+            var remoteRoot = Path.Combine(cloud.CacheRoot, "feed");
+            if (Directory.Exists(remoteRoot) && Directory.EnumerateFiles(remoteRoot,
+                    tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-*.json").Any())
+                sourceRoot = remoteRoot;
         }
         if (!Directory.Exists(sourceRoot)) return null;
         var paths = Directory.GetFiles(sourceRoot, tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-*.json");

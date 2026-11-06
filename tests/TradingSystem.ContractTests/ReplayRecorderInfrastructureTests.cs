@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TradingSystem.Infrastructure;
 using TradingSystem.Infrastructure.MarketData;
 
@@ -8,6 +10,14 @@ namespace TradingSystem.ContractTests;
 
 public sealed class ReplayRecorderInfrastructureTests
 {
+    [Theory]
+    [InlineData(false, HealthStatus.Unhealthy)]
+    [InlineData(true, HealthStatus.Healthy)]
+    public async Task CutoverProbeRequiresCaptureEnabled(bool enabled, HealthStatus expected)
+    {
+        var check = new RecorderActivationHealthCheck(Options.Create(new HistoricalFeedCaptureOptions { Enabled = enabled }));
+        Assert.Equal(expected, (await check.CheckHealthAsync(new HealthCheckContext())).Status);
+    }
     private static readonly string[] RecorderWorkers =
         ["GrowwHistoricalFeedCaptureService", "HistoricalAfterMarketBackfillService", "HistoricalPolicyBuildCaptureService"];
     [Theory]

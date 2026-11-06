@@ -6,6 +6,70 @@ namespace TradingSystem.ContractTests;
 
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
+    [Theory]
+    [InlineData("NSE", "NIFTY26110322500CE", "NIFTY")]
+    [InlineData("BSE", "SENSEX26NOV75000PE", "SENSEX")]
+    [InlineData("NSE", "BANKNIFTY26NOV54000CE", "BANKNIFTY")]
+    public async Task RecorderOnlyQuotesRemainVisibleToTimelineAndMarketReaders(string exchange, string symbol, string market)
+    {
+        var remoteRoot = Path.Combine(directory, "remote");
+        using var recorder = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            Path.Combine(remoteRoot, "quotes"));
+        var sample = Observation() with { Request = new(exchange, "FNO", symbol), Source = "GrowwFeedSample" };
+        recorder.TryRecord(sample);
+        await recorder.FlushBatchAsync(CancellationToken.None);
+        using var website = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            Path.Combine(directory, "empty-website"), cloud: new CachedArchive(remoteRoot));
+        Assert.Equal(sample, Assert.Single((await website.ReadMarketAsync(Date, market, CancellationToken.None)).Observations));
+        var id = Guid.NewGuid();
+        var (marks, gaps) = await website.HeldMarksAsync(Date, [(id, exchange, symbol, At, At.AddMinutes(1))], CancellationToken.None);
+        Assert.Single(marks[id]);
+        Assert.False(gaps);
+    }
+
+    [Fact]
+    public async Task EmptyCloudDoesNotHideLocalStreamingHistory()
+    {
+        using var writer = Archive();
+        var sample = Observation() with { Source = "GrowwFeedSample" };
+        writer.TryRecord(sample);
+        await writer.FlushBatchAsync(CancellationToken.None);
+        using var reader = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            directory, cloud: new CachedArchive(Path.Combine(directory, "empty-cloud")));
+        var path = await reader.ReadReplayAsync(Date, "NIFTY", "NSE",
+            new Dictionary<string, string> { [sample.Request.TradingSymbol] = sample.Request.TradingSymbol },
+            At, At.AddMinutes(1), CancellationToken.None, streamingOnly: true);
+        Assert.Single(path.Quotes);
+        Assert.False(path.HasCaptureGaps);
+    }
+
+    [Fact]
+    public async Task MirroredObservationIsNotDoubleCountedInTimeline()
+    {
+        var remoteRoot = Path.Combine(directory, "remote");
+        var sample = Observation();
+        using var recorder = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            Path.Combine(remoteRoot, "quotes"));
+        using var website = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            directory, cloud: new CachedArchive(remoteRoot));
+        recorder.TryRecord(sample);
+        website.TryRecord(sample);
+        await recorder.FlushBatchAsync(CancellationToken.None);
+        await website.FlushBatchAsync(CancellationToken.None);
+        var id = Guid.NewGuid();
+        var (marks, gaps) = await website.HeldMarksAsync(Date,
+            [(id, "NSE", sample.Request.TradingSymbol, At, At.AddMinutes(1))], CancellationToken.None);
+        Assert.Single(marks[id]);
+        Assert.False(gaps);
+        Assert.Single((await website.ReadAsync(Date, CancellationToken.None)).Observations);
+    }
+
+    private sealed class CachedArchive(string path) : IReplayArchiveCache
+    {
+        public bool Enabled => true;
+        public string CacheRoot => path;
+        public Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token) => Task.CompletedTask;
+    }
     [Fact]
     public async Task FeedPathFiltersRestBeforeSortingSoSameTimeRestCannotEraseDepthOrBreakReplay()
     {

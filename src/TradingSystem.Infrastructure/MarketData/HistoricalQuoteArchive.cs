@@ -18,7 +18,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 // requested-contract quotes do not imply a complete counterfactual universe.
 internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<HistoricalQuoteArchive> logger,
     string? directory = null, int capacity = 12500, int maximumReadObservations = 1_000_000,
-    long maximumArchiveBytes = 5L * 1024 * 1024 * 1024, ReplayBlobStorage? cloud = null) : BackgroundService, IHistoricalQuoteArchive
+    long maximumArchiveBytes = 5L * 1024 * 1024 * 1024, IReplayArchiveCache? cloud = null) : BackgroundService, IHistoricalQuoteArchive
 {
     private readonly string root = directory ?? Path.Combine(
         Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory,
@@ -179,8 +179,13 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         if (streamingOnly && cloud?.Enabled == true)
         {
             await cloud.HydrateAsync("quotes", date, token);
-            using var remote = new HistoricalQuoteArchive(clock, logger, Path.Combine(cloud.CacheRoot, "quotes"));
-            return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token, streamingOnly: true);
+            var remoteRoot = Path.Combine(cloud.CacheRoot, "quotes");
+            if (HasDateFiles(remoteRoot, date))
+            {
+                using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
+                return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token, streamingOnly: true);
+            }
+            // Cloud configuration alone must not hide pre-cutover local history.
         }
         if (!Directory.Exists(root)) return new([], true);
         var gaps = false;
@@ -189,7 +194,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
 
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken)){
+            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly)){
                 if (streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
                     value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
@@ -206,10 +211,12 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         var byContract=windows.ToLookup(w=>(w.Exchange,w.Symbol));
         bool gaps=false;
         int count=0;
+        var seen = new HashSet<(Guid Window, Guid Observation)>();
         await foreach(var v in StreamDay(date,()=>gaps=true,token)){
             if(v.Request.Segment!="FNO")continue;
             foreach(var w in byContract[(v.Request.Exchange,v.Request.TradingSymbol)]){
                 if(v.ReceivedAtUtc<w.From || v.ReceivedAtUtc>=w.To)continue;
+                if (!seen.Add((w.Id, v.Id))) continue;
                 if(++count>maximumReadObservations)throw new InvalidDataException("Held-position quote limit exceeded.");
                 var source=HistoricalQuoteProjection.ToReplay(v,w.Symbol).SourceAtUtc;
                 if(!result.TryGetValue(w.Id,out var rows)) result[w.Id]=rows=[];
@@ -220,12 +227,24 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     }
 
     private async IAsyncEnumerable<HistoricalQuoteObservation> StreamDay(DateOnly date, Action gap,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true)
     {
-            if(!Directory.Exists(root)){gap();yield break;}
+            var remoteAvailable = false;
+            if (includeCloud && cloud?.Enabled == true)
+            {
+                await cloud.HydrateAsync("quotes", date, cancellationToken);
+                var remoteRoot = Path.Combine(cloud.CacheRoot, "quotes");
+                remoteAvailable = HasDateFiles(remoteRoot, date);
+                if (remoteAvailable)
+                {
+                    using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
+                    await foreach (var value in remote.StreamDay(date, gap, cancellationToken)) yield return value;
+                }
+            }
+            if(!Directory.Exists(root)){if (!remoteAvailable) gap();yield break;}
             var paths=Directory.GetFiles(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"*.ndjson*")
                 .Where(p=>p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal)).ToArray();
-            if(paths.Length==0 || dropped.GetValueOrDefault(date)>0 || buffered.GetValueOrDefault(date)>0 ||
+            if((paths.Length==0 && !remoteAvailable) || dropped.GetValueOrDefault(date)>0 || buffered.GetValueOrDefault(date)>0 ||
                File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+".capture-gap")))gap();
             foreach (var path in paths)
             {
@@ -250,6 +269,10 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             }
     }
 
+    private static bool HasDateFiles(string directory, DateOnly date) => Directory.Exists(directory) &&
+        Directory.EnumerateFiles(directory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
+            .Any(path => path.EndsWith(".ndjson", StringComparison.Ordinal) || path.EndsWith(".ndjson.gz", StringComparison.Ordinal));
+
     public Task<HistoricalQuoteArchiveDay> ReadMarketAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
     {
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY")) throw new ArgumentException("Unsupported research market.", nameof(market));
@@ -258,41 +281,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
 
     private async Task<HistoricalQuoteArchiveDay> ReadCoreAsync(DateOnly tradingDate, string? market, CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(root)) return new([], true);
-        var paths = Directory.GetFiles(root, tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
-            .Where(path => path.EndsWith(".ndjson", StringComparison.Ordinal) || path.EndsWith(".ndjson.gz", StringComparison.Ordinal))
-            .OrderBy(path => path, StringComparer.Ordinal).ToArray();
-        if (paths.Length == 0) return new([], true);
         var observations = new Dictionary<Guid, HistoricalQuoteObservation>();
-        var gaps = dropped.GetValueOrDefault(tradingDate) > 0 || buffered.GetValueOrDefault(tradingDate) > 0 ||
-            File.Exists(Path.Combine(root, tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".capture-gap"));
-        foreach (var path in paths)
+        var gaps = false;
+        await foreach (var value in StreamDay(tradingDate, () => gaps = true, cancellationToken))
         {
-        var info = new FileInfo(path);
-        if (info.LinkTarget is not null || info.Length > 256L * 1024 * 1024)
-            throw new InvalidDataException("Historical quote archive is invalid or exceeds its shard size limit.");
-        await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true);
-        await using var gzip = path.EndsWith(".gz", StringComparison.Ordinal) ? new GZipStream(file, CompressionMode.Decompress, leaveOpen: true) : null;
-        using var bounded = new HistoricalBoundedReadStream((Stream?)gzip ?? file, 2L * 1024 * 1024 * 1024);
-        using var reader = new StreamReader(bounded, Encoding.UTF8);
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            try
-            {
-                var record = JsonSerializer.Deserialize<ArchiveLine>(line);
-                if (record is null || record.DroppedCount > 0) { gaps = true; continue; }
-                var value = record.Observation;
-                if (value is null || value.Id == Guid.Empty || LocalDate(value.ReceivedAtUtc) != tradingDate ||
-                    value.Request is null || value.Quote is null || value.Quote.LastPrice <= 0m)
-                { gaps = true; continue; }
                 if (market is not null && !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal)) continue;
                 if (!observations.ContainsKey(value.Id) && observations.Count >= maximumReadObservations)
                     throw new InvalidDataException("This research market/day exceeds the in-memory replay budget; shorten or partition the input, not silently truncate it.");
                 if (!observations.TryAdd(value.Id, value) && observations[value.Id] != value) gaps = true;
-            }
-            catch (JsonException) { gaps = true; }
-        }
         }
         return new(observations.Values.OrderBy(value => value.ReceivedAtUtc).ThenBy(value => value.Id).ToArray(), gaps);
     }

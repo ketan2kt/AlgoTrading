@@ -21,7 +21,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 
 // Private managed-identity storage. Local disk is a spool/cache, not the only
 // historical copy. No credentials, orders or arbitrary paths enter this store.
-public sealed class ReplayBlobStorage : BackgroundService
+public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
 {
     private readonly BlobContainerClient? container;
     private readonly bool recorder;
@@ -34,10 +34,20 @@ public sealed class ReplayBlobStorage : BackgroundService
     private readonly SemaphoreSlim hydrateGate = new(1, 1);
     private readonly Dictionary<string, (long Length, DateTime Modified)> uploaded = new(StringComparer.Ordinal);
     internal readonly string Root;
-    internal string CacheRoot => Path.Combine(Root, "remote");
+    public string CacheRoot => Path.Combine(Root, "remote");
     public bool Enabled => container is not null;
     public string? LastFailure { get; private set; }
     public DateTimeOffset? LastUploadAtUtc { get; private set; }
+    public async Task VerifyPublishedKeysAsync(CancellationToken token)
+    {
+        // A staged setting is not evidence that the background mirror has run.
+        // Gate recorder startup on the actual, current website key-ring upload.
+        if (keyRing is null || keyRingHash is null)
+            throw new InvalidOperationException("Website key-ring publication is not complete.");
+        var properties = await keyRing.GetPropertiesAsync(cancellationToken: token);
+        if (properties.Value.ContentLength <= 0)
+            throw new InvalidDataException("Published website key ring is empty.");
+    }
     public async Task VerifyAccessAsync(CancellationToken token)
     {
         if (container is null) throw new InvalidOperationException("Private replay storage is not configured.");
@@ -251,8 +261,9 @@ public sealed class ReplayBlobStorage : BackgroundService
             parts[2] is "manifest.json" or "TradingSystem.Application.dll" or "TradingSystem.Domain.dll";
     }
 
-    public async Task HydrateAsync(string category, DateOnly? date, CancellationToken token)
+    public async Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token)
     {
+        var date = tradingDate;
         if (container is null) return;
         if (category is not ("quotes" or "feed" or "policies") || category != "policies" && date is null)
             throw new ArgumentException("A bounded archive category/date is required.");

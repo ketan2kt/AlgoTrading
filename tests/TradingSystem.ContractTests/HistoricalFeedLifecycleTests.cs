@@ -72,8 +72,21 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         Assert.NotNull(restored);
         Assert.False(restored.HasGaps);
         Assert.Equal(3, restored.Instruments.Count);
+        // Adding cloud configuration must not erase a completed local session
+        // that predates recorder cutover.
+        var legacy = await new FileHistoricalFeedManifestReader(directory,
+            new EmptyCloud(Path.Combine(directory, "empty-cloud"))).ReadCompleteAsync(Date,
+                Start.AddMinutes(15), Start.AddHours(6.5), CancellationToken.None);
+        Assert.Equal(restored.UniverseFingerprint, legacy?.UniverseFingerprint);
         // This verifies lifecycle evidence, not complete market ticks: no replay
         // eligibility is asserted without bar and execution-path checks as well.
+    }
+
+    private sealed class EmptyCloud(string path) : IReplayArchiveCache
+    {
+        public bool Enabled => true;
+        public string CacheRoot => path;
+        public Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token) => Task.CompletedTask;
     }
 
     [Fact]

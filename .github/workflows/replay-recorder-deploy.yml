@@ -57,7 +57,25 @@ jobs:
       - name: Stage private recorder settings
         shell: pwsh
         run: ./scripts/configure-replay-recorder.ps1 -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")
-      - name: Deploy recorder only
+      - name: Wait for website key publication
+        # Staging restarts the website. Its asynchronous key mirror must finish
+        # before the recorder can decrypt the existing broker-token vault.
+        # This gate is deliberately independent of website trading readiness.
+        # The previous workflow deployed immediately and raced this publication.
+        run: |
+          ready=false
+          for attempt in $(seq 1 36); do
+            if curl --fail --silent --show-error --max-time 10 https://sarthitradingweb5amvyarepxaci.azurewebsites.net/health/replay-source; then
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" != true ]; then
+            echo 'Website key mirror is not ready; recorder deployment was not attempted.' >&2
+            exit 1
+          fi
+      - name: Publish checked recorder package
         run: |
           az webapp deploy --resource-group rg-sarthi-trading-centralindia \
             --name sarthirecorder5amvyarepxaci --src-path "$RUNNER_TEMP/recorder-release/trading-system.zip" \

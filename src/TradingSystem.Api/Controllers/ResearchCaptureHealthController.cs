@@ -32,7 +32,10 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
         var storage = archive.ReadHealth(date);
         ReplayRecorderSnapshot? remote = null;
         string? remoteError = null;
-        if (cloud.Enabled)
+        // Staging cloud storage does not transfer capture ownership. Failed
+        // cutover restores local capture; its real health must remain visible.
+        var independentCapture = cloud.Enabled && !options.Value.Enabled;
+        if (independentCapture)
         {
             try { remote = await cloud.ReadRecorderHealthAsync(token); }
             catch (Exception exception) when (exception is not OperationCanceledException) { remoteError = exception.GetType().Name; }
@@ -45,7 +48,7 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
         var issues = new List<string>();
         if (expectedNow)
         {
-            if (cloud.Enabled && (remote?.Date != date || now - remote.AtUtc > TimeSpan.FromSeconds(30) || remote.AtUtc > now))
+            if (independentCapture && (remote?.Date != date || now - remote.AtUtc > TimeSpan.FromSeconds(30) || remote.AtUtc > now))
                 issues.Add("Independent recorder heartbeat missing/stale" + (remoteError is null ? "" : " · " + remoteError));
             if (cloud.LastFailure is { } cloudFailure) issues.Add("Private archive upload failed · " + cloudFailure);
             if (master is null || master > open) issues.Add("Pre-open instrument master missing");
