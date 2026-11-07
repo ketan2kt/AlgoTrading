@@ -65,6 +65,7 @@ resource recorder 'Microsoft.Web/sites@2024-11-01' = {
       healthCheckPath: '/health/live'
       appSettings: [
         { name: 'ApplicationRole', value: 'ReplayRecorder' }
+        { name: 'WEBSITES_CONTAINER_START_TIME_LIMIT', value: '600' }
         { name: 'ReplayStorage__ContainerUri', value: '${storage.properties.primaryEndpoints.blob}replay' }
         { name: 'ReplayStorage__KeyRingUri', value: '${storage.properties.primaryEndpoints.blob}protected-keys/keyring.xml' }
         { name: 'MarketData__HistoricalReplayFeed__Enabled', value: 'false' }

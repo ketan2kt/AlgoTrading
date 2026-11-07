@@ -34,6 +34,9 @@ try {
     $rec['DatabaseInitialization__ApplyMigrations'] = 'false'
     $rec['IdentityBootstrap__Enabled'] = 'false'
     $rec['LiveExecution__BuildEnabled'] = 'false'
+    # The Linux B1 host can spend over a minute updating certificates before
+    # starting .NET. Allow startup to finish before activation is rolled back.
+    $rec['WEBSITES_CONTAINER_START_TIME_LIMIT'] = '600'
     $rec['MarketData__HistoricalReplayFeed__Enabled'] = $(if ($Activate) { 'true' } else { 'false' })
     $rec['MarketData__HistoricalReplayFeed__SampleSeconds'] = '2'
     foreach ($settings in @($web, $rec)) {
@@ -52,7 +55,7 @@ try {
             -ContentType 'application/json' -Body (@{ properties = $rec } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
         if ($Activate) {
             $active = $false
-            for ($attempt = 0; $attempt -lt 36; $attempt++) {
+            for ($attempt = 0; $attempt -lt 120; $attempt++) {
                 try {
                     $response = Invoke-WebRequest -Uri "https://$recorder.azurewebsites.net/health/recorder-active" -TimeoutSec 10
                     if ($response.StatusCode -eq 200) { $active = $true; break }

@@ -25,6 +25,8 @@ jobs:
     environment: azure-paper
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Outside market hours only
         run: |
           day=$(TZ=Asia/Kolkata date +%u)
@@ -33,6 +35,10 @@ jobs:
             echo 'Recorder restarts are prohibited during capture/trading hours.' >&2
             exit 1
           fi
+      # Executed after the outside-hours guard; this uses HTTP/cloud doubles.
+      - name: Verify safe recorder cutover regression
+        shell: pwsh
+        run: ./scripts/test-recorder-cutover.ps1
       - name: Use exact checked main package
         env:
           CI_RUN: ${{ inputs.ci_run_id }}
@@ -40,12 +46,22 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CI_RUN" =~ ^[1-9][0-9]*$ ]]
-          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -er \
-            --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
-            'select(.path == ".github/workflows/ci.yml" and .event == "push" and .head_branch == "main" and .head_sha == $sha and .head_repository.full_name == $repo and .conclusion == "success" and .status == "completed") | .run_attempt')
-          gh run download "$CI_RUN" --repo "$GITHUB_REPOSITORY" --name "deploy-$GITHUB_SHA-$attempt" --dir "$RUNNER_TEMP/recorder-release"
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN")
+          attempt=$(jq -er --arg repo "$GITHUB_REPOSITORY" \
+            'select(.path == ".github/workflows/ci.yml" and .event == "push" and .head_branch == "main" and .head_repository.full_name == $repo and .conclusion == "success" and .status == "completed") | .run_attempt' <<< "$run")
+          package_sha=$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' <<< "$run")
+          # Permit a recorder-deployment-only correction without rebuilding or
+          # replacing the application package already deployed to the website.
+          git merge-base --is-ancestor "$package_sha" "$GITHUB_SHA"
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/replay-recorder-deploy.yml|scripts/configure-replay-recorder.ps1|scripts/test-recorder-cutover.ps1|infra/replay-recorder.bicep|docs/handover.md) ;;
+              *) echo "Application changes since checked package; use matching main CI." >&2; exit 1 ;;
+            esac
+          done < <(git diff --name-only "$package_sha" "$GITHUB_SHA")
+          gh run download "$CI_RUN" --repo "$GITHUB_REPOSITORY" --name "deploy-$package_sha-$attempt" --dir "$RUNNER_TEMP/recorder-release"
           cd "$RUNNER_TEMP/recorder-release"
-          test "$(cat source.sha)" = "$GITHUB_SHA"
+          test "$(cat source.sha)" = "$package_sha"
           sha256sum trading-system.zip | cmp - package.sha256
           unzip -tq trading-system.zip
           unzip -p trading-system.zip TradingSystem.Application.dll | sha256sum | cut -d' ' -f1 > application.sha256
