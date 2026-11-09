@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TradingSystem.Infrastructure;
 using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Application.Broker;
 
 namespace TradingSystem.ContractTests;
 
@@ -15,8 +16,46 @@ public sealed class ReplayRecorderInfrastructureTests
     [InlineData(true, HealthStatus.Healthy)]
     public async Task CutoverProbeRequiresCaptureEnabled(bool enabled, HealthStatus expected)
     {
-        var check = new RecorderActivationHealthCheck(Options.Create(new HistoricalFeedCaptureOptions { Enabled = enabled }));
+        var check = new RecorderActivationHealthCheck(Options.Create(new HistoricalFeedCaptureOptions { Enabled = enabled }),
+            new ResearchCapturePulse(), new FixedClock(new DateTimeOffset(2026, 11, 9, 1, 0, 0, TimeSpan.Zero)), new Archive());
         Assert.Equal(expected, (await check.CheckHealthAsync(new HealthCheckContext())).Status);
+    }
+    [Fact]
+    public async Task MarketHoursCutoverRequiresRealSubscriptionAndFreshReceiptsForEveryMarket()
+    {
+        var now = new DateTimeOffset(2026, 11, 9, 7, 30, 0, TimeSpan.Zero);
+        var date = new DateOnly(2026, 11, 9);
+        var pulse = new ResearchCapturePulse(); pulse.Starting(date);
+        var archive = new Archive();
+        var check = new RecorderActivationHealthCheck(Options.Create(new HistoricalFeedCaptureOptions { Enabled = true }), pulse, new FixedClock(now), archive);
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        pulse.Subscribed(now, 500);
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        pulse.Received("NIFTY", now); pulse.Received("SENSEX", now);
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        pulse.Received("BANKNIFTY", now.AddSeconds(-31));
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        pulse.Received("BANKNIFTY", now);
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        archive.Health = new(0, true, now, null); // A prior gap stays marked; resumed writes may recover.
+        Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(new())).Status);
+        archive.Health = new(0, true, now.AddSeconds(-31), null);
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+        archive.Health = new(0, true, now, null);
+        pulse.Failed("HTTP 401 (Unauthorized)");
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    { public override DateTimeOffset GetUtcNow() => now; }
+
+    private sealed class Archive : IHistoricalQuoteArchive
+    {
+        public HistoricalQuoteArchiveHealth? Health { get; set; }
+        public HistoricalQuoteArchiveHealth? ReadHealth(DateOnly date) => Health;
+        public void TryRecord(HistoricalQuoteObservation observation) => throw new NotSupportedException();
+        public void MarkCaptureGap(DateOnly date) => throw new NotSupportedException();
+        public Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly date, CancellationToken token) => throw new NotSupportedException();
     }
     private static readonly string[] RecorderWorkers =
         ["GrowwHistoricalFeedCaptureService", "HistoricalAfterMarketBackfillService", "HistoricalPolicyBuildCaptureService"];

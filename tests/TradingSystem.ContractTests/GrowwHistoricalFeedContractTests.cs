@@ -177,7 +177,7 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
         var handler = new Handler(async request =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal("/v1/api/apex/v1/socket/token/create/", request.RequestUri!.AbsolutePath);
+            Assert.Equal("/v1/api/apex/v1/socket/token/create", request.RequestUri!.AbsolutePath);
             Assert.Equal("test-access", request.Headers.Authorization!.Parameter);
             var json = await request.Content!.ReadAsStringAsync();
             Assert.Contains(key.GetPublicKey(), json);
@@ -191,6 +191,20 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
         Assert.Equal("test-socket-jwt", await transport.AuthorizeAsync(key.GetPublicKey(), CancellationToken.None));
         Assert.Equal("/ld/fo/nse/price_detailed.1234", GrowwHistoricalFeedTransport.Subject(Instrument, "price"));
         Assert.Equal("/ld/fo/nse/book.1234", GrowwHistoricalFeedTransport.Subject(Instrument, "depth"));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    public async Task SocketAuthorizationFailureRetainsSafeHttpStatus(HttpStatusCode status)
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(status)
+            { Content = new StringContent("No credentials should enter telemetry") }));
+        using var client = new HttpClient(handler) { BaseAddress = new("https://api.groww.in/") };
+        var transport = new GrowwHistoricalFeedTransport(new ClientFactory(client), new TokenProvider(), TimeProvider.System);
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => transport.AuthorizeAsync("test-public-key", CancellationToken.None));
+        Assert.Equal(status, error.StatusCode);
+        Assert.DoesNotContain("test-access", error.Message);
     }
 
     private static byte[] Envelope(int field, byte[] payload) => Join(Varint(2, 1), Varint(3, 1), Chunk(field, payload));

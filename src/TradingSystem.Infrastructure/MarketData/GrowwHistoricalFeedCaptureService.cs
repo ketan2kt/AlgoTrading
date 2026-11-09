@@ -54,7 +54,9 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
-                pulse.Failed(exception.GetType().Name, IsSessionStarted(date));
+                var failure = exception is HttpRequestException { StatusCode: { } status }
+                    ? $"HTTP {(int)status} ({status})" : exception.GetType().Name;
+                pulse.Failed(failure, IsSessionStarted(date));
                 MarkSessionGap(date);
                 // Never log transport/auth exception messages or NATS options:
                 // credentials may be embedded in third-party error details.

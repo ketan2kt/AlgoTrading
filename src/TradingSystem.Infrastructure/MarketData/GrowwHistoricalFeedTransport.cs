@@ -72,7 +72,10 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     internal async Task<string> AuthorizeAsync(string publicKey, CancellationToken cancellationToken)
     {
         var access = await tokens.GetAccessTokenAsync(cancellationToken);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "v1/api/apex/v1/socket/token/create/")
+        // The slash-suffixed URL redirects (307); HttpClient strips bearer auth
+        // on redirects. Use the canonical route and never forward credentials
+        // to an unvalidated redirect target.
+        using var request = new HttpRequestMessage(HttpMethod.Post, "v1/api/apex/v1/socket/token/create")
         {
             Content = JsonContent.Create(new { socketKey = publicKey })
         };

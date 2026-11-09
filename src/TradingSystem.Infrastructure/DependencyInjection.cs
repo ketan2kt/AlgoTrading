@@ -169,7 +169,8 @@ public static class DependencyInjection
         {
             client.BaseAddress = new Uri("https://api.groww.in/");
             client.Timeout = TimeSpan.FromSeconds(15);
-        }).RedactLoggedHeaders(static _ => true);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .RedactLoggedHeaders(static _ => true);
         services.AddOptions<HistoricalFeedCaptureOptions>()
             .Bind(configuration.GetSection(HistoricalFeedCaptureOptions.SectionName))
             .Validate(value => value.MaximumInstruments is >= 1 and <= 1000 && value.SampleSeconds is >= 1 and <= 2,
