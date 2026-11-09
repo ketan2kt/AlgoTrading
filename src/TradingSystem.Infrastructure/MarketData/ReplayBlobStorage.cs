@@ -109,9 +109,11 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         {
             try
             {
+                // The pre-open settings deadline must not wait behind a large
+                // quote/build backlog or an unrelated key-ring upload failure.
+                if (!recorder) await PublishPolicyReceiptAsync(stoppingToken);
                 await PublishKeysAsync(stoppingToken);
                 await PublishAsync(stoppingToken); LastFailure = null;
-                if (!recorder) await PublishPolicyReceiptAsync(stoppingToken);
                 if (recorder)
                 {
                     var now = clock.GetUtcNow();

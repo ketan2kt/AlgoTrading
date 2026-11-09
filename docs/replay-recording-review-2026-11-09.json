@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-09",
+  "status": "LOCAL_CAPTURE_FIXES_CHECKED_REAL_SESSION_COMPARISON_BLOCKED_BY_RETAINED_GAPS",
+  "deployment": "Not authorized; all changes local",
+  "productionEvidence": {
+    "recorderManifests": 142,
+    "firstRetainedAttemptAtIst": "2026-11-09T12:45:21.008628+05:30",
+    "firstAttemptInstrumentCount": 995,
+    "firstAttemptComputedSubjectCount": 1987,
+    "lastRetainedAttempt": {
+      "startedAtIst": "2026-11-09T15:30:11.3001895+05:30",
+      "subscribedAtIst": "2026-11-09T15:30:11.596577+05:30",
+      "completedAtIst": "2026-11-09T15:35:00.263932+05:30",
+      "instrumentCount": 497,
+      "hasGaps": true,
+      "contractSelectionVersion": null
+    },
+    "retainedPolicyReceiptAtIst": "2026-11-09T09:14:58.6953114+05:30",
+    "priorSensexStateCaptured": true,
+    "interpretation": "A real pre-open receipt exists in interrupted manifests. The previous complete-only reader hid it and incorrectly conflated incomplete feed coverage with missing metadata. Saved attempts predate the shared-selector receipt protocol; the current code already has the 500-instrument/1000-subject budget fix and that fix was not reimplemented here. Neither the underlying exception type for every interruption nor complete earlier depth can be reconstructed from these manifests."
+  },
+  "actualTradeValidation": {
+    "symbol": "BANKNIFTY26NOV59600CE",
+    "strategy": "Bank index directional breakout",
+    "entryAtIst": "2026-11-09T14:48:13.393688+05:30",
+    "entryPremium": 767.70,
+    "quantity": 60,
+    "exitAtIst": "2026-11-09T14:52:53.739419+05:30",
+    "inspectedShards": [
+      { "name": "2026-11-09-09-18.ndjson.gz", "sha256": "E1FD61E548E7D92674E9CEEC0E52AD0C9506362E37C4E6628B760D62154AE913" },
+      { "name": "2026-11-09-09-19.ndjson.gz", "sha256": "B62F77826D3348EDAF841C1D8C74D0B36E701E260D48EE59A57DA195F7093C8D" }
+    ],
+    "recordedOptionObservations": 28,
+    "observationsWithPriceAndDepthAtMostThirtySecondsOld": 28,
+    "firstObservedAtIst": "2026-11-09T14:48:02.3767412+05:30",
+    "lastObservedAtIst": "2026-11-09T14:49:10.4221795+05:30",
+    "missingReceiptMinutesIst": ["14:50", "14:51", "14:52"],
+    "verdict": "Unsupported complete-trade replay: original terminal exit and alternative exits during the missing interval cannot be priced honestly. No full-trade return, avoided loss or missed winner claimed."
+  },
+  "localFixes": [
+    "One malformed frame no longer cancels all instrument subscriptions. Invalidate only the affected cached side, retain the gap and continue other contracts; transport faults and market silence still reconnect.",
+    "Market watchdog independently requires fresh option-price and depth sources for each subscribed option market. Index traffic cannot hide missing option/depth traffic. Thirty-second source freshness remains mandatory.",
+    "Premarket subscriptions get the existing thirty-second startup grace from 09:15, not from their 09:00 connection, avoiding an immediate opening-bell reconnect.",
+    "Reconnect delay starts at one second and exponentially backs off to thirty seconds on repeated failure, instead of adding thirty seconds to every isolated interruption.",
+    "Final manifests retain checkpoint time and a sanitized interruption reason. Pre-open-only invalid frames are not labeled as missing regular-session data.",
+    "Website publishes pre-open policy receipts before unrelated archive/key-ring upload work.",
+    "Replay reads retained metadata from interrupted attempts without treating them as complete sessions. Actual capture-window failure is reported explicitly; existing market-data, contract, freshness and execution gates remain mandatory.",
+    "Partial remote manifests no longer hide a valid complete local manifest. Conflicting frozen pre-open build/settings evidence is rejected.",
+    "Earlier local eligibility modeled-cost opt-in and bounded UI timeout remain included."
+  ],
+  "checks": {
+    "backendBuild": "passed",
+    "focusedUnitTestsPassed": 47,
+    "focusedContractTestsPassed": 60,
+    "includes": ["capture lifecycle/checkpoint/cloud precedence", "malformed frame isolation/cache invalidation", "opening grace and source freshness", "reconnect backoff", "whole-session synthetic archive/restart pipeline", "cohort exclusions", "paper action fidelity", "entry consistency and runner regression"],
+    "historicalProfitabilityProvenByTests": false,
+    "postgreSqlIntegrationExecuted": false,
+    "frontend": "Earlier eligibility change build/tests passed; no additional frontend code edited in this recording task"
+  },
+  "strategyComparison": {
+    "newEligibleFullSessionComparisons": 0,
+    "reason": "Existing historical executable paths are incomplete; local capture changes cannot recreate absent past depth or pre-session selection receipts.",
+    "previousEvidence": "See entry-runner-review-2026-11-09.json: five usable modeled fixed-entry scenario runs over three 5-Nov Sensex paths were unchanged; 24 synthetic behavior paths include four adverse outcomes. Neither is a validated full-session historical strategy comparison.",
+    "remaining": "After an authorized release, obtain a complete supported recorded session, verify its frozen original build/settings against actual trades, then run both proposals on identical eligible trend/chop sessions with costs, drawdown, avoided losses and missed winners. No deployment or future-session completion claim is made."
+  }
+}

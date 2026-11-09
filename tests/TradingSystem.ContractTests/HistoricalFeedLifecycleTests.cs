@@ -23,6 +23,15 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         new("BANKNIFTY", "NSE", "CASH", "3", "BANKNIFTY", InstrumentType.Index, null, null, 1, 0)];
 
     [Fact]
+    public void ReconnectRetriesPromptlyButRepeatedAuthorizationFailuresAreBackedOff()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(1), GrowwHistoricalFeedCaptureService.RecoveryDelay(1));
+        Assert.Equal(TimeSpan.FromSeconds(2), GrowwHistoricalFeedCaptureService.RecoveryDelay(2));
+        Assert.Equal(TimeSpan.FromSeconds(30), GrowwHistoricalFeedCaptureService.RecoveryDelay(6));
+        Assert.Equal(TimeSpan.FromSeconds(30), GrowwHistoricalFeedCaptureService.RecoveryDelay(int.MaxValue));
+    }
+
+    [Fact]
     public async Task PreSessionContractCoverageIsPersistedAndExposedForAllThreeMarkets()
     {
         var clock = new ManualClock(Start);
@@ -83,6 +92,12 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recording);
         Assert.True(ReadManifest()!.HasGaps);
         Assert.Equal(receipt.Fingerprint, ReadManifest()!.PolicyReceipt!.Fingerprint);
+        Assert.NotNull(ReadManifest()!.LastCheckpointAtUtc);
+        Assert.Equal("Recorder shutdown before capture completed", ReadManifest()!.InterruptionReason);
+        var evidence = await new FileHistoricalFeedManifestReader(directory).ReadEvidenceAsync(Date,
+            Start.AddMinutes(15), Start.AddHours(6.5), CancellationToken.None);
+        Assert.Equal(receipt.Fingerprint, evidence!.PolicyReceipt!.Fingerprint);
+        Assert.False(HistoricalFeedCaptureEvidence.CoversWindow(evidence, Date, Start.AddMinutes(15), Start.AddHours(6.5)));
     }
 
     [Fact]
@@ -105,12 +120,29 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         Assert.NotNull(restored);
         Assert.False(restored.HasGaps);
         Assert.Equal(3, restored.Instruments.Count);
+        // A later incomplete attempt must not hide the complete one, and an
+        // incomplete manifest must never be promoted by ReadEvidenceAsync.
+        var interrupted = restored with { StartedAtUtc = Start.AddHours(7), HasGaps = true,
+            CompletedAtUtc = null, LastCheckpointAtUtc = Start.AddHours(7) };
+        await File.WriteAllBytesAsync(Path.Combine(directory, "2026-11-06-interrupted.json"),
+            JsonSerializer.SerializeToUtf8Bytes(interrupted));
+        var selected = await new FileHistoricalFeedManifestReader(directory).ReadEvidenceAsync(Date,
+            Start.AddMinutes(15), Start.AddHours(6.5), CancellationToken.None);
+        Assert.False(selected!.HasGaps);
         // Adding cloud configuration must not erase a completed local session
         // that predates recorder cutover.
         var legacy = await new FileHistoricalFeedManifestReader(directory,
             new EmptyCloud(Path.Combine(directory, "empty-cloud"))).ReadCompleteAsync(Date,
                 Start.AddMinutes(15), Start.AddHours(6.5), CancellationToken.None);
         Assert.Equal(restored.UniverseFingerprint, legacy?.UniverseFingerprint);
+        var partialCloud = Path.Combine(directory, "partial-cloud");
+        Directory.CreateDirectory(Path.Combine(partialCloud, "feed"));
+        await File.WriteAllBytesAsync(Path.Combine(partialCloud, "feed", "2026-11-06-partial.json"),
+            JsonSerializer.SerializeToUtf8Bytes(interrupted));
+        var localWithPartialCloud = await new FileHistoricalFeedManifestReader(directory,
+            new EmptyCloud(partialCloud)).ReadCompleteAsync(Date, Start.AddMinutes(15), Start.AddHours(6.5), CancellationToken.None);
+        Assert.NotNull(localWithPartialCloud);
+        Assert.False(localWithPartialCloud.HasGaps);
         // This verifies lifecycle evidence, not complete market ticks: no replay
         // eligibility is asserted without bar and execution-path checks as well.
     }
@@ -171,7 +203,8 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         public bool Cancelled { get; private set; }
         public async Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
             Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-            Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken token)
+            Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken token,
+            Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null)
         {
             onSubscribed(clock.GetUtcNow());
             foreach (var instrument in instruments)

@@ -1053,9 +1053,10 @@ internal sealed partial class MultiMarketPaperTradingService(
                 options.Value.DifferentiatedRunnerEnabled && !protectionOnly &&
                 !invalidation.ShouldExit && !priorStopHit &&
                 market.Code is "sensex" or "bank-nifty" && options.Value.TargetExtensionEnabled &&
-                MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+                DifferentiatedRunnerPolicy.AllowsTargetExtension(
+                    MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy), invalidation.RunnerStructureIntact),
                 position.Quantity, position.RemainingQuantity, position.PartialExitQuantity > 0,
-                invalidation.RunnerStructureIntact);
+                invalidation.RunnerStructureIntact, initialRisk > 0m ? favourable / initialRisk : 0m);
             if (market == TradingMarketCatalog.NaturalGas)
             {
                 trailing = NaturalGasMiniPositionPolicy.ApplyTrailingStop(position.Direction,
@@ -1139,7 +1140,9 @@ internal sealed partial class MultiMarketPaperTradingService(
             var continuationConfirmed = !protectionOnly && !manualExitRequested && !forced &&
                                         !stopHit && !reversalExit && !reversalProtection &&
                                         targetHit && options.Value.TargetExtensionEnabled &&
-                                        MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
+                                        DifferentiatedRunnerPolicy.AllowsTargetExtension(
+                                            MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+                                            options.Value.DifferentiatedRunnerEnabled && invalidation.RunnerStructureIntact) &&
                                         (differentiatedRunner || await HasContinuationStructureAsync(db, position.UnderlyingInstrumentId,
                                             expectedUnderlyingDirection, cancellationToken));
             var failedSetup = false;

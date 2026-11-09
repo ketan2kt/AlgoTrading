@@ -43,6 +43,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!options.Value.Enabled) return;
+        var consecutiveFailures = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
             var local = clock.GetUtcNow().ToOffset(India);
@@ -52,7 +53,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             { await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken); continue; }
             var date = DateOnly.FromDateTime(local.DateTime);
             pulse.Starting(date);
-            try { await CaptureSessionAsync(date, stoppingToken); pulse.Finished(); }
+            try { await CaptureSessionAsync(date, stoppingToken); pulse.Finished(); consecutiveFailures = 0; }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
@@ -63,10 +64,16 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 // Never log transport/auth exception messages or NATS options:
                 // credentials may be embedded in third-party error details.
                 CaptureFailed(logger, pulse.Read(date, true).LastFailure ?? exception.GetType().Name, null);
-                await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken);
+                var snapshot = pulse.Read(date, true);
+                consecutiveFailures = snapshot.SubscribedAtUtc is { } connected &&
+                    clock.GetUtcNow() - connected >= TimeSpan.FromMinutes(1) ? 1 : Math.Min(6, consecutiveFailures + 1);
+                await Task.Delay(RecoveryDelay(consecutiveFailures), clock, stoppingToken);
             }
         }
     }
+
+    internal static TimeSpan RecoveryDelay(int consecutiveFailures) =>
+        TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Clamp(consecutiveFailures, 1, 6) - 1)));
 
     internal async Task CaptureSessionAsync(DateOnly date, CancellationToken stoppingToken)
     {
@@ -107,15 +114,25 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         pulse.Stage("Broker authorization / subscription");
         var consume = transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
             {
-                accumulator.Observe(instrument, kind, point, received); pulse.Received(instrument.Market, received);
+                accumulator.Observe(instrument, kind, point, received);
+                if ((kind == "depth" || point.Last is > 0m) && point.SourceAtUtc <= received &&
+                    received - point.SourceAtUtc <= TimeSpan.FromSeconds(30))
+                {
+                    pulse.Received(instrument.Market, received);
+                    if (instrument.Type is InstrumentType.CallOption or InstrumentType.PutOption)
+                        pulse.OptionReceived(instrument.Market, kind, point.SourceAtUtc);
+                }
                 if (instrument.Type == InstrumentType.Index && kind != "depth" && point.Last is > 0m &&
                     point.SourceAtUtc <= received && received - point.SourceAtUtc <= TimeSpan.FromSeconds(30) &&
                     received >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India))
                     observedRanges.AddOrUpdate(instrument.Market, (point.Last.Value, point.Last.Value),
                         (_, range) => (Math.Min(range.Low, point.Last.Value), Math.Max(range.High, point.Last.Value)));
             },
-            () => { failed = true; pulse.Failed("Transport interrupted or invalid frame", IsSessionStarted(date)); MarkSessionGap(date); },
-            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count); pulse.Stage("Recording"); }, lifetime.Token);
+            () => { failed |= IsSessionStarted(date); pulse.Failed("Transport interrupted or invalid frame", IsSessionStarted(date)); MarkSessionGap(date); },
+            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count, plan
+                .Where(value => value.Type is InstrumentType.CallOption or InstrumentType.PutOption)
+                .Select(value => value.Market).Distinct(StringComparer.Ordinal).ToArray()); pulse.Stage("Recording"); }, lifetime.Token,
+            (instrument, kind, at) => accumulator.Invalidate(instrument, kind, at));
         var sampling = SampleAsync(date, accumulator, lifetime.Token);
         // Never hold subscription startup waiting for optional fidelity metadata.
         var receipt = captureReceipt(date, lifetime.Token);
@@ -141,9 +158,11 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
                     subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India) };
         }
-        catch
+        catch (Exception exception)
         {
-            manifest = manifest with { SubscribedAtUtc = subscribedAt, HasGaps = true };
+            manifest = manifest with { SubscribedAtUtc = subscribedAt, HasGaps = true,
+                InterruptionReason = stoppingToken.IsCancellationRequested ? "Recorder shutdown before capture completed" :
+                    pulse.Read(date, true).Stage + ": " + exception.GetType().Name };
             MarkSessionGap(date);
             throw;
         }
@@ -183,11 +202,12 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                     manifest = manifest with { ContractCoverageIssues = problems };
                     pulse.ContractCoverageIssues(problems);
                 }
-                await WriteManifestAsync(path, manifest with { SubscribedAtUtc = subscribedAt,
+                manifest = manifest with { SubscribedAtUtc = subscribedAt,
                     LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
                         subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India),
                     PolicyReceipt = policy,
-                    SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis }, lifetime.Token);
+                    SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
+                await WriteManifestAsync(path, manifest, lifetime.Token);
             }
         }
 

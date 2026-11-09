@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-09",
+  "status": "LOCAL_IMPLEMENTATION_CHECKED_HISTORICAL_VALIDATION_INCOMPLETE",
+  "baselineSourceCommit": "264f9474e2df2955246024209f1d353fcfc1a0cd",
+  "baselineApplicationSha256": "51B5505514E486AE9949DBB3CB8345679DA45263F895F2EB265B7D0B0484796F",
+  "proposalApplicationSha256": "C0AD48D0FFB8ADF08B7D090811435A3D72F33C18CC4815A5B3CF421FBC79A911",
+  "implementation": {
+    "entryConsistency": "Nifty consumes the validated setup decision at admission. A conflicting descriptive Chop/Exhausted label produces a Transition plan, never a high-conviction upgrade. Rejected quality and unavailable state remain blocked. Timing, location, OI, re-entry, quote and portfolio controls remain independently mandatory.",
+    "runnerEligibility": "Nifty, Sensex and Bank Nifty can qualify before a partial at >=0.5R observed favourable movement with current fresh, continuous completed-candle trend evidence. Current confirmed structure can qualify target extension despite the original non-directional plan. Existing partial schedule, stop monotonicity, confirmed reversal/failed-setup exits, time exits, confidence/freshness and broker protections remain.",
+    "specialtyStrategies": "Hero Zero and expansion pairs unchanged and excluded from the study."
+  },
+  "checks": { "focusedUnitTestsPassed": 94, "gitDiffCheck": "passed", "deployed": false },
+  "syntheticStudy": {
+    "classification": "BEHAVIOR_ONLY_NOT_HISTORICAL_PERFORMANCE",
+    "paths": 24,
+    "design": "Three index adapters x CE/PE direction x four deliberately constructed paths; mirrored sides are not independent evidence. Fixed 100-unit entries isolate exit behavior; 50-unit synthetic lot size is not claimed actual exchange metadata.",
+    "costAssumptions": "0.05 premium-point half-spread, 0.05% modeled slippage each side and existing modeled NSE/BSE charges.",
+    "entryChecks": { "formerlyRevetoedValidatedExamplesNowAdmitted": 2, "unconfirmedChopStillRejected": true, "ordinaryTrendUnchanged": true },
+    "outcomes": {
+      "trendPullbackResumption": { "paths": 6, "improved": 6, "worse": 0 },
+      "chop": { "paths": 6, "unchanged": 6 },
+      "initialFailedSetup": { "paths": 6, "unchanged": 6 },
+      "trendSignalPremiumReversal": { "paths": 6, "unchanged": 2, "worse": 4, "baselineWinnersBecomingProposalLosses": 4 }
+    },
+    "illustrativeNetPerBuyCase": [
+      { "adapter": "NIFTY", "path": "trendPullbackResumption", "baseline": 1405.48, "proposal": 2578.97, "baselineDrawdown": 349.155, "proposalDrawdown": 349.155 },
+      { "adapter": "SENSEX", "path": "trendPullbackResumption", "baseline": 558.145, "proposal": 2579.65, "baselineDrawdown": 349.155, "proposalDrawdown": 349.155 },
+      { "adapter": "BANKNIFTY", "path": "trendPullbackResumption", "baseline": 557.535, "proposal": 2578.97, "baselineDrawdown": 349.155, "proposalDrawdown": 349.155 },
+      { "adapter": "SENSEX", "path": "trendSignalPremiumReversal", "baseline": 328.70, "proposal": -90.30, "baselineDrawdown": 498.80, "proposalDrawdown": 917.80 },
+      { "adapter": "BANKNIFTY", "path": "trendSignalPremiumReversal", "baseline": 328.09, "proposal": -90.89, "baselineDrawdown": 498.79, "proposalDrawdown": 917.77 }
+    ],
+    "baselineDetails": "../.analysis-entry-runner-baseline/result.json",
+    "proposalDetails": "../.analysis-entry-runner-proposal/result.json"
+  },
+  "recordedPathSensitivity": {
+    "date": "2026-11-05",
+    "classification": "PARTIAL_FIXED_ENTRY_MODELED_SPREAD_NOT_FULL_SESSION_OR_EXECUTABLE_RESULT",
+    "tradePathsAttempted": 7,
+    "spreadScenariosPerPath": 2,
+    "usableScenarioRuns": 5,
+    "usableDistinctTradePaths": 3,
+    "result": "All five usable exit comparisons were unchanged; no historical net improvement established.",
+    "excludedScenarioRuns": 9,
+    "exclusions": "Missing/stale entry or exit quotes, or replay rejected an invalid/unpriced requested exit. The separate Nifty path was skipped because actual entry regime was absent, not guessed.",
+    "assumptions": "Recorded REST LTP samples, sampled underlying bars, hypothetical 0.25%/0.50% half-spreads plus 0.05% each-side slippage, modeled 10% initial stop/target and 0.65 entry confidence; not original execution reproduction or counterfactual entry testing.",
+    "baselineDetails": "../.analysis-entry-runner-recorded-baseline/result.json",
+    "proposalDetails": "../.analysis-entry-runner-recorded-proposal/result.json"
+  },
+  "currentProductionReplayAudit": {
+    "date": "2026-11-09",
+    "source": "Authenticated production Historical Replay website: single-day all-three cohort eligibility and replay-to-paper verification.",
+    "eligibleDays": 0,
+    "excludedDays": 1,
+    "allThreeReportedExclusions": ["Underlying/futures/dated-master/control-state coverage incomplete", "Option universe or strategy inputs incomplete", "Shared contract-selection receipt missing or version unverified", "Executable option bid/offer coverage incomplete", "Historical charges unverified"],
+    "paperVerification": "Inconclusive: no verified pre-open policy on a complete feed, or lot settings changed. Current settings will not be substituted.",
+    "localSoftwareFix": "Cohort eligibility now accepts an explicit modeled-cost opt-in matching website comparison. API remains strict by default. Actual market-data, selection and depth exclusions retained. Website coverage request cancels after 180 seconds with an explicit no-verdict message.",
+    "checks": "Backend/API compiled; 9 cohort-selector unit tests passed; frontend production build and full frontend tests passed, including modeled-cost parameter and timeout cancellation regressions.",
+    "deployed": false,
+    "conclusion": "Replay comparison is not historically validated. A fee-assumption eligibility inconsistency was fixed, but existing missing archive evidence cannot be replaced by current settings or synthetic quotes."
+  },
+  "fullSessionValidation": {
+    "frozenArchiveDate": "2026-11-06",
+    "frozenArchiveSha256": "ED8E8EF3DA552326187F48EE3777F6C678824FE891B5BD5663716CF2A2942638",
+    "eligibleHistoricalComparisons": 0,
+    "reasons": ["No executable bid/offer observations for any index in this saved archive.", "No captured complete selected-expiry universes.", "Sensex confirmation futures missing 57 minutes; Bank Nifty futures missing one minute."],
+    "missingCoverageWasRelaxed": false,
+    "avoidedLossesAndMissedWinnersFromCounterfactualHistoricalEntries": "Unknown; unsupported historical comparisons excluded.",
+    "conclusion": "Technical gaps addressed, but synthetic benefit plus unchanged partial historical exits is not proof of net strategy improvement. Keep local pending eligible recorded trend/chop session comparisons."
+  }
+}

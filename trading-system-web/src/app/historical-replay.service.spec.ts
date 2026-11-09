@@ -2,6 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { HistoricalReplayService, replayProposal } from './historical-replay.service';
+import { TestScheduler } from 'rxjs/testing';
 
 describe('three-market replay experiments',()=>{
   const base={niftyAdmission:{stopLossPercent:10},sensexEntry:{stopPercent:12},bankNiftyStopPercent:8,
@@ -70,8 +71,23 @@ describe('HistoricalReplayService', () => {
     expect(request.request.method).toBe('GET');
     expect(request.request.params.get('from')).toBe('2026-11-02');
     expect(request.request.params.get('to')).toBe('2026-11-03');
+    expect(request.request.params.get('allowModeledHistoricalCosts')).toBe('true');
     request.flush({from:'2026-11-02',to:'2026-11-03',includedDates:[],
       excludedDates:[{date:'2026-11-02',reasons:['NIFTY: archive missing']}]});
+    http.verify();
+  });
+
+  it('cancels a stalled eligibility request instead of checking indefinitely', () => {
+    const service=TestBed.inject(HistoricalReplayService);
+    const http=TestBed.inject(HttpTestingController);
+    new TestScheduler(()=>{}).run(({flush})=>{
+      let failure='';
+      service.cohortCoverage('2026-11-09','2026-11-09').subscribe({error:error=>failure=error.name});
+      const request=http.expectOne(value=>value.url==='/api/research/historical-replay/cohort-coverage');
+      flush();
+      expect(failure).toBe('TimeoutError');
+      expect(request.cancelled).toBe(true);
+    });
     http.verify();
   });
 

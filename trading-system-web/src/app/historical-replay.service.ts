@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Observable, switchMap } from 'rxjs';
+import { Observable, switchMap, timeout } from 'rxjs';
 
 export interface HistoricalReplayFill {
   symbol:string; strategy:string; decisionAtUtc:string; entryAtUtc:string; exitAtUtc:string;
@@ -173,7 +173,10 @@ export class HistoricalReplayService {
   cohortCoverage(from:string,to:string) {
     return this.http.get<HistoricalReplayCohortCoverage>(
       '/api/research/historical-replay/cohort-coverage',
-      {params:new HttpParams().set('from',from).set('to',to)});
+      // Match the comparison's explicit modeled-charge assumption, without
+      // certifying historical fees or relaxing market-data coverage.
+      {params:new HttpParams().set('from',from).set('to',to)
+        .set('allowModeledHistoricalCosts',true)}).pipe(timeout({first:180000}));
   }
   backfill(date:string,market:string) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(

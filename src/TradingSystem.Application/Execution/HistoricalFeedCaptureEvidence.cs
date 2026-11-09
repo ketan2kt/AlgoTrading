@@ -13,6 +13,7 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
     public string? ContractSelectionVersion { get; init; }
     public ReplayContractPreflight? ContractPreflight { get; init; }
     public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
+    public string? InterruptionReason { get; init; }
 }
 
 public static class HistoricalFeedCaptureEvidence

@@ -13,7 +13,8 @@ internal interface IGrowwHistoricalFeedTransport
 {
     Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken);
+        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken,
+        Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null);
 }
 
 // Read-only topics from the official Groww SDK. The ephemeral socket JWT/NKey
@@ -32,7 +33,8 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     }
     public async Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken)
+        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken,
+        Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null)
     {
         _ = SubscriptionCount(instruments); // Fail before auth or any partial subscription.
         using var key = KeyPair.CreatePair(PrefixByte.User);
@@ -62,7 +64,7 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
                     opts: new NatsSubOpts { ChannelOpts = new NatsSubChannelOpts { Capacity = 128, FullMode = BoundedChannelFullMode.DropOldest } },
                     cancellationToken: lifetime.Token);
                 subscriptions.Add(subscription);
-                consumers.Add(ConsumeSubscriptionAsync(subscription, instrument, kind, onPoint, onGap, lifetime));
+                consumers.Add(ConsumeSubscriptionAsync(subscription, instrument, kind, onPoint, onGap, onInvalidPoint, lifetime));
             }
             onSubscribed(clock.GetUtcNow());
             await Task.WhenAll(consumers);
@@ -124,16 +126,16 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     private async Task ConsumeSubscriptionAsync(INatsSub<byte[]> subscription,
         HistoricalFeedInstrument instrument, string kind,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, CancellationTokenSource lifetime)
+        Action onGap, Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint,
+        CancellationTokenSource lifetime)
     {
         try
         {
             await foreach (var message in subscription.Msgs.ReadAllAsync(lifetime.Token))
             {
                 var received = clock.GetUtcNow();
-                if (message.Data is null) throw new InvalidDataException("Empty feed frame.");
-                var point = GrowwHistoricalFeedCodec.Decode(message.Data, kind, received, instrument.Exchange, instrument.Segment);
-                onPoint(instrument, kind, point, received);
+                DispatchFrame(message.Data ?? [], instrument, kind, received, onPoint,
+                    () => { onInvalidPoint?.Invoke(instrument, kind, received); onGap(); });
             }
             if (!lifetime.IsCancellationRequested) throw new InvalidDataException("A feed subscription ended before the capture window closed.");
         }
@@ -144,5 +146,23 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
             await lifetime.CancelAsync();
             throw;
         }
+    }
+
+    internal static void DispatchFrame(byte[] data, HistoricalFeedInstrument instrument, string kind,
+        DateTimeOffset received, Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
+        Action onInvalid)
+    {
+        GrowwFeedPoint point;
+        try { point = GrowwHistoricalFeedCodec.Decode(data, kind, received, instrument.Exchange, instrument.Segment); }
+        catch (Exception exception) when (exception is InvalidDataException or OverflowException)
+        {
+            // A bad frame must invalidate its own cached side, not disconnect
+            // every other subject. The gap is retained; no fabricated quote or
+            // successful replay coverage is inferred. Transport failures and
+            // the existing 30-second silence watchdog still reconnect.
+            onInvalid();
+            return;
+        }
+        onPoint(instrument, kind, point, received);
     }
 }

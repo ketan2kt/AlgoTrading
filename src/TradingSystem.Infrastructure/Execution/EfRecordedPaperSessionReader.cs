@@ -16,7 +16,7 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
     public async Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly tradingDate,CancellationToken token)
     {
         var end=Time(tradingDate,15,30).ToUniversalTime();
-        var receipt=(await manifests.ReadCompleteAsync(tradingDate,Time(tradingDate,9,15),end,token))?.PolicyReceipt;
+        var receipt=(await manifests.ReadEvidenceAsync(tradingDate,Time(tradingDate,9,15),end,token))?.PolicyReceipt;
         if(receipt?.ValidFor(tradingDate)!=true) return null;
         if(await db.AuditLogs.AsNoTracking().AnyAsync(a=>a.Action=="IndexTradingLotsChanged" &&
             a.OccurredAtUtc>=receipt.ObservedAt && a.OccurredAtUtc<=end,token)) return null;

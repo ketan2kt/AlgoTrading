@@ -72,7 +72,7 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
         try
         {
             var receipt=await recorded.ReceiptAsync(date,cancellationToken);
-            if(receipt is null) return Conflict("Inconclusive: no verified pre-open policy on a complete feed, or lot settings changed. Current settings will not be substituted.");
+            if(receipt is null) return Conflict("Inconclusive: verified pre-open policy is missing, conflicting, or lot settings changed. Current settings will not be substituted.");
             var execution=SessionPolicyReceipt.ComparisonExecution;
             return await Compare(new(date,date,receipt.Settings,receipt.Settings,execution) {
                 BaselineBuildId=receipt.BuildId,ProposalBuildId=receipt.BuildId,PaperSessionPolicyFingerprint=receipt.Fingerprint

@@ -112,7 +112,9 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     this.subscriptions.add(this.historicalReplayService.cohortCoverage(
       this.replayFrom,this.replayTo).subscribe({
       next:value=>{this.replayCohort=value;this.replayCohortBusy=false;this.refreshView();},
-      error:()=>{this.replayCohortBusy=false;this.replayCohortError='Full-session coverage unavailable for this date range.';this.refreshView();},
+      error:error=>{this.replayCohortBusy=false;this.replayCohortError=
+        error?.name==='TimeoutError'?'Session eligibility check exceeded three minutes. No eligibility verdict was produced; retry a shorter date range.':
+        typeof error?.error==='string'?error.error:'Full-session coverage unavailable for this date range.';this.refreshView();},
     }));
   }
   protected runHistoricalReplay():void {

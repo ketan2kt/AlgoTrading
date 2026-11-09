@@ -57,6 +57,71 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
     }
 
     [Fact]
+    public void PremarketConnectionGetsTheSameThirtySecondGraceAtTheOpeningBell()
+    {
+        var pulse = new ResearchCapturePulse();
+        var date = new DateOnly(2026, 11, 4);
+        var preOpen = new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.FromHours(5.5));
+        pulse.Starting(date);
+        pulse.Subscribed(preOpen, 497, ["NIFTY", "SENSEX", "BANKNIFTY"]);
+        Assert.False(pulse.Read(date, true).HasStalledMarket(preOpen.AddMinutes(15)));
+        Assert.False(pulse.Read(date, true).HasStalledMarket(preOpen.AddMinutes(15).AddSeconds(30)));
+        Assert.True(pulse.Read(date, true).HasStalledMarket(preOpen.AddMinutes(15).AddSeconds(31)));
+    }
+
+    [Fact]
+    public void IndexTrafficCannotMaskMissingOrStaleOptionDepthInAnyMarket()
+    {
+        var pulse = new ResearchCapturePulse();
+        var date = new DateOnly(2026, 11, 4);
+        string[] markets = ["NIFTY", "SENSEX", "BANKNIFTY"];
+        pulse.Starting(date);
+        pulse.Subscribed(At, 497, markets);
+        var now = At.AddSeconds(31);
+        foreach (var market in markets)
+        {
+            pulse.Received(market, now);
+            pulse.OptionReceived(market, "price", now);
+        }
+        Assert.True(pulse.Read(date, true).HasStalledMarket(now));
+        foreach (var market in markets) pulse.OptionReceived(market, "depth", At);
+        Assert.True(pulse.Read(date, true).HasStalledMarket(now));
+        foreach (var market in markets) pulse.OptionReceived(market, "depth", now);
+        Assert.False(pulse.Read(date, true).HasStalledMarket(now));
+        pulse.Starting(date);
+        Assert.Empty(pulse.Read(date, true).LastOptionDepthSourceByMarket);
+    }
+
+    [Fact]
+    public async Task BadFrameInvalidatesItsCachedSideButOtherContractsContinueRecording()
+    {
+        using var archive = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, directory);
+        var accumulator = new GrowwHistoricalFeedAccumulator(archive);
+        var other = Instrument with { TradingSymbol = "SENSEXCE", Exchange = "BSE", ExchangeToken = "999" };
+        foreach (var instrument in new[] { Instrument, other })
+        {
+            accumulator.Observe(instrument, "price", new(At, 100, 1000, 5000, null, null, null, null), At);
+            accumulator.Observe(instrument, "depth", new(At, null, null, null, 99, 65, 101, 65), At);
+        }
+        var invalid = false;
+        GrowwHistoricalFeedTransport.DispatchFrame([0x22, 0x7f, 0x00], Instrument, "depth", At.AddSeconds(1),
+            accumulator.Observe, () => { invalid = true; accumulator.Invalidate(Instrument, "depth", At.AddSeconds(1)); archive.MarkCaptureGap(new(2026, 11, 4)); });
+        accumulator.Sample(At.AddSeconds(2));
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var rows = await archive.ReadAsync(new(2026, 11, 4), CancellationToken.None);
+        Assert.True(invalid);
+        Assert.True(rows.HasCaptureGaps);
+        Assert.Single(rows.Observations);
+        Assert.Equal("SENSEXCE", rows.Observations[0].Request.TradingSymbol);
+        // A delayed pre-corruption frame must not resurrect the cleared book.
+        accumulator.Observe(Instrument, "depth", new(At, null, null, null, 99, 65, 101, 65), At);
+        accumulator.Sample(At.AddSeconds(3));
+        await archive.FlushBatchAsync(CancellationToken.None);
+        Assert.DoesNotContain((await archive.ReadAsync(new(2026, 11, 4), CancellationToken.None)).Observations,
+            value => value.Request.TradingSymbol == Instrument.TradingSymbol);
+    }
+
+    [Fact]
     public void AfterMarketRepairNeverCompetesWithDaytimePollingAndCatchesPreviousWeekday()
     {
         DateTimeOffset Ist(int day, int hour, int minute) => new(2026, 11, day, hour, minute, 0, TimeSpan.FromHours(5.5));

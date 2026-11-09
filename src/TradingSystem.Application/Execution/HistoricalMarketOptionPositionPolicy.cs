@@ -21,7 +21,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v6";
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v7/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -60,7 +60,9 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             !TryMark(frame, position, out var price) || !TryUnderlying(frame, out _)) return false;
         var reversal = Reversal(frame, position, price, position.StopPrice);
         return price > position.StopPrice && !reversal.ShouldExit && !reversal.ProtectProfit &&
-            settings.TargetExtensionEnabled && MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy) &&
+            settings.TargetExtensionEnabled && DifferentiatedRunnerPolicy.AllowsTargetExtension(
+                MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+                settings.DifferentiatedRunnerEnabled && Invalidation(frame, position).RunnerStructureIntact) &&
             (RunnerEligible(frame, position) || MarketOptionPositionPolicy.FreshContinuation(Bars(frame, false), position.UnderlyingDirection!.Value,
                 frame.Market.AvailableAtUtc, frame.Market.LatestQuotes[underlyingSymbol].AvailableAtUtc,
                 settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds));
@@ -115,11 +117,17 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             settings.ReversalLockFraction, contract.TickSize);
     }
 
-    private bool RunnerEligible(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position) =>
-        DifferentiatedRunnerPolicy.Eligible(settings.DifferentiatedRunnerEnabled && settings.TargetExtensionEnabled &&
-            MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy),
+    private bool RunnerEligible(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
+    {
+        if (!TryMark(frame, position, out var price)) return false;
+        var invalidation = Invalidation(frame, position);
+        return DifferentiatedRunnerPolicy.Eligible(settings.DifferentiatedRunnerEnabled && settings.TargetExtensionEnabled &&
+            DifferentiatedRunnerPolicy.AllowsTargetExtension(
+                MarketOptionPositionPolicy.AllowsTargetExtension(position.Strategy), invalidation.RunnerStructureIntact),
             position.OriginalQuantity, position.Quantity, position.Quantity < position.OriginalQuantity,
-            Invalidation(frame, position).RunnerStructureIntact);
+            !invalidation.ShouldExit && invalidation.RunnerStructureIntact,
+            Risk(position) > 0m ? (price - position.EntryPrice) / Risk(position) : 0m);
+    }
 
     private UnderlyingTrendInvalidationResult Invalidation(HistoricalReplayPortfolioFrame frame,
         HistoricalReplayOpenPosition position) => settings.InvalidationEnabled && TryUnderlying(frame, out _)

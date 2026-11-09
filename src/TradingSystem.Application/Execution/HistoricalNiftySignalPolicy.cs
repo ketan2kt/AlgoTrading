@@ -32,13 +32,14 @@ public sealed class HistoricalNiftySignalPolicy(
     // quote and risk policies. The discovery-only constructor is not certified.
     public bool ProductionPolicyParityVerified => admissionSettings is not null;
 
-    public string CodeVersion => $"nifty-signal-adapter-v14:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}";
+    public string CodeVersion => $"nifty-signal-adapter-v15:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}/{EntryChainConsistencyPolicy.Version}";
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         spotSymbol, futuresSymbol, tradingDate, previousClose,
         openingRangeEnd, minimumSpotCandles, minimumFuturesCandles,
         candleIntervalSeconds, lots, optionSelection, admissionSettings,
         EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
+        EntryChainVersion = EntryChainConsistencyPolicy.Version,
         EntryTiming = new
         {
             FirstEntryTimingPolicy.Version,
@@ -182,9 +183,12 @@ public sealed class HistoricalNiftySignalPolicy(
             regime.Regime is MarketRegime.GapDownContinuation or
                 MarketRegime.GapUpContinuation or MarketRegime.StrongBearishTrend or
                 MarketRegime.StrongBullishTrend;
-        if (!PaperEntryQualityPolicy.Evaluate(structure, signal.Direction,
+        var entryQuality = PaperEntryQualityPolicy.Evaluate(structure, signal.Direction,
                 signal.StrategyId, strongRegimeAligned, regime.Confidence,
-                relativeVolume, relaxedNiftyEntries: true).Permitted) return [];
+                relativeVolume, relaxedNiftyEntries: true);
+        var entryChain = EntryChainConsistencyPolicy.Evaluate(
+            ProfessionalTradeFramework.Map(marketState), entryQuality);
+        if (!entryChain.Permitted) return [];
 
         var strategyId = signal.StrategyId;
         if (admissionSettings is not null)
@@ -253,7 +257,7 @@ public sealed class HistoricalNiftySignalPolicy(
                 admissionSettings.RewardToRiskRatio, contract.TickSize,
                 contract.LotSize, lots,
                 new ProfessionalTradeAssessmentInput("nifty",
-                    ProfessionalTradeFramework.Map(marketState), signal.Confidence,
+                    entryChain.PlanRegime, signal.Confidence,
                     relativeVolume, structure.RoomToRiskRatio,
                     null, null, null, 0, null, null, 0m,
                     frame.PortfolioOpenPositions.Any(value =>

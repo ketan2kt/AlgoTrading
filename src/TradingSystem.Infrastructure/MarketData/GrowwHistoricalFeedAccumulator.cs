@@ -8,6 +8,17 @@ internal sealed class GrowwHistoricalFeedAccumulator(IHistoricalQuoteArchive arc
     private readonly Dictionary<string, State> states = new(StringComparer.Ordinal);
     private readonly object gate = new();
 
+    public void Invalidate(HistoricalFeedInstrument instrument, string kind, DateTimeOffset received)
+    {
+        lock (gate)
+        {
+            var key = instrument.Exchange + ":" + instrument.Segment + ":" + instrument.ExchangeToken;
+            if (!states.TryGetValue(key, out var state)) return;
+            if (kind == "depth") { state.Depth = null; state.DepthReceived = received; }
+            else { state.Price = null; state.PriceReceived = received; }
+        }
+    }
+
     public void Observe(HistoricalFeedInstrument instrument, string kind, GrowwFeedPoint point, DateTimeOffset received)
     {
         lock (gate)

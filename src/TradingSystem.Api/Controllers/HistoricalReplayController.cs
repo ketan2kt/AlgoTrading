@@ -25,7 +25,7 @@ public sealed class HistoricalReplayController(IHistoricalReplayReportReader rea
     [HttpGet("cohort-coverage")]
     public async Task<ActionResult<HistoricalReplayCohortRangeReport>> CohortCoverage(
         [FromQuery] DateOnly from, [FromQuery] DateOnly to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, [FromQuery] bool allowModeledHistoricalCosts = false)
     {
         Response.Headers.CacheControl = "no-store";
         if (from == default || to == default || from > to || !HistoricalReplaySessionCalendar.IsCompletedDate(to, clock.GetUtcNow()) ||
@@ -74,7 +74,7 @@ public sealed class HistoricalReplayController(IHistoricalReplayReportReader rea
             }
         }
         var selection = HistoricalReplayCohortSelector.Select(sessions,
-            markets, dates);
+            markets, dates, allowModeledHistoricalCosts);
         var excluded = selection.ExcludedDates.Select(value => new
             HistoricalReplayExcludedDate(value.Date,
                 value.Reasons.Concat(unreadable.GetValueOrDefault(value.Date) ?? [])

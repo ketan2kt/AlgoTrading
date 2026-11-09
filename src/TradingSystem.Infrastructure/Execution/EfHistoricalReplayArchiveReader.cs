@@ -32,7 +32,9 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             IndiaOffset).ToUniversalTime();
         var controls = await new EfHistoricalReplayControlReader(db).ReadAsync(market, start, end, cancellationToken);
         var feedManifest = feedManifests is null ? null :
-            await feedManifests.ReadCompleteAsync(tradingDate, start, end, cancellationToken);
+            await feedManifests.ReadEvidenceAsync(tradingDate, start, end, cancellationToken);
+        var feedWindowComplete = feedManifest is not null &&
+            HistoricalFeedCaptureEvidence.CoversWindow(feedManifest, tradingDate, start, end);
         var datedMaster = await db.HistoricalInstrumentMasterSnapshots.AsNoTracking()
             .Where(value => value.SessionDate == tradingDate &&
                 value.Source == "GrowwInstrumentMasterV1" &&
@@ -254,7 +256,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                     value.GrowwSymbol ?? "", value.Type, value.ExpiryDate,
                     value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
                 exchange, underlying, tradingDate).ToArray();
-        var streamingUniverse = feedManifest is not null && !quoteDay.HasCaptureGaps &&
+        var streamingUniverse = feedManifest is not null && feedWindowComplete && !quoteDay.HasCaptureGaps &&
             datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars,
                 feedManifest.PolicyReceipt?.Settings.NiftySelection);
         if (streamingUniverse)
@@ -274,6 +276,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             "|controlStateVerified=" + controls.InitialStateVerified +
             "|controlStateGaps=" + string.Join(';', controls.Gaps) +
             "|streamingUniverse=" + feedManifest?.UniverseFingerprint +
+            "|feedWindowComplete=" + feedWindowComplete +
             "|streamingUniverseScope=" + feedManifest?.UniverseScope +
             "|contractSelection=" + feedManifest?.ContractSelectionVersion +
             "|sessionPolicy=" + feedManifest?.PolicyReceipt?.Fingerprint +
@@ -311,11 +314,14 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             StrategyInputsComplete = streamingUniverse && (underlying == "BANKNIFTY" ||
                 optionObservations.All(value => value.Volume.HasValue && value.OpenInterest.HasValue)),
             PolicyInputManifest = manifest,
-            UnsupportedContractCoverage = feedManifest?.ContractSelectionVersion != RegularOptionContractSelector.Version
+            UnsupportedContractCoverage = (feedWindowComplete ? Array.Empty<string>() :
+                new[] { "Capture window incomplete: " + (feedManifest is null ? "no recorder manifest" :
+                    feedManifest.InterruptionReason ?? $"started {feedManifest.StartedAtUtc:O}; subscribed {feedManifest.SubscribedAtUtc:O}; completed {feedManifest.CompletedAtUtc:O}; gaps={feedManifest.HasGaps}") })
+                .Concat(feedManifest?.ContractSelectionVersion != RegularOptionContractSelector.Version
                 ? ["Unsupported replay: shared contract-selection receipt missing or version unverified."]
                 : feedManifest.ContractPreflight is not { Ready: true }
                     ? ["Unsupported replay: pre-session contract coverage was not verified."]
-                    : feedManifest.ContractCoverageIssues,
+                    : feedManifest.ContractCoverageIssues).ToArray(),
             OptionChains = chains.Select(value => new HistoricalOptionChainFrame(
                     value.ReceivedAtUtc, value.SourceTimestampUtc,
                     value.ExpiryDate,

@@ -97,6 +97,7 @@ internal sealed partial class AutomatedPaperTradingService(
         {
             EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
             EntryTimingVersion = FirstEntryTimingPolicy.Version,
+            EntryChainVersion = EntryChainConsistencyPolicy.Version,
             options.Value.Enabled, options.Value.MinimumSignalCandles,
             options.Value.MinimumFuturesConfirmationCandles,
             options.Value.EntryWindowStart, options.Value.EntryCutoff,
@@ -622,6 +623,16 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
+        var entryChain = EntryChainConsistencyPolicy.Evaluate(
+            ProfessionalTradeFramework.Map(marketStateV2), entryQuality);
+        cycleInputs["entryChain"] = entryChain;
+        if (!entryChain.Permitted)
+        {
+            state.Record("EntryQualityRejected", false, string.Join(" ", entryChain.Reasons),
+                tradeState.TradesToday, tradeState.RealisedPnl);
+            return;
+        }
+
         var adaptiveDecision = AdaptivePaperTradePolicy.Evaluate(tradeState.TradesToday,
             int.MaxValue, tradeState.ConsecutiveLosses,
             int.MaxValue, tradeState.LastLossAtUtc, now,
@@ -760,7 +771,7 @@ internal sealed partial class AutomatedPaperTradingService(
             options.Value.OptionRewardToRiskRatio, selectedOption.TickSize,
             selectedOption.LotSize, configuredLots,
             new ProfessionalTradeAssessmentInput("nifty",
-                ProfessionalTradeFramework.Map(marketStateV2), signal.Confidence,
+                entryChain.PlanRegime, signal.Confidence,
                 relativeVolume, shadowStructure.RoomToRiskRatio,
                 null, null, null, 0, null, null, 0m,
                 hasCorrelatedSensexExposure, tradeState.ConsecutiveLosses,
@@ -971,19 +982,23 @@ internal sealed partial class AutomatedPaperTradingService(
             : new UnderlyingTrendInvalidationResult(false, 0m,
                 underlyingFresh ? ["Underlying trend invalidation is disabled."] :
                     ["Fresh Nifty data is unavailable; reversal exits fail closed."]);
+        var initialRiskPerUnit = Math.Abs(entryPrice - open.StopLoss);
+        var favourableMove = (favourable - entryPrice) * multiplier;
+        var currentRunnerStructure = underlyingFresh && !invalidation.ShouldExit &&
+                                     invalidation.RunnerStructureIntact;
+        var runnerPlanAllows = DifferentiatedRunnerPolicy.AllowsTargetExtension(
+            exitPlan.ExtendTarget, options.Value.DifferentiatedRunnerEnabled && currentRunnerStructure);
         var differentiatedRunner = DifferentiatedRunnerPolicy.Eligible(
             options.Value.DifferentiatedRunnerEnabled && options.Value.TrailingStopEnabled,
             open.TotalQuantity, open.RemainingQuantity, open.PartialExit is { FilledQuantity: > 0 },
-            options.Value.TargetExtensionEnabled && exitPlan.ExtendTarget && underlyingFresh &&
-            !invalidation.ShouldExit && invalidation.RunnerStructureIntact &&
-            open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence);
+            options.Value.TargetExtensionEnabled && runnerPlanAllows && currentRunnerStructure &&
+            open.Signal.Confidence >= options.Value.TargetExtensionMinimumConfidence,
+            initialRiskPerUnit > 0m ? favourableMove / initialRiskPerUnit : 0m);
         var effectiveStop = PaperProtectiveStopPolicy.CalculateNetProtected(
             open.Entry.Direction, entryPrice, open.StopLoss, favourable,
             exitPlan, options.Value.BreakEvenEnabled,
             options.Value.TrailingStopEnabled, open.TotalQuantity,
             open.Entry.FilledQuantity, "NSE", differentiatedRunner);
-        var initialRiskPerUnit = Math.Abs(entryPrice - open.StopLoss);
-        var favourableMove = (favourable - entryPrice) * multiplier;
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
         await PersistProfitProtectionSnapshotAsync(researchDb, open, underlyingInstrumentId,
             price, effectiveStop, peakPoint?.OptionPrice ?? price,
@@ -1010,7 +1025,7 @@ internal sealed partial class AutomatedPaperTradingService(
             underlyingInstrumentId, open.Entry.Direction, open.StopLoss, optionInstrument.TickSize, effectiveStop, open.RemainingQuantity, cancellationToken);
 
         var extendBeyondTarget = options.Value.TargetExtensionEnabled && underlyingFresh &&
-                                 exitPlan.ExtendTarget &&
+                                 runnerPlanAllows &&
                                  !invalidation.ShouldExit &&
                                  (differentiatedRunner || invalidation.DirectionAligned &&
                                   invalidation.Behaviour == SessionBehaviour.Trending) &&
