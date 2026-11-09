@@ -40,6 +40,7 @@ try {
     $rec['WEBSITES_CONTAINER_START_TIME_LIMIT'] = '600'
     $rec['MarketData__HistoricalReplayFeed__Enabled'] = $(if ($Activate) { 'true' } else { 'false' })
     $rec['MarketData__HistoricalReplayFeed__SampleSeconds'] = '2'
+    $rec['MarketData__HistoricalReplayFeed__MaximumInstruments'] = '500'
     foreach ($settings in @($web, $rec)) {
         $settings['ReplayStorage__ContainerUri'] = 'https://sarthireplay2026.blob.core.windows.net/replay'
         $settings['ReplayStorage__KeyRingUri'] = 'https://sarthireplay2026.blob.core.windows.net/protected-keys/keyring.xml'

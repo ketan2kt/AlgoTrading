@@ -46,6 +46,11 @@ public sealed class RecorderActivationHealthCheck(IOptions<HistoricalFeedCapture
                 if (storage?.Failure is not null || storage?.LastPersistedAtUtc is not { } written ||
                     written > now || now - written > TimeSpan.FromSeconds(30))
                     return Task.FromResult(HealthCheckResult.Unhealthy("A recent successful quote write is required."));
+                if (Markets.Any(market => !storage.LastOptionWrittenAtByMarket.TryGetValue(market, out var optionAt) ||
+                        optionAt > now || now - optionAt > TimeSpan.FromSeconds(30) ||
+                        !storage.LastOptionSourceAtByMarket.TryGetValue(market, out var sourceAt) ||
+                        sourceAt > now || now - sourceAt > TimeSpan.FromSeconds(30)))
+                    return Task.FromResult(HealthCheckResult.Unhealthy("Fresh saved option prices AND depth are required for every market."));
             }
         }
         // Historical gaps do not prevent recovery, but remain in capture-health.

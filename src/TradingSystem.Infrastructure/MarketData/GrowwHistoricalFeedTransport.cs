@@ -22,11 +22,19 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     IGrowwAccessTokenProvider tokens, TimeProvider clock) : IGrowwHistoricalFeedTransport
 {
     internal const string HttpClientName = "GrowwHistoricalFeedAuth";
+    internal const int MaximumSubjects = 1000;
+    internal static int SubscriptionCount(IReadOnlyList<HistoricalFeedInstrument> instruments)
+    {
+        var count = instruments.Sum(value => value.Type == TradingSystem.Domain.Trading.InstrumentType.Index ? 1 : 2);
+        if (instruments.Count == 0 || count > MaximumSubjects)
+            throw new ArgumentException("Replay price/depth subscription budget exceeds 1000 subjects.", nameof(instruments));
+        return count;
+    }
     public async Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
         Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken)
     {
-        if (instruments.Count is 0 or > 1000) throw new ArgumentException("Invalid Groww subscription count.", nameof(instruments));
+        _ = SubscriptionCount(instruments); // Fail before auth or any partial subscription.
         using var key = KeyPair.CreatePair(PrefixByte.User);
         var jwt = await AuthorizeAsync(key.GetPublicKey(), cancellationToken);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

@@ -45,6 +45,7 @@ foreach ($mode in @('slow-success', 'failed-start')) {
         $failed = $true
     }
     if ($global:recorderTestSettings.recorder.WEBSITES_CONTAINER_START_TIME_LIMIT -ne '600') { throw 'Startup budget missing.' }
+    if ($global:recorderTestSettings.recorder.MarketData__HistoricalReplayFeed__MaximumInstruments -ne '500') { throw 'Price/depth subscription budget missing.' }
     if ($global:recorderTestSucceed) {
         if ($failed -or $global:recorderTestProbes -ne 117 -or ($global:recorderTestWrites -join ',') -ne 'website:false,recorder:true') {
             throw 'Slow successful activation was not preserved.'

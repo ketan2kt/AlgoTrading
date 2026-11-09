@@ -69,6 +69,7 @@ resource recorder 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'ReplayStorage__ContainerUri', value: '${storage.properties.primaryEndpoints.blob}replay' }
         { name: 'ReplayStorage__KeyRingUri', value: '${storage.properties.primaryEndpoints.blob}protected-keys/keyring.xml' }
         { name: 'MarketData__HistoricalReplayFeed__Enabled', value: 'false' }
+        { name: 'MarketData__HistoricalReplayFeed__MaximumInstruments', value: '500' }
         { name: 'ASPNETCORE_ENVIRONMENT', value: 'Production' }
       ]
     }

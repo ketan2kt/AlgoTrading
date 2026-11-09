@@ -20,7 +20,8 @@ public sealed class HistoricalFeedCaptureOptions
     public const string SectionName = "MarketData:HistoricalReplayFeed";
     public bool Enabled { get; init; } = true;
     public bool AfterMarketBackfillEnabled { get; init; } = true;
-    public int MaximumInstruments { get; init; } = 1000;
+    // Each derivative requires separate price and depth subscriptions.
+    public int MaximumInstruments { get; init; } = 500;
     public int SampleSeconds { get; init; } = 2;
 }
 

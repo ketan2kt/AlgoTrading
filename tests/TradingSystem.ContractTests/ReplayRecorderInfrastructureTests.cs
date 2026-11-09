@@ -11,6 +11,7 @@ namespace TradingSystem.ContractTests;
 
 public sealed class ReplayRecorderInfrastructureTests
 {
+    private static readonly string[] MarketCodes = ["NIFTY", "SENSEX", "BANKNIFTY"];
     [Theory]
     [InlineData(false, HealthStatus.Unhealthy)]
     [InlineData(true, HealthStatus.Healthy)]
@@ -38,7 +39,15 @@ public sealed class ReplayRecorderInfrastructureTests
         pulse.Received("BANKNIFTY", now);
         Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
         archive.Health = new(0, true, now, null); // A prior gap stays marked; resumed writes may recover.
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status); // Index-only writes are insufficient.
+        var optionTimes = MarketCodes.ToDictionary(market => market, _ => now);
+        archive.Health = archive.Health with { LastOptionWrittenAtByMarket = optionTimes,
+            LastOptionSourceAtByMarket = new Dictionary<string, DateTimeOffset> { ["NIFTY"] = now, ["SENSEX"] = now } };
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status); // Missing Bank Nifty premium/depth.
+        archive.Health = archive.Health with { LastOptionSourceAtByMarket = optionTimes };
         Assert.Equal(HealthStatus.Healthy, (await check.CheckHealthAsync(new())).Status);
+        archive.Health = archive.Health with { LastOptionSourceAtByMarket = new Dictionary<string, DateTimeOffset>(optionTimes) { ["BANKNIFTY"] = now.AddSeconds(-31) } };
+        Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
         archive.Health = new(0, true, now.AddSeconds(-31), null);
         Assert.Equal(HealthStatus.Unhealthy, (await check.CheckHealthAsync(new())).Status);
         archive.Health = new(0, true, now, null);

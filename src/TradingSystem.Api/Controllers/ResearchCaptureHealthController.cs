@@ -59,6 +59,13 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             if (!feed.PriorSensexStateReady) issues.Add("Sensex prior-session state not yet recorded");
             if (storage?.Failure is { } failure) issues.Add(failure);
             if (storage?.GapObserved == true) issues.Add("Quote recording gap detected");
+            if (quotesExpected)
+                foreach (var market in new[] { "NIFTY", "SENSEX", "BANKNIFTY" })
+                    if (storage is null || !storage.LastOptionWrittenAtByMarket.TryGetValue(market, out var optionAt) ||
+                        optionAt > observedAt || observedAt - optionAt > TimeSpan.FromSeconds(30) ||
+                        !storage.LastOptionSourceAtByMarket.TryGetValue(market, out var sourceAt) ||
+                        sourceAt > observedAt || observedAt - sourceAt > TimeSpan.FromSeconds(30))
+                        issues.Add(market + " option price/depth recording missing or stale");
             if (storage is { ArchiveLimitBytes: > 0 } && storage.ArchiveBytes >= storage.ArchiveLimitBytes * .8m)
                 issues.Add("Quote archive over 80% of storage limit");
             if (storage?.DiskFreeBytes is >= 0 and < 1024L * 1024 * 1024)

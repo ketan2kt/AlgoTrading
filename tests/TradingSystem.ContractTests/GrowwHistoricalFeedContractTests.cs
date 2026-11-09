@@ -207,6 +207,61 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
         Assert.DoesNotContain("test-access", error.Message);
     }
 
+    [Fact]
+    public void PriceAndDepthBothCountAgainstConnectionBudgetAndBandsRemainBalanced()
+    {
+        Assert.Equal(1000, GrowwHistoricalFeedTransport.SubscriptionCount(Enumerable.Repeat(Instrument, 500).ToArray()));
+        Assert.Throws<ArgumentException>(() => GrowwHistoricalFeedTransport.SubscriptionCount(Enumerable.Repeat(Instrument, 501).ToArray()));
+        Assert.Throws<ArgumentException>(() => GrowwHistoricalFeedTransport.SubscriptionCount([]));
+        var date = new DateOnly(2026, 11, 4);
+        var markets = new[] { "NIFTY", "SENSEX", "BANKNIFTY" };
+        var rows = new List<HistoricalFeedInstrument>();
+        var token = 0;
+        foreach (var market in markets)
+        {
+            var exchange = market == "SENSEX" ? "BSE" : "NSE";
+            rows.Add(Instrument with { Market = market, Exchange = exchange, Segment = "CASH", TradingSymbol = market,
+                Type = InstrumentType.Index, ExchangeToken = (++token).ToString(System.Globalization.CultureInfo.InvariantCulture), StrikePrice = null, ExpiryDate = null });
+            if (market != "BANKNIFTY") rows.Add(Instrument with { Market = market, Exchange = exchange, TradingSymbol = market + "FUT",
+                Type = InstrumentType.Future, ExchangeToken = (++token).ToString(System.Globalization.CultureInfo.InvariantCulture), StrikePrice = null, ExpiryDate = date.AddDays(20) });
+            for (var i = 0; i < 200; i++)
+            foreach (var type in new[] { InstrumentType.CallOption, InstrumentType.PutOption })
+                rows.Add(Instrument with { Market = market, Exchange = exchange, Type = type, StrikePrice = 15000 + i * 50,
+                    TradingSymbol = market + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + (type == InstrumentType.CallOption ? "CE" : "PE"),
+                    ExchangeToken = (++token).ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        }
+        var plan = HistoricalFeedSubscriptionPlanner.Select(date, rows, 500, markets.ToDictionary(market => market, _ => 22000m));
+        Assert.Equal(497, plan.Count);
+        Assert.Equal(991, GrowwHistoricalFeedTransport.SubscriptionCount(plan));
+        foreach (var market in markets)
+            Assert.Equal(164, plan.Count(row => row.Market == market && row.Type is InstrumentType.CallOption or InstrumentType.PutOption));
+    }
+
+    [Fact]
+    public async Task HealthReportsOnlyDurablyWrittenOptionQuotesAndTheirRealPriceDepthTimes()
+    {
+        var date = new DateOnly(2026, 11, 4);
+        using var archive = new HistoricalQuoteArchive(new RecordingClock(At), NullLogger<HistoricalQuoteArchive>.Instance, directory);
+        void Add(string market, bool option, DateTimeOffset priceAt) => archive.TryRecord(new(Guid.NewGuid(), At,
+            new(market == "SENSEX" ? "BSE" : "NSE", option ? "FNO" : "CASH", market + (option ? "CE" : "")),
+            new(100m, priceAt.ToUnixTimeMilliseconds(), 99m, 30L, 101m, 30L, null, null, null))
+            { Source = "GrowwFeedSample", DepthSourceAtUtc = At });
+        Add("NIFTY", true, At); Add("SENSEX", true, At); Add("BANKNIFTY", false, At);
+        Assert.Empty(archive.ReadHealth(date).LastOptionWrittenAtByMarket);
+        await archive.FlushBatchAsync(CancellationToken.None);
+        Assert.Equal(2, archive.ReadHealth(date).LastOptionWrittenAtByMarket.Count);
+        Assert.False(archive.ReadHealth(date).LastOptionWrittenAtByMarket.ContainsKey("BANKNIFTY"));
+        Add("BANKNIFTY", true, At.AddSeconds(-31));
+        await archive.FlushBatchAsync(CancellationToken.None);
+        Assert.Equal(At, archive.ReadHealth(date).LastOptionWrittenAtByMarket["BANKNIFTY"]);
+        Assert.Equal(At.AddSeconds(-31), archive.ReadHealth(date).LastOptionSourceAtByMarket["BANKNIFTY"]);
+        Add("BANKNIFTY", true, At);
+        await archive.FlushBatchAsync(CancellationToken.None);
+        Assert.Equal(At, archive.ReadHealth(date).LastOptionSourceAtByMarket["BANKNIFTY"]);
+    }
+
+    private sealed class RecordingClock(DateTimeOffset at) : TimeProvider { public override DateTimeOffset GetUtcNow() => at; }
+
     private static byte[] Envelope(int field, byte[] payload) => Join(Varint(2, 1), Varint(3, 1), Chunk(field, payload));
     private static byte[] Book(double price, double quantity) => Join(Varint(1, 1), Chunk(2, Join(Double(1, price), Double(2, quantity))));
     private static byte[] Join(params byte[][] fields) => fields.SelectMany(value => value).ToArray();

@@ -29,6 +29,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private readonly ConcurrentDictionary<DateOnly, long> buffered = new();
     private readonly ConcurrentDictionary<DateOnly, bool> knownGaps = new();
     private readonly ConcurrentDictionary<DateOnly, DateTimeOffset> persisted = new();
+    private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionWritten = new();
+    private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionSource = new();
     private string? failure;
     private readonly List<HistoricalQuoteObservation> pending = [];
     private DateTimeOffset storageCheckedAt = DateTimeOffset.MinValue;
@@ -69,7 +71,11 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         persisted.TryGetValue(tradingDate, out var at) ? at : null, Volatile.Read(ref failure))
     {
         ArchiveBytes = Interlocked.Read(ref archiveBytes), ArchiveLimitBytes = maximumArchiveBytes,
-        DiskFreeBytes = Interlocked.Read(ref diskFreeBytes) is >= 0 and var free ? free : null
+        DiskFreeBytes = Interlocked.Read(ref diskFreeBytes) is >= 0 and var free ? free : null,
+        LastOptionWrittenAtByMarket = optionWritten.Where(value => value.Key.Date == tradingDate)
+            .ToDictionary(value => value.Key.Market, value => value.Value),
+        LastOptionSourceAtByMarket = optionSource.Where(value => value.Key.Date == tradingDate)
+            .ToDictionary(value => value.Key.Market, value => value.Value)
     };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -159,6 +165,23 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 await file.FlushAsync(token);
             }
             persisted[date] = clock.GetUtcNow();
+            foreach (var value in pending.Where(value => LocalDate(value.ReceivedAtUtc) == date && value.Source == "GrowwFeedSample" &&
+                (value.Request.TradingSymbol.EndsWith("CE", StringComparison.Ordinal) || value.Request.TradingSymbol.EndsWith("PE", StringComparison.Ordinal))))
+            {
+                var symbol = value.Request.TradingSymbol;
+                var market = symbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
+                    symbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY";
+                var key = (date, market);
+                optionWritten.AddOrUpdate(key, value.ReceivedAtUtc, (_, previous) => value.ReceivedAtUtc > previous ? value.ReceivedAtUtc : previous);
+                var priceAt = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds);
+                if (priceAt is { } price && value.DepthSourceAtUtc is { } depth &&
+                    price <= value.ReceivedAtUtc && depth <= value.ReceivedAtUtc &&
+                    value.Quote.BidPrice > 0m && value.Quote.OfferPrice >= value.Quote.BidPrice)
+                {
+                    var sourceAt = price < depth ? price : depth;
+                    optionSource.AddOrUpdate(key, sourceAt, (_, previous) => sourceAt > previous ? sourceAt : previous);
+                }
+            }
             Volatile.Write(ref failure, null);
         }
         foreach (var gap in gaps) dropped.AddOrUpdate(gap.Key, 0, (_, count) => Math.Max(0, count - gap.Value));

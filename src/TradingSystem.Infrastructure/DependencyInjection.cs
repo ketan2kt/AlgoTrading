@@ -173,8 +173,8 @@ public static class DependencyInjection
             .RedactLoggedHeaders(static _ => true);
         services.AddOptions<HistoricalFeedCaptureOptions>()
             .Bind(configuration.GetSection(HistoricalFeedCaptureOptions.SectionName))
-            .Validate(value => value.MaximumInstruments is >= 1 and <= 1000 && value.SampleSeconds is >= 1 and <= 2,
-                "Historical feed limits must respect Groww's instrument cap and a 1–2 second sample cadence for two-stage quote admission.")
+            .Validate(value => value.MaximumInstruments is >= 1 and <= 500 && value.SampleSeconds is >= 1 and <= 2,
+                "Historical feed must fit 1000 price/depth subjects (at most 500 instruments) and use a 1–2 second sample cadence.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
         services.AddSingleton<ResearchCapturePulse>();

@@ -19,6 +19,8 @@ public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserve
     public long ArchiveBytes { get; init; }
     public long ArchiveLimitBytes { get; init; }
     public long? DiskFreeBytes { get; init; }
+    public IReadOnlyDictionary<string, DateTimeOffset> LastOptionWrittenAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
+    public IReadOnlyDictionary<string, DateTimeOffset> LastOptionSourceAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
 }
 
 public static class HistoricalQuoteProjection
