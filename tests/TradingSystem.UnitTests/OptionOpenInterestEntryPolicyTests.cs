@@ -6,6 +6,18 @@ namespace TradingSystem.UnitTests;
 public sealed class OptionOpenInterestEntryPolicyTests
 {
     [Fact]
+    public void BroaderNiftyTrialAllowsOneRiskUnitBeforeWallButNotNearZeroRoom()
+    {
+        OptionOpenInterestStrike[] chain = [new(22900m, 800m, 1100m),
+            new(23000m, 900m, 1000m), new(23100m, 5000m, 900m), new(23200m, 1000m, 800m)];
+        Assert.False(OptionOpenInterestEntryPolicy.Evaluate(Direction.Buy, 23020m, 80m, chain).Permitted);
+        Assert.True(OptionOpenInterestEntryPolicy.Evaluate(Direction.Buy, 23020m, 80m, chain,
+            relaxedNiftyEntries: true).Permitted);
+        Assert.False(OptionOpenInterestEntryPolicy.Evaluate(Direction.Buy, 23090m, 80m, chain,
+            relaxedNiftyEntries: true).Permitted);
+    }
+
+    [Fact]
     [Trait("Category", "DeploymentRegression")]
     public void RejectsBuyWhenConcentratedCallWallLeavesInsufficientRoom()
     {

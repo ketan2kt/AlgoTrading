@@ -15,6 +15,19 @@ public sealed class OpeningRangeBreakoutStrategyTests
     private readonly OpeningRangeBreakoutStrategy strategy = new(new());
 
     [Fact]
+    public void NiftyTrialLoosensVolumeAndCooldownWithoutChangingRiskOrOtherMarkets()
+    {
+        var baseline = Context() with { RelativeVolume = .65m, LastSignalAtUtc = Now.AddMinutes(-20) };
+        Assert.Null(strategy.Evaluate(baseline));
+        var relaxed = strategy.Evaluate(baseline with { RelaxedNiftyEntries = true });
+        Assert.NotNull(relaxed);
+        Assert.Equal(2m, relaxed.RewardToRiskRatio);
+        Assert.Equal(baseline.OpeningRangeLow, relaxed.ProposedStopLoss);
+        Assert.Null(strategy.Evaluate(baseline with
+            { RelaxedNiftyEntries = true, DataTradingPermitted = false }));
+    }
+
+    [Fact]
     public void BullishBreakoutCreatesImmutableRiskDefinedSignal()
     {
         var signal = strategy.Evaluate(Context());

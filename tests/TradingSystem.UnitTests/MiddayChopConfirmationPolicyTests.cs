@@ -10,6 +10,22 @@ public sealed class MiddayChopConfirmationPolicyTests
         MarketStructureQualityState.NoisyChop, Direction.Buy, .25m, .75m, .30m,
         .80m, null, .30m, false, ["chop"]);
 
+    [Fact]
+    public void NiftyTrialCanConfirmPreviousBarBreakButStillRequiresContinuousCompletedBars()
+    {
+        var start = new DateTimeOffset(2026, 11, 9, 5, 30, 0, TimeSpan.Zero);
+        StrategyPriceBar[] bars = [new(start, 99m, 105m, 98m, 100m),
+            new(start.AddMinutes(5), 100m, 102m, 99m, 101m),
+            new(start.AddMinutes(10), 101m, 104m, 100m, 103m)];
+        Assert.False(MiddayChopConfirmationPolicy.Evaluate(new(12, 0), bars,
+            Direction.Buy, NoisyStructure, 300, true).Permitted);
+        Assert.True(MiddayChopConfirmationPolicy.Evaluate(new(12, 0), bars,
+            Direction.Buy, NoisyStructure, 300, true, true).Permitted);
+        bars[1] = bars[1] with { OpenTimeUtc = start.AddMinutes(6) };
+        Assert.False(MiddayChopConfirmationPolicy.Evaluate(new(12, 0), bars,
+            Direction.Buy, NoisyStructure, 300, true, true).Permitted);
+    }
+
     [Theory]
     [InlineData(10, 59)]
     [InlineData(13, 31)]

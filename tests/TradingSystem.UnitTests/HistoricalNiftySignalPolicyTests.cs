@@ -34,6 +34,8 @@ public sealed class HistoricalNiftySignalPolicyTests
 
         Assert.Empty(candidates);
         Assert.NotNull(strategy.LastContext);
+        Assert.True(strategy.LastContext.RelaxedNiftyEntries);
+        Assert.Contains(NiftyEntryTrialProfile.Version, policy.ConfigurationManifest);
         Assert.Equal(15, strategy.LastContext.RecentCandles.Count);
         Assert.Equal(1m, strategy.LastContext.RelativeVolume);
         Assert.Equal(22015m, strategy.LastContext.CurrentPrice);

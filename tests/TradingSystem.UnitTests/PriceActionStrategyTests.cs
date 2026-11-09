@@ -8,6 +8,33 @@ public sealed class PriceActionStrategyTests
     private static readonly DateTimeOffset Now = new(2026, 8, 13, 5, 30, 0, TimeSpan.Zero);
 
     [Fact]
+    public void BroaderNiftyTrialAdmitsLowerScoreSingleSignalButStillRejectsDisagreement()
+    {
+        var context = Context() with
+        {
+            MarketStructure = new(MarketStructureDirection.Bullish, .6m, 103m, 99m, 3)
+        };
+        var strategy = new CompositeTradingStrategy([new StubStrategy("ema-pullback-continuation", .60m)]);
+        Assert.Null(strategy.Evaluate(context));
+        Assert.NotNull(strategy.Evaluate(context with { RelaxedNiftyEntries = true }));
+        var opposed = new CompositeTradingStrategy([
+            new StubStrategy("ema-pullback-continuation", .60m),
+            new StubStrategy("vwap-trend-pullback", .65m, Direction.Sell)]);
+        Assert.Null(opposed.Evaluate(context with { RelaxedNiftyEntries = true }));
+    }
+
+    [Fact]
+    public void BroaderNiftyTrialAllowsTechnicalContinuationDespiteLaggingRegime()
+    {
+        var context = Context() with { RegimeTradingPermitted = false, RegimeBias = Direction.Sell };
+        var strategy = new EmaPullbackContinuationStrategy(new());
+        Assert.Null(strategy.Evaluate(context));
+        Assert.NotNull(strategy.Evaluate(context with { RelaxedNiftyEntries = true }));
+        Assert.Null(strategy.Evaluate(context with
+            { RelaxedNiftyEntries = true, DataTradingPermitted = false }));
+    }
+
+    [Fact]
     public void OpeningRangeRetestSignalsWithoutHighRelativeVolume()
     {
         var strategy = new OpeningRangeRetestStrategy(new());

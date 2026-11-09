@@ -23,6 +23,7 @@ public sealed record StrategyEvaluationContext(
     bool RegimeTradingPermitted, bool DataTradingPermitted,
     DateTimeOffset? LastSignalAtUtc, int TradesToday)
 {
+    public bool RelaxedNiftyEntries { get; init; }
     public decimal Vwap { get; init; }
     public decimal FastEma { get; init; }
     public decimal SlowEma { get; init; }

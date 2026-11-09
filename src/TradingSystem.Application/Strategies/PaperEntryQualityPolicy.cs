@@ -12,10 +12,31 @@ public static class PaperEntryQualityPolicy
         string strategyId = "",
         bool strongRegimeAligned = false,
         decimal regimeConfidence = 0m,
-        decimal relativeVolume = 0m)
+        decimal relativeVolume = 0m,
+        bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(structure);
         var reasons = new List<string>();
+
+        if (relaxedNiftyEntries)
+        {
+            var standard = Evaluate(structure, candidateDirection, strategyId,
+                strongRegimeAligned, regimeConfidence, relativeVolume);
+            if (standard.Permitted) return standard;
+            if (structure.State == MarketStructureQualityState.Unavailable)
+                reasons.Add("Structure-quality inputs are unavailable.");
+            if (structure.TrendEfficiency < .25m || structure.ChopScore > .65m ||
+                structure.SwingConsistency < .35m)
+                reasons.Add("Trial requires efficiency >=25%, chop <=65% and swing consistency >=35%.");
+            if (structure.MoveMaturityAtr > 6m)
+                reasons.Add("Trial move maturity exceeds 6 ATR.");
+            if (structure.RoomToRiskRatio is < .60m)
+                reasons.Add("Trial requires at least 0.60R of known structural room.");
+            if (structure.ObservedBias is { } trialBias && trialBias != candidateDirection)
+                reasons.Add($"Entry direction {candidateDirection} conflicts with short-term structure {trialBias}.");
+            return new(reasons.Count == 0, reasons.Count == 0
+                ? ["Broader Nifty entry trial structure thresholds passed."] : reasons.ToArray());
+        }
 
         var balancedContinuation = strongRegimeAligned && regimeConfidence >= .65m &&
             relativeVolume >= .75m && structure.ObservedBias == candidateDirection &&

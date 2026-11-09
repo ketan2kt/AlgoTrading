@@ -8,6 +8,11 @@ public sealed record FirstEntryTimingDecision(bool Permitted, decimal AtrExtensi
 
 public static class FirstEntryTimingPolicy
 {
+    // Shared by Nifty production (paper/live) and historical signal replay.
+    public const string Version = "nifty-entry-timing-v2";
+    public const decimal MaximumTriggerExtensionAtr = .65m;
+    public const decimal MaximumImpulseBodyAtr = 1.30m;
+
     public static FirstEntryTimingDecision Evaluate(IReadOnlyList<StrategyPriceBar> source,
         Direction direction)
     {
@@ -22,8 +27,8 @@ public static class FirstEntryTimingPolicy
         var extension = (direction == Direction.Buy ? latest.Close - trigger : trigger - latest.Close) / atr;
         var impulse = Math.Abs(latest.Close - latest.Open) / atr;
         var reasons = new List<string>();
-        if (extension > .45m) reasons.Add($"Entry is {extension:F2} ATR beyond its eight-bar trigger; the move is already extended.");
-        if (impulse > 1.10m) reasons.Add($"The latest candle body is {impulse:F2} ATR; entering after this impulse risks buying the exhaustion.");
+        if (extension > MaximumTriggerExtensionAtr) reasons.Add($"Entry is {extension:F2} ATR beyond its eight-bar trigger (limit {MaximumTriggerExtensionAtr:F2}); the move is already extended.");
+        if (impulse > MaximumImpulseBodyAtr) reasons.Add($"The latest candle body is {impulse:F2} ATR (limit {MaximumImpulseBodyAtr:F2}); entering after this impulse risks buying the exhaustion.");
         return new(reasons.Count == 0, extension, impulse,
             reasons.Count == 0 ? ["Entry remains inside the first-entry timing budget."] : reasons);
     }

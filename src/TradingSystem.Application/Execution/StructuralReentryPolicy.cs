@@ -11,7 +11,7 @@ public static class StructuralReentryPolicy
 {
     public static StructuralReentryDecision Evaluate(IReadOnlyList<StrategyPriceBar> source,
         Direction direction, DateTimeOffset? previousExitUtc,
-        bool persistentDirectionalContext = false)
+        bool persistentDirectionalContext = false, bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (previousExitUtc is null)
@@ -20,7 +20,7 @@ public static class StructuralReentryPolicy
         var afterExit = source.Where(x => x.OpenTimeUtc > previousExitUtc.Value).ToArray();
         // First entries remain untouched. After a persistent trend entry exits, require
         // a full pullback/base plus a separate completed trigger candle before re-entry.
-        var minimumBars = persistentDirectionalContext ? 4 : 5;
+        var minimumBars = (persistentDirectionalContext ? 4 : 5) - (relaxedNiftyEntries ? 1 : 0);
         if (afterExit.Length < minimumBars)
             return new(false, false, afterExit.Length,
                 [$"Only {afterExit.Length} completed candle(s) exist after the previous same-direction exit; a fresh structure has not formed."]);
@@ -30,11 +30,13 @@ public static class StructuralReentryPolicy
         var atr = Atr(source.TakeLast(Math.Min(15, source.Count)).ToArray());
         var latest = afterExit[^1];
         var prior = afterExit[^2];
-        var meaningfulRange = atr > 0 && afterExit.Max(x => x.High) - afterExit.Min(x => x.Low) >= atr * .75m;
+        var meaningfulRange = atr > 0 && afterExit.Max(x => x.High) - afterExit.Min(x => x.Low) >=
+            atr * (relaxedNiftyEntries ? .50m : .75m);
+        var resetDepth = atr * (relaxedNiftyEntries ? .05m : .15m);
         var reset = direction == Direction.Buy
-            ? afterExit.SkipLast(1).Any(x => x.Low <= fast - atr * .15m) && meaningfulRange && latest.Close > fast &&
+            ? afterExit.SkipLast(1).Any(x => x.Low <= fast - resetDepth) && meaningfulRange && latest.Close > fast &&
               latest.Close > latest.Open && latest.Close > prior.Close
-            : afterExit.SkipLast(1).Any(x => x.High >= fast + atr * .15m) && meaningfulRange && latest.Close < fast &&
+            : afterExit.SkipLast(1).Any(x => x.High >= fast + resetDepth) && meaningfulRange && latest.Close < fast &&
               latest.Close < latest.Open && latest.Close < prior.Close;
         var continuationBase = false;
         if (persistentDirectionalContext && afterExit.Length >= 4 && atr > 0m)
@@ -44,7 +46,7 @@ public static class StructuralReentryPolicy
                             baseBars.SkipLast(1).Min(x => x.Low);
             var pauseObserved = baseBars.SkipLast(1).Any(x => direction == Direction.Buy
                 ? x.Close <= x.Open : x.Close >= x.Open);
-            continuationBase = pauseObserved && baseRange <= atr * 1.10m && meaningfulRange &&
+            continuationBase = pauseObserved && baseRange <= atr * (relaxedNiftyEntries ? 1.35m : 1.10m) && meaningfulRange &&
                 (direction == Direction.Buy
                     ? latest.Close > baseBars.SkipLast(1).Max(x => x.High) &&
                       latest.Close > latest.Open && latest.Close > fast

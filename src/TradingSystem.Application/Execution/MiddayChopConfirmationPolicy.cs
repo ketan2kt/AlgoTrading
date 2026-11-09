@@ -18,7 +18,7 @@ public static class MiddayChopConfirmationPolicy
     public static MiddayChopConfirmationDecision Evaluate(TimeOnly indiaTime,
         IReadOnlyList<StrategyPriceBar> completedBars, Direction direction,
         MarketStructureQualitySnapshot structure, int sourceIntervalSeconds,
-        bool includeOtherHours = false)
+        bool includeOtherHours = false, bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(completedBars);
         ArgumentNullException.ThrowIfNull(structure);
@@ -33,7 +33,7 @@ public static class MiddayChopConfirmationPolicy
         if (!choppy)
             return new(false, true, ["Midday structure is not classified as choppy; normal trend entries remain eligible."]);
 
-        return Confirm(completedBars, direction, sourceIntervalSeconds);
+        return Confirm(completedBars, direction, sourceIntervalSeconds, relaxedNiftyEntries);
     }
 
     public static MiddayChopConfirmationDecision EvaluateObservedPath(
@@ -64,7 +64,8 @@ public static class MiddayChopConfirmationPolicy
     }
 
     private static MiddayChopConfirmationDecision Confirm(
-        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds)
+        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds,
+        bool relaxedNiftyEntries = false)
     {
         var fiveMinuteBars = AggregateFiveMinuteBars(completedBars, sourceIntervalSeconds);
         if (fiveMinuteBars.Length < 3)
@@ -85,8 +86,8 @@ public static class MiddayChopConfirmationPolicy
             ? last.Close > last.Open && last.Close > previous.Close
             : last.Close < last.Open && last.Close < previous.Close;
         var structureBreak = direction == Direction.Buy
-            ? last.Close > Math.Max(previous.High, prior.High)
-            : last.Close < Math.Min(previous.Low, prior.Low);
+            ? last.Close > (relaxedNiftyEntries ? previous.High : Math.Max(previous.High, prior.High))
+            : last.Close < (relaxedNiftyEntries ? previous.Low : Math.Min(previous.Low, prior.Low));
         var pullbackResume = direction == Direction.Buy
             ? (previous.Close <= previous.Open || previous.Close < prior.Close) &&
               last.Close > previous.High && last.Close > last.Open
@@ -96,7 +97,9 @@ public static class MiddayChopConfirmationPolicy
         var permitted = alignedClose && (structureBreak || pullbackResume);
         return permitted
             ? new(true, true,
-                ["A completed five-minute direction-aligned close confirmed a structure break or pullback resumption."])
+                [relaxedNiftyEntries
+                    ? "Trial completed five-minute direction-aligned close broke the previous bar or resumed a pullback."
+                    : "A completed five-minute direction-aligned close confirmed a structure break or pullback resumption."])
             : new(true, false,
                 ["Choppy structure is active; waiting for a completed five-minute direction-aligned structure break or pullback resumption."]);
     }

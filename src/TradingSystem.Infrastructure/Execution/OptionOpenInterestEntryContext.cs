@@ -17,7 +17,7 @@ internal static class OptionOpenInterestEntryContext
         decimal underlyingPrice,
         decimal underlyingRiskDistance,
         DateTimeOffset nowUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool relaxedNiftyEntries = false)
     {
         var snapshots = await db.OptionChainSnapshots.AsNoTracking()
             .Where(value => value.UnderlyingInstrumentId == underlyingInstrumentId &&
@@ -28,13 +28,14 @@ internal static class OptionOpenInterestEntryContext
             .ToArrayAsync(cancellationToken);
         if (snapshots.Length == 0)
             return OptionOpenInterestEntryPolicy.Evaluate(direction, underlyingPrice,
-                underlyingRiskDistance, []);
+                underlyingRiskDistance, [], relaxedNiftyEntries: relaxedNiftyEntries);
 
         var current = Read(snapshots[0].PayloadJson);
         var previous = snapshots.Skip(1)
             .FirstOrDefault(value => value.ExpiryDate == snapshots[0].ExpiryDate);
         var decision = OptionOpenInterestEntryPolicy.Evaluate(direction, underlyingPrice,
-            underlyingRiskDistance, current, previous is null ? [] : Read(previous.PayloadJson));
+            underlyingRiskDistance, current, previous is null ? [] : Read(previous.PayloadJson),
+            relaxedNiftyEntries);
         return decision with
         {
             Reasons =

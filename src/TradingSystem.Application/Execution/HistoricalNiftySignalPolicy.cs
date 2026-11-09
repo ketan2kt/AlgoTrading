@@ -32,12 +32,19 @@ public sealed class HistoricalNiftySignalPolicy(
     // quote and risk policies. The discovery-only constructor is not certified.
     public bool ProductionPolicyParityVerified => admissionSettings is not null;
 
-    public string CodeVersion => $"nifty-signal-adapter-v12:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}";
+    public string CodeVersion => $"nifty-signal-adapter-v14:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}";
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         spotSymbol, futuresSymbol, tradingDate, previousClose,
         openingRangeEnd, minimumSpotCandles, minimumFuturesCandles,
         candleIntervalSeconds, lots, optionSelection, admissionSettings,
+        EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
+        EntryTiming = new
+        {
+            FirstEntryTimingPolicy.Version,
+            FirstEntryTimingPolicy.MaximumTriggerExtensionAtr,
+            FirstEntryTimingPolicy.MaximumImpulseBodyAtr
+        },
         Regime = regimeEngine.ConfigurationManifest,
         StrategyConfiguration = strategy.ConfigurationManifest,
         Contracts = optionContracts.OrderBy(value => value.TradingSymbol,
@@ -117,6 +124,7 @@ public sealed class HistoricalNiftySignalPolicy(
             regime.TradingPermitted, true, lastCompletedSignal,
             frame.ClosedTrades.Count + frame.OpenPositions.Count)
         {
+            RelaxedNiftyEntries = true,
             Vwap = vwap,
             FastEma = fast,
             SlowEma = slow,
@@ -138,8 +146,10 @@ public sealed class HistoricalNiftySignalPolicy(
             .OrderByDescending(value => value.ExitAtUtc)
             .Select(value => (DateTimeOffset?)value.ExitAtUtc).FirstOrDefault();
         if (!StructuralReentryPolicy.Evaluate(recent, signal.Direction,
-                priorSameDirectionExit, persistentDirection).Permitted) return [];
-        var structure = NiftySignalFeaturePolicy.EntryStructure(context);
+                priorSameDirectionExit, persistentDirection, relaxedNiftyEntries: true).Permitted) return [];
+        var structure = MarketStructureQualityAnalyzer.Analyze(recent, signal.Direction,
+            context.CurrentPrice, vwap, atr, openingHigh, openingLow,
+            Math.Abs(signal.ProposedEntry - signal.ProposedStopLoss));
         var sessionBars = spot.Select(ToStrategyBar).ToArray();
         var previousSessions = frame.Market.CompletedBars
             .Where(value => value.Symbol == spotSymbol &&
@@ -158,7 +168,7 @@ public sealed class HistoricalNiftySignalPolicy(
                 sessionBars, previousBars, signal.Direction, structure,
                 multiTimeframe, candleIntervalSeconds,
                 context.CurrentPrice * atr / 100m,
-                openingHigh, openingLow).Permitted) return [];
+                openingHigh, openingLow, relaxedNiftyEntries: true).Permitted) return [];
         var underlyingRiskDistance = Math.Abs(signal.ProposedEntry -
             signal.ProposedStopLoss);
         if (underlyingRiskDistance <= 0m)
@@ -167,14 +177,14 @@ public sealed class HistoricalNiftySignalPolicy(
         var priorOi = frame.PreviousOptionChain?.Strikes ?? [];
         if (!OptionOpenInterestEntryPolicy.Evaluate(signal.Direction,
                 context.CurrentPrice, underlyingRiskDistance, currentOi,
-                priorOi).Permitted) return [];
+                priorOi, relaxedNiftyEntries: true).Permitted) return [];
         var strongRegimeAligned = regime.DirectionalBias == signal.Direction &&
             regime.Regime is MarketRegime.GapDownContinuation or
                 MarketRegime.GapUpContinuation or MarketRegime.StrongBearishTrend or
                 MarketRegime.StrongBullishTrend;
         if (!PaperEntryQualityPolicy.Evaluate(structure, signal.Direction,
                 signal.StrategyId, strongRegimeAligned, regime.Confidence,
-                relativeVolume).Permitted) return [];
+                relativeVolume, relaxedNiftyEntries: true).Permitted) return [];
 
         var strategyId = signal.StrategyId;
         if (admissionSettings is not null)
@@ -252,7 +262,7 @@ public sealed class HistoricalNiftySignalPolicy(
                             ? "CE" : "PE", StringComparison.Ordinal)),
                     sameDirectionLosses,
                     StructuralReentryPolicy.Evaluate(recent, signal.Direction,
-                        priorSameDirectionExit, persistentDirection).NewStructureObserved),
+                        priorSameDirectionExit, persistentDirection, relaxedNiftyEntries: true).NewStructureObserved),
                 new PaperPortfolioRiskInput(0m, 0m, contract.LotSize, lots,
                     admissionSettings.MaximumRiskPerTrade,
                     admissionSettings.MaximumCapitalExposure, existingCapital,

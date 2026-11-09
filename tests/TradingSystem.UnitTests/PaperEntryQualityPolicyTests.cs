@@ -6,6 +6,20 @@ namespace TradingSystem.UnitTests;
 public sealed class PaperEntryQualityPolicyTests
 {
     [Fact]
+    public void BroaderNiftyTrialAdmitsModerateMaturityButRetainsDirectionAndRoomChecks()
+    {
+        var structure = Snapshot(MarketStructureQualityState.MatureTrend, false) with
+            { MoveMaturityAtr = 4m, RoomToRiskRatio = .8m };
+        Assert.False(PaperEntryQualityPolicy.Evaluate(structure, Direction.Buy).Permitted);
+        Assert.True(PaperEntryQualityPolicy.Evaluate(structure, Direction.Buy,
+            relaxedNiftyEntries: true).Permitted);
+        Assert.False(PaperEntryQualityPolicy.Evaluate(structure with { RoomToRiskRatio = .1m },
+            Direction.Buy, relaxedNiftyEntries: true).Permitted);
+        Assert.False(PaperEntryQualityPolicy.Evaluate(structure, Direction.Sell,
+            relaxedNiftyEntries: true).Permitted);
+    }
+
+    [Fact]
     public void AllowsBalancedDirectionalContinuationDespiteSoftRoomVeto()
     {
         var structure = new MarketStructureQualitySnapshot(

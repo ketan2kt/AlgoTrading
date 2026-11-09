@@ -95,6 +95,8 @@ internal sealed partial class AutomatedPaperTradingService(
         cycleInputs = [];
         cycleInputs["configuration"] = new
         {
+            EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
+            EntryTimingVersion = FirstEntryTimingPolicy.Version,
             options.Value.Enabled, options.Value.MinimumSignalCandles,
             options.Value.MinimumFuturesConfirmationCandles,
             options.Value.EntryWindowStart, options.Value.EntryCutoff,
@@ -440,6 +442,7 @@ internal sealed partial class AutomatedPaperTradingService(
             lastCompletedSignalTime,
             tradeState.TradesToday)
         {
+            RelaxedNiftyEntries = true,
             Vwap = vwap,
             FastEma = fast,
             SlowEma = slow,
@@ -529,7 +532,7 @@ internal sealed partial class AutomatedPaperTradingService(
                                            ProfessionalTradeRegime.Directional;
         var reentryDecision = StructuralReentryPolicy.Evaluate(strategyContext.RecentCandles
                 .Where(bar => bar.OpenTimeUtc.AddSeconds(marketOptions.Value.CandleIntervalSeconds) <= now).ToArray(),
-            signal.Direction, priorSameDirectionExit, persistentDirectionalContext);
+            signal.Direction, priorSameDirectionExit, persistentDirectionalContext, relaxedNiftyEntries: true);
         // A persistent thesis is not fresh post-exit evidence. Continuation bases remain eligible.
         if (!reentryDecision.Permitted)
         {
@@ -560,7 +563,7 @@ internal sealed partial class AutomatedPaperTradingService(
             signal.Direction, shadowStructure, multiTimeframeV2,
             marketOptions.Value.CandleIntervalSeconds,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
-            strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow);
+            strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow, relaxedNiftyEntries: true);
         if (!preQuoteGate.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
@@ -582,7 +585,7 @@ internal sealed partial class AutomatedPaperTradingService(
             underlyingRiskDistance = strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m;
         var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db, instrument.Id,
             signal.Direction, strategyContext.CurrentPrice, underlyingRiskDistance, now,
-            cancellationToken);
+            cancellationToken, relaxedNiftyEntries: true);
         var optionInterestOutcome = !optionInterest.Available
             ? "OptionOpenInterestUnavailable"
             : optionInterest.Permitted
@@ -605,7 +608,8 @@ internal sealed partial class AutomatedPaperTradingService(
             regime.Regime is MarketRegime.GapDownContinuation or MarketRegime.GapUpContinuation or
                 MarketRegime.StrongBearishTrend or MarketRegime.StrongBullishTrend;
         var entryQuality = PaperEntryQualityPolicy.Evaluate(shadowStructure, signal.Direction,
-            signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume);
+            signal.StrategyId, strongRegimeAligned, regime.Confidence, relativeVolume,
+            relaxedNiftyEntries: true);
         if (!entryQuality.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,

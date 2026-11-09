@@ -1,4 +1,5 @@
 using TradingSystem.Domain.Trading;
+using TradingSystem.Application.Strategies;
 
 namespace TradingSystem.Application.Execution;
 
@@ -40,7 +41,8 @@ public static class OptionOpenInterestEntryPolicy
         decimal underlyingPrice,
         decimal underlyingRiskDistance,
         IReadOnlyList<OptionOpenInterestStrike> current,
-        IReadOnlyList<OptionOpenInterestStrike>? previous = null)
+        IReadOnlyList<OptionOpenInterestStrike>? previous = null,
+        bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(current);
         if (direction is not (Direction.Buy or Direction.Sell))
@@ -118,10 +120,11 @@ public static class OptionOpenInterestEntryPolicy
         var evidence = $"{kind} at {barriers.Strike:F0}: {barriers.Oi:F0} OI, " +
                        $"{barriers.Ratio:F2}x the side median, {barriers.Concentration:P0} of visible side OI; " +
                        $"room is {roomToRisk:F2}R.{buildUp}";
-        if (roomToRisk < MinimumRoomToRisk)
+        var minimumRoom = relaxedNiftyEntries ? NiftyEntryTrialProfile.MinimumOiRoom : MinimumRoomToRisk;
+        if (roomToRisk < minimumRoom)
             return new(false, true, barriers.Strike, kind, roomToRisk, barriers.Ratio,
                 barriers.Concentration, barriers.Change,
-                [evidence, $"No trade: a minimum {MinimumRoomToRisk:F2}R of room is required before the OI barrier."]);
+                [evidence, $"No trade: a minimum {minimumRoom:F2}R of room is required before the OI barrier."]);
 
         return new(true, true, barriers.Strike, kind, roomToRisk, barriers.Ratio,
             barriers.Concentration, barriers.Change,

@@ -36,19 +36,24 @@ public sealed class OpeningRangeBreakoutStrategy(OpeningRangeBreakoutOptions opt
         if (context.RegimeConfidence < options.MinimumRegimeConfidence && !technicalOverride)
             failed.Add(FormattableString.Invariant(
                 $"Regime confidence {context.RegimeConfidence * 100m:F0}% is below {options.MinimumRegimeConfidence * 100m:F0}%."));
-        if (context.RelativeVolume < options.MinimumRelativeVolume)
+        var minimumVolume = options.MinimumRelativeVolume *
+            (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.VolumeScale : 1m);
+        if (context.RelativeVolume < minimumVolume)
             failed.Add(FormattableString.Invariant(
-                $"Relative futures volume {context.RelativeVolume:F2} is below {options.MinimumRelativeVolume:F2}."));
+                $"Relative futures volume {context.RelativeVolume:F2} is below {minimumVolume:F2}."));
         if (options.EnforceDailyTradeLimit && context.TradesToday >= options.MaximumTradesPerDay)
             failed.Add("Strategy daily trade limit reached.");
+        var cooldown = options.CooldownMinutes *
+            (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.CooldownScale : 1m);
         if (context.LastSignalAtUtc is not null &&
-            context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes(options.CooldownMinutes))
-            failed.Add($"Strategy cooldown of {options.CooldownMinutes} minutes is active.");
+            context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes((double)cooldown))
+            failed.Add($"Strategy cooldown of {cooldown} minutes is active.");
         if (failed.Count > 0) return new(null, failed);
         if (context.OpeningRangeHigh <= context.OpeningRangeLow || context.CurrentPrice <= 0)
             throw new ArgumentException("Opening-range context is invalid.", nameof(context));
 
-        var buffer = context.CurrentPrice * options.BreakoutBufferPercent / 100m;
+        var buffer = context.CurrentPrice * options.BreakoutBufferPercent / 100m *
+            (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.BreakoutBufferScale : 1m);
         var bullishRegime = context.RegimeBias == Direction.Buy && context.Regime is
                 MarketRegime.StrongBullishTrend or MarketRegime.WeakBullishTrend or
                 MarketRegime.GapUpContinuation or MarketRegime.GapDownReversal or

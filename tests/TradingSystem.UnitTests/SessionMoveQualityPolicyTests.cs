@@ -6,6 +6,17 @@ namespace TradingSystem.UnitTests;
 
 public sealed class SessionMoveQualityPolicyTests
 {
+    [Fact]
+    public void BroaderNiftyTrialRaisesMaturityThresholdWithoutRemovingIt()
+    {
+        var bars = Bars([(100m, 101m, 99m, 100m), (127m, 128m, 126.8m, 127.8m),
+            (128m, 129m, 127.8m, 128.8m), (129m, 129.6m, 128.8m, 129.4m),
+            (129.5m, 130m, 129.4m, 129.8m)]);
+        Assert.False(SessionMoveQualityPolicy.Evaluate(bars, Direction.Buy, 10m).Permitted);
+        Assert.True(SessionMoveQualityPolicy.Evaluate(bars, Direction.Buy, 10m,
+            relaxedNiftyEntries: true).Permitted);
+    }
+
     [Theory]
     [InlineData(Direction.Buy)]
     [InlineData(Direction.Sell)]

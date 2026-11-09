@@ -29,16 +29,21 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     {
         var failures = new List<string>();
         if (!context.DataTradingPermitted) failures.Add("Market data does not permit trading.");
-        if (!context.RegimeTradingPermitted && !permitRegimeOverride)
+        var technicalOverride = context.RelaxedNiftyEntries &&
+            (NiftyEntryTrialProfile.TechnicalDirection(context, Direction.Buy) ||
+             NiftyEntryTrialProfile.TechnicalDirection(context, Direction.Sell));
+        if (!context.RegimeTradingPermitted && !permitRegimeOverride && !technicalOverride)
             failures.Add("Market regime does not permit directional trading.");
         if (Options.EnforceDailyTradeLimits && context.TradesToday >= Options.MaximumTradesPerDay)
             failures.Add("Paper daily trade limit reached.");
         if (Options.EnforceDailyTradeLimits && context.TradesByStrategyToday.GetValueOrDefault(StrategyId) >=
             Options.MaximumTradesPerStrategyPerDay)
             failures.Add($"Daily allocation for {StrategyId} is exhausted.");
+        var cooldown = Options.CooldownMinutes *
+            (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.CooldownScale : 1m);
         if (context.LastSignalAtUtc is not null &&
-            context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes(Options.CooldownMinutes))
-            failures.Add($"Shared cooldown of {Options.CooldownMinutes} minutes is active.");
+            context.ObservedAtUtc - context.LastSignalAtUtc < TimeSpan.FromMinutes((double)cooldown))
+            failures.Add($"Shared cooldown of {cooldown} minutes is active.");
         if (context.RecentCandles.Count < 4 || context.Vwap <= 0 ||
             context.FastEma <= 0 || context.SlowEma <= 0 || context.AtrPercent <= 0)
             failures.Add("Price-action indicators or recent candles are incomplete.");
@@ -58,8 +63,10 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
     protected StrategyEvaluationResult Signal(StrategyEvaluationContext context, Direction direction,
         decimal stop, decimal score, params string[] reasons)
     {
-        if (score < Options.MinimumScore)
-            return new(null, [$"Setup score {score:P0} is below {Options.MinimumScore:P0}."]);
+        var minimumScore = Math.Max(0m, Options.MinimumScore -
+            (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.ScoreReduction : 0m));
+        if (score < minimumScore)
+            return new(null, [$"Setup score {score:P0} is below {minimumScore:P0}."]);
         var risk = Math.Abs(context.CurrentPrice - stop);
         if (risk <= 0) return new(null, ["The chart pattern does not define positive risk."]);
         var target = direction == Direction.Buy
@@ -107,7 +114,7 @@ public sealed class OpeningRangeRetestStrategy(PriceActionStrategyOptions option
             ? confirmation.Close > confirmation.Open
             : confirmation.Close < confirmation.Open;
         if (!trendAligned) return new(null, ["Retest formed but VWAP and EMA trend are not aligned."]);
-        if (context.RegimeBias is not null && context.RegimeBias != direction)
+        if (context.RegimeBias is not null && !NiftyEntryTrialProfile.RegimeMatches(context, direction))
             return new(null, ["Retest direction conflicts with the current market bias."]);
         var stop = direction == Direction.Buy
             ? Math.Min(retest.Low, context.OpeningRangeHigh - tolerance)
@@ -144,7 +151,7 @@ public sealed class VwapTrendPullbackStrategy(PriceActionStrategyOptions options
             return new(null, ["No confirmed VWAP pullback and trend-continuation candle."]);
 
         var direction = bullishPattern ? Direction.Buy : Direction.Sell;
-        if (context.RegimeBias is not null && context.RegimeBias != direction)
+        if (context.RegimeBias is not null && !NiftyEntryTrialProfile.RegimeMatches(context, direction))
             return new(null, ["VWAP continuation direction conflicts with the current market bias."]);
         var stop = direction == Direction.Buy
             ? Math.Min(pullback.Low, context.Vwap - tolerance)
@@ -177,7 +184,7 @@ public sealed class EmaPullbackContinuationStrategy(PriceActionStrategyOptions o
         if (!bullish && !bearish)
             return new(null, ["No EMA 9/21 pullback with a confirmed continuation candle."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
-        if (context.RegimeBias != direction)
+        if (!NiftyEntryTrialProfile.RegimeMatches(context, direction))
             return new(null, ["EMA continuation direction lacks matching regime bias."]);
         var structureAligned = direction == Direction.Buy
             ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
@@ -214,7 +221,7 @@ public sealed class RangeBreakoutRetestStrategy(PriceActionStrategyOptions optio
         if (!bullish && !bearish)
             return new(null, ["No intraday consolidation breakout, retest and continuation sequence."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
-        if (context.RegimeBias != direction)
+        if (!NiftyEntryTrialProfile.RegimeMatches(context, direction))
             return new(null, ["Range breakout direction lacks matching regime bias."]);
         var trendAligned = direction == Direction.Buy
             ? context.CurrentPrice > context.Vwap : context.CurrentPrice < context.Vwap;
@@ -275,8 +282,9 @@ public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options
         var prior = bars.TakeLast(Math.Min(7, bars.Count)).SkipLast(1).ToArray();
         var averageRange = prior.Average(x => x.High - x.Low);
         var currentRange = confirmation.High - confirmation.Low;
-        if (averageRange <= 0 || currentRange < averageRange * 1.45m)
-            return new(null, ["Latest candle is not a 1.45x range expansion."]);
+        var expansion = context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.ExpansionRange : 1.45m;
+        if (averageRange <= 0 || currentRange < averageRange * expansion)
+            return new(null, [$"Latest candle is not a {expansion:F2}x range expansion."]);
         var bullish = confirmation.Close > confirmation.Open && confirmation.Close > prior.Max(x => x.High) &&
             confirmation.Close > context.Vwap;
         var bearish = confirmation.Close < confirmation.Open && confirmation.Close < prior.Min(x => x.Low) &&
@@ -341,7 +349,7 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
                 ? context.MarketStructure.Direction == MarketStructureDirection.Bullish
                 : context.MarketStructure.Direction == MarketStructureDirection.Bearish;
             var highQualityMomentum = single.StrategyId == "momentum-expansion" &&
-                                      single.Confidence >= 0.70m &&
+                                      single.Confidence >= (context.RelaxedNiftyEntries ? .65m : .70m) &&
                                       context.RegimeBias == single.Direction &&
                                       structureAligned;
             if (highQualityMomentum)
@@ -369,7 +377,8 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
     private static bool IsExplorationEligible(StrategySignal signal,
         StrategyEvaluationContext context)
     {
-        if (signal.Confidence < 0.62m || !KnownExplorationStrategy(signal.StrategyId)) return false;
+        if (signal.Confidence < (context.RelaxedNiftyEntries ? NiftyEntryTrialProfile.SingleSignalScore : .62m) ||
+            !KnownExplorationStrategy(signal.StrategyId)) return false;
         var emaVwapAligned = signal.Direction == Direction.Buy
             ? context.FastEma > context.SlowEma && context.CurrentPrice > context.Vwap
             : context.FastEma < context.SlowEma && context.CurrentPrice < context.Vwap;

@@ -6,6 +6,19 @@ namespace TradingSystem.UnitTests;
 public sealed class MarketLocationPolicyTests
 {
     [Fact]
+    public void BroaderNiftyTrialNarrowsResistanceProximityButKeepsMissingContextBlocked()
+    {
+        var session = Bars([106m, 107m, 108m, 109.9m]);
+        var previous = Bars([104m, 110m, 108m, 109m]);
+        Assert.False(MarketLocationPolicy.Evaluate(session, previous,
+            Direction.Buy, 1m, 108m, 105m).Permitted);
+        Assert.True(MarketLocationPolicy.Evaluate(session, previous,
+            Direction.Buy, 1m, 108m, 105m, relaxedNiftyEntries: true).Permitted);
+        Assert.False(MarketLocationPolicy.Evaluate(session, [],
+            Direction.Buy, 1m, 108m, 105m, relaxedNiftyEntries: true).Permitted);
+    }
+
+    [Fact]
     public void RejectsBuyImmediatelyBelowMajorResistance()
     {
         var result = MarketLocationPolicy.Evaluate(

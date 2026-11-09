@@ -19,7 +19,7 @@ public static class SessionMoveQualityPolicy
     public static SessionMoveQualityDecision Evaluate(
         IReadOnlyList<StrategyPriceBar> fullSession,
         Direction direction,
-        decimal atr)
+        decimal atr, bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(fullSession);
         if (fullSession.Count < 4 || atr <= 0m)
@@ -44,16 +44,17 @@ public static class SessionMoveQualityPolicy
         var currentMoveAtr = currentMove / atr;
         var distanceFromExtremeAtr = Math.Max(0m, distanceFromExtreme / atr);
 
-        if (currentMove <= 0m || peakMoveAtr < MatureMoveAtr ||
+        if (currentMove <= 0m || peakMoveAtr < (relaxedNiftyEntries ? 3.5m : MatureMoveAtr) ||
             distanceFromExtremeAtr > NearExtremeAtr)
             return new(true, peakMoveAtr, currentMoveAtr, distanceFromExtremeAtr,
                 ["The candidate is not chasing a mature same-direction session extreme."]);
 
         var recent = fullSession.TakeLast(4).ToArray();
         var pullbackBars = recent.SkipLast(1).ToArray();
+        var requiredPullback = atr * (relaxedNiftyEntries ? .20m : RequiredPullbackAtr);
         var pullbackObserved = direction == Direction.Buy
-            ? pullbackBars.Any(value => value.Low <= sessionExtreme - atr * RequiredPullbackAtr)
-            : pullbackBars.Any(value => value.High >= sessionExtreme + atr * RequiredPullbackAtr);
+            ? pullbackBars.Any(value => value.Low <= sessionExtreme - requiredPullback)
+            : pullbackBars.Any(value => value.High >= sessionExtreme + requiredPullback);
         var resumed = direction == Direction.Buy
             ? latest.Close > latest.Open && latest.Close > pullbackBars.Max(value => value.High)
             : latest.Close < latest.Open && latest.Close < pullbackBars.Min(value => value.Low);

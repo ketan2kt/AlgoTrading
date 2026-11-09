@@ -10,7 +10,7 @@ public static class MarketLocationPolicy
 {
     public static MarketLocationDecision Evaluate(IReadOnlyList<StrategyPriceBar> session,
         IReadOnlyList<StrategyPriceBar> previousSession, Direction direction, decimal atr,
-        decimal openingRangeHigh, decimal openingRangeLow)
+        decimal openingRangeHigh, decimal openingRangeLow, bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(previousSession);
@@ -46,10 +46,12 @@ public static class MarketLocationPolicy
             sessionPrior.Max(x => x.High) }.Max();
         var breakdownBarrier = new[] { previousLow, openingRangeLow,
             sessionPrior.Min(x => x.Low) }.Min();
-        var aboveResistance = price > breakoutBarrier + atr * 0.10m;
-        var belowSupport = price < breakdownBarrier - atr * 0.10m;
-        var nearSupport = support is { } ns && price - ns <= atr * 0.35m;
-        var nearResistance = resistance is { } nr && nr - price <= atr * 0.35m;
+        var breakBuffer = atr * (relaxedNiftyEntries ? .05m : .10m);
+        var proximity = atr * (relaxedNiftyEntries ? .20m : .35m);
+        var aboveResistance = price > breakoutBarrier + breakBuffer;
+        var belowSupport = price < breakdownBarrier - breakBuffer;
+        var nearSupport = support is { } ns && price - ns <= proximity;
+        var nearResistance = resistance is { } nr && nr - price <= proximity;
 
         if (direction == Direction.Buy && nearResistance && !aboveResistance)
             reasons.Add("Buy entry is too close to major resistance without a confirmed breakout.");
@@ -68,7 +70,9 @@ public static class MarketLocationPolicy
         var gapAtr = Math.Abs(session[0].Open - previousClose) / atr;
         if (gapAtr >= 0.60m)
             context += session[0].Open < previousClose ? "+GapDown" : "+GapUp";
-        if (location is > 0.35m and < 0.65m && context.StartsWith("BetweenLevels", StringComparison.Ordinal))
+        if (location > (relaxedNiftyEntries ? .45m : .35m) &&
+            location < (relaxedNiftyEntries ? .55m : .65m) &&
+            context.StartsWith("BetweenLevels", StringComparison.Ordinal))
             reasons.Add("Price is in the middle of the current session range; location offers no clear edge.");
 
         return new(reasons.Count == 0, context, support, resistance, reasons);

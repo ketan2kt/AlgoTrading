@@ -10,12 +10,15 @@ public static class ConfirmedEntryLocationPolicy
     public static MarketLocationDecision Evaluate(MarketLocationDecision location,
         IReadOnlyList<StrategyPriceBar> bars, Direction direction,
         MarketStructureQualitySnapshot structure, MultiTimeframeDecisionAssessment timeframes,
-        decimal atr, int candleIntervalSeconds = 60)
+        decimal atr, int candleIntervalSeconds = 60, bool relaxedNiftyEntries = false)
     {
         ArgumentNullException.ThrowIfNull(location);
+        var eligibleStructure = structure.WouldPermit &&
+            structure.State is (MarketStructureQualityState.CleanTrend or MarketStructureQualityState.DevelopingTrend) ||
+            relaxedNiftyEntries && PaperEntryQualityPolicy.Evaluate(structure, direction,
+                relaxedNiftyEntries: true).Permitted;
         if (location.Permitted || location.Reasons.Count != 1 || location.Reasons[0] != MiddleReason ||
-            bars.Count < 2 || atr <= 0m || !structure.WouldPermit ||
-            structure.State is not (MarketStructureQualityState.CleanTrend or MarketStructureQualityState.DevelopingTrend) ||
+            bars.Count < 2 || atr <= 0m || !eligibleStructure ||
             structure.ObservedBias != direction || !timeframes.CandidateAligned)
             return location;
         var last = bars[^1];
@@ -29,7 +32,7 @@ public static class ConfirmedEntryLocationPolicy
             last.Close - location.NearestSupport;
         // Only the coarse range-middle veto can be replaced. All actual
         // support/resistance, maturity, OI, timing and risk gates still apply.
-        return trigger && room >= atr * 1.10m
+        return trigger && room >= atr * (relaxedNiftyEntries ? .80m : 1.10m)
             ? location with { Permitted = true, Context = location.Context + "+ConfirmedContinuation",
                 Reasons = ["A completed direction-aligned continuation with multi-timeframe alignment and structural room qualifies inside the session range."] }
             : location;

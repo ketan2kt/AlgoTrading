@@ -13,9 +13,10 @@ public static class MatureEdgeEntryPolicy
 {
     public static MatureEdgeEntryDecision Evaluate(SessionMoveQualityDecision move,
         MultiTimeframeDecisionAssessment timeframes, Direction direction,
-        IReadOnlyList<StrategyPriceBar> completedSession, int candleIntervalSeconds = 60)
+        IReadOnlyList<StrategyPriceBar> completedSession, int candleIntervalSeconds = 60,
+        bool relaxedNiftyEntries = false)
     {
-        if (move.PeakMoveAtr < 8m || move.DistanceFromExtremeAtr > .75m)
+        if (move.PeakMoveAtr < (relaxedNiftyEntries ? 10m : 8m) || move.DistanceFromExtremeAtr > .75m)
             return new(true, ["The candidate is not a mature near-extreme entry."]);
 
         // The 1m timeframe's Strength describes the entire supplied session.
@@ -32,7 +33,7 @@ public static class MatureEdgeEntryPolicy
         var aligned = recent.Length >= 2 && (direction == Direction.Buy
             ? net > 0m && recent[^1].Close > recent[^1].Open && recent[^1].Close > recent[^2].Close
             : net < 0m && recent[^1].Close < recent[^1].Open && recent[^1].Close < recent[^2].Close);
-        if (contiguous && aligned && strength >= .45m && timeframes.CandidateAligned)
+        if (contiguous && aligned && strength >= (relaxedNiftyEntries ? .35m : .45m) && timeframes.CandidateAligned)
             return new(true, [$"A mature near-extreme entry has fresh five-bar participation ({strength:P0}) and multi-timeframe alignment."]);
 
         return new(false,

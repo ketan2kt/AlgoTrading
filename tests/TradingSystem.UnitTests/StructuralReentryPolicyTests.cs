@@ -6,6 +6,18 @@ namespace TradingSystem.UnitTests;
 
 public sealed class StructuralReentryPolicyTests
 {
+    [Fact]
+    public void BroaderNiftyTrialAllowsFourBarResetButNotImmediateReentry()
+    {
+        var bars = Bars([100m, 101m, 102m, 103m, 104m, 105m, 106m, 107m, 108m,
+            106m, 105m, 104m, 107m]);
+        Assert.False(StructuralReentryPolicy.Evaluate(bars, Direction.Buy, bars[8].OpenTimeUtc).Permitted);
+        Assert.True(StructuralReentryPolicy.Evaluate(bars, Direction.Buy, bars[8].OpenTimeUtc,
+            relaxedNiftyEntries: true).Permitted);
+        Assert.False(StructuralReentryPolicy.Evaluate(bars, Direction.Buy, bars[^1].OpenTimeUtc,
+            relaxedNiftyEntries: true).Permitted);
+    }
+
     [Theory]
     [InlineData(Direction.Buy)]
     [InlineData(Direction.Sell)]
