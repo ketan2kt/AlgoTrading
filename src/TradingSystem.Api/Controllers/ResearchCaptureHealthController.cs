@@ -56,7 +56,17 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             else if (quotesExpected && feed.HasStalledMarket(observedAt)) issues.Add("Feed silent over 30 seconds");
             if (feed.GapObserved) issues.Add("Feed interruption recorded");
             if (!feed.PreOpenPolicyReady) issues.Add("Pre-open strategy/settings receipt missing");
+            if (feed.ContractPreflight is not { Ready: true })
+            {
+                if (feed.ContractPreflight is null) issues.Add("Pre-session contract coverage not verified");
+                else
+                {
+                    issues.AddRange(feed.ContractPreflight.Issues);
+                    issues.AddRange(feed.ContractPreflight.Markets.SelectMany(m => m.Issues.Select(issue => m.Market + ": " + issue)));
+                }
+            }
             if (!feed.PriorSensexStateReady) issues.Add("Sensex prior-session state not yet recorded");
+            issues.AddRange(feed.ContractCoverageIssues);
             if (storage?.Failure is { } failure) issues.Add(failure);
             if (storage?.GapObserved == true) issues.Add("Quote recording gap detected");
             if (quotesExpected)

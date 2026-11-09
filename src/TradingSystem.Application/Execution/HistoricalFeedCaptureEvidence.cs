@@ -10,6 +10,9 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
     public bool SensexPriorThesisStateCaptured { get; init; }
     public PersistentDirectionalThesisV1? PriorSensexThesis { get; init; }
     public SessionPolicyReceipt? PolicyReceipt { get; init; }
+    public string? ContractSelectionVersion { get; init; }
+    public ReplayContractPreflight? ContractPreflight { get; init; }
+    public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
 }
 
 public static class HistoricalFeedCaptureEvidence
@@ -22,12 +25,14 @@ public static class HistoricalFeedCaptureEvidence
 
     public static bool CoversNormalUniverse(HistoricalFeedCaptureManifest manifest, string market,
         IReadOnlyList<NiftyOptionContractCandidate> contracts, DateOnly tradingDate,
-        IReadOnlyList<HistoricalReplayBar>? sessionBars = null)
+        IReadOnlyList<HistoricalReplayBar>? sessionBars = null, NiftyOptionSelectionOptions? niftySelection = null)
     {
-        var eligible = contracts.Where(value => value.ExpiryDate > tradingDate).ToArray();
+        var eligible = RegularOptionContractSelector.Eligible(contracts.ToArray(), market, tradingDate,
+                TradingSystem.Domain.Trading.Direction.Buy, niftySelection)
+            .Concat(RegularOptionContractSelector.Eligible(contracts.ToArray(), market, tradingDate,
+                TradingSystem.Domain.Trading.Direction.Sell, niftySelection)).ToArray();
         if (eligible.Length == 0) return false;
-        var expiry = eligible.Min(value => value.ExpiryDate);
-        var expected = eligible.Where(value => value.ExpiryDate == expiry)
+        var expected = eligible
             .OrderBy(value => value.TradingSymbol, StringComparer.Ordinal).ToArray();
         var captured = manifest.Instruments.Where(value => value.Market == market &&
                 value.Type is TradingSystem.Domain.Trading.InstrumentType.CallOption or TradingSystem.Domain.Trading.InstrumentType.PutOption)

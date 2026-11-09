@@ -573,19 +573,13 @@ internal sealed partial class MultiMarketPaperTradingService(
         var preferredInTheMoneySteps = market == TradingMarketCatalog.Sensex && marketStateV2 is not null &&
                                       ProfessionalTradeFramework.Map(marketStateV2) ==
                                       ProfessionalTradeRegime.Directional ? 1 : 0;
+        var sensexExpiryRolled = market == TradingMarketCatalog.Sensex &&
+            await db.Instruments.AsNoTracking().AnyAsync(value => value.IsActive &&
+                value.Exchange == market.Exchange && value.TradingSymbol.StartsWith(market.ExecutionUnderlying) &&
+                value.ExpiryDate == today && (decision.Direction == Direction.Buy
+                    ? value.Type == InstrumentType.CallOption : value.Type == InstrumentType.PutOption), cancellationToken);
         var execution = await SelectExecutionInstrumentAsync(db, market, decision.Direction.Value,
             latest.Close, today, preferredInTheMoneySteps, cancellationToken);
-        var nextSearchDate = RegularExecutionSearchDate(market, today, execution?.ExpiryDate);
-        var sensexExpiryRolled = nextSearchDate > today;
-        if (sensexExpiryRolled)
-        {
-            // Keep regular entries eligible on expiry day without forcing the
-            // regular strategy into same-day option decay. Hero Zero may still
-            // trade the expiring contract under its own entry rules.
-            execution = await SelectExecutionInstrumentAsync(db, market,
-                decision.Direction.Value, latest.Close, nextSearchDate,
-                preferredInTheMoneySteps, cancellationToken);
-        }
         if (execution is null)
         {
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc, "InstrumentUnavailable",
@@ -933,7 +927,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         // Regular banking-index entries use the next monthly contract on an expiry
         // day. Selecting today's contract and rejecting it would strand the market.
         var execution = await SelectExecutionInstrumentAsync(db, market,
-            decision.Direction.Value, latest.Close, BankRegularOptionStartDate(today), 0,
+            decision.Direction.Value, latest.Close, today, 0,
             cancellationToken);
         if (execution is null)
         {
@@ -1411,6 +1405,19 @@ internal sealed partial class MultiMarketPaperTradingService(
                     value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith(market.ExecutionUnderlying) &&
                     value.ExpiryDate >= today && value.IsActive)
                 .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
+        if (market == TradingMarketCatalog.Sensex || market == TradingMarketCatalog.BankNifty)
+        {
+            var candidates = await db.Instruments.AsNoTracking().Where(value => value.IsActive &&
+                value.Exchange == market.Exchange && value.Segment == InstrumentSegment.FuturesAndOptions &&
+                value.TradingSymbol.StartsWith(market.ExecutionUnderlying) && value.ExpiryDate >= today &&
+                value.ExpiryDate <= today.AddDays(45) && value.StrikePrice != null &&
+                (value.Type == InstrumentType.CallOption || value.Type == InstrumentType.PutOption)).ToArrayAsync(cancellationToken);
+            var selected = RegularOptionContractSelector.Select(candidates.Select(value =>
+                new NiftyOptionContractCandidate(value.Id, value.TradingSymbol, value.Type,
+                    value.ExpiryDate!.Value, value.StrikePrice!.Value, value.LotSize, value.TickSize)).ToArray(),
+                market.ExecutionUnderlying, today, direction, price, preferredInTheMoneySteps);
+            return selected is null ? null : candidates.Single(value => value.Id == selected.InstrumentId);
+        }
         var strikeStep = market == TradingMarketCatalog.Sensex ? 100m :
             market == TradingMarketCatalog.Bankex ? 100m :
             market == TradingMarketCatalog.BankNifty ? 100m : 50m;

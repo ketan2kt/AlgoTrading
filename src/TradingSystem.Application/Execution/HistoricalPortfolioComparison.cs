@@ -28,6 +28,7 @@ public sealed record HistoricalReplaySessionData(DateOnly Date, string IndexSymb
     public IReadOnlyList<HistoricalReplayControlEvent> ControlEvents { get; init; } = [];
     public IReadOnlyList<string> ExecutionOptionSymbols { get; init; } = [];
     public string ExchangeCode { get; init; } = "NSE";
+    public IReadOnlyList<string> UnsupportedContractCoverage { get; init; } = [];
 }
 
 public sealed record HistoricalPortfolioComparisonDay(DateOnly Date,

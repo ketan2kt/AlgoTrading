@@ -50,6 +50,32 @@ For a compact new-chat handover without reading the full history:
 This combines the stable `docs/project-state.json` manifest with the current branch,
 commit and working-tree state. It never reads credentials.
 
+## Replay contract coverage
+
+Normal Nifty, Sensex and Bank Nifty contract discovery uses
+`RegularOptionContractSelector` in trading, recording and replay. Same-day
+expiry is excluded for these regular paths; Hero Zero/pair selectors are not
+changed and pairs remain outside the normal replay feature.
+
+The independent recorder saves a pre-09:15 IST contract preflight with the
+website policy fingerprint, selector version, per-market expiry/strike bounds,
+guarded underlying-price intervals and actual price/depth subscription cost.
+This is a bounded recording plan, not unlimited coverage of future strategies.
+Capture health exposes the preflight and flags missing verification or a
+session moving beyond contract coverage. Existing freshness and genuine gap
+checks still apply independently. A successful preflight is not proof of
+complete quote recording or a completed session.
+
+Before comparison, both frozen configurations must have every possible selected
+contract across the observed session price range in the saved manifest, with
+matching dated expiry, strike, lot and tick metadata. Unsupported dates are
+excluded for both versions with contract-specific reasons shown in Historical
+Replay. Unknown/legacy selector protocols or missing manifests are not certified.
+A compiled strategy emitting an out-of-manifest candidate rejects the replay
+with HTTP409; it cannot silently omit that candidate or invent an execution.
+Coverage checks never restrict live entries to the recorded band, and never
+backfill missing historical depth or change trading risk controls.
+
 ## Deployment
 
 Routine main releases automatically choose app-only or full provisioning. App-only requires a verified baseline from the previous successful deployment, identical infrastructure inputs, and matching Azure resources. A missing, expired, changed or unreadable baseline takes the full path. Set `force_infrastructure` in the workflow dispatch form for a deliberate reprovision. The workflow summary records the path. The first release containing this optimization performs a full deployment.

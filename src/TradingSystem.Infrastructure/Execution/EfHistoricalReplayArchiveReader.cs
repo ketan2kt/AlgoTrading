@@ -255,7 +255,8 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                     value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
                 exchange, underlying, tradingDate).ToArray();
         var streamingUniverse = feedManifest is not null && !quoteDay.HasCaptureGaps &&
-            datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars);
+            datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars,
+                feedManifest.PolicyReceipt?.Settings.NiftySelection);
         if (streamingUniverse)
         {
             quotes = observedQuotes;
@@ -274,6 +275,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             "|controlStateGaps=" + string.Join(';', controls.Gaps) +
             "|streamingUniverse=" + feedManifest?.UniverseFingerprint +
             "|streamingUniverseScope=" + feedManifest?.UniverseScope +
+            "|contractSelection=" + feedManifest?.ContractSelectionVersion +
             "|sessionPolicy=" + feedManifest?.PolicyReceipt?.Fingerprint +
             "|sensexPriorThesisCaptured=" + feedManifest?.SensexPriorThesisStateCaptured +
             "|priorSensexThesis=" + JsonSerializer.Serialize(feedManifest?.PriorSensexThesis) +
@@ -309,6 +311,11 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             StrategyInputsComplete = streamingUniverse && (underlying == "BANKNIFTY" ||
                 optionObservations.All(value => value.Volume.HasValue && value.OpenInterest.HasValue)),
             PolicyInputManifest = manifest,
+            UnsupportedContractCoverage = feedManifest?.ContractSelectionVersion != RegularOptionContractSelector.Version
+                ? ["Unsupported replay: shared contract-selection receipt missing or version unverified."]
+                : feedManifest.ContractPreflight is not { Ready: true }
+                    ? ["Unsupported replay: pre-session contract coverage was not verified."]
+                    : feedManifest.ContractCoverageIssues,
             OptionChains = chains.Select(value => new HistoricalOptionChainFrame(
                     value.ReceivedAtUtc, value.SourceTimestampUtc,
                     value.ExpiryDate,
@@ -335,6 +342,9 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         {
             UnderlyingInstrumentId = index.Id,
             SessionPolicyFingerprint = feedManifest?.PolicyReceipt?.Fingerprint,
+            RecordedContractUniverse = feedManifest is null ? null : new(
+                feedManifest.ContractSelectionVersion ?? "legacy-unverified", feedManifest.Instruments),
+            RecordedContractCoverageIssues = session.UnsupportedContractCoverage,
             PriorSensexThesis = feedManifest?.PriorSensexThesis,
             ControlStateGaps = controls.Gaps,
             UniversePages = pageReceipts.Select(value =>

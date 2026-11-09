@@ -171,16 +171,6 @@ public static class HistoricalBankNiftyOptionSelector
         ArgumentNullException.ThrowIfNull(contracts);
         if (direction is not (Direction.Buy or Direction.Sell) ||
             underlyingPrice <= 0m) throw new ArgumentOutOfRangeException(nameof(direction));
-        var type = direction == Direction.Buy ? InstrumentType.CallOption :
-            InstrumentType.PutOption;
-        return contracts.Where(value => value.Type == type &&
-                value.TradingSymbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) &&
-                value.ExpiryDate >= tradingDate.AddDays(1) &&
-                value.ExpiryDate <= tradingDate.AddDays(45) &&
-                value.LotSize > 0)
-            .OrderBy(value => value.ExpiryDate)
-            .ThenBy(value => Math.Abs(value.StrikePrice - underlyingPrice))
-            .ThenBy(value => value.TradingSymbol, StringComparer.Ordinal)
-            .FirstOrDefault();
+        return RegularOptionContractSelector.Select(contracts, "BANKNIFTY", tradingDate, direction, underlyingPrice);
     }
 }

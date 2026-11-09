@@ -74,6 +74,16 @@ public sealed class HistoricalNormalReplayRunStoreContractTests : IDisposable
                 var at = start.AddMinutes(31).AddSeconds(second);
                 quotes[(option, at)] = new(option, at, premium) { BidPrice = premium - .5m, OfferPrice = premium };
             }
+            var contracts = new[] {
+                new NiftyOptionContractCandidate(Guid.NewGuid(), option,
+                    symbol == "BANKNIFTY" ? InstrumentType.PutOption : InstrumentType.CallOption,
+                    date.AddDays(7), price, symbol == "BANKNIFTY" ? 30 : 65, .05m),
+                new NiftyOptionContractCandidate(Guid.NewGuid(), symbol + "-OTHER-SIDE",
+                    symbol == "BANKNIFTY" ? InstrumentType.CallOption : InstrumentType.PutOption,
+                    date.AddDays(7), price, symbol == "BANKNIFTY" ? 30 : 65, .05m) };
+            var savedContracts = contracts.Select((c, i) => new HistoricalFeedInstrument(symbol,
+                symbol == "SENSEX" ? "BSE" : "NSE", "FNO", i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                c.TradingSymbol, c.Type, c.ExpiryDate, c.StrikePrice, c.LotSize, c.TickSize)).ToArray();
             var session = new HistoricalReplaySessionData(date, symbol, bars, quotes.Values.ToArray(), start, start.AddMinutes(375))
             {
                 RequiredInputsComplete = true, EligibleOptionUniverseComplete = true, ExecutableQuoteSidesComplete = true,
@@ -81,8 +91,8 @@ public sealed class HistoricalNormalReplayRunStoreContractTests : IDisposable
                 ExecutionOptionSymbols = [option], ExchangeCode = symbol == "SENSEX" ? "BSE" : "NSE"
             };
             return Task.FromResult(new HistoricalReplayArchiveSlice(session, price, symbol + "-FUT",
-                [new(Guid.NewGuid(), option, symbol == "BANKNIFTY" ? InstrumentType.PutOption : InstrumentType.CallOption,
-                    date.AddDays(20), price, symbol == "BANKNIFTY" ? 30 : 65, .05m)], []) { UnderlyingInstrumentId = Guid.NewGuid() });
+                contracts, []) { UnderlyingInstrumentId = Guid.NewGuid(),
+                    RecordedContractUniverse = new(RegularOptionContractSelector.Version, savedContracts) });
         }
     }
 

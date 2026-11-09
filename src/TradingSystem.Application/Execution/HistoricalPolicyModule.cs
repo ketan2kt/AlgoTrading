@@ -7,6 +7,7 @@ namespace TradingSystem.Application.Execution;
 public sealed class HistoricalPolicyModule
 {
     public const int ProtocolVersion = 1;
+    public const string ContractSelectionProtocol = RegularOptionContractSelector.Version;
     private readonly IHistoricalReplayPortfolioPolicy policy;
 
     public HistoricalPolicyModule(string configurationJson, string archiveSliceJson)
@@ -68,6 +69,7 @@ public sealed record HistoricalPolicyBuild(string Id, DateTimeOffset CapturedAtU
 public interface IHistoricalPolicyModuleFactory : IDisposable
 {
     string BuildId { get; }
+    string? ContractSelectionVersion => null;
     IHistoricalReplayPortfolioPolicy Create(HistoricalNormalPolicyConfiguration configuration,
         HistoricalReplayArchiveSlice slice);
 }

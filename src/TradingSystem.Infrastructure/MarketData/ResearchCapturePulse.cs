@@ -1,3 +1,5 @@
+using TradingSystem.Application.Execution;
+
 namespace TradingSystem.Infrastructure.MarketData;
 
 // Process-local observations only: a restart must not resurrect a healthy connection.
@@ -13,6 +15,8 @@ public sealed class ResearchCapturePulse
     private string stage = "Waiting";
     private bool policyReady;
     private bool priorReady;
+    private ReplayContractPreflight? coverage;
+    private IReadOnlyList<string> coverageIssues = [];
     private readonly Dictionary<string, DateTimeOffset> receipts = new(StringComparer.Ordinal);
 
     internal void Starting(DateOnly session)
@@ -22,6 +26,8 @@ public sealed class ResearchCapturePulse
             if (session != date) { gap = false; failure = null; }
             date = session; phase = "Connecting"; instruments = 0; subscribed = null; receipts.Clear();
             policyReady = false; priorReady = false;
+            coverage = null;
+            coverageIssues = [];
         }
     }
 
@@ -33,6 +39,8 @@ public sealed class ResearchCapturePulse
     { lock (gate) { gap = true; phase = "Interrupted"; } }
     internal void Stage(string value) { lock (gate) stage = value; }
     internal void Metadata(bool policy, bool prior) { lock (gate) { policyReady = policy; priorReady = prior; } }
+    internal void ContractCoverage(ReplayContractPreflight value) { lock (gate) coverage = value; }
+    internal void ContractCoverageIssues(IReadOnlyList<string> values) { lock (gate) coverageIssues = values; }
     internal void Failed(string code, bool gapObserved = true)
     { lock (gate) { gap |= gapObserved; phase = "Interrupted"; failure = stage + ": " + code; } }
     internal void Finished()
@@ -44,7 +52,8 @@ public sealed class ResearchCapturePulse
         {
             if (!enabled || date != session) return new(!enabled ? "Disabled" : "Not started", null, 0, false, new Dictionary<string,DateTimeOffset>());
             return new(phase, subscribed, instruments, gap, new Dictionary<string,DateTimeOffset>(receipts))
-                { LastFailure = failure, Stage = stage, PreOpenPolicyReady = policyReady, PriorSensexStateReady = priorReady };
+                { LastFailure = failure, Stage = stage, PreOpenPolicyReady = policyReady, PriorSensexStateReady = priorReady,
+                    ContractPreflight = coverage, ContractCoverageIssues = coverageIssues };
         }
     }
 }
@@ -57,6 +66,8 @@ public sealed record ResearchCaptureSnapshot(string Phase, DateTimeOffset? Subsc
     public string Stage { get; init; } = "Waiting";
     public bool PreOpenPolicyReady { get; init; }
     public bool PriorSensexStateReady { get; init; }
+    public ReplayContractPreflight? ContractPreflight { get; init; }
+    public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
     public bool HasStalledMarket(DateTimeOffset now) => SubscribedAtUtc is { } subscribed &&
         now - subscribed > TimeSpan.FromSeconds(30) &&
         Markets.Any(market =>

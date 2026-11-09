@@ -103,6 +103,7 @@ public static class HistoricalReplayCohortSelector
                 if (!session.EligibleOptionUniverseComplete ||
                     !session.StrategyInputsComplete)
                     reasons.Add($"{market}: option universe or strategy inputs incomplete");
+                reasons.AddRange(session.UnsupportedContractCoverage.Select(reason => market + ": " + reason));
                 // Underlying spot freshness uses LTP; it does not need option
                 // bid/offer sides. Do not reject every otherwise complete day
                 // merely because the archived index quote has no order book.

@@ -152,6 +152,8 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
                 throw new InvalidDataException("Unsupported historical policy module protocol.");
         }
 
+        public string? ContractSelectionVersion => (string?)type.GetField("ContractSelectionProtocol")?.GetRawConstantValue();
+
         public IHistoricalReplayPortfolioPolicy Create(HistoricalNormalPolicyConfiguration configuration,
             HistoricalReplayArchiveSlice slice)
         {

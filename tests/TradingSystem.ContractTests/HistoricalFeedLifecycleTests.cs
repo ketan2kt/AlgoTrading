@@ -23,6 +23,39 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         new("BANKNIFTY", "NSE", "CASH", "3", "BANKNIFTY", InstrumentType.Index, null, null, 1, 0)];
 
     [Fact]
+    public async Task PreSessionContractCoverageIsPersistedAndExposedForAllThreeMarkets()
+    {
+        var clock = new ManualClock(Start);
+        var transport = new Transport(clock);
+        var pulse = new ResearchCapturePulse(); pulse.Starting(Date);
+        using var archive = new HistoricalQuoteArchive(clock, NullLogger<HistoricalQuoteArchive>.Instance, Path.Combine(directory, "quotes"));
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var worker = Worker(services, transport, archive, clock, pulse);
+        var optionTypes = new[] { InstrumentType.CallOption, InstrumentType.PutOption };
+        var rows = Plan.SelectMany((market, number) => Enumerable.Range(0, 21).SelectMany(i => optionTypes.Select((type, side) =>
+            new HistoricalFeedInstrument(market.Market, market.Exchange, "FNO",
+                (10000 + number * 1000 + i * 2 + side).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                market.Market + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + type, type,
+                Date.AddDays(7), 21000m + i * 100, 30, .05m)))).ToArray();
+        var plan = Plan.Concat(rows).ToArray();
+        var input = new ReplayContractCoverageInput(ReplayContractCoverage.Contracts(rows),
+            Plan.ToDictionary(m => m.Market, _ => 22000m));
+        using var lifetime = new CancellationTokenSource();
+        var recording = worker.RecordSessionAsync(Date, plan, (_, _) => Task.FromResult<SessionPolicyReceipt?>(Receipt()),
+            (_, _) => Task.FromResult<(bool, PersistentDirectionalThesisV1?)>((true, null)), directory, lifetime.Token, input);
+        await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await UntilAsync(() => clock.ActiveTimers >= 3);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        await UntilAsync(() => ReadManifest()?.ContractPreflight?.Ready == true);
+        Assert.True(pulse.Read(Date, true).ContractPreflight!.Ready);
+        Assert.Equal(3, ReadManifest()!.ContractPreflight!.Markets.Count);
+        Assert.Equal(RegularOptionContractSelector.Version, ReadManifest()!.ContractSelectionVersion);
+        lifetime.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recording);
+        Assert.True(ReadManifest()!.ContractPreflight!.Ready);
+    }
+
+    [Fact]
     public async Task PreOpenMetadataIsCheckpointedBeforeShutdownAndCrashIsNotCertifiedComplete()
     {
         var clock = new ManualClock(Start);

@@ -109,6 +109,10 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
         {
             return Ok(await comparison.CompareAsync(request, timeout.Token));
         }
+        catch (UnsupportedReplayContractException exception)
+        {
+            return Conflict(exception.Message);
+        }
         catch (ArgumentException)
         {
             return BadRequest("The frozen research configuration or historical inputs are invalid.");

@@ -41,33 +41,7 @@ public static class NiftyOptionContractSelector
         if (options.MaximumDaysToExpiry is < 1 or > 31)
             throw new ArgumentOutOfRangeException(nameof(options));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.StrikeStep);
-        var requiredType = underlyingDirection switch
-        {
-            Direction.Buy => InstrumentType.CallOption,
-            Direction.Sell => InstrumentType.PutOption,
-            _ => throw new ArgumentOutOfRangeException(nameof(underlyingDirection))
-        };
-
-        var eligible = candidates.Where(value =>
-                // Regular entries roll past today's expiry. Hero Zero has its
-                // own current-expiry selector and is deliberately unaffected.
-                value.Type == requiredType && value.ExpiryDate > tradingDate &&
-                value.ExpiryDate <= tradingDate.AddDays(options.MaximumDaysToExpiry) &&
-                value.StrikePrice > 0 && value.LotSize > 0 && value.TickSize > 0)
-            .ToArray();
-        if (eligible.Length == 0) return null;
-
-        var nearestExpiry = eligible.Min(value => value.ExpiryDate);
-        var steps = options.NormalInTheMoneySteps;
-        var atm = Math.Round(underlyingPrice / options.StrikeStep,
-            MidpointRounding.AwayFromZero) * options.StrikeStep;
-        var desiredStrike = requiredType == InstrumentType.CallOption
-            ? atm - steps * options.StrikeStep
-            : atm + steps * options.StrikeStep;
-        return eligible.Where(value => value.ExpiryDate == nearestExpiry)
-            .OrderBy(value => Math.Abs(value.StrikePrice - desiredStrike))
-            .ThenBy(value => value.StrikePrice)
-            .ThenBy(value => value.TradingSymbol, StringComparer.Ordinal)
-            .First();
+        return RegularOptionContractSelector.Select(candidates, "NIFTY", tradingDate,
+            underlyingDirection, underlyingPrice, options.NormalInTheMoneySteps, options);
     }
 }

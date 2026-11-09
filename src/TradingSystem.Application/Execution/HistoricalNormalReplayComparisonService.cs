@@ -75,12 +75,24 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             }
         }
         }
+        foreach (var key in slices.Keys.ToArray())
+        {
+            var slice = slices[key];
+            var coverage = new List<string>(slice.RecordedContractCoverageIssues);
+            if (baselineModule is not null && baselineModule.ContractSelectionVersion != RegularOptionContractSelector.Version)
+                coverage.Add("Baseline compiled strategy does not declare a supported contract-selection contract.");
+            if (proposalModule is not null && proposalModule.ContractSelectionVersion != RegularOptionContractSelector.Version)
+                coverage.Add("Proposal compiled strategy does not declare a supported contract-selection contract.");
+            coverage.AddRange(ReplayContractCoverage.ValidateReplay(slice, request.Baseline).Select(r => "Baseline: " + r));
+            coverage.AddRange(ReplayContractCoverage.ValidateReplay(slice, request.Proposal).Select(r => "Proposal: " + r));
+            slices[key] = slice with { Session = slice.Session with { UnsupportedContractCoverage = coverage } };
+        }
         var result = HistoricalSharedPortfolioComparison.RunEligible(
             slices.Values.Select(value => value.Session).ToArray(), ["NIFTY", "SENSEX", "BANKNIFTY"],
-            (date, market) => baselineModule?.Create(request.Baseline, slices[(date, market)])
-                ?? baseline.Create(slices[(date, market)]),
-            (date, market) => proposalModule?.Create(request.Proposal, slices[(date, market)])
-                ?? proposal.Create(slices[(date, market)]),
+            (date, market) => Guard(baselineModule?.Create(request.Baseline, slices[(date, market)])
+                ?? baseline.Create(slices[(date, market)]), date, market),
+            (date, market) => Guard(proposalModule?.Create(request.Proposal, slices[(date, market)])
+                ?? proposal.Create(slices[(date, market)]), date, market),
             request.Execution, request.Execution, dates, cancellationToken);
         var exclusions = result.Cohort.ExcludedDates.Select(value => new HistoricalReplayExcludedDate(value.Date,
             value.Reasons.Concat(slices.Values.Where(slice => slice.Session.Date == value.Date)
@@ -116,7 +128,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         [
             "Normal-session policy comparison only: Hero Zero and expansion pairs are deliberately excluded, as requested.",
             "Both versions use the same frozen data, execution model and date cohort; insufficient old dates are excluded.",
-            "Streaming capture may use declared pre-session strike bands within the broker subscription limit. Selected contracts outside those bands remain missing evidence, not assumed fills; a session crossing a band boundary is excluded.",
+            "Contract selection is shared by trading, recording and replay. Both versions must prove their entire session price-range selections exist in the saved universe; unsupported strikes, expiries, selection builds or missing manifests explicitly exclude the date before simulation. Pre-open coverage is a bounded plan, not unlimited future-strategy coverage.",
             "Approved archived compiled normal-policy builds can be compared using explicit frozen configurations. Arbitrary uploaded code is not accepted.",
             "Intraday, flat-start research only. Enabled overnight carry is rejected. Unmatched original manual interventions and reconciliation-outage dates are excluded, not silently applied to different simulated trades.",
             "Verified decision scope: normal 1/5-minute entries and protection, with as-of pre-session state. Fill latency, spreads, slippage and charges remain explicit models. Non-whole-lot paper partials invalidate execution coverage instead of silently being credited or rounded.",
@@ -140,5 +152,9 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             report = report with { SavedRunId = id };
         }
         return report;
+
+        HistoricalContractCoveragePolicy Guard(IHistoricalReplayPortfolioPolicy policy, DateOnly date, string market) =>
+            new(policy, market, date, slices[(date, market)].RecordedContractUniverse!.Instruments
+                .Where(c => c.Market == market).Select(c => c.TradingSymbol).ToHashSet(StringComparer.Ordinal));
     }
 }

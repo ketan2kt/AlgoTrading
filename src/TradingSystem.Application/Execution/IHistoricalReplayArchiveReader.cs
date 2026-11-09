@@ -14,6 +14,8 @@ public sealed record HistoricalReplayArchiveSlice(HistoricalReplaySessionData Se
     public DateTimeOffset? InstrumentMasterCapturedAtUtc { get; init; }
     public PersistentDirectionalThesisV1? PriorSensexThesis { get; init; }
     public string? SessionPolicyFingerprint { get; init; }
+    public ReplayRecordedContractUniverse? RecordedContractUniverse { get; init; }
+    public IReadOnlyList<string> RecordedContractCoverageIssues { get; init; } = [];
 }
 
 public interface IHistoricalReplayArchiveReader

@@ -197,13 +197,6 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
     internal static NiftyOptionContractCandidate? Select(IReadOnlyList<NiftyOptionContractCandidate> contracts,
         DateOnly date, Direction direction, decimal price, int inTheMoneySteps)
     {
-        var type = direction == Direction.Buy ? InstrumentType.CallOption : InstrumentType.PutOption;
-        var eligible = contracts.Where(value => value.Type == type &&
-            value.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal)).ToArray();
-        var start = IsSameDayExpiryRoll(contracts, date, direction) ? date.AddDays(1) : date;
-        var strike = price + (direction == Direction.Buy ? -1 : 1) * inTheMoneySteps * 100m;
-        return eligible.Where(value => value.ExpiryDate >= start && value.ExpiryDate <= start.AddDays(10))
-            .OrderBy(value => value.ExpiryDate).ThenBy(value => Math.Abs(value.StrikePrice - strike))
-            .ThenBy(value => value.TradingSymbol, StringComparer.Ordinal).FirstOrDefault();
+        return RegularOptionContractSelector.Select(contracts, "SENSEX", date, direction, price, inTheMoneySteps);
     }
 }

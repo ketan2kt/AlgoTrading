@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -25,8 +26,8 @@ public sealed class HistoricalFeedCaptureOptions
     public int SampleSeconds { get; init; } = 2;
 }
 
-// A research-only sibling of the trading REST feeds. No orders, strategies or
-// controls are resolved. Failure only makes the research day ineligible.
+// A research-only sibling of the trading REST feeds. No orders or live decision
+// engines are resolved. Read-only frozen settings define the capture universe.
 internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory scopes,
     IGrowwHistoricalFeedTransport transport, IHistoricalQuoteArchive archive,
     IOptions<HistoricalFeedCaptureOptions> options, TimeProvider clock, ResearchCapturePulse pulse,
@@ -70,8 +71,11 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     internal async Task CaptureSessionAsync(DateOnly date, CancellationToken stoppingToken)
     {
         pulse.Stage("Instrument plan / pre-session anchors");
-        var plan = await LoadPlanAsync(date, stoppingToken);
-        await RecordSessionAsync(date, plan, CapturePolicyReceiptAsync, CapturePriorThesisAsync, root, stoppingToken);
+        var receipt = await CapturePolicyReceiptOnceAsync(date, stoppingToken);
+        var (plan, coverage) = await LoadPlanAsync(date, receipt?.Settings.NiftySelection, stoppingToken);
+        await RecordSessionAsync(date, plan, (day, token) => receipt is null
+                ? CapturePolicyReceiptAsync(day, token) : Task.FromResult<SessionPolicyReceipt?>(receipt),
+            CapturePriorThesisAsync, root, stoppingToken, coverage);
     }
 
     // Separate input retrieval from the recording lifecycle so disconnect,
@@ -79,14 +83,15 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     internal async Task RecordSessionAsync(DateOnly date, IReadOnlyList<HistoricalFeedInstrument> plan,
         Func<DateOnly, CancellationToken, Task<SessionPolicyReceipt?>> captureReceipt,
         Func<DateOnly, CancellationToken, Task<(bool Captured, PersistentDirectionalThesisV1? Thesis)>> capturePriorThesis,
-        string outputDirectory, CancellationToken stoppingToken)
+        string outputDirectory, CancellationToken stoppingToken,
+        ReplayContractCoverageInput? coverageInput = null)
     {
         var now = clock.GetUtcNow();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(plan);
         var fingerprint = Convert.ToHexString(SHA256.HashData(bytes));
         var manifest = new HistoricalFeedCaptureManifest(date, now, null, null, fingerprint,
             options.Value.SampleSeconds, now > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India), plan)
-        { UniverseScope = "PreSessionStrikeBand" };
+        { UniverseScope = "PreSessionStrikeBand", ContractSelectionVersion = RegularOptionContractSelector.Version };
         if (manifest.HasGaps) archive.MarkCaptureGap(date);
         pulse.Stage("Manifest storage");
         Directory.CreateDirectory(outputDirectory);
@@ -97,16 +102,25 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var timer = Task.Delay(end - now, clock, lifetime.Token);
         var failed = false;
+        var observedRanges = new ConcurrentDictionary<string, (decimal Low, decimal High)>(StringComparer.Ordinal);
         DateTimeOffset? subscribedAt = null;
         pulse.Stage("Broker authorization / subscription");
         var consume = transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
-            { accumulator.Observe(instrument, kind, point, received); pulse.Received(instrument.Market, received); },
+            {
+                accumulator.Observe(instrument, kind, point, received); pulse.Received(instrument.Market, received);
+                if (instrument.Type == InstrumentType.Index && kind != "depth" && point.Last is > 0m &&
+                    point.SourceAtUtc <= received && received - point.SourceAtUtc <= TimeSpan.FromSeconds(30) &&
+                    received >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India))
+                    observedRanges.AddOrUpdate(instrument.Market, (point.Last.Value, point.Last.Value),
+                        (_, range) => (Math.Min(range.Low, point.Last.Value), Math.Max(range.High, point.Last.Value)));
+            },
             () => { failed = true; pulse.Failed("Transport interrupted or invalid frame", IsSessionStarted(date)); MarkSessionGap(date); },
             at => { subscribedAt = at; pulse.Subscribed(at, plan.Count); pulse.Stage("Recording"); }, lifetime.Token);
         var sampling = SampleAsync(date, accumulator, lifetime.Token);
         // Never hold subscription startup waiting for optional fidelity metadata.
         var receipt = captureReceipt(date, lifetime.Token);
         var priorThesis = capturePriorThesis(date, lifetime.Token);
+        if (receipt.IsCompletedSuccessfully) UpdateCoverage(receipt.Result);
         // Persist metadata and progress DURING the session, not only at shutdown.
         // A crash must not erase an already captured pre-open policy receipt.
         var checkpoint = CheckpointAsync();
@@ -148,6 +162,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             var prior = await priorThesis;
             manifest = manifest with { PolicyReceipt = await receipt,
                 SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
+            UpdateCoverage(manifest.PolicyReceipt);
             await WriteManifestAsync(path, manifest, CancellationToken.None);
         }
 
@@ -159,12 +174,31 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 var prior = priorThesis.IsCompletedSuccessfully ? priorThesis.Result : default;
                 var policy = receipt.IsCompletedSuccessfully ? receipt.Result : null;
                 pulse.Metadata(policy?.ValidFor(date) == true, prior.Captured);
+                UpdateCoverage(policy);
+                if (coverageInput is not null && policy is not null)
+                {
+                    var problems = observedRanges.SelectMany(pair => ReplayContractCoverage.CheckRange(
+                        coverageInput.Contracts, plan.Where(c => c.Market == pair.Key).ToArray(), pair.Key,
+                        date, pair.Value.Low, pair.Value.High, policy.Settings.NiftySelection)).ToArray();
+                    manifest = manifest with { ContractCoverageIssues = problems };
+                    pulse.ContractCoverageIssues(problems);
+                }
                 await WriteManifestAsync(path, manifest with { SubscribedAtUtc = subscribedAt,
                     LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
                         subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India),
                     PolicyReceipt = policy,
                     SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis }, lifetime.Token);
             }
+        }
+
+        void UpdateCoverage(SessionPolicyReceipt? policy)
+        {
+            // Keep the actual pre-open receipt; a late recovery must never rewrite
+            // history as a successful pre-session check.
+            if (coverageInput is null || manifest.ContractPreflight?.Ready == true) return;
+            var preflight = ReplayContractCoverage.Preflight(date, clock.GetUtcNow(), plan, coverageInput, policy);
+            manifest = manifest with { ContractPreflight = preflight };
+            pulse.ContractCoverage(preflight);
         }
     }
 
@@ -241,7 +275,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         }
     }
 
-    private async Task<IReadOnlyList<HistoricalFeedInstrument>> LoadPlanAsync(DateOnly date, CancellationToken token)
+    private async Task<(IReadOnlyList<HistoricalFeedInstrument> Plan, ReplayContractCoverageInput Coverage)> LoadPlanAsync(
+        DateOnly date, NiftyOptionSelectionOptions? selection, CancellationToken token)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
@@ -262,12 +297,14 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             if (anchor is not > 0m) throw new InvalidOperationException("Replay pre-session index anchor is unavailable: " + market);
             anchors.Add(market, anchor.Value);
         }
-        return HistoricalFeedSubscriptionPlanner.Select(date, rows.Select(value => new HistoricalFeedInstrument(
+        var source = rows.Select(value => new HistoricalFeedInstrument(
             value.TradingSymbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
                 value.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY",
             value.Exchange, value.Segment == InstrumentSegment.Cash ? "CASH" : "FNO", value.ExchangeToken ?? "",
-            value.TradingSymbol, value.Type, value.ExpiryDate, value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
-            options.Value.MaximumInstruments, anchors);
+            value.TradingSymbol, value.Type, value.ExpiryDate, value.StrikePrice, value.LotSize, value.TickSize)).ToArray();
+        selection ??= (await scope.ServiceProvider.GetRequiredService<SessionPolicySettings>().ReadAsync(token)).NiftySelection;
+        var plan = HistoricalFeedSubscriptionPlanner.Select(date, source, options.Value.MaximumInstruments, anchors, selection);
+        return (plan, new(ReplayContractCoverage.Contracts(source), anchors));
     }
 
     // Npgsql timestamptz parameters require offset zero, even for comparisons.

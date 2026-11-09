@@ -13,7 +13,8 @@ public static class HistoricalFeedSubscriptionPlanner
     // deterministic pre-session band, never a corridor chosen after the session.
     public static IReadOnlyList<HistoricalFeedInstrument> Select(DateOnly tradingDate,
         IReadOnlyList<HistoricalFeedInstrument> instruments, int maximumInstruments = 1000,
-        IReadOnlyDictionary<string, decimal>? preSessionAnchors = null)
+        IReadOnlyDictionary<string, decimal>? preSessionAnchors = null,
+        NiftyOptionSelectionOptions? niftySelection = null)
     {
         if (maximumInstruments is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumInstruments));
         var selected = new List<HistoricalFeedInstrument>();
@@ -27,11 +28,14 @@ public static class HistoricalFeedSubscriptionPlanner
                 selected.Add(rows.Where(value => value.Type == InstrumentType.Future && value.ExpiryDate >= tradingDate)
                     .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol, StringComparer.Ordinal).FirstOrDefault()
                     ?? throw new InvalidOperationException("A required confirmation future is missing from the streaming master."));
-            var options = rows.Where(value => value.Type is InstrumentType.CallOption or InstrumentType.PutOption &&
-                value.ExpiryDate >= tradingDate.AddDays(1)).ToArray();
-            var expiry = options.Select(value => value.ExpiryDate).Min()
-                ?? throw new InvalidOperationException("A normal option expiry is missing from the streaming master.");
-            selected.AddRange(options.Where(value => value.ExpiryDate == expiry));
+            var contracts = ReplayContractCoverage.Contracts(rows);
+            var calls = RegularOptionContractSelector.Eligible(contracts, market, tradingDate, Direction.Buy, niftySelection);
+            var puts = RegularOptionContractSelector.Eligible(contracts, market, tradingDate, Direction.Sell, niftySelection);
+            if (calls.Count == 0 || puts.Count == 0)
+                throw new InvalidOperationException(market + ": both valid CE and PE expiries are required by the shared contract policy.");
+            var eligible = calls.Concat(puts).ToArray();
+            var symbols = eligible.Select(c => c.TradingSymbol).ToHashSet(StringComparer.Ordinal);
+            selected.AddRange(rows.Where(value => symbols.Contains(value.TradingSymbol)));
         }
         if (selected.Any(value => value.Exchange is not ("NSE" or "BSE") ||
                 value.Segment is not ("CASH" or "FNO") || string.IsNullOrWhiteSpace(value.ExchangeToken) ||
