@@ -2,11 +2,18 @@ name: Independent replay recorder deployment
 on:
   workflow_call:
     inputs:
+      emergency_restart:
+        type: boolean
+        default: false
       ci_run_id:
         required: true
         type: string
   workflow_dispatch:
     inputs:
+      emergency_restart:
+        description: Explicitly approved emergency repair; preserve recorded session gaps
+        type: boolean
+        default: false
       ci_run_id:
         description: Successful main CI run matching the website's deployed package
         required: true
@@ -28,12 +35,17 @@ jobs:
         with:
           fetch-depth: 0
       - name: Outside market hours only
+        env:
+          EMERGENCY_RESTART: ${{ inputs.emergency_restart }}
         run: |
           day=$(TZ=Asia/Kolkata date +%u)
           hour=$(TZ=Asia/Kolkata date +%H)
           if (( day <= 5 && 10#$hour >= 8 && 10#$hour < 16 )); then
-            echo 'Recorder restarts are prohibited during capture/trading hours.' >&2
-            exit 1
+            if [[ "$EMERGENCY_RESTART" != 'true' ]]; then
+              echo 'Recorder restarts require explicit emergency approval during capture/trading hours.' >&2
+              exit 1
+            fi
+            echo 'Explicitly approved emergency recorder repair; existing session gaps remain recorded.'
           fi
       # Executed after the outside-hours guard; this uses HTTP/cloud doubles.
       - name: Verify safe recorder cutover regression
@@ -55,7 +67,7 @@ jobs:
           git merge-base --is-ancestor "$package_sha" "$GITHUB_SHA"
           while IFS= read -r path; do
             case "$path" in
-              .github/workflows/replay-recorder-deploy.yml|scripts/configure-replay-recorder.ps1|scripts/test-recorder-cutover.ps1|infra/replay-recorder.bicep|docs/handover.md) ;;
+              .github/workflows/replay-recorder-deploy.yml|.github/workflows/azure-deploy.yml|scripts/tasks.ps1|scripts/configure-replay-recorder.ps1|scripts/test-recorder-cutover.ps1|infra/replay-recorder.bicep|docs/handover.md) ;;
               *) echo "Application changes since checked package; use matching main CI." >&2; exit 1 ;;
             esac
           done < <(git diff --name-only "$package_sha" "$GITHUB_SHA")
@@ -109,4 +121,6 @@ jobs:
           exit 1
       - name: Activate independent capture
         shell: pwsh
-        run: ./scripts/configure-replay-recorder.ps1 -Activate -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")
+        env:
+          EMERGENCY_RESTART: ${{ inputs.emergency_restart }}
+        run: ./scripts/configure-replay-recorder.ps1 -Activate -AllowMarketHoursRestart:($env:EMERGENCY_RESTART -eq 'true') -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")

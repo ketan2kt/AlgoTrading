@@ -18,6 +18,10 @@ on:
         description: Deploy and activate the approved independent recorder after the website
         type: boolean
         default: false
+      emergency_recorder_restart:
+        description: Explicitly approved emergency recorder repair during market hours
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,6 +39,7 @@ jobs:
     uses: ./.github/workflows/replay-recorder-deploy.yml
     with:
       ci_run_id: ${{ inputs.ci_run_id }}
+      emergency_restart: ${{ inputs.emergency_recorder_restart }}
     secrets: inherit
   deploy:
     if: inputs.deploy == 'DEPLOY-LIVE' && github.ref == 'refs/heads/main'

@@ -17,7 +17,8 @@ param(
     [int]$Days = 30,
     [switch]$Install,
     [switch]$DryRun,
-    [switch]$IncludeRecorder
+    [switch]$IncludeRecorder,
+    [switch]$EmergencyRecorderRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -128,9 +129,11 @@ try {
         }
         'deploy' {
             if ([string]::IsNullOrWhiteSpace($Ref)) { throw 'Supply -Ref with the authorized remote branch or tag.' }
+            if ($EmergencyRecorderRestart -and -not $IncludeRecorder) { throw 'Emergency recorder restart requires -IncludeRecorder.' }
             $ciRunId = Assert-DeploymentCiPassed $Ref
             $dispatchArguments = @('workflow', 'run', $workflow, '--repo', $repo, '--ref', $Ref, '-f', 'deploy=DEPLOY-LIVE', '-f', "ci_run_id=$ciRunId")
             if ($IncludeRecorder) { $dispatchArguments += @('-f', 'include_recorder=true') }
+            if ($EmergencyRecorderRestart) { $dispatchArguments += @('-f', 'emergency_recorder_restart=true') }
             if ($DryRun) {
                 Write-Output ('Would invoke gh with arguments: ' + ($dispatchArguments | ConvertTo-Json -Compress))
                 Write-Output 'No deployment dispatched.'

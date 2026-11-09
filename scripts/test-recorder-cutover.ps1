@@ -39,7 +39,7 @@ foreach ($mode in @('slow-success', 'failed-start')) {
     $global:recorderTestProbes = 0
     $global:recorderTestSucceed = $mode -eq 'slow-success'
     $failed = $false
-    try { & "$PSScriptRoot/configure-replay-recorder.ps1" -Activate }
+    try { & "$PSScriptRoot/configure-replay-recorder.ps1" -Activate -AllowMarketHoursRestart }
     catch {
         if ($_.Exception.Message -notlike 'Recorder cutover failed;*') { throw }
         $failed = $true

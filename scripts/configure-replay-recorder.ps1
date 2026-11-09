@@ -1,5 +1,6 @@
 [CmdletBinding()]
-param([switch]$Activate, [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedAssemblyHash)
+param([switch]$Activate, [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedAssemblyHash,
+    [switch]$AllowMarketHoursRestart)
 $ErrorActionPreference = 'Stop'
 $rg = 'rg-sarthi-trading-centralindia'
 $website = 'sarthitradingweb5amvyarepxaci'
@@ -7,7 +8,7 @@ $recorder = 'sarthirecorder5amvyarepxaci'
 $subscription = '8f1fb990-d44b-4dd2-b8f4-4208cc40c340'
 $baseUri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$rg/providers/Microsoft.Web/sites"
 $local = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(5.5))
-if ($Activate -and $local.DayOfWeek -notin @('Saturday','Sunday') -and $local.Hour -ge 8 -and $local.Hour -lt 16) {
+if ($Activate -and -not $AllowMarketHoursRestart -and $local.DayOfWeek -notin @('Saturday','Sunday') -and $local.Hour -ge 8 -and $local.Hour -lt 16) {
     throw 'Recorder activation/restart is restricted to outside the capture/trading window.'
 }
 $managementToken = az account get-access-token --resource https://management.azure.com/ --query accessToken -o tsv
