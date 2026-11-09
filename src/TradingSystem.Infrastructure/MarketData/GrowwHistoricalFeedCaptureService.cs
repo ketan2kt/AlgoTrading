@@ -251,8 +251,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         foreach (var market in new[] { "NIFTY", "SENSEX", "BANKNIFTY" })
         {
             var index = rows.Single(value => value.TradingSymbol == market && value.Type == InstrumentType.Index);
-            var oldest = new DateTimeOffset(date.AddDays(-7).ToDateTime(TimeOnly.MinValue), India);
-            var before = new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
+            pulse.Stage("Pre-session anchor / " + market);
+            var (oldest, before) = AnchorWindowUtc(date);
             var anchor = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == index.Id &&
                     value.IntervalSeconds == 60 && value.Source == "Groww" && value.OpenTimeUtc >= oldest && value.OpenTimeUtc < before)
                 .OrderByDescending(value => value.OpenTimeUtc).Select(value => (decimal?)value.Close).FirstOrDefaultAsync(token);
@@ -266,6 +266,12 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             value.TradingSymbol, value.Type, value.ExpiryDate, value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
             options.Value.MaximumInstruments, anchors);
     }
+
+    // Npgsql timestamptz parameters require offset zero, even for comparisons.
+    // Define the session in IST, then convert the same instants before querying.
+    internal static (DateTimeOffset Oldest, DateTimeOffset Before) AnchorWindowUtc(DateOnly date) =>
+        (new DateTimeOffset(date.AddDays(-7).ToDateTime(TimeOnly.MinValue), India).ToUniversalTime(),
+         new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India).ToUniversalTime());
 
     private async Task<PersistentDirectionalThesisV1?> LoadPriorThesisAsync(DateOnly date, CancellationToken token)
     {
