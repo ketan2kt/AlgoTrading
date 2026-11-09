@@ -6,8 +6,11 @@ namespace TradingSystem.Application.Execution;
 
 public sealed record HeroZeroCandidate(
     Guid InstrumentId, string Symbol, string OptionType, decimal Strike, DateOnly Expiry,
-    int LotSize, decimal Premium, decimal Bid, decimal Ask, decimal SpreadPercent,
-    decimal Volume, decimal OpenInterest, decimal OpenInterestChange, decimal Score);
+    int LotSize, decimal Premium, decimal Bid, decimal Ask, decimal? SpreadPercent,
+    decimal Volume, decimal OpenInterest, decimal OpenInterestChange, decimal Score)
+{
+    public bool MarketDepthAvailable => Bid > 0m && Ask >= Bid;
+}
 
 public sealed record HeroZeroLegSnapshot(
     Guid PositionId, string Symbol, string OptionType, decimal Strike, int Quantity,
@@ -65,7 +68,7 @@ public static class HeroZeroCandidatePolicy
                         volume * 0.20m + oiChange * 0.10m;
             return new HeroZeroCandidate(value.Value.InstrumentId, value.Value.Symbol,
                 value.Value.OptionType, value.Value.Strike, value.Value.Expiry, value.Value.LotSize,
-                value.Value.Premium, value.Value.Bid, value.Value.Ask, value.Spread,
+                value.Value.Premium, value.Value.Bid, value.Value.Ask, value.HasMarketDepth ? value.Spread : null,
                 value.Value.Volume, value.Value.OpenInterest, value.Value.OpenInterestChange, score);
         }).OrderByDescending(value => value.Score).ThenBy(value => Math.Abs(value.Premium - targetPremium))
           .First();

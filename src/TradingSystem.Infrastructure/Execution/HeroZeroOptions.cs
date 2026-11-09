@@ -5,6 +5,7 @@ public sealed class HeroZeroOptions
     public const string SectionName = "PaperTrading:HeroZero";
     public bool Enabled { get; init; } = true;
     public int ScanIntervalSeconds { get; init; } = 30;
+    public int ManagementIntervalSeconds { get; init; } = 5;
     public string EntryWindowStart { get; init; } = "14:25";
     public string EntryCutoff { get; init; } = "15:00";
     public string ForcedExit { get; init; } = "15:20";

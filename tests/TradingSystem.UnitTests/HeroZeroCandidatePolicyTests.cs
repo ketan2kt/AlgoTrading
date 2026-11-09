@@ -41,6 +41,8 @@ public sealed class HeroZeroCandidatePolicyTests
 
         Assert.Equal("14:25", options.EntryWindowStart);
         Assert.Equal("15:00", options.EntryCutoff);
+        Assert.Equal(5, options.ManagementIntervalSeconds);
+        Assert.Equal(30, options.ScanIntervalSeconds);
         Assert.Equal(100m, options.NiftyMaximumStrikeDistance);
         Assert.Equal(250m, options.SensexMaximumStrikeDistance);
         Assert.False(IndexEntryWindowPolicy.AllowsEntry(
@@ -73,6 +75,8 @@ public sealed class HeroZeroCandidatePolicyTests
 
         Assert.NotNull(selected);
         Assert.Equal("NO-DEPTH", selected.Symbol);
+        Assert.Null(selected.SpreadPercent);
+        Assert.False(selected.MarketDepthAvailable);
     }
 
     [Fact]

@@ -615,7 +615,7 @@
                       <div><span>Candidate</span><strong>{{ candidate.optionType }} · {{ candidate.strike | number:'1.0-0' }}</strong></div>
                       <div><span>Premium</span><strong>{{ candidate.premium | number:'1.2-2' }}</strong></div>
                       <div><span>Bid / ask</span><strong>{{ candidate.bid | number:'1.2-2' }} / {{ candidate.ask | number:'1.2-2' }}</strong></div>
-                      <div><span>Spread</span><strong>{{ candidate.spreadPercent | number:'1.1-1' }}%</strong></div>
+                      <div><span>Spread</span><strong>{{ candidate.spreadPercent === null ? 'Unknown' : (candidate.spreadPercent | number:'1.1-1') + '%' }}</strong></div>
                       <div><span>OI / change</span><strong>{{ candidate.openInterest | number:'1.0-0' }} / {{ candidate.openInterestChange | number:'1.0-0' }}</strong></div>
                       <div><span>Volume</span><strong>{{ candidate.volume | number:'1.0-0' }}</strong></div>
                       <div><span>Quality</span><strong>{{ candidate.score | percent:'1.0-0' }}</strong></div>

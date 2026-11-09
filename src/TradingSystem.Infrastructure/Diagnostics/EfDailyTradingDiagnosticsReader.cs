@@ -126,6 +126,11 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             select new { order.ClientReference, fill.ExecutedAtUtc }).ToListAsync(cancellationToken);
         var entryTimes = entryFills.GroupBy(fill => fill.ClientReference)
             .ToDictionary(group => group.Key, group => group.Min(fill => fill.ExecutedAtUtc));
+        // The durable paper broker journals simulated fills without necessarily
+        // creating execution-ledger Trades rows. Use that authoritative fill
+        // receipt, not the earlier signal candle, when the ledger is absent.
+        var journalFills = await JournalEntryFills(db.PaperBrokerEvents.AsNoTracking(), entryReferences).ToArrayAsync(cancellationToken);
+        foreach (var fill in journalFills) entryTimes.TryAdd(fill.ClientReference, fill.At);
         var samples = signalIds.Length == 0
             ? []
             : await db.PaperTradePriceSamples.AsNoTracking()
@@ -502,6 +507,13 @@ internal sealed class EfDailyTradingDiagnosticsReader(
 
     private static readonly (LiveFillPnl.Leg Role,string Suffix)[] PaperLegReferences =
         [(LiveFillPnl.Leg.Entry,"ENTRY"),(LiveFillPnl.Leg.AddOn,"ADDON"),(LiveFillPnl.Leg.Partial,"PARTIAL"),(LiveFillPnl.Leg.Final,"EXIT")];
+
+    internal sealed record JournalFillReceipt(string ClientReference, DateTimeOffset At);
+
+    internal static IQueryable<JournalFillReceipt> JournalEntryFills(IQueryable<PaperBrokerEvent> events, string[] references) =>
+        events.Where(value => references.Contains(value.ClientReference) && value.EventType == "OrderFilled")
+            .GroupBy(value => value.ClientReference)
+            .Select(group => new JournalFillReceipt(group.Key, group.Min(value => value.OccurredAtUtc)));
 
     internal static string NormalizeMarket(string market) => market.Trim().ToUpperInvariant() switch
     {

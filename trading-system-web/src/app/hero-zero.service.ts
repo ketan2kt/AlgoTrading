@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 
 export interface HeroZeroCandidate {
   symbol: string; optionType: string; strike: number; expiry: string; lotSize: number;
-  premium: number; bid: number; ask: number; spreadPercent: number; volume: number;
+  premium: number; bid: number; ask: number; spreadPercent: number | null; volume: number;
   openInterest: number; openInterestChange: number; score: number;
 }
 export interface HeroZeroLeg {

@@ -95,13 +95,20 @@ public sealed class GrowwReadOnlyGateway(
             throw Malformed("Groww quote omitted a valid last price or supplied an invalid trade timestamp.");
         }
 
+        // Groww may supply the book only in depth.buy/depth.sell. Do not
+        // discard that evidence or manufacture a zero spread when root fields
+        // are absent. Explicit zero root fields still mean a withdrawn side.
+        var bid = payload.Depth?.Buy?.Where(level => level.Price > 0 && level.Quantity > 0)
+            .OrderByDescending(level => level.Price).FirstOrDefault();
+        var ask = payload.Depth?.Sell?.Where(level => level.Price > 0 && level.Quantity > 0)
+            .OrderBy(level => level.Price).FirstOrDefault();
         return new GrowwQuote(
             payload.LastPrice,
             payload.LastTradeTime,
-            payload.BidPrice,
-            payload.BidQuantity,
-            payload.OfferPrice,
-            payload.OfferQuantity,
+            payload.BidPrice ?? bid?.Price,
+            payload.BidQuantity ?? (payload.BidPrice is null ? bid?.Quantity : null),
+            payload.OfferPrice ?? ask?.Price,
+            payload.OfferQuantity ?? (payload.OfferPrice is null ? ask?.Quantity : null),
             payload.Volume,
             payload.OpenInterest,
             payload.OpenInterestDayChange);
@@ -488,7 +495,15 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("offer_quantity")] long? OfferQuantity,
         [property: JsonPropertyName("volume")] decimal? Volume,
         [property: JsonPropertyName("open_interest")] decimal? OpenInterest,
-        [property: JsonPropertyName("oi_day_change")] decimal? OpenInterestDayChange);
+        [property: JsonPropertyName("oi_day_change")] decimal? OpenInterestDayChange,
+        [property: JsonPropertyName("depth")] QuoteDepthPayload? Depth);
+
+    private sealed record QuoteDepthPayload(
+        [property: JsonPropertyName("buy")] QuoteDepthLevel[]? Buy,
+        [property: JsonPropertyName("sell")] QuoteDepthLevel[]? Sell);
+    private sealed record QuoteDepthLevel(
+        [property: JsonPropertyName("price")] decimal Price,
+        [property: JsonPropertyName("quantity")] long Quantity);
 
     private sealed record HistoricalPayload(
         [property: JsonPropertyName("candles")] JsonElement[]? Candles,

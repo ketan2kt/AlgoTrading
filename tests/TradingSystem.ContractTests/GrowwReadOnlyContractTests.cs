@@ -78,6 +78,41 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     [Fact]
+    public async Task NestedDocumentedDepthMapsBestExecutableSidesWithoutAnotherRequest()
+    {
+        var calls = 0;
+        var gateway = CreateGateway(_ =>
+        {
+            calls++;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"last_price":20,"last_trade_time":1746174479582,
+                 "depth":{"buy":[{"price":19.5,"quantity":100},{"price":19.8,"quantity":200},{"price":25,"quantity":0}],
+                          "sell":[{"price":21,"quantity":100},{"price":20.2,"quantity":300},{"price":0,"quantity":50}]}}}
+                """);
+        });
+        var quote = await gateway.GetQuoteAsync(new("NSE", "FNO", "NIFTY-CE"), CancellationToken.None);
+        Assert.Equal(19.8m, quote.BidPrice);
+        Assert.Equal(200, quote.BidQuantity);
+        Assert.Equal(20.2m, quote.OfferPrice);
+        Assert.Equal(300, quote.OfferQuantity);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task ExplicitWithdrawnTopLevelSideIsNotReplacedByAnApparentlyHealthyNestedBook()
+    {
+        var gateway = CreateGateway(_ => Json(HttpStatusCode.OK, """
+            {"status":"SUCCESS","payload":{"last_price":20,"bid_price":0,"offer_price":0,
+             "depth":{"buy":[{"price":19.8,"quantity":200}],"sell":[{"price":20.2,"quantity":300}]}}}
+            """));
+        var quote = await gateway.GetQuoteAsync(new("NSE", "FNO", "NIFTY-CE"), CancellationToken.None);
+        Assert.Equal(0, quote.BidPrice);
+        Assert.Equal(0, quote.OfferPrice);
+        Assert.Null(quote.BidQuantity);
+        Assert.Null(quote.OfferQuantity);
+    }
+
+    [Fact]
     public async Task OptionChainUsesOfficialEndpointAndMapsOiVolumeAndGreeks()
     {
         HttpRequestMessage? captured = null;

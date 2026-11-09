@@ -23,6 +23,7 @@ internal sealed partial class HeroZeroPaperTradingService(
     IOptions<MarketDataOptions> marketData,
     TimeProvider timeProvider,
     TradingEngineEvidenceRecorder evidenceRecorder,
+    LiveExecutionWakeSignal liveWake,
     ILogger<HeroZeroPaperTradingService> logger) : BackgroundService
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
@@ -50,14 +51,16 @@ internal sealed partial class HeroZeroPaperTradingService(
                 catch (Exception exception)
                 {
                     LogScanFailure(logger, market.Code, exception);
-                    state.Set(new(market.Code, false, null, "Faulted",
-                        "The latest scan failed safely; no new pair was opened.", timeProvider.GetUtcNow(),
-                        null, null, null, [], 0m, 0m, 0m));
+                    state.Set(state.GetSnapshot(market.Code) with { Status = "Faulted",
+                        Explanation = "The latest scan failed; existing basket protection remains pending for retry.",
+                        ObservedAtUtc = timeProvider.GetUtcNow() });
                     await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "Scan", "Faulted",
                         "Hero Zero scan or position management failed.", timeProvider.GetUtcNow(),
                         TradingEngineEvidenceRecorder.FailureEvidence(exception), stoppingToken);
                 }
-            await Task.Delay(TimeSpan.FromSeconds(options.Value.ScanIntervalSeconds), stoppingToken);
+            var seconds = state.GetSnapshot(market.Code).ActiveLegs.Count > 0
+                ? options.Value.ManagementIntervalSeconds : options.Value.ScanIntervalSeconds;
+            await Task.Delay(TimeSpan.FromSeconds(seconds), stoppingToken);
         }
     }
 
@@ -157,7 +160,8 @@ internal sealed partial class HeroZeroPaperTradingService(
             ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff));
         var expansion = candidateReady && inEntryWindow
             ? await ExpansionTriggerAsync(db, underlying.Id, cancellationToken) : null;
-        var canEnter = candidateReady && inEntryWindow && expansion?.Permitted == true;
+        var depthReady = call?.MarketDepthAvailable == true && put?.MarketDepthAvailable == true;
+        var canEnter = candidateReady && depthReady && inEntryWindow && expansion?.Permitted == true;
         var openedToday = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>
             value.Market == market.Code && value.Strategy.StartsWith("Hero Zero|") &&
             value.OpenedAtUtc >= StartOfIndiaDay(now), cancellationToken);
@@ -197,7 +201,8 @@ internal sealed partial class HeroZeroPaperTradingService(
                 ParseTime(options.Value.EntryWindowStart), ParseTime(options.Value.EntryCutoff));
             finalEntryFresh = finalEntryFresh && refreshed.Observations.All(value =>
                 value.ReceivedAtUtc is { } received && HeroZeroCandidatePolicy.IsFreshQuote(value.SourceTime, received, now));
-            canEnter = candidateReady && inEntryWindow && finalEntryFresh && expansion.Permitted;
+            depthReady = call?.MarketDepthAvailable == true && put?.MarketDepthAvailable == true;
+            canEnter = candidateReady && depthReady && inEntryWindow && finalEntryFresh && expansion.Permitted;
             discovery.Observations.AddRange(refreshed.Observations);
         }
         HeroZeroPairBudgetDecision? pairBudget = null;
@@ -231,6 +236,11 @@ internal sealed partial class HeroZeroPaperTradingService(
             status = "Waiting for fresh quotes";
             explanation = "Selected legs could not be revalidated with fresh quotes; no pair opened.";
         }
+        else if (candidateReady && !depthReady)
+        {
+            status = "Waiting for market depth";
+            explanation = "Candidates are visible, but fresh two-sided bid/ask evidence is required on both legs before entry. Unknown spread is not zero spread.";
+        }
         else if (pairBudget is { Lots: 0 })
         {
             status = "Pair budget exceeded";
@@ -257,7 +267,7 @@ internal sealed partial class HeroZeroPaperTradingService(
         await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "EntryDecision", status,
             explanation, now, new { expiry, spotQuote.LastPrice, candidateReady,
                 inEntryWindow, openedToday, call, put, expansion,
-                options.Value.MinimumCandidateScore, finalEntryFresh, pairBudget, entryLots, targetPremium,
+                options.Value.MinimumCandidateScore, finalEntryFresh, depthReady, pairBudget, entryLots, targetPremium,
                 discovery.Observations }, cancellationToken);
         if (inEntryWindow && !openedToday)
         {
@@ -268,7 +278,7 @@ internal sealed partial class HeroZeroPaperTradingService(
                 JsonSerializer.Serialize(new { call = call?.Symbol, callScore = call?.Score,
                     put = put?.Symbol, putScore = put?.Score, candidateReady,
                     expansionPermitted = expansion?.Permitted, expansionReasons = expansion?.Reasons,
-                    opened = canEnter, explanation, finalEntryFresh, pairBudget, entryLots, targetPremium,
+                    opened = canEnter, explanation, finalEntryFresh, depthReady, pairBudget, entryLots, targetPremium,
                     discovery.Observations })));
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -364,32 +374,79 @@ internal sealed partial class HeroZeroPaperTradingService(
         var instruments = await db.Instruments.AsNoTracking().Where(value =>
             legs.Select(leg => leg.ExecutionInstrumentId).Contains(value.Id))
             .ToDictionaryAsync(value => value.Id, cancellationToken);
+        var quotes = new Dictionary<Guid, GrowwQuote>();
+        var receivedAt = new Dictionary<Guid, DateTimeOffset>();
+        var quoteTimes = new List<DateTimeOffset>();
         foreach (var leg in legs.Where(value => value.Status == "Active"))
         {
             var instrument = instruments[leg.ExecutionInstrumentId];
-            var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
-                instrument.TradingSymbol), cancellationToken);
-            if (quote.LastPrice > 0)
+            GrowwQuote quote;
+            try { quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
+                instrument.TradingSymbol), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
             {
-                leg.Mark(quote.LastPrice, leg.StopLoss, now);
+                await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "BasketQuote", "Unavailable",
+                    "An open leg quote failed; saved protection is retained and liquidation will be retried.",
+                    timeProvider.GetUtcNow(), new { leg.Id, instrument.TradingSymbol, failure = exception.GetType().Name }, cancellationToken);
+                continue;
+            }
+            var received = timeProvider.GetUtcNow();
+            if (quote.LastPrice > 0 && HeroZeroCandidatePolicy.IsFreshQuote(quote.LastTradeTimeEpochMilliseconds, received, received))
+            {
+                quotes[leg.Id] = quote;
+                receivedAt[leg.Id] = received;
+                quoteTimes.Add(GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) ?? received);
+                leg.Mark(quote.BidPrice is > 0m && quote.OfferPrice >= quote.BidPrice ? quote.BidPrice.Value : quote.LastPrice,
+                    leg.StopLoss, received);
                 if (await ManualTradeExitRequest.ExistsAsync(db, market.Code, leg.Id, cancellationToken))
                     Close(leg, "ManualExit");
             }
         }
+        now = timeProvider.GetUtcNow();
+        localTime = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, IndiaTimeZone).DateTime);
         var entryCost = legs.Sum(value => value.EntryPrice * value.Quantity);
-        var currentValue = legs.Sum(value => value.CurrentPrice * value.Quantity);
-        var combinedPnl = legs.Sum(value => value.Status == "Active"
-            ? (value.CurrentPrice - value.EntryPrice) * value.Quantity
-            : value.RealisedPnl);
-        var force = localTime >= ParseTime(options.Value.ForcedExit);
-        if (force)
+        var pairPrefix = string.Join('|', legs[0].Strategy.Split('|').Take(2));
+        var outcome = "HeroZeroBasketState:" + pairPrefix;
+        var previousJson = await db.MarketStrategyAudits.AsNoTracking().Where(a => a.Market == market.Code && a.Outcome == outcome)
+            .OrderByDescending(a => a.CandleTimeUtc).Select(a => a.ReasonsJson).FirstOrDefaultAsync(cancellationToken);
+        HeroZeroBasketProtectionState? previous = null;
+        if (previousJson is not null)
         {
-            // The expiry hedge is a defined-risk debit pair. Preserve both legs through the
-            // late-session expansion window; one leg may decay near zero while the other expands.
-            // Intraday combined-loss, losing-leg and winner-trailing exits defeated that design.
-            foreach (var leg in legs) Close(leg, "HeroZeroTimeExit");
+            try { previous = JsonSerializer.Deserialize<HeroZeroBasketProtectionState>(previousJson)
+                ?? throw new JsonException(); }
+            catch (JsonException) { previous = new(entryCost, 0m, 0m, false, "HeroZeroProtectionStateInvalid"); }
         }
+        bool Fresh(MarketPaperPosition leg) => quotes.TryGetValue(leg.Id, out var quote) &&
+            HeroZeroCandidatePolicy.IsFreshQuote(quote.LastTradeTimeEpochMilliseconds, receivedAt[leg.Id], now);
+        var allFresh = legs.Where(l => l.Status == "Active").All(Fresh) &&
+            (quoteTimes.Count == 0 || quoteTimes.Max() - quoteTimes.Min() <= TimeSpan.FromSeconds(5));
+        var executableBook = allFresh && legs.Where(l => l.Status == "Active").All(l =>
+            quotes[l.Id].BidPrice is > 0m && quotes[l.Id].OfferPrice >= quotes[l.Id].BidPrice);
+        var net = allFresh ? legs.Sum(leg => leg.Status == "Active"
+            ? leg.CurrentPnlAt(leg.CurrentPrice) - Charges(leg, leg.CurrentPrice) : leg.RealisedPnl) : (decimal?)null;
+        var protection = HeroZeroBasketProtectionPolicy.Evaluate(entryCost, net, executableBook, previous,
+            options.Value.CombinedStopLossPercent, options.Value.CombinedProfitActivationPercent,
+            options.Value.WinnerTrailingFraction, localTime >= ParseTime(options.Value.ForcedExit),
+            legs.Any(l => l.Status == "Active" && Fresh(l) && l.CurrentPrice <= l.StopLoss));
+        // Commit the watermark/exit latch atomically with the paper closures.
+        // Recovery must never reset an activated floor or cancel liquidation.
+        db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlyingId, now,
+            outcome, 1m, JsonSerializer.Serialize(protection)));
+        if (protection.ExitReason is { } reason)
+            foreach (var leg in legs.Where(l => l.Status == "Active" && Fresh(l))) Close(leg, reason);
         await db.SaveChangesAsync(cancellationToken);
+        if (protection.ExitReason is not null || legs.Any(l => l.Status == "ManualExit")) liveWake.Notify();
+        await evidenceRecorder.RecordAsync(market.Code, "hero-zero", "BasketProtection",
+            protection.ExitReason ?? (allFresh ? "Managed" : "WaitingForFreshBasket"),
+            protection.ExitReason is null ? "After-cost basket protection evaluated; individual red legs are not discarded."
+                : "Basket liquidation latched; fresh legs closed and remaining legs will be retried.", now,
+            new { pairPrefix, allFresh, executableBook, netLiquidationPnl = net, protection,
+                legs = legs.Select(l => new { l.Id, l.CurrentPrice, l.RemainingQuantity, l.RealisedPnl, l.Status }),
+                quotes = quotes.Select(q => new { positionId = q.Key, q.Value.LastPrice, q.Value.BidPrice, q.Value.OfferPrice,
+                    q.Value.LastTradeTimeEpochMilliseconds }) }, cancellationToken);
+        var currentValue = legs.Sum(value => value.CurrentPrice * value.RemainingQuantity);
+        var combinedPnl = legs.Sum(value => value.CurrentPnlAt(value.CurrentPrice));
         var open = legs.Where(value => value.Status == "Active").Select(value =>
         {
             var instrument = instruments[value.ExecutionInstrumentId];
@@ -397,21 +454,22 @@ internal sealed partial class HeroZeroPaperTradingService(
                 instrument.Type == InstrumentType.CallOption ? "CE" : "PE",
                 instrument.StrikePrice ?? 0m, value.Quantity, value.EntryPrice, value.CurrentPrice,
                 value.StopLoss, value.Status,
-                (value.CurrentPrice - value.EntryPrice) * value.Quantity, null);
+                value.CurrentPnlAt(value.CurrentPrice), null);
         }).ToArray();
         state.Set(new(market.Code, true, expiry, open.Length > 0 ? "Pair active" : "Pair closed",
-            open.Length > 0 ? $"Holding both defined-risk legs until {options.Value.ForcedExit} IST; no red-leg or combined-loss exit." :
+            open.Length > 0 ? $"Basket protection active: {options.Value.CombinedStopLossPercent:0.#}% debit risk; after-cost floor ₹{protection.ProfitFloor:0.00}." :
                 "The expiry pair has completed.", now, null, null, null, open,
             entryCost, currentValue, combinedPnl));
 
         void Close(MarketPaperPosition leg, string reason)
         {
             if (leg.Status != "Active") return;
-            var costs = PaperTradingCostModel.CalculateOptionCharges([
-                new(PaperOptionTransactionSide.Buy, leg.EntryPrice, leg.Quantity),
-                new(PaperOptionTransactionSide.Sell, leg.CurrentPrice, leg.Quantity)], market.Exchange).Total;
-            leg.Close(leg.CurrentPrice, costs, reason, now);
+            leg.Close(leg.CurrentPrice, Charges(leg, leg.CurrentPrice), reason, timeProvider.GetUtcNow());
         }
+
+        decimal Charges(MarketPaperPosition leg, decimal price) => PaperTradingCostModel.CalculateOptionCharges([
+            new(PaperOptionTransactionSide.Buy, leg.EntryPrice, leg.RemainingQuantity),
+            new(PaperOptionTransactionSide.Sell, price, leg.RemainingQuantity)], market.Exchange).Total;
     }
 
     private async Task<HeroZeroExpansionDecision> ExpansionTriggerAsync(TradingDbContext db, Guid instrumentId,

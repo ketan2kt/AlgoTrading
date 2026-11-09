@@ -180,23 +180,35 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
           `Previous stop ${price(before.stopLoss)}; current unrealised ${money(trade.unrealisedPnl)}`);
       }
     }
-  }
-  const oldPnl = previous.paperAutomation.unrealisedPnl;
-  const pnl = current.paperAutomation.unrealisedPnl;
-  const risk = current.paperAutomation.portfolioRisk?.openRiskAtStops ?? 0;
-  const crossedProfit = [500, 1000, 2000, 5000, 10000]
-    .filter((threshold) => oldPnl < threshold && pnl >= threshold)
-    .at(-1);
-  if (crossedProfit !== undefined) {
-    add('trade', 'opportunity', `open-pnl:${current.paperAutomation.activeSignalId}:${crossedProfit}`,
-      `${name} open profit crossed ${money(crossedProfit)}. Review profit protection.`,
-      `Unrealised ${money(pnl)}; risk at stops ${money(risk)}`);
-  }
-  if (oldPnl >= 500 && pnl < oldPnl * 0.5) {
-    add('trade', pnl <= 0 ? 'critical' : 'warning',
-      `profit-giveback:${current.paperAutomation.activeSignalId}:${roundBucket(pnl, 250)}`,
-      pnl <= 0 ? `${name} open position gave back its profit and is no longer green.` : `${name} open profit has fallen by more than half.`,
-      `Previous mark ${money(oldPnl)}; current mark ${money(pnl)}; risk at stops ${money(risk)}`);
+    // Automation summaries can reset to zero during readiness/error updates or after
+    // an exit. Compare the same marked, still-open position instead of that summary.
+    if (!before || !previous.isFresh || !current.isFresh ||
+        !before.lifecycleStatus.startsWith('Active') || !trade.lifecycleStatus.startsWith('Active') ||
+        before.quantity !== trade.quantity || trade.quantity == null || trade.quantity <= 0 ||
+        before.executionInstrument !== trade.executionInstrument ||
+        before.fillPrice !== trade.fillPrice ||
+        before.currentOptionPrice == null || trade.currentOptionPrice == null ||
+        before.unrealisedPnl == null || trade.unrealisedPnl == null ||
+        !Number.isFinite(before.unrealisedPnl) || !Number.isFinite(trade.unrealisedPnl)) continue;
+    const oldPnl = before.unrealisedPnl;
+    const pnl = trade.unrealisedPnl;
+    const contract = spokenContract(trade.executionInstrument);
+    const crossedProfit = [500, 1000, 2000, 5000, 10000]
+      .filter((threshold) => oldPnl < threshold && pnl >= threshold)
+      .at(-1);
+    if (crossedProfit !== undefined) {
+      add('trade', 'opportunity', `open-pnl:${trade.signalId}:${crossedProfit}`,
+        `${name} ${contract} open profit crossed ${money(crossedProfit)}. Review profit protection.`,
+        `Open P&L ${money(pnl)}; quantity ${trade.quantity}`);
+    }
+    if (oldPnl >= 500 && pnl < oldPnl * 0.5) {
+      const movement = `Open P&L fell from ${money(oldPnl)} to ${money(pnl)}.`;
+      const state = pnl > 0 ? 'Still in profit.' : pnl === 0 ? 'Open P&L is now at breakeven.' : 'Open P&L is now negative.';
+      add('trade', pnl < 0 ? 'critical' : 'warning',
+        `profit-giveback:${trade.signalId}:${roundBucket(pnl, 250)}`,
+        `${name} ${contract}. ${movement} ${state}`,
+        `Same open trade; quantity ${trade.quantity}; excludes previously booked P&L and exit charges.`);
+    }
   }
 }
 

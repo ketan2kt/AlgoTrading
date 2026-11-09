@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMarketNarratorEvents, selectHighSignalNarratorEvents } from './market-narrator';
-import { TradingWorkspaceSnapshot, WorkspaceCandle } from './trading-workspace';
+import { TradingWorkspaceSnapshot, WorkspaceCandle, WorkspaceTradeOverlay } from './trading-workspace';
 
 function candle(time: string, open: number, high: number, low: number, close: number, volume = 100): WorkspaceCandle {
   return { openTimeUtc: time, intervalSeconds: 300, open, high, low, close, volume, isClosed: true };
@@ -32,6 +32,38 @@ function snapshot(candles: WorkspaceCandle[], overrides: Partial<TradingWorkspac
 }
 
 describe('market narrator', () => {
+  it.each([
+    ['positive giveback', { unrealisedPnl: 800 }, true, 'Still in profit.'],
+    ['breakeven', { unrealisedPnl: 0 }, true, 'at breakeven'],
+    ['negative open mark', { unrealisedPnl: -200 }, true, 'now negative'],
+    ['closed winner', { unrealisedPnl: 0, lifecycleStatus: 'Closed', realisedPnl: 1800 }, false, ''],
+    ['partial exit', { unrealisedPnl: 800, quantity: 5 }, false, ''],
+    ['different trade', { unrealisedPnl: 0, signalId: 'new-trade' }, false, ''],
+    ['missing mark', { unrealisedPnl: null }, false, ''],
+    ['missing price', { unrealisedPnl: 0, currentOptionPrice: null }, false, ''],
+  ] as [string, Partial<WorkspaceTradeOverlay>, boolean, string][])(
+    'uses per-trade evidence, not a zero automation summary: %s', (_name, changes, expected, text) => {
+      const bars = [candle('2026-11-05T04:10:00Z', 100, 101, 99, 100)];
+      const trade: WorkspaceTradeOverlay = {
+        signalId: 's1', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,
+        entry: 100, stopLoss: 95, target: 110, status: 'Active', quantity: 10, fillPrice: 100,
+        executionInstrument: 'NIFTY26NOV25000CE', executionInstrumentType: 'Option', executionExpiry: null,
+        executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
+        executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
+        executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 102,
+        exitPrice: null, realisedPnl: null, unrealisedPnl: 2000, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null,
+        maximumFavourablePnl: null, maximumAdverseLoss: null,
+      };
+      const previous = snapshot(bars, { overlays: [trade] });
+      previous.paperAutomation.unrealisedPnl = 2000;
+      const current = snapshot(bars, { overlays: [{ ...trade, ...changes }] });
+      const alerts = buildMarketNarratorEvents('nifty', previous, current).filter(e => e.key.includes('profit-giveback:'));
+      expect(alerts).toHaveLength(expected ? 1 : 0);
+      if (expected) expect(alerts[0].message).toContain(text);
+      current.isFresh = false;
+      expect(buildMarketNarratorEvents('nifty', previous, current).some(e => e.key.includes('profit-giveback:'))).toBe(false);
+    });
+
   it('announces completed-candle EMA and VWAP crossings', () => {
     const bars = [
       candle('2026-10-12T03:45:00Z', 99, 100, 98, 99),

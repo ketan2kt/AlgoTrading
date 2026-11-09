@@ -268,12 +268,14 @@ public static class DependencyInjection
         services.AddOptions<HeroZeroOptions>()
             .Bind(configuration.GetSection(HeroZeroOptions.SectionName))
             .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&
+                               value.ManagementIntervalSeconds is >= 2 and <= 15 &&
                                value.TargetPremium > 0 && value.MinimumPremium > 0 &&
                                value.MaximumPremium > value.MinimumPremium &&
                                value.MaximumSpreadPercent is > 0 and <= 30 &&
                                value.MinimumCandidateScore is >= 0.5m and <= 1m &&
                                value.MaximumCombinedPremium > 0 &&
                                value.CombinedStopLossPercent is > 0 and <= 50 &&
+                               value.CombinedProfitActivationPercent is > 0m and <= 100m &&
                                value.WinnerActivationMultiple is >= 1.25m and <= 5m &&
                                value.WinnerTrailingFraction is > 0 and < 0.5m &&
                                value.NiftyMaximumStrikeDistance is >= 50m and <= 200m &&
