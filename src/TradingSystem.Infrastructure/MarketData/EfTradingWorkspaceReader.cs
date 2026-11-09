@@ -372,13 +372,9 @@ internal sealed class EfTradingWorkspaceReader(
             var todaysPositions = marketPositionRows.Where(value => value.OpenedAtUtc >= sessionStartUtc &&
                                                                     value.OpenedAtUtc < sessionEndUtc).ToArray();
             var activePosition = todaysPositions.FirstOrDefault(value => value.Status == "Active");
-            var realised = todaysPositions.Where(value => value.Status != "Active").Sum(value => value.RealisedPnl);
-            var unrealised = todaysPositions.Where(value => value.Status == "Active").Sum(value =>
-                (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
-                    value.EntryPrice - value.CurrentPrice) * value.Quantity);
             automation = new PaperAutomationSnapshot(state.IsFresh ? "Scanning" : "DataUnavailable",
                 state.IsFresh, state.IsFresh ? $"{definition.DisplayName} paper engine is scanning completed candles."
-                    : state.Message ?? "Live data is unavailable.", now, todaysPositions.Length, realised, unrealised,
+                    : state.Message ?? "Live data is unavailable.", now, 0, 0m, 0m,
                 activePosition?.Id, activePosition?.Direction.ToString(), activePosition?.Quantity,
                 activePosition?.EntryPrice, activePosition?.StopLoss, activePosition?.Target,
                 ActiveExecutionInstrument(activePosition)?.TradingSymbol ??
@@ -393,13 +389,15 @@ internal sealed class EfTradingWorkspaceReader(
                 activePosition?.CurrentPrice,
                 todaysPositions.Where(value => value.Status == "Active").Select(value => new PaperPositionMark(
                     value.Id, value.CurrentPrice, value.CurrentPrice,
-                    (value.Direction == Direction.Buy ? value.CurrentPrice - value.EntryPrice :
-                    value.EntryPrice - value.CurrentPrice) * value.Quantity, now, true)).ToArray());
+                    value.CurrentPnlAt(value.CurrentPrice) - value.RealisedPnl, now, true)).ToArray());
 
             Instrument? ActiveExecutionInstrument(MarketPaperPosition? position) =>
                 position is not null && marketExecutionInstruments.TryGetValue(position.ExecutionInstrumentId,
                     out var resolved) ? resolved : null;
         }
+        // Presentation totals include every displayed specialty leg. Do not mutate
+        // the regular engine's risk/entry state or add the same legacy trade twice.
+        automation = IncludeSessionPositionTotals(automation, market, marketPositionRows, sessionStartUtc, sessionEndUtc);
 
         var evaluationRows = market == TradingMarketCatalog.Nifty.Code
             ? await dbContext.StrategyEvaluations.AsNoTracking()
@@ -589,6 +587,25 @@ internal sealed class EfTradingWorkspaceReader(
     internal static bool IncludeNiftyMarketPosition(string strategy) =>
         strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) ||
         strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal);
+
+    internal static PaperAutomationSnapshot IncludeSessionPositionTotals(PaperAutomationSnapshot automation,
+        string market, IEnumerable<MarketPaperPosition> positions, DateTimeOffset start, DateTimeOffset end)
+    {
+        var rows = positions.Where(value => value.Market == market && value.OpenedAtUtc >= start &&
+            value.OpenedAtUtc < end && (market != "nifty" || IncludeNiftyMarketPosition(value.Strategy)))
+            .DistinctBy(value => value.Id).ToArray();
+        var preserveLegacy = market == "nifty";
+        return automation with
+        {
+            TradesToday = (preserveLegacy ? automation.TradesToday : 0) + rows.Length,
+            RealisedPnl = (preserveLegacy ? automation.RealisedPnl : 0m) + rows.Sum(value => value.RealisedPnl),
+            // Realised partials already contain paid costs. Only the remaining
+            // quantity belongs in unrealised P&L; never count a partial twice.
+            UnrealisedPnl = (preserveLegacy ? automation.UnrealisedPnl : 0m) + rows
+                .Where(value => value.Status == "Active")
+                .Sum(value => value.CurrentPnlAt(value.CurrentPrice) - value.RealisedPnl)
+        };
+    }
 
     internal static bool IsTradableSessionTimestamp(
         DateTimeOffset timestampUtc,

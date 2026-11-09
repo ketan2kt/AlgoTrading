@@ -1,6 +1,7 @@
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Infrastructure.Execution;
 using TradingSystem.Infrastructure.Diagnostics;
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 using System.Globalization;
 
@@ -8,6 +9,60 @@ namespace TradingSystem.ContractTests;
 
 public sealed class TradingWorkspaceIsolationTests
 {
+    [Theory]
+    [InlineData("nifty", 1800, 650, 6)]
+    [InlineData("sensex", 800, 450, 4)]
+    [InlineData("bank-nifty", 800, 450, 4)]
+    public void SessionTotalsIncludeBothHeroZeroLegsAndPartialsExactlyOnce(
+        string market, decimal realised, decimal unrealised, int trades)
+    {
+        var start = DateTimeOffset.Parse("2026-11-09T18:30:00Z", CultureInfo.InvariantCulture);
+        var end = start.AddDays(1);
+        var before = new PaperAutomationSnapshot("Scanning", true, "unchanged", start.AddHours(12),
+            2, 1000m, 200m, null, null, null, null, null, null);
+        MarketPaperPosition Position(string owner, string strategy, DateTimeOffset opened) => new(
+            Guid.NewGuid(), owner, Guid.NewGuid(), Guid.NewGuid(), strategy, Direction.Buy, 100, 50, 10, 200, opened);
+        var call = Position(market, "Hero Zero|pair|CE", start.AddHours(9));
+        call.Close(70, 50, "TargetHit", start.AddHours(10)); // +1950 net
+        var put = Position(market, "Hero Zero|pair|PE", start.AddHours(9));
+        put.Mark(40, 10, start.AddHours(10)); // -1000 open
+        var partial = Position(market, "Expansion Pair|pair2|CE", start.AddHours(9));
+        partial.TakePartial(70, 50, 50, start.AddHours(10)); // +950 net realised
+        partial.Mark(79, 10, start.AddHours(11)); // +1450 on the remaining 50 only
+        var loss = Position(market, "Hero Zero|earlier|PE", start.AddHours(8));
+        loss.Close(29, 0, "StopLossHit", start.AddHours(9)); // -2100 net
+        var foreign = Position("another-market", "Hero Zero|foreign|CE", start);
+        foreign.Mark(1000, 10, start.AddHours(1));
+        var old = Position(market, "Hero Zero|old|CE", start.AddDays(-1));
+        old.Close(1000, 0, "Closed", start.AddDays(-1).AddHours(1));
+        var next = Position(market, "Hero Zero|next|CE", end);
+        var rows = new[] { call, put, partial, loss, call, foreign, old, next };
+        var result = EfTradingWorkspaceReader.IncludeSessionPositionTotals(before, market, rows, start, end);
+        Assert.Equal(realised, result.RealisedPnl);
+        Assert.Equal(unrealised, result.UnrealisedPnl);
+        Assert.Equal(trades, result.TradesToday);
+        Assert.Equal(before.Status, result.Status);
+        Assert.Equal(before.StopLoss, result.StopLoss);
+        Assert.Equal(before.ActiveSignalId, result.ActiveSignalId);
+    }
+
+    [Fact]
+    public void NiftyLegacyRowsAreNotAddedAgainButZeroZeroLossesAreIncluded()
+    {
+        var start = DateTimeOffset.Parse("2026-11-09T18:30:00Z", CultureInfo.InvariantCulture);
+        var snapshot = new PaperAutomationSnapshot("Scanning", true, "", start, 1, 1000, 0, null, null, null, null, null, null);
+        var legacy = new MarketPaperPosition(Guid.NewGuid(), "nifty", Guid.NewGuid(), Guid.NewGuid(),
+            "NiftyAutomation", Direction.Buy, 100, 50, 10, 200, start);
+        legacy.Close(60, 0, "Closed", start.AddMinutes(1));
+        var hz = new MarketPaperPosition(Guid.NewGuid(), "nifty", Guid.NewGuid(), Guid.NewGuid(),
+            "Hero Zero|pair|PE", Direction.Buy, 100, 50, 10, 200, start);
+        hz.Close(40, 25, "Closed", start.AddMinutes(1));
+        var result = EfTradingWorkspaceReader.IncludeSessionPositionTotals(snapshot, "nifty", [legacy, hz], start, start.AddDays(1));
+        Assert.Equal(-25, result.RealisedPnl);
+        Assert.Equal(2, result.TradesToday);
+        Assert.Equal(0, result.UnrealisedPnl);
+    }
+
     [Theory]
     [InlineData("Hero Zero|pair|CE", true)]
     [InlineData("Expansion Pair|pair|CE", true)]
