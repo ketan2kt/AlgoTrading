@@ -50,7 +50,9 @@ jobs:
       # Executed after the outside-hours guard; this uses HTTP/cloud doubles.
       - name: Verify safe recorder cutover regression
         shell: pwsh
-        run: ./scripts/test-recorder-cutover.ps1
+        run: |
+          ./scripts/test-recorder-cutover.ps1
+          ./scripts/test-recorder-package.ps1
       - name: Use exact checked main package
         env:
           CI_RUN: ${{ inputs.ci_run_id }}
@@ -67,7 +69,7 @@ jobs:
           git merge-base --is-ancestor "$package_sha" "$GITHUB_SHA"
           while IFS= read -r path; do
             case "$path" in
-              .github/workflows/replay-recorder-deploy.yml|.github/workflows/azure-deploy.yml|scripts/tasks.ps1|scripts/configure-replay-recorder.ps1|scripts/test-recorder-cutover.ps1|infra/replay-recorder.bicep|docs/handover.md) ;;
+              .github/workflows/replay-recorder-deploy.yml|.github/workflows/azure-deploy.yml|scripts/tasks.ps1|scripts/configure-replay-recorder.ps1|scripts/test-recorder-cutover.ps1|scripts/verify-recorder-package.ps1|scripts/test-recorder-package.ps1|infra/replay-recorder.bicep|docs/handover.md) ;;
               *) echo "Application changes since checked package; use matching main CI." >&2; exit 1 ;;
             esac
           done < <(git diff --name-only "$package_sha" "$GITHUB_SHA")
@@ -83,6 +85,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Stage private recorder settings
+        id: stage_recorder
         shell: pwsh
         run: ./scripts/configure-replay-recorder.ps1 -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")
       - name: Wait for website key publication
@@ -105,13 +108,25 @@ jobs:
           fi
       - name: Publish checked recorder package
         run: |
+          # Kudu can accept/copy the package and then return a gateway 502
+          # during container recycle. Never blindly upload a second package.
+          # Exact identity and runtime readiness below gate activation.
+          set +e
           az webapp deploy --resource-group rg-sarthi-trading-centralindia \
             --name sarthirecorder5amvyarepxaci --src-path "$RUNNER_TEMP/recorder-release/trading-system.zip" \
-            --type zip --clean true --restart true
+            --type zip --clean true --restart true --async true --track-status false
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            echo 'Deployment client did not confirm success; checking the server against the exact package before activation.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Verify exact recorder package before readiness and activation
+        shell: pwsh
+        run: ./scripts/verify-recorder-package.ps1 -PackagePath "$env:RUNNER_TEMP/recorder-release/trading-system.zip"
       - name: Verify database and private archive before switching capture
         run: |
           for attempt in $(seq 1 12); do
-            if curl --fail --silent --show-error https://sarthirecorder5amvyarepxaci.azurewebsites.net/health/ready; then
+            if curl --fail --silent --show-error --max-time 15 https://sarthirecorder5amvyarepxaci.azurewebsites.net/health/ready; then
               echo 'Recorder database and private archive round-trip passed. Market-session capture verification is still required.' >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
@@ -124,3 +139,7 @@ jobs:
         env:
           EMERGENCY_RESTART: ${{ inputs.emergency_restart }}
         run: ./scripts/configure-replay-recorder.ps1 -Activate -AllowMarketHoursRestart:($env:EMERGENCY_RESTART -eq 'true') -ExpectedAssemblyHash (Get-Content "$env:RUNNER_TEMP/recorder-release/application.sha256")
+      - name: Restore website capture after incomplete recorder rollout
+        if: (failure() || cancelled()) && (steps.stage_recorder.outcome == 'success' || steps.stage_recorder.outcome == 'failure')
+        shell: pwsh
+        run: ./scripts/configure-replay-recorder.ps1 -RestoreWebsiteCapture

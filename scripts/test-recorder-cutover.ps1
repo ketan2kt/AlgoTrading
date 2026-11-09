@@ -21,7 +21,10 @@ function Invoke-RestMethod {
     throw 'Unexpected request in cutover test.'
 }
 function Invoke-WebRequest {
-    param($Uri, $TimeoutSec)
+    param($Uri, $TimeoutSec, $Method, $Headers)
+    if ($Uri -eq 'https://sarthitradingweb5amvyarepxaci.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Application.dll') {
+        return [pscustomobject]@{ Content = [Text.Encoding]::UTF8.GetBytes('synthetic-checked-application') }
+    }
     if ($Uri -ne 'https://sarthirecorder5amvyarepxaci.azurewebsites.net/health/recorder-active') {
         throw 'Unexpected health URL.'
     }
@@ -56,3 +59,32 @@ foreach ($mode in @('slow-success', 'failed-start')) {
     }
     Write-Output "PASS: $mode"
 }
+
+# Package upload/key publication can fail after staging, before -Activate ever
+# runs. Recovery must work from the both-disabled state and preserve secrets.
+$global:recorderTestSettings = @{
+    website = @{ ConnectionStrings__TradingDatabase = 'synthetic-database'; MarketData__HistoricalReplayFeed__Enabled = 'false'; KeptSetting = 'test-only-marker' }
+    recorder = @{ MarketData__HistoricalReplayFeed__Enabled = 'false' }
+}
+$global:recorderTestWrites = [Collections.Generic.List[string]]::new()
+& "$PSScriptRoot/configure-replay-recorder.ps1" -RestoreWebsiteCapture
+if (($global:recorderTestWrites -join ',') -ne 'recorder:false,website:true' -or
+    $global:recorderTestSettings.website.KeptSetting -ne 'test-only-marker' -or
+    $global:recorderTestSettings.website.MarketData__HistoricalReplayFeed__AfterMarketBackfillEnabled -ne 'true') {
+    throw 'Pre-activation deployment failure did not safely restore website capture.'
+}
+Write-Output 'PASS: staged-package-failure-recovery'
+
+$global:recorderTestWrites.Clear()
+$applicationHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('synthetic-checked-application')))
+& "$PSScriptRoot/configure-replay-recorder.ps1" -ExpectedAssemblyHash $applicationHash
+Write-Output 'PASS: website-identity-verified-by-read-only-file-hash'
+$global:recorderTestWrites.Clear()
+$rejected = $false
+try { & "$PSScriptRoot/configure-replay-recorder.ps1" -ExpectedAssemblyHash ('0' * 64) }
+catch {
+    if ($_.Exception.Message -notlike 'Website policy assembly does not match*') { throw }
+    $rejected = $true
+}
+if (-not $rejected -or $global:recorderTestWrites.Count -ne 0) { throw 'Wrong website build changed capture settings.' }
+Write-Output 'PASS: website-identity-mismatch-preserves-capture'

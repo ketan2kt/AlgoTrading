@@ -1,7 +1,8 @@
 [CmdletBinding()]
-param([switch]$Activate, [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedAssemblyHash,
+param([switch]$Activate, [switch]$RestoreWebsiteCapture, [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedAssemblyHash,
     [switch]$AllowMarketHoursRestart)
 $ErrorActionPreference = 'Stop'
+if ($Activate -and $RestoreWebsiteCapture) { throw 'Choose activation or website recovery, not both.' }
 $rg = 'rg-sarthi-trading-centralindia'
 $website = 'sarthitradingweb5amvyarepxaci'
 $recorder = 'sarthirecorder5amvyarepxaci'
@@ -16,9 +17,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Azure authentication failed' }
 $headers = @{ Authorization = "Bearer $managementToken" }
 try {
     if ($ExpectedAssemblyHash) {
-        $verified = Invoke-RestMethod -Method Post -Uri "https://$website.scm.azurewebsites.net/api/command" -Headers $headers `
-            -ContentType 'application/json' -Body '{"command":"sha256sum /home/site/wwwroot/TradingSystem.Application.dll","dir":"/home/site/wwwroot"}'
-        if ($verified.ExitCode -ne 0 -or ($verified.Output -split '\s+')[0] -ne $ExpectedAssemblyHash) {
+        $verified = Invoke-WebRequest -Method Get -Uri "https://$website.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Application.dll" `
+            -Headers $headers -TimeoutSec 30
+        $actualHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([byte[]]$verified.Content))
+        if ($actualHash -ne $ExpectedAssemblyHash) {
             throw 'Website policy assembly does not match the checked recorder release; deploy the website package first.'
         }
     }
@@ -28,6 +30,24 @@ try {
     $web = @{}; $rec = @{}
     foreach ($property in $webSettings.properties.PSObject.Properties) { $web[$property.Name] = $property.Value }
     foreach ($property in $recSettings.properties.PSObject.Properties) { $rec[$property.Name] = $property.Value }
+    if ($RestoreWebsiteCapture) {
+        # Covers failures between staging and activation (upload/startup/keys),
+        # not just failures inside the activation probe. Never restore the
+        # website until the recorder-disable setting is confirmed persisted.
+        $rec['MarketData__HistoricalReplayFeed__Enabled'] = 'false'
+        Invoke-RestMethod -Method Put -Uri "$baseUri/$recorder/config/appsettings?api-version=2024-11-01" -Headers $headers `
+            -ContentType 'application/json' -Body (@{ properties = $rec } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+        $confirmed = Invoke-RestMethod -Method Post -Uri "$baseUri/$recorder/config/appsettings/list?api-version=2024-11-01" -Headers $headers
+        if ($confirmed.properties.MarketData__HistoricalReplayFeed__Enabled -ne 'false') {
+            throw 'Recorder disable could not be confirmed; website capture was not enabled.'
+        }
+        $web['MarketData__HistoricalReplayFeed__Enabled'] = 'true'
+        $web['MarketData__HistoricalReplayFeed__AfterMarketBackfillEnabled'] = 'true'
+        Invoke-RestMethod -Method Put -Uri "$baseUri/$website/config/appsettings?api-version=2024-11-01" -Headers $headers `
+            -ContentType 'application/json' -Body (@{ properties = $web } | ConvertTo-Json -Depth 6 -Compress) | Out-Null
+        Write-Host 'Recorder disabled; website capture restored after incomplete rollout. Recorder release remains incomplete.'
+        return
+    }
     if ([string]::IsNullOrWhiteSpace($web['ConnectionStrings__TradingDatabase'])) { throw 'Database configuration missing' }
     $rec['ConnectionStrings__TradingDatabase'] = $web['ConnectionStrings__TradingDatabase']
     $rec['ApplicationRole'] = 'ReplayRecorder'
@@ -40,6 +60,7 @@ try {
     $rec['WEBSITES_CONTAINER_START_TIME_LIMIT'] = '600'
     $rec['MarketData__HistoricalReplayFeed__Enabled'] = $(if ($Activate) { 'true' } else { 'false' })
     $rec['MarketData__HistoricalReplayFeed__SampleSeconds'] = '2'
+    $rec['MarketData__HistoricalReplayFeed__AfterMarketBackfillEnabled'] = 'true'
     $rec['MarketData__HistoricalReplayFeed__MaximumInstruments'] = '500'
     foreach ($settings in @($web, $rec)) {
         $settings['ReplayStorage__ContainerUri'] = 'https://sarthireplay2026.blob.core.windows.net/replay'
@@ -83,5 +104,5 @@ try {
     }
     Write-Host $(if ($Activate) { 'Recorder activated; website capture disabled. Verify recorder health before declaring ready.' } else { 'Recorder configuration staged; capture remains disabled until checked packages are deployed.' })
 } finally {
-    $managementToken = $null; $headers = $null; $webSettings = $null; $recSettings = $null; $web = $null; $rec = $null
+    $managementToken = $null; $headers = $null; $webSettings = $null; $recSettings = $null; $confirmed = $null; $web = $null; $rec = $null
 }
