@@ -4,12 +4,13 @@
 
 - Adds a single-date, after-hours gap-aware mode to Historical Replay. Uses archived Groww streaming books only, marks gaps separately for each index, excludes uncertain fills, and shows post-gap flat-start results separately from verified simulated P&L. Missing dated policy inputs produce a coverage-only report. Strict replay remains unchanged.
 - Release excludes recorder reconnect, recorder writer/atomic-shard, warning and independent-feed changes. No live trading, strategy, or 70% Bank Nifty trail changes. Deploy the website only from the checked main package; do not restart the recorder.
+- Local Release: 39 focused checks passed, including archived 11 November input across all three markets and preservation of strict archive reads. Required entry-path review uses the 11 November ledger: Nifty 2/2, Sensex 7/7, Bank Nifty 10/10 regular entries retained; no strategy removed.
 
 ## Groww-only replay evidence — website release
 
 - Normal trading quote receipts retain their original receipt times. The website mirrors settled quote shards under `-website` names in existing private storage, separate from recorder shards. Position timelines label receipt sources. Strict streaming replay skips website shards and their gap markers.
 - During the regular session, the website checks the recorder's persisted option-source times per market. If stale, it may request one Groww REST snapshot for an open or unexpired option signal, held contracts first. Skip recent normal receipts; share the website gateway's limiter, yield to foreground demand, cap at five supplemental requests/minute, use the existing vault token and a 600 ms timeout. REST fallback is diagnostic evidence, not timestamped order-book coverage or a replay execution input. No new vendor, recorder restart, strategy, order, or migration.
-- Local Release checks: 70 contract and 3 architecture tests passed. Keep the independent-feed and gap-aware UI drafts in `.worktree-session-evidence` out of this release. CI and website rollout must use the checked main package.
+- Local Release checks: 70 contract and 3 architecture tests passed. Keep independent-feed drafts in `.worktree-session-evidence` out of website-only replay releases. CI and website rollout must use the checked main package.
 
 ## Pre-session verification + failed recorder rollout recovery
 
