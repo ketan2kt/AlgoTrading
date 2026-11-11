@@ -11,6 +11,62 @@ namespace TradingSystem.ContractTests;
 public sealed class GrowwReadOnlyContractTests
 {
     [Fact]
+    public async Task SupplementalQuoteIsRateCappedAndNeverChangesTheTradingCacheOrDepthClock()
+    {
+        var at = new DateTimeOffset(2026, 11, 11, 6, 0, 0, TimeSpan.Zero);
+        var archive = new QuoteArchive();
+        var calls = 0;
+        using var gateway = CreateGateway(request =>
+        {
+            calls++;
+            Assert.Equal(calls == 1 ? "vault-token" : "test-token", request.Headers.Authorization!.Parameter);
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"last_price":100,"last_trade_time":STAMP,"bid_price":99,"bid_quantity":65,"offer_price":101,"offer_quantity":130}}
+                """.Replace("STAMP", at.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
+        }, new FixedClock(at), archive);
+        var contract = new GrowwQuoteRequest("NSE", "FNO", "NIFTYTESTCE");
+        var other = new GrowwQuoteRequest("BSE", "FNO", "SENSEXTESTPE");
+        Assert.True(await gateway.TryRecordSupplementalQuoteAsync(contract, "vault-token", CancellationToken.None));
+        Assert.False(await gateway.TryRecordSupplementalQuoteAsync(other, "vault-token", CancellationToken.None));
+        Assert.Equal(1, calls);
+        var supplemental = Assert.Single(archive.Rows);
+        Assert.Equal(HistoricalQuoteObservation.GrowwRestFallback, supplemental.Source);
+        Assert.Equal(at, supplemental.ReceivedAtUtc);
+        Assert.Null(supplemental.DepthSourceAtUtc);
+        Assert.Equal(65, supplemental.Quote.BidQuantity);
+        Assert.False(gateway.HasRecentReplayReceipt(contract, at));
+        await gateway.GetQuoteAsync(contract, CancellationToken.None);
+        Assert.Equal(2, calls);
+        Assert.True(gateway.HasRecentReplayReceipt(contract, at));
+        Assert.Equal(HistoricalQuoteObservation.GrowwQuoteReceipt, archive.Rows[1].Source);
+        Assert.False(await gateway.TryRecordSupplementalQuoteAsync(other, "vault-token", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SupplementalQuoteYieldsToForegroundDemandAndRejectsStaleData()
+    {
+        var at = new DateTimeOffset(2026, 11, 11, 6, 0, 0, TimeSpan.Zero);
+        var clock = new FixedClock(at);
+        var archive = new QuoteArchive();
+        var calls = 0;
+        using var gateway = CreateGateway(_ =>
+        {
+            calls++;
+            return Json(HttpStatusCode.OK, """
+                {"status":"SUCCESS","payload":{"last_price":100,"last_trade_time":STAMP,"bid_price":99,"bid_quantity":65,"offer_price":101,"offer_quantity":130}}
+                """.Replace("STAMP", at.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
+        }, clock, archive);
+        var contract = new GrowwQuoteRequest("NSE", "FNO", "NIFTYTESTCE");
+        await gateway.GetQuoteAsync(contract, CancellationToken.None);
+        var other = new GrowwQuoteRequest("BSE", "FNO", "SENSEXTESTPE");
+        Assert.False(await gateway.TryRecordSupplementalQuoteAsync(other, "vault-token", CancellationToken.None));
+        Assert.Equal(1, calls);
+        clock.Now = at.AddSeconds(31);
+        Assert.False(await gateway.TryRecordSupplementalQuoteAsync(other, "vault-token", CancellationToken.None));
+        Assert.Equal(2, calls);
+        Assert.Equal(HistoricalQuoteObservation.GrowwQuoteReceipt, Assert.Single(archive.Rows).Source);
+    }
+    [Fact]
     public async Task ProfileMapsOfficialResponseAndRequiredHeaders()
     {
         HttpRequestMessage? captured = null;
@@ -540,14 +596,29 @@ public sealed class GrowwReadOnlyContractTests
     }
 
     private static GrowwReadOnlyGateway CreateGateway(
-        Func<HttpRequestMessage, HttpResponseMessage> responder)
+        Func<HttpRequestMessage, HttpResponseMessage> responder, TimeProvider? clock = null, IHistoricalQuoteArchive? archive = null)
     {
         var handler = new StubHandler(responder);
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.groww.in/") };
         return new GrowwReadOnlyGateway(
             new StubHttpClientFactory(client),
             new StubTokenProvider(),
-            Options.Create(new GrowwOptions()));
+            Options.Create(new GrowwOptions()), clock, archive);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class QuoteArchive : IHistoricalQuoteArchive
+    {
+        public List<HistoricalQuoteObservation> Rows { get; } = [];
+        public void TryRecord(HistoricalQuoteObservation observation) => Rows.Add(observation);
+        public void MarkCaptureGap(DateOnly tradingDate) { }
+        public Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken) =>
+            Task.FromResult(new HistoricalQuoteArchiveDay(Rows, false));
     }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body) => new(status)

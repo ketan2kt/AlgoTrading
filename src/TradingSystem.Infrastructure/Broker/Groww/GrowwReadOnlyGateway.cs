@@ -22,11 +22,15 @@ public sealed class GrowwReadOnlyGateway(
     // Leave headroom for timing jitter while four index workspaces are active.
     private static readonly TimeSpan MinimumApiRequestSpacing = TimeSpan.FromMilliseconds(210);
     private static readonly TimeSpan QuoteCacheLifetime = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan SupplementalRequestSpacing = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ForegroundQuietPeriod = TimeSpan.FromMilliseconds(500);
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim apiRequestGate = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> quoteGates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CachedQuote> quoteCache = new(StringComparer.Ordinal);
     private DateTimeOffset nextApiRequestAtUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset nextSupplementalAtUtc = DateTimeOffset.MinValue;
+    private long lastForegroundDemandTicks;
 
     public async Task<GrowwUserProfile> GetUserProfileAsync(CancellationToken cancellationToken)
     {
@@ -75,9 +79,38 @@ public sealed class GrowwReadOnlyGateway(
         }
     }
 
+    internal bool HasRecentReplayReceipt(GrowwQuoteRequest request, DateTimeOffset now) =>
+        quoteCache.TryGetValue($"{request.Exchange}|{request.Segment}|{request.TradingSymbol}", out var current) &&
+        current.ReceivedAtUtc <= now && now - current.ReceivedAtUtc <= TimeSpan.FromSeconds(5);
+
+    internal async Task<bool> TryRecordSupplementalQuoteAsync(GrowwQuoteRequest request, string accessToken, CancellationToken cancellationToken)
+    {
+        if (historicalQuotes is null || string.IsNullOrWhiteSpace(accessToken) || request.Segment != "FNO" || request.Exchange is not ("NSE" or "BSE") ||
+            !(request.TradingSymbol.EndsWith("CE", StringComparison.Ordinal) || request.TradingSymbol.EndsWith("PE", StringComparison.Ordinal))) return false;
+        ValidateIdentifier(request.TradingSymbol, nameof(request.TradingSymbol));
+        if (HasRecentReplayReceipt(request, clock.GetUtcNow())) return false;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(600), clock);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken);
+        try
+        {
+            var quote = await GetQuoteCoreAsync(request, linked.Token, supplementalToken: accessToken);
+            var now = clock.GetUtcNow();
+            var source = GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds);
+            if (source is null || source > now || now - source > TimeSpan.FromSeconds(30) ||
+                quote.BidPrice is not > 0m || quote.OfferPrice is not > 0m || quote.BidPrice > quote.OfferPrice ||
+                quote.BidQuantity is not > 0 || quote.OfferQuantity is not > 0) return false;
+            // A receipt time is not a book event time. Never promote this
+            // observation into the streaming evidence or trading quote cache.
+            historicalQuotes.TryRecord(new(Guid.NewGuid(), now, request, quote) { Source = HistoricalQuoteObservation.GrowwRestFallback });
+            return true;
+        }
+        catch (SupplementalBudgetUnavailableException) { return false; }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { return false; }
+    }
+
     private async Task<GrowwQuote> GetQuoteCoreAsync(
         GrowwQuoteRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? supplementalToken = null)
     {
         // Groww's full quote endpoint does not consistently accept MCX commodity
         // trading symbols. The documented multi-LTP endpoint does, so commodity
@@ -89,7 +122,7 @@ public sealed class GrowwReadOnlyGateway(
             ("exchange", request.Exchange),
             ("segment", request.Segment),
             ("trading_symbol", request.TradingSymbol));
-        var payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken);
+        var payload = await GetPayloadAsync<QuotePayload>(path, cancellationToken, supplementalToken);
         if (payload.LastPrice <= 0 || payload.LastTradeTime is <= 0)
         {
             throw Malformed("Groww quote omitted a valid last price or supplied an invalid trade timestamp.");
@@ -306,15 +339,19 @@ public sealed class GrowwReadOnlyGateway(
 
     private async Task<TPayload> GetPayloadAsync<TPayload>(
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? supplementalToken = null)
     {
+        var supplemental = supplementalToken is not null;
+        if (!supplemental) Interlocked.Exchange(ref lastForegroundDemandTicks, clock.GetUtcNow().UtcTicks);
+        else if (clock.GetUtcNow().UtcTicks - Interlocked.Read(ref lastForegroundDemandTicks) < ForegroundQuietPeriod.Ticks)
+            throw new SupplementalBudgetUnavailableException();
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
-        var token = await accessTokenProvider.GetAccessTokenAsync(cancellationToken);
+        var token = supplementalToken ?? await accessTokenProvider.GetAccessTokenAsync(cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("X-API-VERSION", "1.0");
 
-        using var response = await SendRateLimitedAsync(request, cancellationToken);
+        using var response = await SendRateLimitedAsync(request, supplemental, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
         try
         {
@@ -340,12 +377,26 @@ public sealed class GrowwReadOnlyGateway(
 
     private async Task<HttpResponseMessage> SendRateLimitedAsync(
         HttpRequestMessage request,
-        CancellationToken cancellationToken)
+        bool supplemental, CancellationToken cancellationToken)
     {
-        await apiRequestGate.WaitAsync(cancellationToken);
+        if (supplemental)
+        {
+            if (!await apiRequestGate.WaitAsync(0, cancellationToken)) throw new SupplementalBudgetUnavailableException();
+        }
+        else await apiRequestGate.WaitAsync(cancellationToken);
         try
         {
-            var delay = nextApiRequestAtUtc - clock.GetUtcNow();
+            var now = clock.GetUtcNow();
+            var delay = nextApiRequestAtUtc - now;
+            if (supplemental)
+            {
+                if (now < nextSupplementalAtUtc || delay > TimeSpan.Zero ||
+                    now.UtcTicks - Interlocked.Read(ref lastForegroundDemandTicks) < ForegroundQuietPeriod.Ticks)
+                    throw new SupplementalBudgetUnavailableException();
+                // Consume budget before the HTTP call, including on timeout or 429.
+                nextSupplementalAtUtc = now + SupplementalRequestSpacing;
+                nextApiRequestAtUtc = now + MinimumApiRequestSpacing;
+            }
             if (delay > TimeSpan.Zero)
                 await Task.Delay(delay, clock, cancellationToken);
 
@@ -557,4 +608,5 @@ public sealed class GrowwReadOnlyGateway(
         [property: JsonPropertyName("realised_pnl")] decimal RealisedPnl);
 
     private sealed record CachedQuote(GrowwQuote Quote, DateTimeOffset ReceivedAtUtc);
+    private sealed class SupplementalBudgetUnavailableException : Exception;
 }

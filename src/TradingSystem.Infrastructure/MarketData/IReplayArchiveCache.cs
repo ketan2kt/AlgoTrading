@@ -6,4 +6,5 @@ public interface IReplayArchiveCache
     string CacheRoot { get; }
     IDisposable? Pin(DateOnly tradingDate) => null;
     Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token);
+    Task HydrateStreamingQuotesAsync(DateOnly tradingDate, CancellationToken token) => HydrateAsync("quotes", tradingDate, token);
 }

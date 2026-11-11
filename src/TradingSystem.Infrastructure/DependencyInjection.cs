@@ -179,6 +179,7 @@ public static class DependencyInjection
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
         services.AddSingleton<ResearchCapturePulse>();
         services.AddHostedService<GrowwHistoricalFeedCaptureService>();
+        services.AddHostedService<GrowwReplayReceiptFallback>();
         services.AddHostedService<HistoricalAfterMarketBackfillService>();
         services.AddScoped<GrowwInstrumentSynchronizer>();
         services.AddScoped<IGrowwInstrumentSynchronizer>(provider =>

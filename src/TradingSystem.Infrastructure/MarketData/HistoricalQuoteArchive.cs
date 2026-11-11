@@ -202,9 +202,9 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         using var pinned = cloud?.Pin(date);
         if (streamingOnly && cloud?.Enabled == true)
         {
-            await cloud.HydrateAsync("quotes", date, token);
+            await cloud.HydrateStreamingQuotesAsync(date, token);
             var remoteRoot = Path.Combine(cloud.CacheRoot, "quotes");
-            if (HasDateFiles(remoteRoot, date))
+            if (HasDateFiles(remoteRoot, date, includeWebsite: false))
             {
                 using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
                 return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token, streamingOnly: true);
@@ -218,10 +218,13 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
 
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly)){
+            var receiptsSeen = new HashSet<Guid>();
+            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly, includeWebsite: !streamingOnly)){
+                if (value.Source == HistoricalQuoteObservation.GrowwRestFallback) continue;
                 if (streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
                     value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
+                if (value.Source == HistoricalQuoteObservation.GrowwQuoteReceipt && !receiptsSeen.Add(value.Id)) continue;
                 yield return HistoricalQuoteProjection.ToReplay(value, symbol);
             }
         }
@@ -244,14 +247,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 if(++count>maximumReadObservations)throw new InvalidDataException("Held-position quote limit exceeded.");
                 var source=HistoricalQuoteProjection.ToReplay(v,w.Symbol).SourceAtUtc;
                 if(!result.TryGetValue(w.Id,out var rows)) result[w.Id]=rows=[];
-                rows.Add(new(v.ReceivedAtUtc,v.Quote.LastPrice,source));
+                rows.Add(new(v.ReceivedAtUtc,v.Quote.LastPrice,source) { Source = v.Source });
             }
         }
         return(result,gaps);
     }
 
     private async IAsyncEnumerable<HistoricalQuoteObservation> StreamDay(DateOnly date, Action gap,
-        [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true)
+        [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true, bool includeWebsite = true)
     {
             using var pinned = cloud?.Pin(date);
             var remoteAvailable = false;
@@ -268,9 +271,11 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             }
             if(!Directory.Exists(root)){if (!remoteAvailable) gap();yield break;}
             var paths=Directory.GetFiles(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"*.ndjson*")
-                .Where(p=>p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal)).ToArray();
+                .Where(p=>(includeWebsite || !ReplayBlobStorage.IsWebsiteQuotePath(p)) &&
+                    (p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal))).ToArray();
             if((paths.Length==0 && !remoteAvailable) || dropped.GetValueOrDefault(date)>0 || buffered.GetValueOrDefault(date)>0 ||
-               File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+".capture-gap")))gap();
+               File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+".capture-gap")) ||
+               includeWebsite && File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"-website.capture-gap")))gap();
             foreach (var path in paths)
             {
                 var info = new FileInfo(path);
@@ -294,9 +299,10 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             }
     }
 
-    private static bool HasDateFiles(string directory, DateOnly date) => Directory.Exists(directory) &&
+    private static bool HasDateFiles(string directory, DateOnly date, bool includeWebsite = true) => Directory.Exists(directory) &&
         Directory.EnumerateFiles(directory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
-            .Any(path => path.EndsWith(".ndjson", StringComparison.Ordinal) || path.EndsWith(".ndjson.gz", StringComparison.Ordinal));
+            .Any(path => (includeWebsite || !ReplayBlobStorage.IsWebsiteQuotePath(path)) &&
+                (path.EndsWith(".ndjson", StringComparison.Ordinal) || path.EndsWith(".ndjson.gz", StringComparison.Ordinal)));
 
     public Task<HistoricalQuoteArchiveDay> ReadMarketAsync(DateOnly tradingDate, string market, CancellationToken cancellationToken)
     {

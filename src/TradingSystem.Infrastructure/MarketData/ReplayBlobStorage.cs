@@ -208,10 +208,11 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     private async Task PublishAsync(CancellationToken token)
     {
         if (container is null) return;
-        foreach (var category in recorder ? new[] { "quotes", "feed", "policies" } : new[] { "policies" })
+        foreach (var category in recorder ? new[] { "quotes", "feed", "policies" } : new[] { "policies", "quotes" })
         {
             var directory = Path.Combine(Root, category);
             if (!Directory.Exists(directory)) continue;
+            var websiteQuoteUploads = 0;
             foreach (var path in Directory.EnumerateFiles(directory, "*", category == "policies" ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly))
             {
                 var file = new FileInfo(path);
@@ -220,6 +221,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                 // Never upload an actively appended gzip member. Atomic manifests
                 // can change during upload; the stable snapshot is replaced next pass.
                 if (category == "quotes" && clock.GetUtcNow().UtcDateTime - file.LastWriteTimeUtc < TimeSpan.FromMinutes(2)) continue;
+                if (category == "quotes" && !recorder) relative = WebsiteQuotePath(relative);
                 var signature = (file.Length, file.LastWriteTimeUtc);
                 if (!uploaded.TryGetValue(relative, out var previous) || previous != signature)
                 {
@@ -234,6 +236,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                     if ((file.Length, file.LastWriteTimeUtc) != signature) continue;
                     uploaded[relative] = signature;
                     LastUploadAtUtc = clock.GetUtcNow();
+                    if (category == "quotes" && !recorder && ++websiteQuoteUploads >= 24) break;
                 }
                 // Only evict verified uploaded quote spool files from older days.
                 // Keep manifests/builds and today's spool; never delete cloud history.
@@ -254,6 +257,13 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         }
     }
 
+    internal static string WebsiteQuotePath(string relative) => relative.EndsWith(".ndjson.gz", StringComparison.Ordinal)
+        ? relative[..^".ndjson.gz".Length] + "-website.ndjson.gz"
+        : relative[..^".capture-gap".Length] + "-website.capture-gap";
+
+    internal static bool IsWebsiteQuotePath(string path) => path.EndsWith("-website.ndjson.gz", StringComparison.Ordinal) ||
+        path.EndsWith("-website.capture-gap", StringComparison.Ordinal);
+
     internal static bool Allowed(string relative)
     {
         if (relative.Contains("..", StringComparison.Ordinal) || relative.Contains('\\') || relative.StartsWith('/')) return false;
@@ -268,7 +278,13 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
 
     public IDisposable Pin(DateOnly tradingDate) => quoteCache.Pin(tradingDate);
 
-    public async Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token)
+    public Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token) =>
+        HydrateCoreAsync(category, tradingDate, streamingOnly: false, token);
+
+    public Task HydrateStreamingQuotesAsync(DateOnly tradingDate, CancellationToken token) =>
+        HydrateCoreAsync("quotes", tradingDate, streamingOnly: true, token);
+
+    private async Task HydrateCoreAsync(string category, DateOnly? tradingDate, bool streamingOnly, CancellationToken token)
     {
         var date = tradingDate;
         if (container is null) return;
@@ -286,6 +302,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             var prefix = category + "/" + date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             await foreach (var item in container.GetBlobsAsync(BlobTraits.Metadata, BlobStates.None, prefix: prefix, cancellationToken: token))
             {
+                if (streamingOnly && IsWebsiteQuotePath(item.Name)) continue;
                 if (!Allowed(item.Name) || !item.Metadata.TryGetValue("sha256", out var hash))
                     throw new InvalidDataException("Invalid replay cloud artifact.");
                 var path = Path.Combine(CacheRoot, item.Name.Replace('/', Path.DirectorySeparatorChar));

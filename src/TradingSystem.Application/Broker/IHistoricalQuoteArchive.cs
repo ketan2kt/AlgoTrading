@@ -5,7 +5,9 @@ namespace TradingSystem.Application.Broker;
 public sealed record HistoricalQuoteObservation(Guid Id, DateTimeOffset ReceivedAtUtc,
     GrowwQuoteRequest Request, GrowwQuote Quote)
 {
-    public string Source { get; init; } = "GrowwQuoteReceipt";
+    public const string GrowwQuoteReceipt = "GrowwQuoteReceipt";
+    public const string GrowwRestFallback = "GrowwRestFallback";
+    public string Source { get; init; } = GrowwQuoteReceipt;
     public DateTimeOffset? DepthSourceAtUtc { get; init; }
 }
 

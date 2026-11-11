@@ -6,6 +6,41 @@ namespace TradingSystem.ContractTests;
 
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
+    [Fact]
+    public async Task MirroredWebsiteReceiptsSupportTimelinesButDoNotChangeStreamingCoverageOrFills()
+    {
+        var cloud = Path.Combine(directory, "remote");
+        var archivePath = Path.Combine(cloud, "quotes");
+        var websitePath = Path.Combine(directory, "website");
+        using var recorder = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, archivePath);
+        using var website = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, websitePath);
+        var sample = Observation() with { Source = "GrowwFeedSample", DepthSourceAtUtc = At };
+        var ordinary = Observation() with { ReceivedAtUtc = At.AddSeconds(1) };
+        var fallback = Observation() with { ReceivedAtUtc = At.AddSeconds(2), Source = HistoricalQuoteObservation.GrowwRestFallback };
+        recorder.TryRecord(sample);
+        website.TryRecord(ordinary);
+        website.TryRecord(fallback);
+        await recorder.FlushBatchAsync(CancellationToken.None);
+        await website.FlushBatchAsync(CancellationToken.None);
+        var originalFile = Assert.Single(Directory.GetFiles(websitePath, "*.ndjson.gz"));
+        var mirror = ReplayBlobStorage.WebsiteQuotePath("quotes/" + Path.GetFileName(originalFile));
+        Assert.True(ReplayBlobStorage.Allowed(mirror));
+        File.Copy(originalFile, Path.Combine(cloud, mirror));
+        await File.WriteAllTextAsync(Path.Combine(archivePath, "2026-11-04-website.capture-gap"), "website receipt gap");
+        using var reader = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance,
+            websitePath, cloud: new CachedArchive(cloud));
+        var symbols = new Dictionary<string, string> { [sample.Request.TradingSymbol] = sample.Request.TradingSymbol };
+        var verified = await reader.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddMinutes(1), CancellationToken.None, streamingOnly: true);
+        Assert.Equal("GrowwFeedSample", Assert.Single(verified.Quotes).Source);
+        Assert.False(verified.HasCaptureGaps);
+        var ordinaryReplay = await reader.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddMinutes(1), CancellationToken.None);
+        Assert.Equal(2, ordinaryReplay.Quotes.Count);
+        Assert.DoesNotContain(ordinaryReplay.Quotes, quote => quote.Source == HistoricalQuoteObservation.GrowwRestFallback);
+        var id = Guid.NewGuid();
+        var (marks, _) = await reader.HeldMarksAsync(Date, [(id, "NSE", sample.Request.TradingSymbol, At, At.AddMinutes(1))], CancellationToken.None);
+        Assert.Equal(3, marks[id].Count);
+        Assert.Contains(marks[id], mark => mark.Source == HistoricalQuoteObservation.GrowwRestFallback && mark.At == fallback.ReceivedAtUtc);
+    }
     [Theory]
     [InlineData("NSE", "NIFTY26110322500CE", "NIFTY")]
     [InlineData("BSE", "SENSEX26NOV75000PE", "SENSEX")]

@@ -44,7 +44,10 @@ public sealed record PaperSessionTimeline(IReadOnlyList<PaperTimelineTrade> Trad
 public sealed record PaperTimelineTrade(Guid Id, DateTimeOffset From, DateTimeOffset To, decimal FinalGross,
     int Sign, bool Verified, IReadOnlyList<PaperTimelineEvent> Events, IReadOnlyList<PaperTimelineMark> Marks);
 public sealed record PaperTimelineEvent(DateTimeOffset At, string Kind, int Units, decimal Price);
-public sealed record PaperTimelineMark(DateTimeOffset At, decimal Price, DateTimeOffset? SourceAt);
+public sealed record PaperTimelineMark(DateTimeOffset At, decimal Price, DateTimeOffset? SourceAt)
+{
+    public string? Source { get; init; }
+}
 
 public sealed record DailyExecutionReview(Guid TradeId, string Market, string Symbol,
     string IntentStatus, string Finding, DateTimeOffset? ObservedAtUtc,
