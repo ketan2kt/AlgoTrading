@@ -195,7 +195,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
 
     public async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly date, string market, string exchange,
         IReadOnlyDictionary<string, string> symbols, DateTimeOffset start, DateTimeOffset end, CancellationToken token,
-        bool streamingOnly = false)
+        bool streamingOnly = false, bool tolerateUnreadableShards = false)
     {
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY") || exchange is not ("NSE" or "BSE"))
             throw new ArgumentException("Unsupported research market.");
@@ -207,19 +207,22 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             if (HasDateFiles(remoteRoot, date, includeWebsite: false))
             {
                 using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
-                return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token, streamingOnly: true);
+                return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token,
+                    streamingOnly: true, tolerateUnreadableShards: tolerateUnreadableShards);
             }
             // Cloud configuration alone must not hide pre-cutover local history.
         }
         if (!Directory.Exists(root)) return new([], true);
         var gaps = false;
+        var unreadable = new HashSet<HistoricalReplayGap>();
         var result = await FileHistoricalReplayQuotePath.BuildAsync(Path.Combine(root, "replay-paths"), ProjectAsync(token), token);
-        return new(result, gaps);
+        return new(result, gaps) { UnreadableIntervals = unreadable.OrderBy(value => value.StartUtc).ToArray() };
 
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
             var receiptsSeen = new HashSet<Guid>();
-            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly, includeWebsite: !streamingOnly)){
+            await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly,
+                includeWebsite: !streamingOnly, unreadableShard: tolerateUnreadableShards ? MarkUnreadable : null)){
                 if (value.Source == HistoricalQuoteObservation.GrowwRestFallback) continue;
                 if (streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
@@ -227,6 +230,19 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 if (value.Source == HistoricalQuoteObservation.GrowwQuoteReceipt && !receiptsSeen.Add(value.Id)) continue;
                 yield return HistoricalQuoteProjection.ToReplay(value, symbol);
             }
+        }
+
+        void MarkUnreadable(string path)
+        {
+            gaps = true;
+            var name = Path.GetFileName(path);
+            if (name.Length >= 16 && TimeOnly.TryParseExact(name.AsSpan(11, 5), "HH-mm",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var minute))
+            {
+                var from = new DateTimeOffset(start.UtcDateTime.Date.Add(minute.ToTimeSpan()), TimeSpan.Zero);
+                unreadable.Add(new(from, from.AddMinutes(1), "Unreadable archive minute"));
+            }
+            else unreadable.Add(new(start, end, "Unreadable archive interval cannot be localized"));
         }
     }
 
@@ -254,7 +270,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     }
 
     private async IAsyncEnumerable<HistoricalQuoteObservation> StreamDay(DateOnly date, Action gap,
-        [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true, bool includeWebsite = true)
+        [EnumeratorCancellation] CancellationToken cancellationToken, bool includeCloud = true, bool includeWebsite = true,
+        Action<string>? unreadableShard = null)
     {
             using var pinned = cloud?.Pin(date);
             var remoteAvailable = false;
@@ -266,7 +283,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 if (remoteAvailable)
                 {
                     using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
-                    await foreach (var value in remote.StreamDay(date, gap, cancellationToken)) yield return value;
+                    await foreach (var value in remote.StreamDay(date, gap, cancellationToken,
+                        includeWebsite: includeWebsite, unreadableShard: unreadableShard)) yield return value;
                 }
             }
             if(!Directory.Exists(root)){if (!remoteAvailable) gap();yield break;}
@@ -284,16 +302,34 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 await using var gzip = path.EndsWith(".gz", StringComparison.Ordinal) ? new GZipStream(file, CompressionMode.Decompress) : null;
                 using var bounded = new HistoricalBoundedReadStream((Stream?)gzip ?? file, 2L * 1024 * 1024 * 1024);
                 using var reader = new StreamReader(bounded, Encoding.UTF8);
-                while (await reader.ReadLineAsync(cancellationToken) is { } line)
+                while (true)
                 {
+                    string? line;
+                    try { line = await reader.ReadLineAsync(cancellationToken); }
+                    catch (InvalidDataException) when (unreadableShard is not null)
+                    {
+                        // Later minute files are independent. The decoded prefix
+                        // of a damaged minute does not certify that minute.
+                        unreadableShard(path);
+                        break;
+                    }
+                    if (line is null)
+                    {
+                        if (gzip is not null && file.Position < info.Length) unreadableShard?.Invoke(path);
+                        break;
+                    }
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     ArchiveLine? record;
                     try { record = JsonSerializer.Deserialize<ArchiveLine>(line); }
-                    catch (JsonException) { gap(); continue; }
+                    catch (JsonException) { gap(); unreadableShard?.Invoke(path); continue; }
                     var value = record?.Observation;
                     if (record is null || record.DroppedCount > 0 || value?.Request is null || value.Quote is null ||
                         value.Id == Guid.Empty || LocalDate(value.ReceivedAtUtc) != date || value.Quote.LastPrice <= 0m)
-                    { gap(); continue; }
+                    {
+                        gap();
+                        if (record is null || record.DroppedCount == 0) unreadableShard?.Invoke(path);
+                        continue;
+                    }
                     yield return value;
                 }
             }

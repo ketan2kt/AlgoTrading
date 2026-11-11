@@ -1,7 +1,7 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, Input, OnInit, OnDestroy, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { ReplayTrial } from './historical-replay.service';
+import type { HistoricalGapAwareReport, ReplayTrial } from './historical-replay.service';
 import { Subscription } from 'rxjs';
 import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, HistoricalPolicyBuild, HistoricalReplayCohortCoverage, HistoricalReplayResearchReport, HistoricalReplayService } from './historical-replay.service';
 @Component({selector:'app-replay-panel', imports:[DatePipe,DecimalPipe,PercentPipe,FormsModule], templateUrl:'./replay-panel.component.html', styleUrl:'./replay-panel.component.scss'})
@@ -19,6 +19,9 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected normalReplayReport: HistoricalNormalReplayReport | null = null;
   protected normalReplayBusy = false;
   protected normalReplayError = '';
+  protected gapAwareBusy = false;
+  protected gapAwareError = '';
+  protected gapAwareReport: HistoricalGapAwareReport | null = null;
   protected normalReplayStopPercent = 10;
   protected normalReplayTrial:ReplayTrial='control';
   protected replayPolicyBuilds:HistoricalPolicyBuild[]=[];
@@ -75,6 +78,15 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     }));
   }
   protected closeHistoricalReplay():void { this.closed.emit(); }
+  protected runGapAware():void {
+    if (!this.replayTo || this.normalReplayBusy || this.gapAwareBusy) return;
+    this.gapAwareBusy=true;this.gapAwareError='';this.gapAwareReport=null;
+    this.subscriptions.add(this.historicalReplayService.gapAware(this.replayTo).subscribe({
+      next:value=>{this.gapAwareReport=value;this.gapAwareBusy=false;this.refreshView();},
+      error:e=>{this.gapAwareError=typeof e?.error==='string'?e.error:'Gap-aware replay could not finish. No result was produced.';
+        this.gapAwareBusy=false;this.refreshView();},
+    }));
+  }
   protected verifyPaperSession():void {
     if(!this.replayTo || this.normalReplayBusy)return;
     this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;

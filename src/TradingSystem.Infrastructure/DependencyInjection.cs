@@ -234,6 +234,7 @@ public static class DependencyInjection
         services.AddScoped<IHistoricalReplayReportReader, EfHistoricalReplayReportReader>();
         services.AddScoped<IHistoricalReplayArchiveReader, EfHistoricalReplayArchiveReader>();
         services.AddScoped<HistoricalNormalReplayComparisonService>();
+        services.AddScoped<HistoricalGapAwareReplayService>();
         services.AddScoped<SessionPolicySettings>();
         services.AddScoped<IRecordedPaperSessionReader, EfRecordedPaperSessionReader>();
         services.AddSingleton<IHistoricalPolicyBuildStore, FileHistoricalPolicyBuildStore>();

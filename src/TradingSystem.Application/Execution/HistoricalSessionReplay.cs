@@ -145,6 +145,7 @@ public sealed record HistoricalReplayResult(IReadOnlyList<HistoricalReplayFill> 
     public int PeakConcurrentPositions { get; init; }
     public int MissingAddOnQuoteCount { get; init; }
     public int UnsupportedPartialCount { get; init; }
+    internal DateTimeOffset? FirstExecutionUncertaintyAtUtc { get; init; }
     public IReadOnlyList<HistoricalReplayFill> CompletedPositions =>
         HistoricalReplayTradeAggregation.CompletedPositions(Trades);
     public int Wins => CompletedPositions.Count(value => value.NetPnl > 0m);

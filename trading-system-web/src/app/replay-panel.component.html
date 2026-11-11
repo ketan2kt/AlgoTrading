@@ -45,8 +45,9 @@
                 }
               </div>
               <div class="replay-actions">
-                <button type="button" class="primary-action" (click)="runNormalReplay()" [disabled]="normalReplayBusy">{{normalReplayBusy?'Comparing…':'Compare strategies'}}</button>
-                <button type="button" (click)="verifyPaperSession()" [disabled]="normalReplayBusy || !replayTo">Verify replay against paper · {{replayTo}}</button>
+                <button type="button" class="primary-action" (click)="runNormalReplay()" [disabled]="normalReplayBusy || gapAwareBusy">{{normalReplayBusy?'Comparing…':'Compare strategies'}}</button>
+                <button type="button" (click)="verifyPaperSession()" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo">Verify replay against paper · {{replayTo}}</button>
+                <button type="button" (click)="runGapAware()" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo">{{gapAwareBusy?'Reading archive…':'Gap-aware replay · '+replayTo}}</button>
               </div>
               <div class="replay-notes"><small>Paper verification uses only the “To” session and its recorded pre-open settings, not the experiment.</small><small>Frozen datasets retain their saved dates, settings and execution assumptions. Comparisons run outside market hours.</small></div>
               @if(normalReplayError){<p class="historical-replay-warning" role="alert">{{normalReplayError}}</p>}
@@ -99,6 +100,46 @@
                 </details>
               }
             </section>
+            @if(gapAwareError){<p class="historical-replay-warning" role="alert">{{gapAwareError}}</p>}
+            @if(gapAwareBusy){<p class="replay-empty" role="status">Checking recorded prices, depth and policy inputs separately for each market.</p>}
+            @if(gapAwareReport;as report){
+              <section class="daily-analysis-section">
+                <div class="section-heading"><div><span class="eyebrow">SESSION RESEARCH</span><h3>Gap-aware replay · {{report.date}}</h3></div><span class="market-badge">Not a full-day P&amp;L verdict</span></div>
+                <p>Uncertain positions are excluded. Windows after a gap start flat and are shown as independent scenarios; their results are never added to verified P&amp;L.</p>
+                @for(market of report.markets;track market.market){
+                  <section class="daily-analysis-section">
+                    <h4>{{market.market==='BANKNIFTY'?'Bank Nifty':market.market}} · {{market.gaps.length}} marked gaps</h4>
+                    <p>{{market.contractsWithFreshBooks}} contracts with fresh depth · {{market.freshBookSamples|number}} observations.
+                      Verified simulated net: {{market.verifiedNetPnl===null?'Not available':'₹'+(market.verifiedNetPnl|number:'1.2-2')}}.</p>
+                    @if(market.contractsWithoutFreshBooks.length){
+                      <details><summary>{{market.contractsWithoutFreshBooks.length}} planned contracts without a fresh two-sided book</summary>
+                        <p>{{market.contractsWithoutFreshBooks.join(', ')}}</p>
+                      </details>
+                    }
+                    @if(market.gaps.length){
+                      <details open><summary>Marked intervals · IST</summary><ul>
+                        @for(gap of market.gaps;track gap.startUtc){<li>{{gap.startUtc|date:'HH:mm:ss.SSS':'+0530'}} – {{gap.endUtc|date:'HH:mm:ss.SSS':'+0530'}} · {{gap.reason}}</li>}
+                      </ul></details>
+                    }
+                    <details><summary>Replay windows and excluded fills</summary>
+                      <div class="daily-analysis-table"><table><thead><tr><th>Window · IST</th><th>Evidence</th><th>Excluded or unresolved</th><th>Verified net</th><th>Separate scenario net</th></tr></thead><tbody>
+                        @for(window of market.windows;track window.startUtc){
+                          <tr><td>{{window.startUtc|date:'HH:mm:ss':'+0530'}} – {{window.endUtc|date:'HH:mm:ss':'+0530'}}</td>
+                            <td>{{!window.simulated?'Coverage only':window.independentFlatRestart?'Independent flat restart':'Session opening state'}}</td>
+                            <td>{{window.simulated?window.unresolvedExecutions:'—'}}</td>
+                            <td>{{window.verifiedNetPnl===null?'—':'₹'+(window.verifiedNetPnl|number:'1.2-2')}}</td>
+                            <td>{{window.independentScenarioNetPnl===null?'—':'₹'+(window.independentScenarioNetPnl|number:'1.2-2')}}</td></tr>
+                          @for(row of window.fills;track $index){
+                            @if(row.exclusionReason){<tr><td>{{row.fill.exitAtUtc|date:'HH:mm:ss':'+0530'}}</td><td colspan="4">{{row.fill.symbol}} · Excluded: {{row.exclusionReason}}</td></tr>}
+                          }
+                        }
+                      </tbody></table></div>
+                    </details>
+                    <details><summary>Evidence limits</summary><ul>@for(note of market.limitations;track $index){<li>{{note}}</li>}</ul></details>
+                  </section>
+                }
+              </section>
+            }
             <details class="desk-advanced"><summary>Advanced tools <span>Archive maintenance &amp; legacy candidate study</span></summary>
             <details><summary>Legacy recorded-candidate study — not a full-strategy replay</summary>
             <form class="historical-replay-form" (ngSubmit)="runHistoricalReplay()">

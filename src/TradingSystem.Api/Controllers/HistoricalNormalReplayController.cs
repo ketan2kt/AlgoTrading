@@ -63,6 +63,26 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
 
     [HistoricalReplayWorkWindow]
     [ValidateAntiForgeryToken]
+    [HttpPost("gap-aware/{date}")]
+    public async Task<ActionResult<HistoricalGapAwareReport>> GapAware(DateOnly date,
+        [FromServices] HistoricalGapAwareReplayService replay, CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (date.Year < 2020 || !HistoricalReplaySessionCalendar.IsCompletedDate(date, clock.GetUtcNow()))
+            return BadRequest("Choose a completed session.");
+        if (!await ComparisonSlot.WaitAsync(0, cancellationToken))
+            return Conflict("A normal-policy replay is already running. Retry when it finishes.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        try { return Ok(await replay.RunAsync(date, timeout.Token)); }
+        catch (InvalidDataException) { return Conflict("The saved replay input exceeded its bounds or failed integrity checks."); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { return StatusCode(StatusCodes.Status408RequestTimeout, "Gap-aware replay exceeded its time budget; no incomplete verdict was returned."); }
+        finally { ComparisonSlot.Release(); }
+    }
+
+    [HistoricalReplayWorkWindow]
+    [ValidateAntiForgeryToken]
     [HttpPost("paper-session/{date}")]
     public async Task<ActionResult<HistoricalNormalReplayComparisonReport>> PaperSession(DateOnly date,CancellationToken cancellationToken)
     {

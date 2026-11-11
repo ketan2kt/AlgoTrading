@@ -14,7 +14,10 @@ public sealed record HistoricalQuoteObservation(Guid Id, DateTimeOffset Received
 public sealed record HistoricalQuoteArchiveDay(IReadOnlyList<HistoricalQuoteObservation> Observations,
     bool HasCaptureGaps);
 
-public sealed record HistoricalReplayQuoteArchiveDay(IReadOnlyList<HistoricalReplayQuote> Quotes, bool HasCaptureGaps);
+public sealed record HistoricalReplayQuoteArchiveDay(IReadOnlyList<HistoricalReplayQuote> Quotes, bool HasCaptureGaps)
+{
+    public IReadOnlyList<HistoricalReplayGap> UnreadableIntervals { get; init; } = [];
+}
 public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserved,
     DateTimeOffset? LastPersistedAtUtc, string? Failure)
 {
@@ -55,7 +58,7 @@ public interface IHistoricalQuoteArchive
     }
     async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly tradingDate, string market, string exchange,
         IReadOnlyDictionary<string, string> symbols, DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken token,
-        bool streamingOnly = false)
+        bool streamingOnly = false, bool tolerateUnreadableShards = false)
     {
         var day = await ReadMarketAsync(tradingDate, market, token);
         return new(day.Observations.Where(value => (!streamingOnly || value.Source == "GrowwFeedSample") && value.Request.Exchange == exchange &&

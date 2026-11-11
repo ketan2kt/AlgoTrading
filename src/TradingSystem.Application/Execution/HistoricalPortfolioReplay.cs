@@ -190,6 +190,9 @@ public static class HistoricalPortfolioReplay
         var unsupportedPartials = new HashSet<string>(StringComparer.Ordinal);
         var missingExit = 0;
         var stale = 0;
+        DateTimeOffset? firstUncertainty = null;
+        void FlagUncertainty(DateTimeOffset at) =>
+            firstUncertainty = firstUncertainty is not { } previous || at < previous ? at : previous;
         var barIndex = 0;
         var quoteIndex = 0;
         var chainIndex = 0;
@@ -295,6 +298,7 @@ public static class HistoricalPortfolioReplay
                 {
                     position.Unpriced = true;
                     stale++;
+                    FlagUncertainty(position.EntryAtUtc);
                 }
                 if (update.NewStopPrice < position.StopPrice && !update.RecomputedFromInitialRisk)
                     throw new InvalidOperationException(
@@ -339,11 +343,12 @@ public static class HistoricalPortfolioReplay
                     exiting.ExitTriggeredAtUtc is not null) continue;
                 if (partial.NonExecutablePaperQuantity)
                 {
-                    if (!openPositions.ContainsKey(partial.Symbol) ||
+                    if (!openPositions.TryGetValue(partial.Symbol, out var unsupportedPosition) ||
                         partial.DecidedAtUtc != atUtc)
                         throw new InvalidOperationException(
                             "A replay policy reported an invalid paper-only partial.");
                     unsupportedPartials.Add(partial.Symbol);
+                    FlagUncertainty(unsupportedPosition.EntryAtUtc);
                     continue;
                 }
                 // A new underlying observation or bar may re-evaluate the same
@@ -483,6 +488,7 @@ public static class HistoricalPortfolioReplay
                 pendingEntries.Remove(pending.Symbol);
                 missingEntry++;
                 stale++;
+                FlagUncertainty(pending.StrategyDecisionAtUtc ?? pending.DecidedAtUtc);
             }
             foreach (var pending in pendingAddOns.Values.ToArray())
             {
@@ -490,6 +496,7 @@ public static class HistoricalPortfolioReplay
                 pendingAddOns.Remove(pending.Symbol);
                 missingAddOn++;
                 stale++;
+                FlagUncertainty(openPositions.TryGetValue(pending.Symbol, out var unresolved) ? unresolved.EntryAtUtc : pending.DecidedAtUtc);
             }
             if (barIndex != firstBarIndex && time >= sessionStartUtc &&
                 time < sessionEndUtc)
@@ -567,6 +574,7 @@ public static class HistoricalPortfolioReplay
                     {
                         open.Unpriced = true;
                         stale++;
+                        FlagUncertainty(open.EntryAtUtc);
                     }
                     else if (!open.Unpriced)
                     {
@@ -619,7 +627,10 @@ public static class HistoricalPortfolioReplay
                                         value.EntryPrice * value.RemainingQuantity));
                             }
                             else if (open.ExitTriggeredAtUtc is null)
+                            {
                                 missingAddOn++;
+                                FlagUncertainty(open.EntryAtUtc);
+                            }
                         }
                         if (pendingPartials.TryGetValue(quote.Symbol,
                                 out var partial) &&
@@ -640,6 +651,7 @@ public static class HistoricalPortfolioReplay
                             {
                                 open.Unpriced = true;
                                 stale++;
+                                FlagUncertainty(open.EntryAtUtc);
                             }
                         }
                         if (!open.Unpriced && open.ExitTriggeredAtUtc is not null)
@@ -752,6 +764,7 @@ public static class HistoricalPortfolioReplay
                         pendingEntries.Remove(symbol);
                         missingEntry++;
                         stale++;
+                        FlagUncertainty(pending.StrategyDecisionAtUtc ?? pending.DecidedAtUtc);
                         continue;
                     }
                     var admitted = policy.AssessDeferredEntry(snapshot, pending,
@@ -821,6 +834,9 @@ public static class HistoricalPortfolioReplay
         missingEntry += pendingEntries.Count;
         missingAddOn += pendingAddOns.Count;
         missingExit += openPositions.Count;
+        foreach (var position in openPositions.Values) FlagUncertainty(position.EntryAtUtc);
+        foreach (var entry in pendingEntries.Values) FlagUncertainty(entry.StrategyDecisionAtUtc ?? entry.DecidedAtUtc);
+        foreach (var addOn in pendingAddOns.Values) FlagUncertainty(addOn.DecidedAtUtc);
         var equity = closed.Sum(value => value.NetPnl);
         return new(closed, candidateCount, missingEntry, missingExit, stale,
             equity, markToMarketDrawdown,
@@ -839,7 +855,8 @@ public static class HistoricalPortfolioReplay
             PeakEntryCapitalExposure = peakEntryCapitalExposure,
             PeakConcurrentPositions = peakConcurrentPositions,
             MissingAddOnQuoteCount = missingAddOn,
-            UnsupportedPartialCount = unsupportedPartials.Count
+            UnsupportedPartialCount = unsupportedPartials.Count,
+            FirstExecutionUncertaintyAtUtc = firstUncertainty
         };
     }
 

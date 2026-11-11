@@ -1,11 +1,30 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using TradingSystem.Application.Broker;
+using TradingSystem.Application.Execution;
 using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.ContractTests;
 
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
+    [Fact]
+    public async Task GapAwareReadMarksCorruptMinuteAndKeepsLaterQuotesWithoutRelaxingStrictRead()
+    {
+        using var archive = Archive();
+        var sample = Observation() with { ReceivedAtUtc = At.AddMinutes(1), Source = "GrowwFeedSample" };
+        archive.TryRecord(sample);
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var corrupt = Path.Combine(directory, "2026-11-04-04-00.ndjson.gz");
+        await File.WriteAllTextAsync(corrupt, "invalid gzip member");
+        var symbols = new Dictionary<string, string> { [sample.Request.TradingSymbol] = sample.Request.TradingSymbol };
+        await Assert.ThrowsAsync<InvalidDataException>(() => archive.ReadReplayAsync(Date, "NIFTY", "NSE", symbols,
+            At, At.AddMinutes(2), CancellationToken.None, streamingOnly: true));
+        var read = await archive.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddMinutes(2),
+            CancellationToken.None, streamingOnly: true, tolerateUnreadableShards: true);
+        Assert.True(read.HasCaptureGaps);
+        Assert.Equal(sample.ReceivedAtUtc, Assert.Single(read.Quotes).AvailableAtUtc);
+        Assert.Equal(new HistoricalReplayGap(At, At.AddMinutes(1), "Unreadable archive minute"), Assert.Single(read.UnreadableIntervals));
+    }
     [Fact]
     public async Task MirroredWebsiteReceiptsSupportTimelinesButDoNotChangeStreamingCoverageOrFills()
     {

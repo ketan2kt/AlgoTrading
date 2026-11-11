@@ -1,5 +1,10 @@
 # Current handover — 11 November 2026
 
+## Gap-aware replay — website release
+
+- Adds a single-date, after-hours gap-aware mode to Historical Replay. Uses archived Groww streaming books only, marks gaps separately for each index, excludes uncertain fills, and shows post-gap flat-start results separately from verified simulated P&L. Missing dated policy inputs produce a coverage-only report. Strict replay remains unchanged.
+- Release excludes recorder reconnect, recorder writer/atomic-shard, warning and independent-feed changes. No live trading, strategy, or 70% Bank Nifty trail changes. Deploy the website only from the checked main package; do not restart the recorder.
+
 ## Groww-only replay evidence — website release
 
 - Normal trading quote receipts retain their original receipt times. The website mirrors settled quote shards under `-website` names in existing private storage, separate from recorder shards. Position timelines label receipt sources. Strict streaming replay skips website shards and their gap markers.

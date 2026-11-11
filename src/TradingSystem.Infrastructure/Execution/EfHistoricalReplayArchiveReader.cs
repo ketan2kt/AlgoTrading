@@ -16,8 +16,14 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
 
-    public async Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly tradingDate, string market,
-        CancellationToken cancellationToken)
+    public Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly tradingDate, string market,
+        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, false, cancellationToken);
+
+    public Task<HistoricalReplayArchiveSlice> ReadGapAwareAsync(DateOnly tradingDate, string market,
+        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, true, cancellationToken);
+
+    private async Task<HistoricalReplayArchiveSlice> ReadCoreAsync(DateOnly tradingDate, string market,
+        bool gapAware, CancellationToken cancellationToken)
     {
         var (exchange, underlying) = market switch
         {
@@ -227,9 +233,12 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             });
         var replayQuoteSymbols = names.Values.Append(index.TradingSymbol).ToDictionary(value => value, value => value, StringComparer.Ordinal);
         foreach (var pair in mappedProviderSymbols) replayQuoteSymbols[pair.Key] = pair.Value;
+        if (gapAware && feedManifest is not null)
+            foreach (var instrument in feedManifest.Instruments.Where(value => value.Market == underlying))
+                replayQuoteSymbols.TryAdd(instrument.TradingSymbol, instrument.TradingSymbol);
         var quoteDay = quoteArchive is null ? new HistoricalReplayQuoteArchiveDay([], true) :
             await quoteArchive.ReadReplayAsync(tradingDate, underlying, exchange, replayQuoteSymbols, start, end, cancellationToken,
-                streamingOnly: feedManifest is not null);
+                streamingOnly: gapAware || feedManifest is not null, tolerateUnreadableShards: gapAware);
         var observedQuotes = quoteDay.Quotes;
         var proxyQuotes = HistoricalArchivePathCanonicalizer.Quotes(
             candles.Where(value => names.ContainsKey(value.InstrumentId))
@@ -259,7 +268,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         var streamingUniverse = feedManifest is not null && feedWindowComplete && !quoteDay.HasCaptureGaps &&
             datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars,
                 feedManifest.PolicyReceipt?.Settings.NiftySelection);
-        if (streamingUniverse)
+        if (gapAware || streamingUniverse)
         {
             quotes = observedQuotes;
             // Once an observed option path exists, a minute's option low/high
@@ -348,6 +357,15 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         {
             UnderlyingInstrumentId = index.Id,
             SessionPolicyFingerprint = feedManifest?.PolicyReceipt?.Fingerprint,
+            CapturedSessionPolicy = gapAware ? feedManifest?.PolicyReceipt : null,
+            CaptureSampleSeconds = feedManifest?.SampleSeconds ?? 2,
+            UnreadableQuoteIntervals = gapAware ? quoteDay.UnreadableIntervals : [],
+            ArchiveReportedCaptureGaps = gapAware && (quoteDay.HasCaptureGaps || feedManifest?.HasGaps == true),
+            GapAwarePolicyInputsReady = gapAware && datedMaster is not null && controls.InitialStateVerified &&
+                previousClose is > 0m && (underlying == "BANKNIFTY" || frontFutureSymbol is not null) &&
+                feedManifest is { ContractPreflight.Ready: true } &&
+                feedManifest.PolicyReceipt?.ValidFor(tradingDate) == true &&
+                (underlying != "SENSEX" || feedManifest.SensexPriorThesisStateCaptured),
             RecordedContractUniverse = feedManifest is null ? null : new(
                 feedManifest.ContractSelectionVersion ?? "legacy-unverified", feedManifest.Instruments),
             RecordedContractCoverageIssues = session.UnsupportedContractCoverage,

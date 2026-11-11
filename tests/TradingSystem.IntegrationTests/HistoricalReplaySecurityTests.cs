@@ -53,6 +53,9 @@ public sealed class HistoricalReplaySecurityTests
             .Cast<AuthorizeAttribute>()).Roles);
         Assert.NotEmpty(typeof(HistoricalNormalReplayController).GetMethod(nameof(HistoricalNormalReplayController.Compare))!
             .GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
+        var gapAware = typeof(HistoricalNormalReplayController).GetMethod(nameof(HistoricalNormalReplayController.GapAware))!;
+        Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
+        Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));
         Assert.NotEmpty(typeof(HistoricalReplayController).GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));
     }
 

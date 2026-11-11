@@ -16,10 +16,17 @@ public sealed record HistoricalReplayArchiveSlice(HistoricalReplaySessionData Se
     public string? SessionPolicyFingerprint { get; init; }
     public ReplayRecordedContractUniverse? RecordedContractUniverse { get; init; }
     public IReadOnlyList<string> RecordedContractCoverageIssues { get; init; } = [];
+    public SessionPolicyReceipt? CapturedSessionPolicy { get; init; }
+    public IReadOnlyList<HistoricalReplayGap> UnreadableQuoteIntervals { get; init; } = [];
+    public bool ArchiveReportedCaptureGaps { get; init; }
+    public bool GapAwarePolicyInputsReady { get; init; }
+    public int CaptureSampleSeconds { get; init; } = 2;
 }
 
 public interface IHistoricalReplayArchiveReader
 {
     Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly tradingDate, string market,
         CancellationToken cancellationToken);
+    Task<HistoricalReplayArchiveSlice> ReadGapAwareAsync(DateOnly tradingDate, string market,
+        CancellationToken cancellationToken) => ReadAsync(tradingDate, market, cancellationToken);
 }

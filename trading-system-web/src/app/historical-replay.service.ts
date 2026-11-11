@@ -56,6 +56,18 @@ export interface HistoricalReplayCohortCoverage {
   from:string; to:string; includedDates:string[];
   excludedDates:{date:string;reasons:string[]}[];
 }
+export interface HistoricalGapAwareReport {
+  date:string;
+  markets:{
+    market:string; contractsWithFreshBooks:number; contractsWithoutFreshBooks:string[];
+    freshBookSamples:number; archiveReportedCaptureGaps:boolean;
+    verifiedNetPnl:number|null; limitations:string[];
+    gaps:{startUtc:string;endUtc:string;reason:string}[];
+    windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;simulated:boolean;
+      candidates:number;unresolvedExecutions:number;verifiedNetPnl:number|null;independentScenarioNetPnl:number|null;
+      fills:{fill:HistoricalReplayFill;exclusionReason:string|null}[]}[];
+  }[];
+}
 export interface HistoricalNormalPolicyConfiguration {
   niftyAdmission:{stopLossPercent:number;[key:string]:unknown};
   sensexEntry:{stopPercent:number;[key:string]:unknown};
@@ -122,6 +134,11 @@ interface NormalReplaySavedConfiguration {
 @Injectable({providedIn:'root'})
 export class HistoricalReplayService {
   private readonly http=inject(HttpClient);
+  gapAware(date:string) {
+    return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
+      this.http.post<HistoricalGapAwareReport>('/api/research/historical-replay/normal-policy/gap-aware/'+encodeURIComponent(date),
+        {},{headers:{'X-CSRF-TOKEN':csrf.token}})));
+  }
   comparePaperSession(date:string) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
       this.http.post<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/paper-session/'+encodeURIComponent(date),
