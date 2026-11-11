@@ -6,6 +6,37 @@ namespace TradingSystem.UnitTests;
 public sealed class HistoricalBankNiftySignalPolicyTests
 {
     [Fact]
+    public void FailedSetupCooldownUsesSameContractAndAfterCostLossUntilExactBoundary()
+    {
+        var date = new DateOnly(2026, 11, 11);
+        var contract = Contract("BANKNIFTY26NOV60700PE", InstrumentType.PutOption, date.AddDays(15), 60700m);
+        var policy = new HistoricalBankNiftySignalPolicy(Guid.Empty, date, 60,
+            new TimeOnly(9, 15), new TimeOnly(15, 0), 2, [contract]);
+        var closedAt = new DateTimeOffset(2026, 11, 11, 13, 44, 10, TimeSpan.FromHours(5.5));
+        var loss = new HistoricalReplayFill(contract.TradingSymbol, BankNiftyFailedSetupCooldownPolicy.Strategy,
+            closedAt.AddMinutes(-11), closedAt.AddMinutes(-11), closedAt, 100m, 99m, 60, -60m, 40m, -100m,
+            BankNiftyFailedSetupCooldownPolicy.FailedExit);
+
+        HistoricalReplayCandidate? Admit(DateTimeOffset at, HistoricalReplayFill earlier)
+        {
+            var pending = new HistoricalReplayCandidate(contract.TradingSymbol, at.AddSeconds(-2),
+                BankNiftyFailedSetupCooldownPolicy.Strategy, .75m, 60) { RequiresDeferredQuoteAdmission = true };
+            var frame = new HistoricalReplayPortfolioFrame(new HistoricalReplayFrame(at, [],
+                new Dictionary<string, HistoricalReplayQuote>()), null, [earlier]);
+            return policy.AssessDeferredEntry(frame, pending, new HistoricalReplayQuote(contract.TradingSymbol, at, 100m)
+                { BidPrice = 99.50m, OfferPrice = 100m });
+        }
+        Assert.Null(Admit(closedAt, loss));
+        Assert.Null(Admit(closedAt.AddMinutes(20).AddTicks(-1), loss));
+        Assert.NotNull(Admit(closedAt.AddMinutes(20), loss));
+        Assert.NotNull(Admit(closedAt.AddMinutes(1), loss with { NetPnl = 0m }));
+        Assert.NotNull(Admit(closedAt.AddMinutes(1), loss with { ExitReason = "StopLossHit" }));
+        Assert.NotNull(Admit(closedAt.AddMinutes(1), loss with { Symbol = "BANKNIFTY26NOV60800PE" }));
+        Assert.NotNull(Admit(closedAt.AddMinutes(1), loss with { Strategy = "Hero Zero|Pair" }));
+        Assert.NotNull(Admit(closedAt.AddSeconds(-1), loss)); // No future closure leakage.
+    }
+
+    [Fact]
     public void DeferredBankOptionAdmissionUsesLaterTwoSidedQuoteAndFrozenProtection()
     {
         var date = new DateOnly(2026, 10, 29);

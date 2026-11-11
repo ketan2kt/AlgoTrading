@@ -13,6 +13,8 @@ public sealed record HistoricalReplayQuote(string Symbol, DateTimeOffset Availab
     // they must never manufacture a bid/offer from a candle close.
     public decimal? BidPrice { get; init; }
     public decimal? OfferPrice { get; init; }
+    public long? BidQuantity { get; init; }
+    public long? OfferQuantity { get; init; }
     public long? Volume { get; init; }
     public decimal? OpenInterest { get; init; }
     public DateTimeOffset? SourceAtUtc { get; init; }

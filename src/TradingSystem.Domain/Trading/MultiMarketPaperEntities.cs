@@ -12,7 +12,7 @@ public sealed class MarketPaperPosition : MutableEntity
         Market = market; UnderlyingInstrumentId = underlyingInstrumentId;
         ExecutionInstrumentId = executionInstrumentId; Strategy = strategy; Direction = direction;
         Quantity = quantity; RemainingQuantity = quantity; EntryPrice = entryPrice; CurrentPrice = entryPrice;
-        StopLoss = stopLoss; Target = target; OpenedAtUtc = openedAtUtc.ToUniversalTime();
+        InitialStopLoss = stopLoss; StopLoss = stopLoss; Target = target; OpenedAtUtc = openedAtUtc.ToUniversalTime();
         MaximumFavourablePnl = 0m;
         MaximumFavourableAtUtc = OpenedAtUtc;
         MaximumAdversePnl = 0m;
@@ -33,6 +33,9 @@ public sealed class MarketPaperPosition : MutableEntity
     public decimal? PartialExitPrice { get; private set; }
     public decimal EntryPrice { get; private init; }
     public decimal CurrentPrice { get; private set; }
+    // Null only for older rows. The mutable stop cannot recover entry risk.
+    public decimal? InitialStopLoss { get; private init; }
+    public decimal? BankNiftyTrailFloorNet { get; private set; }
     public decimal StopLoss { get; private set; }
     public decimal Target { get; private init; }
     public decimal RealisedPnl { get; private set; }
@@ -48,6 +51,12 @@ public sealed class MarketPaperPosition : MutableEntity
     public DateTimeOffset? ExcursionObservedFromUtc { get; private set; }
     // 0: legacy mixed gross/net marks. 1: consistently gross, including realised partials.
     public int ExcursionBasisVersion { get; private set; }
+
+    public void RatchetBankNiftyTrailFloor(decimal floor)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(floor);
+        BankNiftyTrailFloorNet = Math.Max(BankNiftyTrailFloorNet ?? 0m, floor);
+    }
 
     public void Mark(decimal price, decimal trailingStop, DateTimeOffset observedAtUtc)
     {

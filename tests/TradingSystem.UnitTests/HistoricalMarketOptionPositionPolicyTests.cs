@@ -10,6 +10,52 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
     private static readonly NiftyOptionContractCandidate Contract = new(Guid.Empty,
         Symbol, InstrumentType.CallOption, new DateOnly(2026, 11, 24), 55000m, 30, .05m);
 
+    [Fact]
+    public void RecordedBankTrailUsesLaterBidsAndLeavesExistingStopAuthoritative()
+    {
+        var policy = Policy();
+        var position = Position();
+        HistoricalReplayPortfolioFrame At(int seconds, decimal bid, decimal spot, decimal stop = 90m)
+        {
+            var at = position.EntryAtUtc.AddSeconds(seconds);
+            var open = position with { StopPrice = stop };
+            return new(new(at, [], new Dictionary<string, HistoricalReplayQuote>
+            {
+                [Symbol] = new(Symbol, at, bid) { BidPrice = bid, OfferPrice = bid + .05m,
+                    BidQuantity = 150, OfferQuantity = 150, SourceAtUtc = at, DepthSourceAtUtc = at },
+                ["BANKNIFTY"] = new("BANKNIFTY", at, spot) { SourceAtUtc = at }
+            }), open, []) { OpenPositions = [open] };
+        }
+        Assert.Empty(policy.EvaluateExits(At(0, 100m, 55000m)));
+        Assert.Empty(policy.EvaluateExits(At(2, 103m, 55010m)));
+        Assert.Empty(policy.EvaluateExits(At(4, 104m, 55010m)));
+        Assert.Empty(policy.EvaluateExits(At(6, 99m, 54990m)));
+        Assert.Equal(BankNiftyConfirmedTrail.ExitReason, Assert.Single(policy.EvaluateExits(At(10, 99m, 54980m))).Reason);
+        Assert.Equal("StopLossHit", Assert.Single(policy.EvaluateExits(At(12, 89m, 54970m))).Reason);
+    }
+
+    [Fact]
+    public void AsymmetricTargetsDoNotChangeTrailingOrPartialMilestones()
+    {
+        var policy = Policy(partial: true);
+        var now = Start.AddMinutes(3);
+        HistoricalReplayPortfolioFrame AtTarget(decimal target)
+        {
+            var position = Position() with { InitialTargetPrice = target, TargetPrice = target, StopPrice = 94m };
+            return new(new(now, [], new Dictionary<string, HistoricalReplayQuote>
+                { [Symbol] = Quote(3, 107.50m, 107.45m) }), position, [])
+                { OpenPositions = [position] };
+        }
+
+        var close = AtTarget(115m);
+        var distant = AtTarget(150m);
+        Assert.Equal(Assert.Single(policy.EvaluateStopUpdates(close)), Assert.Single(policy.EvaluateStopUpdates(distant)));
+        Assert.Equal(60, Assert.Single(policy.EvaluatePartialExits(close)).Quantity);
+        Assert.Equal(60, Assert.Single(policy.EvaluatePartialExits(distant)).Quantity);
+        Assert.Empty(policy.EvaluateExits(close));
+        Assert.Empty(policy.EvaluateExits(distant));
+    }
+
     [Theory]
     [InlineData("sensex", "SENSEX", "Index momentum breakout")]
     [InlineData("sensex", "SENSEX", "Sensex controlled early pullback")]
@@ -62,7 +108,8 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
             new("BANKNIFTY", Start.AddMinutes(4).AddSeconds(-1), 55120m),
             new("BANKNIFTY", Start.AddMinutes(5).AddSeconds(-1), 55125m),
             new("BANKNIFTY", Start.AddMinutes(6).AddSeconds(-1), 55130m),
-            Quote(2, 100m, 99.5m), Quote(3, 115m, 114.5m),
+            // At 0.8R the new partial is eligible, but the runner target is not hit.
+            Quote(2, 100m, 99.5m), Quote(3, 108m, 107.5m),
             Quote(4, 116m, 115.5m), Quote(5, 107m, 106.5m),
             Quote(6, 106m, 105.5m)
         ], policy, new(.10m, .20m, 0m, 0m, 30, 0), Start, Start.AddMinutes(8));

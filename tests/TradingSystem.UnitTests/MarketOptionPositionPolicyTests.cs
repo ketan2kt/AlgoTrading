@@ -5,6 +5,30 @@ namespace TradingSystem.UnitTests;
 
 public sealed class MarketOptionPositionPolicyTests
 {
+    [Fact]
+    public void EarlierPartialAppliesOnlyToBankNiftyDirectionalBreakoutAndPreservesRunnerControls()
+    {
+        const string strategy = BankNiftyFailedSetupCooldownPolicy.Strategy;
+        var baseline = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
+        var bank = MarketOptionPositionPolicy.ExitPlan("bank-nifty", strategy);
+        Assert.Equal(baseline with { PartialProfitR = .75m, PartialExitFraction = .40m }, bank);
+        Assert.Equal(baseline, MarketOptionPositionPolicy.ExitPlan("sensex", strategy));
+        Assert.Equal(baseline, MarketOptionPositionPolicy.ExitPlan("nifty", strategy));
+        Assert.Equal(baseline, MarketOptionPositionPolicy.ExitPlan("bank-nifty", "Another directional strategy"));
+
+        MarketOptionPositionDecision Decide(decimal price, int quantity = 150, bool alreadyPartial = false,
+            bool forceExit = false) => MarketOptionPositionPolicy.Decide(Direction.Buy, price, 100m, 90m,
+                110m, 10m, quantity, 30, bank, false, false, false, false, forceExit, true, alreadyPartial);
+        Assert.Equal(0, Decide(107.49m).PartialQuantity);
+        var partial = Decide(107.50m);
+        Assert.Equal(60, partial.PartialQuantity);
+        Assert.Null(partial.ExitReason);
+        Assert.Equal(0, Decide(107.50m, quantity: 30).PartialQuantity);
+        Assert.Equal(0, Decide(107.50m, quantity: 90, alreadyPartial: true).PartialQuantity);
+        Assert.Equal("TimeExit", Decide(107.50m, forceExit: true).ExitReason);
+        Assert.Equal(0, Decide(107.50m, forceExit: true).PartialQuantity);
+    }
+
     [Theory]
     [InlineData("BSE")]
     [InlineData("NSE")]

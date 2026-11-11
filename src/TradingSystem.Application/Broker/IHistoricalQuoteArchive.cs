@@ -32,6 +32,7 @@ public static class HistoricalQuoteProjection
         Volume = value.Quote.Volume is >= 0m and <= long.MaxValue ? (long)value.Quote.Volume.Value : null,
         OpenInterest = value.Quote.OpenInterest,
         SourceAtUtc = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds),
+        BidQuantity = value.Quote.BidQuantity, OfferQuantity = value.Quote.OfferQuantity,
         DepthSourceAtUtc = value.DepthSourceAtUtc
     };
 }

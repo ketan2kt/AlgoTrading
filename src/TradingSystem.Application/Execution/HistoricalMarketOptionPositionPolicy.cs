@@ -21,7 +21,11 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     IReadOnlyList<NiftyOptionContractCandidate> contracts) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v7/" + DifferentiatedRunnerPolicy.Version;
+    // Normal Bank Nifty holds at most one position; reset transient state at each new fill.
+    private (string Symbol, DateTimeOffset EntryAt)? bankPosition;
+    private BankNiftyTrailSpot? bankEntrySpot;
+    private BankNiftyTrailState bankTrail = new();
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v10/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -68,12 +72,50 @@ public sealed class HistoricalMarketOptionPositionPolicy(
                 settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds));
     }
 
-    public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame) =>
-        Positions(frame).Where(value => TryMark(frame, value, out _))
-            .Select(value => (Position: value, Decision: Decision(frame, value)))
-            .Where(value => value.Decision.ExitReason is not null)
-            .Select(value => new HistoricalReplayExitRequest(value.Position.Symbol,
-                frame.Market.AvailableAtUtc, value.Decision.ExitReason!)).ToArray();
+    public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame)
+    {
+        var requests = new List<HistoricalReplayExitRequest>();
+        foreach (var position in Positions(frame))
+        {
+            if (!TryMark(frame, position, out _)) continue;
+            var reason = Decision(frame, position).ExitReason;
+            if (reason is null && BankNiftyConfirmedTrail.Applies(market, position.Strategy) &&
+                EvaluateBankTrail(frame, position))
+                reason = BankNiftyConfirmedTrail.ExitReason;
+            if (reason is not null) requests.Add(new(position.Symbol, frame.Market.AvailableAtUtc, reason));
+        }
+        return requests;
+    }
+
+    private bool EvaluateBankTrail(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
+    {
+        var at = frame.Market.AvailableAtUtc;
+        var key = (position.Symbol, position.EntryAtUtc);
+        var spot = frame.Market.LatestQuotes.TryGetValue(underlyingSymbol, out var spotQuote) &&
+            spotQuote.SourceAtUtc is { } spotSource
+            ? new BankNiftyTrailSpot(spotQuote.LastPrice, spotQuote.AvailableAtUtc, spotSource) : null;
+        if (bankPosition != key)
+        {
+            bankPosition = key;
+            bankTrail = new();
+            bankEntrySpot = spot is not null && spot.ReceivedAt <= position.EntryAtUtc ? spot : null;
+        }
+        var quote = frame.Market.LatestQuotes[position.Symbol];
+        if (quote.AvailableAtUtc != at) return false;
+        var source = quote.DepthSourceAtUtc ?? (quote.Source == "GrowwQuoteReceipt" ? quote.SourceAtUtc : null);
+        var book = source is { } stamp && quote.SourceAtUtc is { } priceStamp && priceStamp <= at &&
+            at - priceStamp <= TimeSpan.FromSeconds(30) && quote.OfferQuantity > 0 &&
+            quote.BidPrice is { } bid && quote.OfferPrice is { } ask
+            ? new BankNiftyTrailBook(bid, ask, quote.BidQuantity ?? 0, quote.AvailableAtUtc, stamp) : null;
+        var booked = position.Quantity == position.OriginalQuantity ? 0m : frame.CompletedFills
+            .Where(value => value.IsPartialExit && value.Symbol == position.Symbol && value.EntryAtUtc == position.EntryAtUtc)
+            .Sum(value => value.NetPnl);
+        var decision = BankNiftyConfirmedTrail.Evaluate(bankTrail, position.EntryAtUtc, at,
+            position.UnderlyingDirection!.Value, position.EntryPrice, Risk(position), position.LotSize!.Value,
+            position.Quantity, booked, book, bankEntrySpot, spot);
+        bankTrail = decision.State;
+        return decision.Exit;
+    }
 
     public IReadOnlyList<HistoricalReplayPartialExit> EvaluatePartialExits(HistoricalReplayPortfolioFrame frame) =>
         Positions(frame).Where(value => TryMark(frame, value, out _))
@@ -140,6 +182,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private IEnumerable<HistoricalReplayOpenPosition> Positions(HistoricalReplayPortfolioFrame frame) =>
         frame.OpenPositions.Where(value => value.Symbol.StartsWith(underlyingSymbol, StringComparison.Ordinal) &&
             value.UnderlyingDirection is not null && value.Quantity > 0 && value.LotSize is > 0 &&
+            value.InitialStopPrice > 0m && value.InitialStopPrice < value.EntryPrice &&
             value.InitialTargetPrice > value.EntryPrice &&
             !value.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) &&
             !value.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
@@ -181,9 +224,9 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     }
 
     private static decimal Risk(HistoricalReplayOpenPosition position) =>
-        Math.Abs(position.InitialTargetPrice - position.EntryPrice);
+        MarketOptionPositionPolicy.InitialRisk(position.EntryPrice, position.InitialStopPrice);
     private static decimal Favourable(HistoricalReplayOpenPosition position, decimal price) =>
         Math.Max(position.EntryPrice, Math.Max(position.HighestDecisionPrice, price));
-    private static ProfessionalExitPlan Plan(HistoricalReplayOpenPosition position) =>
-        ProfessionalExitPolicy.For(MarketOptionPositionPolicy.Regime(position.Strategy));
+    private ProfessionalExitPlan Plan(HistoricalReplayOpenPosition position) =>
+        MarketOptionPositionPolicy.ExitPlan(market, position.Strategy);
 }

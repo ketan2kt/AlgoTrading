@@ -229,6 +229,8 @@ public sealed class TradingDbContext(
             entity.Property(value => value.EntryPrice).HasPrecision(18, 4);
             entity.Property(value => value.CurrentPrice).HasPrecision(18, 4);
             entity.Property(value => value.StopLoss).HasPrecision(18, 4);
+            entity.Property(value => value.InitialStopLoss).HasPrecision(18, 4);
+            entity.Property(value => value.BankNiftyTrailFloorNet).HasPrecision(18, 4);
             entity.Property(value => value.Target).HasPrecision(18, 4);
             entity.Property(value => value.RealisedPnl).HasPrecision(18, 4);
             entity.Property(value => value.PartialExitPrice).HasPrecision(18, 4);

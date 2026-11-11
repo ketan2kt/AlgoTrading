@@ -868,6 +868,10 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("BankNiftyTrailFloorNet")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
                     b.Property<DateTimeOffset?>("ClosedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -906,6 +910,10 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("ExecutionInstrumentId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("InitialStopLoss")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
 
                     b.Property<string>("Market")
                         .IsRequired()

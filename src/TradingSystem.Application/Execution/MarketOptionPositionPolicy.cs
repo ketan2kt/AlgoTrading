@@ -24,6 +24,21 @@ public static class MarketOptionPositionPolicy
               strategy.Contains("continuation", StringComparison.OrdinalIgnoreCase)
                 ? ProfessionalTradeRegime.Directional : ProfessionalTradeRegime.Transition;
 
+    public static ProfessionalExitPlan ExitPlan(string market, string strategy)
+    {
+        var plan = ProfessionalExitPolicy.For(Regime(strategy));
+        return market == "bank-nifty" && strategy == BankNiftyFailedSetupCooldownPolicy.Strategy
+            ? plan with { PartialProfitR = .75m, PartialExitFraction = .40m }
+            : plan;
+    }
+
+    public static decimal InitialRisk(decimal entry, decimal initialStop) => Math.Abs(entry - initialStop);
+
+    // Old rows did not persist the entry stop. Preserve their previous
+    // behaviour without rewriting history from a stop that may have moved.
+    public static decimal InitialRiskForSavedPosition(decimal entry, decimal? initialStop, decimal legacyTarget) =>
+        initialStop is { } stop ? InitialRisk(entry, stop) : Math.Abs(legacyTarget - entry);
+
     public static decimal ProtectedStop(Direction direction, decimal entry,
         decimal initialRisk, decimal favourablePrice, decimal existingStop,
         int remainingQuantity, ProfessionalExitPlan plan, string exchangeCode = "NSE",

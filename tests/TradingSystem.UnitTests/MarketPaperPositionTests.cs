@@ -1,9 +1,28 @@
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.UnitTests;
 
 public sealed class MarketPaperPositionTests
 {
+    [Fact]
+    public void EntryRiskDoesNotFollowTheTargetOrTrailedStop()
+    {
+        var now = new DateTimeOffset(2026, 11, 11, 4, 0, 0, TimeSpan.Zero);
+        MarketPaperPosition Open(decimal target) => new(Guid.NewGuid(), "bank-nifty", Guid.NewGuid(),
+            Guid.NewGuid(), "directional", Direction.Buy, 150, 100m, 90m, target, now);
+        var a = Open(115m);
+        var b = Open(140m);
+        a.Mark(112m, 106m, now.AddMinutes(1));
+        a.TakePartial(112m, 60, 0m, now.AddMinutes(1));
+
+        Assert.Equal(106m, a.StopLoss);
+        Assert.Equal(90m, a.InitialStopLoss);
+        Assert.Equal(10m, MarketOptionPositionPolicy.InitialRiskForSavedPosition(a.EntryPrice, a.InitialStopLoss, a.Target));
+        Assert.Equal(10m, MarketOptionPositionPolicy.InitialRiskForSavedPosition(b.EntryPrice, b.InitialStopLoss, b.Target));
+        Assert.Equal(15m, MarketOptionPositionPolicy.InitialRiskForSavedPosition(a.EntryPrice, null, a.Target));
+    }
+
     [Fact]
     public void ClosedLossExcursionExcludesFeesJustLikeOpenMarks()
     {

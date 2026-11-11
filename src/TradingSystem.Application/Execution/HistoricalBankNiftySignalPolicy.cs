@@ -16,11 +16,12 @@ public sealed class HistoricalBankNiftySignalPolicy(
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => candleIntervalSeconds is 60 or 300;
-    public string CodeVersion => "bank-nifty-deferred-admission-v7/" + OptionRiskBudgetPolicy.Version;
+    public string CodeVersion => "bank-nifty-deferred-admission-v8/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         tradingDate, candleIntervalSeconds, entryStart, entryCutoff, lots,
         optionStopPercent, maximumOptionQuoteAgeSeconds, forcedExitTime,
+        FailedSetupCooldownMinutes = BankNiftyFailedSetupCooldownPolicy.Minutes,
         Contracts = optionContracts.OrderBy(value => value.TradingSymbol,
             StringComparer.Ordinal).Select(value => new
         {
@@ -84,8 +85,10 @@ public sealed class HistoricalBankNiftySignalPolicy(
         var selected = HistoricalBankNiftyOptionSelector.Select(optionContracts,
             tradingDate, direction, session[^1].Close);
         return selected is null || optionStopPercent <= 0m ||
-            maximumOptionQuoteAgeSeconds <= 0 ? [] : [new HistoricalReplayCandidate(
-            selected.TradingSymbol, asOf, "Bank index directional breakout",
+            maximumOptionQuoteAgeSeconds <= 0 ||
+            BankNiftyFailedSetupCooldownPolicy.BlocksReplay(selected.TradingSymbol, asOf, frame.ClosedTrades)
+            ? [] : [new HistoricalReplayCandidate(
+            selected.TradingSymbol, asOf, BankNiftyFailedSetupCooldownPolicy.Strategy,
             decision.Confidence, checked(selected.LotSize * lots))
             {
                 LotSize = selected.LotSize,
@@ -112,6 +115,7 @@ public sealed class HistoricalBankNiftySignalPolicy(
             optionQuote.AvailableAtUtc <= pending.DecidedAtUtc ||
             optionQuote.AvailableAtUtc - pending.DecidedAtUtc >
                 TimeSpan.FromSeconds(maximumOptionQuoteAgeSeconds) ||
+            BankNiftyFailedSetupCooldownPolicy.BlocksReplay(pending.Symbol, frame.Market.AvailableAtUtc, frame.ClosedTrades) ||
             frame.OpenPositions.Any(value => value.Symbol == pending.Symbol) ||
             optionQuote.OfferPrice is not > 0m || optionQuote.BidPrice is not > 0m ||
             optionQuote.BidPrice > optionQuote.OfferPrice ||

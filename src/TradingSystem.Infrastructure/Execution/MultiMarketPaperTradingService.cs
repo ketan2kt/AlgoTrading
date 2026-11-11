@@ -29,6 +29,7 @@ internal sealed partial class MultiMarketPaperTradingService(
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private readonly Dictionary<string, DateTimeOffset> lastEvaluated = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Guid, decimal> favourablePriceByPosition = new();
+    private readonly ConcurrentDictionary<Guid, BankNiftyTrailState> bankTrailSamples = new();
     private readonly ConcurrentDictionary<string, bool> degradedManagement = new();
     private readonly Dictionary<string, string> entryPhases = [];
 
@@ -936,6 +937,24 @@ internal sealed partial class MultiMarketPaperTradingService(
                 ["No current monthly option contract is synchronized."], cancellationToken);
             return;
         }
+        var cooldownAt = timeProvider.GetUtcNow();
+        var cutoff = cooldownAt.AddMinutes(-BankNiftyFailedSetupCooldownPolicy.Minutes);
+        var failedExit = await db.MarketPaperPositions.AsNoTracking()
+            .Where(value => value.Market == market.Code && value.ExecutionInstrumentId == execution.Id &&
+                value.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
+                value.Status == BankNiftyFailedSetupCooldownPolicy.FailedExit && value.RealisedPnl < 0m &&
+                value.ClosedAtUtc > cutoff && value.ClosedAtUtc <= cooldownAt)
+            .OrderByDescending(value => value.ClosedAtUtc).Select(value => value.ClosedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (failedExit is { } closedAt && BankNiftyFailedSetupCooldownPolicy.Blocks(cooldownAt, closedAt))
+        {
+            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                BankNiftyFailedSetupCooldownPolicy.Rejection, decision.Confidence,
+                [$"{execution.TradingSymbol} had a losing failed-setup exit at {closedAt:O}; " +
+                 $"same-contract entries resume at {closedAt.AddMinutes(BankNiftyFailedSetupCooldownPolicy.Minutes):O}."],
+                cancellationToken);
+            return;
+        }
         entryPhases[market.Code] = "BankOptionQuoteAndAdmission";
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
             execution.TradingSymbol), cancellationToken);
@@ -975,7 +994,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         var filledAt = timeProvider.GetUtcNow();
         var position = new MarketPaperPosition(Guid.NewGuid(), market.Code, underlying.Id,
-            execution.Id, "Bank index directional breakout", Direction.Buy,
+            execution.Id, BankNiftyFailedSetupCooldownPolicy.Strategy, Direction.Buy,
             quantity, entry, stop, target, filledAt);
         db.MarketPaperPositions.Add(position);
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code, underlying.Id,
@@ -984,7 +1003,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 underlyingDirection = decision.Direction.ToString(),
                 direction = Direction.Buy.ToString(), entry, initialStop = stop, target,
                 quantity, riskBudget, execution = execution.TradingSymbol, quoteSnapshot = quote,
-                appliedExitPlan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional),
+                appliedExitPlan = MarketOptionPositionPolicy.ExitPlan(market.Code, position.Strategy),
                 evaluationStartedAtUtc = now, paperEntryRecordedAtUtc = filledAt,
                 reasons = decision.Reasons, location = preQuote.Location.Context,
                 optionInterest = optionInterest.Reasons })));
@@ -999,6 +1018,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             value.Status == "Active" && !value.Strategy.StartsWith("Hero Zero|") &&
             !value.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix))
             .ToListAsync(cancellationToken);
+        var wakeForTrailExit = false;
         foreach (var position in active)
         {
             var instrument = await db.Instruments.AsNoTracking().FirstOrDefaultAsync(value =>
@@ -1028,9 +1048,12 @@ internal sealed partial class MultiMarketPaperTradingService(
                 position.Id, cancellationToken);
             var targetRiskMultiple = market == TradingMarketCatalog.NaturalGas
                 ? NaturalGasMiniPositionPolicy.TargetRiskMultiple : 1m;
-            var initialRisk = Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
+            var initialRisk = market.Code is "sensex" or "bank-nifty"
+                ? MarketOptionPositionPolicy.InitialRiskForSavedPosition(
+                    position.EntryPrice, position.InitialStopLoss, position.Target)
+                : Math.Abs(position.Target - position.EntryPrice) / targetRiskMultiple;
             var positionRegime = MarketOptionPositionPolicy.Regime(position.Strategy);
-            var exitPlan = ProfessionalExitPolicy.For(positionRegime);
+            var exitPlan = MarketOptionPositionPolicy.ExitPlan(market.Code, position.Strategy);
             var favourable = position.Direction == Direction.Buy ? price - position.EntryPrice : position.EntryPrice - price;
             var favourableExtreme = price;
             var trailing = position.StopLoss;
@@ -1206,6 +1229,20 @@ internal sealed partial class MultiMarketPaperTradingService(
                 reversalExit, failedSetup, continuationConfirmed, forced,
                 !protectionOnly && market.ExecuteOptions && options.Value.PartialProfitEnabled,
                 position.PartialExitQuantity != 0);
+            if (!protectionOnly && positionDecision.ExitReason is null &&
+                BankNiftyConfirmedTrail.Applies(market.Code, position.Strategy) && position.InitialStopLoss is > 0m)
+            {
+                var trail = await EvaluateBankNiftyTrailAsync(db, position, quote, observedAt, initialRisk,
+                    instrument.LotSize, expectedUnderlyingDirection, cancellationToken);
+                if (trail.Exit)
+                {
+                    // Keep the existing protective order in place until the live
+                    // reconciler takes over the terminal exit. Never submit here.
+                    positionDecision = new(BankNiftyConfirmedTrail.ExitReason, 0);
+                    price = quote.BidPrice!.Value;
+                    wakeForTrailExit = true;
+                }
+            }
             if (positionDecision.PartialQuantity > 0)
             {
                 var partialQuantity = positionDecision.PartialQuantity;
@@ -1234,6 +1271,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     : decimal.Round((position.EntryPrice + price) * position.RemainingQuantity * 0.0005m, 2);
                 position.Close(price, costs, exitReason, observedAt);
                 favourablePriceByPosition.TryRemove(position.Id, out _);
+                bankTrailSamples.TryRemove(position.Id, out _);
                 var grossPnl = position.RealisedPnl + position.CostsPaid;
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, observedAt, $"PositionClosed:{position.Id:N}", 0m,
@@ -1246,6 +1284,52 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
         }
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
+        if (wakeForTrailExit) liveWakeSignal.Notify();
+    }
+
+    private async Task<BankNiftyTrailDecision> EvaluateBankNiftyTrailAsync(TradingDbContext db,
+        MarketPaperPosition position, GrowwQuote quote, DateTimeOffset observedAt, decimal initialRisk,
+        int lot, Direction direction, CancellationToken token)
+    {
+        var state = (bankTrailSamples.GetValueOrDefault(position.Id) ?? new BankNiftyTrailState()) with
+            { Floor = position.BankNiftyTrailFloorNet };
+        var book = quote.BidPrice is { } bid && quote.OfferPrice is { } ask && quote.OfferQuantity > 0 &&
+            GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) is { } sourceAt
+            ? new BankNiftyTrailBook(bid, ask, quote.BidQuantity ?? 0, observedAt, sourceAt) : null;
+        BankNiftyTrailDecision Evaluate(BankNiftyTrailSpot? entry = null, BankNiftyTrailSpot? current = null) =>
+            BankNiftyConfirmedTrail.Evaluate(state, position.OpenedAtUtc, observedAt, direction,
+                position.EntryPrice, initialRisk, lot, position.RemainingQuantity, position.RealisedPnl, book, entry, current);
+
+        var result = Evaluate();
+        if (result.NeedsSpot)
+        {
+            var entry = await ReadSpot(position.OpenedAtUtc);
+            var current = entry is null ? null : await ReadSpot(observedAt);
+            result = Evaluate(entry, current);
+        }
+        bankTrailSamples[position.Id] = result.State with { Floor = null };
+        var previousFloor = position.BankNiftyTrailFloorNet;
+        if (result.State.Floor is { } floor && floor != previousFloor)
+            position.RatchetBankNiftyTrailFloor(floor);
+        if (result.Exit || position.BankNiftyTrailFloorNet != previousFloor)
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), position.Market, position.UnderlyingInstrumentId,
+                observedAt, $"BankNiftyConfirmedTrail:{position.Id:N}", 0m,
+                JsonSerializer.Serialize(new { positionId = position.Id, bid = book?.Bid, bidSize = book?.Size,
+                    quoteSourceAt = book?.SourceAt, previousFloor, floorNet = position.BankNiftyTrailFloorNet,
+                    triggered = result.Exit, position.RemainingQuantity })));
+        return result;
+
+        Task<BankNiftyTrailSpot?> ReadSpot(DateTimeOffset asOf)
+        {
+            var lower = asOf - BankNiftyConfirmedTrail.MaximumSpotAge;
+            return db.MarketObservations.AsNoTracking()
+                .Where(value => value.InstrumentId == position.UnderlyingInstrumentId && value.Source == "Groww" &&
+                    value.ReceivedAtUtc >= lower && value.ReceivedAtUtc <= asOf && value.SourceTimestampUtc >= lower &&
+                    value.SourceTimestampUtc <= value.ReceivedAtUtc)
+                .OrderByDescending(value => value.ReceivedAtUtc).ThenByDescending(value => value.SourceTimestampUtc)
+                .Select(value => new BankNiftyTrailSpot(value.Price, value.ReceivedAtUtc, value.SourceTimestampUtc))
+                .FirstOrDefaultAsync(token);
+        }
     }
 
     internal static (bool ShouldExit, bool ProtectProfit, decimal Stop) ConfirmedReversalResponse(
