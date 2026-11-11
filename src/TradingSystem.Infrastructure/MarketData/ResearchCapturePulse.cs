@@ -12,6 +12,7 @@ public sealed class ResearchCapturePulse
     private bool gap;
     private int instruments;
     private string? failure;
+    private HistoricalFeedFrameRejection? lastRejectedFrame;
     private string stage = "Waiting";
     private bool policyReady;
     private bool priorReady;
@@ -26,7 +27,7 @@ public sealed class ResearchCapturePulse
     {
         lock (gate)
         {
-            if (session != date) { gap = false; failure = null; }
+            if (session != date) { gap = false; failure = null; lastRejectedFrame = null; }
             date = session; phase = "Connecting"; instruments = 0; subscribed = null; receipts.Clear();
             optionPrices.Clear(); optionDepth.Clear(); requiredOptionMarkets = [];
             policyReady = false; priorReady = false;
@@ -55,6 +56,15 @@ public sealed class ResearchCapturePulse
     internal void ContractCoverageIssues(IReadOnlyList<string> values) { lock (gate) coverageIssues = values; }
     internal void Failed(string code, bool gapObserved = true)
     { lock (gate) { gap |= gapObserved; phase = "Interrupted"; failure = stage + ": " + code; } }
+    internal void RejectedFrame(HistoricalFeedFrameRejection rejection, bool gapObserved)
+    {
+        lock (gate)
+        {
+            gap |= gapObserved;
+            if (lastRejectedFrame is null || rejection.AtUtc >= lastRejectedFrame.AtUtc)
+                lastRejectedFrame = rejection;
+        }
+    }
     internal void Finished()
     { lock (gate) phase = "Finished"; }
 
@@ -64,7 +74,7 @@ public sealed class ResearchCapturePulse
         {
             if (!enabled || date != session) return new(!enabled ? "Disabled" : "Not started", null, 0, false, new Dictionary<string,DateTimeOffset>());
             return new(phase, subscribed, instruments, gap, new Dictionary<string,DateTimeOffset>(receipts))
-                { LastFailure = failure, Stage = stage, PreOpenPolicyReady = policyReady, PriorSensexStateReady = priorReady,
+                { LastFailure = failure, LastRejectedFrame = lastRejectedFrame, Stage = stage, PreOpenPolicyReady = policyReady, PriorSensexStateReady = priorReady,
                     ContractPreflight = coverage, ContractCoverageIssues = coverageIssues,
                     RequiredOptionMarkets = requiredOptionMarkets.ToArray(),
                     LastOptionPriceSourceByMarket = new Dictionary<string, DateTimeOffset>(optionPrices),
@@ -78,6 +88,7 @@ public sealed record ResearchCaptureSnapshot(string Phase, DateTimeOffset? Subsc
 {
     private static readonly string[] Markets = ["NIFTY", "SENSEX", "BANKNIFTY"];
     public string? LastFailure { get; init; }
+    public HistoricalFeedFrameRejection? LastRejectedFrame { get; init; }
     public string Stage { get; init; } = "Waiting";
     public bool PreOpenPolicyReady { get; init; }
     public bool PriorSensexStateReady { get; init; }

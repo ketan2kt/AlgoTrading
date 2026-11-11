@@ -94,10 +94,11 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         ReplayContractCoverageInput? coverageInput = null)
     {
         var now = clock.GetUtcNow();
+        var open = new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(plan);
         var fingerprint = Convert.ToHexString(SHA256.HashData(bytes));
         var manifest = new HistoricalFeedCaptureManifest(date, now, null, null, fingerprint,
-            options.Value.SampleSeconds, now > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India), plan)
+            options.Value.SampleSeconds, now > open, plan)
         { UniverseScope = "PreSessionStrikeBand", ContractSelectionVersion = RegularOptionContractSelector.Version };
         if (manifest.HasGaps) archive.MarkCaptureGap(date);
         pulse.Stage("Manifest storage");
@@ -108,7 +109,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         var end = new DateTimeOffset(date.ToDateTime(new TimeOnly(15, 35)), India).ToUniversalTime();
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var timer = Task.Delay(end - now, clock, lifetime.Token);
-        var failed = false;
+        var captureGap = 0;
         var observedRanges = new ConcurrentDictionary<string, (decimal Low, decimal High)>(StringComparer.Ordinal);
         DateTimeOffset? subscribedAt = null;
         pulse.Stage("Broker authorization / subscription");
@@ -124,15 +125,28 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 }
                 if (instrument.Type == InstrumentType.Index && kind != "depth" && point.Last is > 0m &&
                     point.SourceAtUtc <= received && received - point.SourceAtUtc <= TimeSpan.FromSeconds(30) &&
-                    received >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India))
+                    received >= open)
                     observedRanges.AddOrUpdate(instrument.Market, (point.Last.Value, point.Last.Value),
                         (_, range) => (Math.Min(range.Low, point.Last.Value), Math.Max(range.High, point.Last.Value)));
             },
-            () => { failed |= IsSessionStarted(date); pulse.Failed("Transport interrupted or invalid frame", IsSessionStarted(date)); MarkSessionGap(date); },
+            () =>
+            {
+                if (lifetime.IsCancellationRequested) return;
+                var gapObserved = RecordGap(clock.GetUtcNow());
+                pulse.Failed("Transport disconnected or dropped messages", gapObserved);
+            },
             at => { subscribedAt = at; pulse.Subscribed(at, plan.Count, plan
                 .Where(value => value.Type is InstrumentType.CallOption or InstrumentType.PutOption)
-                .Select(value => value.Market).Distinct(StringComparer.Ordinal).ToArray()); pulse.Stage("Recording"); }, lifetime.Token,
-            (instrument, kind, at) => accumulator.Invalidate(instrument, kind, at));
+                .Select(value => value.Market).Distinct(StringComparer.Ordinal).ToArray()); pulse.Stage("Recording"); },
+            (instrument, kind, at) =>
+            {
+                accumulator.Invalidate(instrument, kind, at);
+                // A rejected frame affects one cached side, not the socket's
+                // connection state. Retain regular-session gaps and let the
+                // freshness watchdog detect a stalled market independently.
+                var gapObserved = RecordGap(at);
+                pulse.RejectedFrame(new(at, instrument.Market, instrument.TradingSymbol, kind), gapObserved);
+            }, lifetime.Token);
         var sampling = SampleAsync(date, accumulator, lifetime.Token);
         // Never hold subscription startup waiting for optional fidelity metadata.
         var receipt = captureReceipt(date, lifetime.Token);
@@ -155,8 +169,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             await lifetime.CancelAsync();
             try { await consume; } catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             manifest = manifest with { SubscribedAtUtc = subscribedAt, CompletedAtUtc = clock.GetUtcNow(),
-                HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
-                    subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India) };
+                HasGaps = manifest.HasGaps || Volatile.Read(ref captureGap) != 0 || subscribedAt is null ||
+                    subscribedAt > open };
         }
         catch (Exception exception)
         {
@@ -180,6 +194,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             catch (Exception) when (checkpoint.IsFaulted) { manifest = manifest with { HasGaps = true }; }
             var prior = await priorThesis;
             manifest = manifest with { PolicyReceipt = await receipt,
+                LastRejectedFrame = pulse.Read(date, true).LastRejectedFrame,
                 SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
             UpdateCoverage(manifest.PolicyReceipt);
             await WriteManifestAsync(path, manifest, CancellationToken.None);
@@ -203,12 +218,20 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                     pulse.ContractCoverageIssues(problems);
                 }
                 manifest = manifest with { SubscribedAtUtc = subscribedAt,
-                    LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || failed || subscribedAt is null ||
-                        subscribedAt > new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India),
+                    LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || Volatile.Read(ref captureGap) != 0 ||
+                        subscribedAt is null || subscribedAt > open,
+                    LastRejectedFrame = pulse.Read(date, true).LastRejectedFrame,
                     PolicyReceipt = policy,
                     SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
                 await WriteManifestAsync(path, manifest, lifetime.Token);
             }
+        }
+
+        bool RecordGap(DateTimeOffset at)
+        {
+            if (at < open) return false;
+            if (Interlocked.Exchange(ref captureGap, 1) == 0) archive.MarkCaptureGap(date);
+            return true;
         }
 
         void UpdateCoverage(SessionPolicyReceipt? policy)
@@ -352,6 +375,17 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     {
         var pending = path + ".pending";
         await File.WriteAllBytesAsync(pending, JsonSerializer.SerializeToUtf8Bytes(manifest), token);
-        File.Move(pending, path, overwrite: true);
+        for (var attempt = 0; ; attempt++)
+        {
+            try { File.Move(pending, path, overwrite: true); return; }
+            catch (Exception exception) when (OperatingSystem.IsWindows() && attempt < 4 &&
+                exception is IOException or UnauthorizedAccessException &&
+                (exception.HResult & 0xffff) is 5 or 32 or 33)
+            {
+                // A concurrent manifest reader can briefly block an atomic
+                // replace on Windows. Persistent failures still fail capture.
+                await Task.Delay(TimeSpan.FromMilliseconds(15), token);
+            }
+        }
     }
 }

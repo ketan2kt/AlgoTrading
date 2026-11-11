@@ -14,7 +14,10 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
     public ReplayContractPreflight? ContractPreflight { get; init; }
     public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
     public string? InterruptionReason { get; init; }
+    public HistoricalFeedFrameRejection? LastRejectedFrame { get; init; }
 }
+
+public sealed record HistoricalFeedFrameRejection(DateTimeOffset AtUtc, string Market, string TradingSymbol, string Channel);
 
 public static class HistoricalFeedCaptureEvidence
 {

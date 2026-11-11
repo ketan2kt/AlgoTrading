@@ -154,6 +154,36 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
         public Task HydrateAsync(string category, DateOnly? tradingDate, CancellationToken token) => Task.CompletedTask;
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectedFramesKeepConnectionStateAndOnlyRegularSessionRejectionsMarkGaps(bool duringSession)
+    {
+        var clock = new ManualClock(Start.AddMinutes(14).AddSeconds(50));
+        var transport = new Transport(clock);
+        var pulse = new ResearchCapturePulse(); pulse.Starting(Date);
+        using var archive = new HistoricalQuoteArchive(clock, NullLogger<HistoricalQuoteArchive>.Instance, Path.Combine(directory, "quotes"));
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var worker = Worker(services, transport, archive, clock, pulse);
+        var recording = worker.RecordSessionAsync(Date, Plan, (_, _) => Task.FromResult<SessionPolicyReceipt?>(Receipt()),
+            (_, _) => Task.FromResult<(bool, PersistentDirectionalThesisV1?)>((true, null)), directory, CancellationToken.None);
+        await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await UntilAsync(() => clock.ActiveTimers >= 3);
+
+        if (duringSession) clock.Advance(TimeSpan.FromSeconds(10));
+        var rejectedAt = clock.GetUtcNow();
+        transport.Reject(Plan[1], "index");
+        Assert.Equal("Subscribed", pulse.Read(Date, true).Phase);
+        Assert.Equal(duringSession, pulse.Read(Date, true).GapObserved);
+        Assert.Equal(duringSession, archive.ReadHealth(Date).GapObserved);
+        Assert.False(transport.Cancelled);
+        clock.Advance(Start.AddHours(6).AddMinutes(35) - clock.GetUtcNow());
+        await recording.WaitAsync(TimeSpan.FromSeconds(5));
+        var manifest = ReadManifest()!;
+        Assert.Equal(duringSession, manifest.HasGaps);
+        Assert.Equal(new(rejectedAt, "SENSEX", "SENSEX", "index"), manifest.LastRejectedFrame);
+    }
+
     [Fact]
     public async Task SilentConnectedFeedIsCancelledAndGapIsPersisted()
     {
@@ -177,7 +207,10 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
     private HistoricalFeedCaptureManifest? ReadManifest()
     {
         var path = Directory.GetFiles(directory, "*.json").SingleOrDefault();
-        return path is null ? null : JsonSerializer.Deserialize<HistoricalFeedCaptureManifest>(File.ReadAllText(path));
+        if (path is null) return null;
+        try { return JsonSerializer.Deserialize<HistoricalFeedCaptureManifest>(File.ReadAllText(path)); }
+        catch (IOException exception) when (OperatingSystem.IsWindows() && (exception.HResult & 0xffff) is 32 or 33)
+        { return null; } // The checkpoint is being atomically replaced; the polling assertion retries.
     }
     private static GrowwHistoricalFeedCaptureService Worker(ServiceProvider services, Transport transport,
         HistoricalQuoteArchive archive, ManualClock clock, ResearchCapturePulse pulse) =>
@@ -201,11 +234,14 @@ public sealed class HistoricalFeedLifecycleTests : IDisposable
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool Cancelled { get; private set; }
+        private Action<HistoricalFeedInstrument, string, DateTimeOffset>? reject;
+        public void Reject(HistoricalFeedInstrument instrument, string channel) => reject!(instrument, channel, clock.GetUtcNow());
         public async Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
             Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-            Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken token,
-            Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null)
+            Action onGap, Action<DateTimeOffset> onSubscribed,
+            Action<HistoricalFeedInstrument, string, DateTimeOffset> onInvalidPoint, CancellationToken token)
         {
+            reject = onInvalidPoint;
             onSubscribed(clock.GetUtcNow());
             foreach (var instrument in instruments)
                 onPoint(instrument, "index", new(clock.GetUtcNow(), 22000, null, null, null, null, null, null), clock.GetUtcNow());

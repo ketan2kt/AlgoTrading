@@ -13,8 +13,8 @@ internal interface IGrowwHistoricalFeedTransport
 {
     Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken,
-        Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null);
+        Action onGap, Action<DateTimeOffset> onSubscribed,
+        Action<HistoricalFeedInstrument, string, DateTimeOffset> onInvalidPoint, CancellationToken cancellationToken);
 }
 
 // Read-only topics from the official Groww SDK. The ephemeral socket JWT/NKey
@@ -33,8 +33,8 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     }
     public async Task ConsumeAsync(IReadOnlyList<HistoricalFeedInstrument> instruments,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, Action<DateTimeOffset> onSubscribed, CancellationToken cancellationToken,
-        Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint = null)
+        Action onGap, Action<DateTimeOffset> onSubscribed,
+        Action<HistoricalFeedInstrument, string, DateTimeOffset> onInvalidPoint, CancellationToken cancellationToken)
     {
         _ = SubscriptionCount(instruments); // Fail before auth or any partial subscription.
         using var key = KeyPair.CreatePair(PrefixByte.User);
@@ -126,7 +126,7 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
     private async Task ConsumeSubscriptionAsync(INatsSub<byte[]> subscription,
         HistoricalFeedInstrument instrument, string kind,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
-        Action onGap, Action<HistoricalFeedInstrument, string, DateTimeOffset>? onInvalidPoint,
+        Action onGap, Action<HistoricalFeedInstrument, string, DateTimeOffset> onInvalidPoint,
         CancellationTokenSource lifetime)
     {
         try
@@ -135,7 +135,7 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
             {
                 var received = clock.GetUtcNow();
                 DispatchFrame(message.Data ?? [], instrument, kind, received, onPoint,
-                    () => { onInvalidPoint?.Invoke(instrument, kind, received); onGap(); });
+                    () => onInvalidPoint(instrument, kind, received));
             }
             if (!lifetime.IsCancellationRequested) throw new InvalidDataException("A feed subscription ended before the capture window closed.");
         }
