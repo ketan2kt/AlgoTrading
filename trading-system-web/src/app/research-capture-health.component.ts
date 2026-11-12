@@ -3,6 +3,7 @@ import {HttpClient} from '@angular/common/http';
 import {Component, DestroyRef, Input, OnInit, inject, signal} from '@angular/core';
 import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {timer, timeout} from 'rxjs';
+import {captureAlertText} from './capture-alert';
 
 interface CaptureHealth {
   date:string; checkedAt:string; master:string|null; preOpenMaster:boolean;
@@ -14,12 +15,17 @@ interface CaptureHealth {
   button{margin-inline-start:.6rem;border:1px solid #528264;border-radius:.35rem;background:#f5fbf2;color:#16492d;padding:.25rem .55rem;cursor:pointer}
   p{margin:.35rem 0}small{display:block}
   .capture-warning{margin:.25rem .6rem;padding:.4rem .65rem;border:1px solid #b17d28;border-radius:.4rem;background:#fff1d2;color:#5d3905;font-size:.8rem}
+  .capture-warning summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .capture-warning ul{margin:.4rem 0 0;padding-inline-start:1.25rem}
 `], template:`
   @if(compact){
     @if(snapshot();as s){@if(s.expectedNow && s.issues.length){
-      <div class="capture-warning" role="status"><strong>Replay recording needs attention:</strong> {{s.issues.join(' · ')}}</div>
+      <details class="capture-warning">
+        <summary><span role="status"><strong>Replay</strong> · {{alertText(s.issues)}} · {{s.checkedAt|date:'HH:mm:ss':'+0530'}}</span></summary>
+        <ul>@for(issue of s.issues;track $index){<li>{{issue}}</li>}</ul>
+      </details>
     }}
-    @if(error() && snapshot()?.expectedNow){<div class="capture-warning" role="status">Replay recording status unavailable. Retrying automatically.</div>}
+    @if(error() && snapshot()?.expectedNow){<div class="capture-warning" role="status"><strong>Replay</strong> · Status unavailable · Retrying</div>}
   } @else {
   <section class="readiness-panel" aria-label="Replay capture">
     <strong>Replay capture · three markets</strong>
@@ -41,6 +47,7 @@ export class ResearchCaptureHealthComponent implements OnInit {
   @Input() compact=false;
   private readonly http=inject(HttpClient);
   private readonly destroy=inject(DestroyRef);
+  protected readonly alertText=captureAlertText;
   protected readonly markets=['NIFTY','SENSEX','BANKNIFTY'];
   protected readonly snapshot=signal<CaptureHealth|null>(null);
   protected readonly busy=signal(false);

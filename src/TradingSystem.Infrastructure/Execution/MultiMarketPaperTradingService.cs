@@ -482,7 +482,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             if (!optionInterest.Permitted) return;
 
-            var priorSameDirectionPosition = await (from priorPosition in db.MarketPaperPositions.AsNoTracking()
+            var sameDirectionExits = from priorPosition in db.MarketPaperPositions.AsNoTracking()
                 join executionInstrument in db.Instruments.AsNoTracking()
                     on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
                 where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
@@ -492,13 +492,14 @@ internal sealed partial class MultiMarketPaperTradingService(
                           : executionInstrument.Type == InstrumentType.PutOption)
                 orderby priorPosition.ClosedAtUtc descending
                 select new { priorPosition.ClosedAtUtc, priorPosition.Status, priorPosition.Strategy,
-                    priorPosition.RealisedPnl, priorPosition.EntryPrice, priorPosition.Quantity })
-                .FirstOrDefaultAsync(cancellationToken);
+                    priorPosition.RealisedPnl, priorPosition.EntryPrice, priorPosition.Quantity };
+            var priorSameDirectionPosition = await sameDirectionExits.FirstOrDefaultAsync(cancellationToken);
             var priorSameDirectionExit = priorSameDirectionPosition?.ClosedAtUtc;
-            if (priorSameDirectionPosition is { } prior &&
-                !prior.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) &&
-                !prior.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
-                !prior.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal) &&
+            var priorIsSpecialty = priorSameDirectionPosition is { } priorSide &&
+                (priorSide.Strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) ||
+                 priorSide.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) ||
+                 priorSide.Strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.Ordinal));
+            if (priorSameDirectionPosition is { } prior && !priorIsSpecialty &&
                 !SensexFullStopReentryPolicy.AllowsEntry(now, prior.ClosedAtUtc, prior.Status,
                     prior.RealisedPnl, prior.EntryPrice, prior.Quantity, options.Value.OptionStopLossPercent))
             {
@@ -527,6 +528,36 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                     "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
+                return;
+            }
+
+            // Keep the existing structural/morning checks unchanged. A specialty
+            // close cannot hide a more recent regular failed setup within this guard.
+            var cooldownStart = now - SensexFailedSetupReentryPolicy.ResetPeriod;
+            var recentRegular = priorIsSpecialty && priorSameDirectionExit > cooldownStart
+                ? await sameDirectionExits.Where(value => value.ClosedAtUtc > cooldownStart &&
+                    !value.Strategy.StartsWith("Hero Zero|") && !value.Strategy.StartsWith("Expansion Pair|") &&
+                    !value.Strategy.StartsWith("PaperOnly|Pyramid|")).FirstOrDefaultAsync(cancellationToken)
+                : priorSameDirectionPosition;
+            if (SensexFailedSetupReentryPolicy.Blocks(now, recentRegular?.ClosedAtUtc,
+                    recentRegular?.Status, recentRegular?.RealisedPnl, marketStateV2, decision.Direction.Value))
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    SensexFailedSetupReentryPolicy.Rejection, decision.Confidence,
+                    [$"The last regular {(decision.Direction == Direction.Buy ? "CE" : "PE")} entry failed at a loss. " +
+                     "Same-side re-entry across strikes waits for stronger directional follow-through or the 15-minute reset; " +
+                     $"current regime {marketStateV2?.State}, efficiency {marketStateV2?.DirectionalEfficiency:P0}."],
+                    cancellationToken);
+                return;
+            }
+
+            var cashOpen = new DateTimeOffset(today.ToDateTime(market.SessionStart), india.Offset);
+            var stalled = SensexStalledTrendEntryPolicy.Evaluate(persistentDirectionalEntry,
+                priceBars, decision.Direction.Value, cashOpen, now, interval);
+            if (!stalled.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    stalled.Rejection!, decision.Confidence, stalled.Reasons, cancellationToken);
                 return;
             }
 
@@ -915,6 +946,26 @@ internal sealed partial class MultiMarketPaperTradingService(
             await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
                 "StructuralReentryRejected", decision.Confidence, reentry.Reasons, cancellationToken);
             return;
+        }
+        if (market == TradingMarketCatalog.BankNifty)
+        {
+            var oppositeType = decision.Direction == Direction.Buy ? InstrumentType.PutOption : InstrumentType.CallOption;
+            var since = now.AddMinutes(-BankNiftyFailedSetupCooldownPolicy.Minutes);
+            var oppositeFailedExit = await (from prior in db.MarketPaperPositions.AsNoTracking()
+                join instrument in db.Instruments.AsNoTracking() on prior.ExecutionInstrumentId equals instrument.Id
+                where prior.Market == market.Code && prior.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
+                    prior.Status == BankNiftyFailedSetupCooldownPolicy.FailedExit && prior.RealisedPnl < 0m &&
+                    prior.ClosedAtUtc > since && prior.ClosedAtUtc <= now && instrument.Type == oppositeType
+                orderby prior.ClosedAtUtc descending
+                select prior.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
+            var structure = BankNiftyEntryStructurePolicy.Evaluate(completed, decision.Direction.Value,
+                atr, interval, now, oppositeFailedExit);
+            if (!structure.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    structure.Rejection!, decision.Confidence, structure.Reasons, cancellationToken);
+                return;
+            }
         }
         var optionInterest = await OptionOpenInterestEntryContext.EvaluateAsync(db,
             underlying.Id, decision.Direction.Value, latest.Close, atr, now, cancellationToken);

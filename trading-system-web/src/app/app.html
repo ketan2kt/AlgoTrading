@@ -188,12 +188,8 @@
           <aside class="narrator-toast-stack" aria-live="assertive" aria-label="Live market alerts">
             @for (event of narratorToasts; track event.key) {
               <article [class]="'narrator-toast narrator-toast--' + event.priority">
-                <div>
-                  <span>{{ event.market }} · {{ event.category }}</span>
-                  <button type="button" aria-label="Dismiss alert" (click)="closeNarratorToast(event.key)">×</button>
-                </div>
-                <strong>{{ event.message }}</strong>
-                <small>{{ event.occurredAtUtc | date:'HH:mm:ss':'Asia/Kolkata' }} IST</small>
+                <strong class="narrator-toast-line">{{ event.alertText }} · {{ event.occurredAtUtc | date:'HH:mm:ss':'+0530' }}</strong>
+                <button type="button" aria-label="Dismiss alert" (click)="closeNarratorToast(event.key)">×</button>
                 <i aria-hidden="true"></i>
               </article>
             }

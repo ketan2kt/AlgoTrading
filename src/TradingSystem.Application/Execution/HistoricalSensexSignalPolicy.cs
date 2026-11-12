@@ -23,7 +23,8 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v5/" + OptionRiskBudgetPolicy.Version;
+    public string CodeVersion => "sensex-normal-entry-v7/" + SensexStalledTrendEntryPolicy.Version +
+        "/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,
@@ -111,6 +112,18 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
         var persistent = selection.PersistentDirectional ||
             ProfessionalTradeFramework.Map(state) == ProfessionalTradeRegime.Directional;
         if (!StructuralReentryPolicy.Evaluate(bars, direction, priorExit, persistent).Permitted) return new([], "StructuralReentry");
+        var priorRegular = priorSame is not null && Specialty(priorSame.Strategy)
+            ? frame.ClosedTrades.Where(value => IsSide(value.Symbol, direction) && !Specialty(value.Strategy))
+                .OrderByDescending(value => value.ExitAtUtc).FirstOrDefault()
+            : priorSame;
+        if (SensexFailedSetupReentryPolicy.Blocks(now, priorRegular?.ExitAtUtc,
+                priorRegular?.ExitReason, priorRegular?.NetPnl, state, direction))
+            return new([], SensexFailedSetupReentryPolicy.Rejection);
+        var sessionOpen = new DateTimeOffset(tradingDate.ToDateTime(SensexStalledTrendEntryPolicy.CashSessionOpen),
+            IndiaOffset);
+        var stalled = SensexStalledTrendEntryPolicy.Evaluate(selection.PersistentDirectional,
+            bars, direction, sessionOpen, now, settings.IntervalSeconds);
+        if (!stalled.Permitted) return new([], stalled.Rejection!);
         var opposite = frame.ClosedTrades.Where(value => !IsSide(value.Symbol, direction))
             .OrderByDescending(value => value.ExitAtUtc).Select(value => (DateTimeOffset?)value.ExitAtUtc)
             .FirstOrDefault();

@@ -22,7 +22,9 @@ describe('automatic replay capture warning',()=>{
     const http=TestBed.inject(HttpTestingController);
     http.expectOne('/api/research/capture-health').flush(state(true,['Feed authorization failed']));
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Feed authorization failed');
+    const warning=fixture.nativeElement.querySelector('details.capture-warning');
+    expect(warning.querySelector('summary').textContent.trim()).toBe('Replay · Feed warning · 09:30:00');
+    expect(warning.querySelector('li').textContent).toBe('Feed authorization failed');
     fixture.destroy();await vi.advanceTimersByTimeAsync(31000);
     http.expectNone('/api/research/capture-health');http.verify();
   });

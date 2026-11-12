@@ -4,6 +4,7 @@ namespace TradingSystem.Application.Execution;
 
 public static class PaperProtectiveStopPolicy
 {
+    public const decimal NiftyMinimumPeakGainLockFraction = .70m;
     public static decimal ExecutableTrail(Direction direction, decimal proposed, decimal prior, decimal tick)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tick);
@@ -16,7 +17,8 @@ public static class PaperProtectiveStopPolicy
     public static decimal CalculateNetProtected(Direction direction, decimal entry,
         decimal initialStop, decimal favourable, ProfessionalExitPlan plan,
         bool breakEvenEnabled, bool trailingEnabled, int costQuantity,
-        int protectionQuantity, string exchangeCode, bool differentiatedRunner = false)
+        int protectionQuantity, string exchangeCode, bool differentiatedRunner = false,
+        decimal minimumPeakGainLockFraction = 0m)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(costQuantity);
@@ -26,7 +28,7 @@ public static class PaperProtectiveStopPolicy
             stop = Calculate(direction, entry, initialStop, favourable,
                 breakEvenEnabled ? plan.BreakEvenTriggerR : decimal.MaxValue,
                 trailingEnabled ? plan.TrailDistanceR : decimal.MaxValue,
-                plan.ProfitLockTriggerR, plan.ProfitLockR, differentiatedRunner);
+                plan.ProfitLockTriggerR, plan.ProfitLockR, differentiatedRunner, minimumPeakGainLockFraction);
         var risk = Math.Abs(entry - initialStop);
         if (risk <= 0m) throw new ArgumentOutOfRangeException(nameof(initialStop));
         var favourableMove = direction == Direction.Buy ? favourable - entry :
@@ -74,13 +76,17 @@ public static class PaperProtectiveStopPolicy
     public static decimal Calculate(Direction direction, decimal entry, decimal initialStop,
         decimal highWater, decimal breakEvenTriggerR, decimal trailingDistanceR,
         decimal profitLockTriggerR = decimal.MaxValue, decimal profitLockR = 0m,
-        bool differentiatedRunner = false)
+        bool differentiatedRunner = false, decimal minimumPeakGainLockFraction = 0m)
     {
         var risk = Math.Abs(entry - initialStop);
         if (risk <= 0) throw new ArgumentOutOfRangeException(nameof(initialStop));
         if (profitLockR < 0 || profitLockR >= profitLockTriggerR)
             throw new ArgumentOutOfRangeException(nameof(profitLockR),
                 "Profit lock must be non-negative and below its trigger.");
+        if (minimumPeakGainLockFraction is < 0m or > 1m)
+            throw new ArgumentOutOfRangeException(nameof(minimumPeakGainLockFraction));
+        decimal LockFraction(decimal peakR) => Math.Max(minimumPeakGainLockFraction,
+            differentiatedRunner ? DifferentiatedRunnerPolicy.PeakGainLockFraction : PeakProfitLockFraction(peakR));
         if (direction == Direction.Buy)
         {
             var result = initialStop;
@@ -88,8 +94,7 @@ public static class PaperProtectiveStopPolicy
             if (profitLockTriggerR != decimal.MaxValue &&
                 highWater >= entry + risk * profitLockTriggerR)
                 result = Math.Max(result, entry + Math.Max(risk * profitLockR,
-                    (highWater - entry) * (differentiatedRunner ? DifferentiatedRunnerPolicy.PeakGainLockFraction
-                        : PeakProfitLockFraction((highWater - entry) / risk))));
+                    (highWater - entry) * LockFraction((highWater - entry) / risk)));
             if (!differentiatedRunner && highWater >= entry + risk * (breakEvenTriggerR + trailingDistanceR))
                 result = Math.Max(result, highWater - risk * trailingDistanceR);
             return result;
@@ -99,8 +104,7 @@ public static class PaperProtectiveStopPolicy
         if (profitLockTriggerR != decimal.MaxValue &&
             highWater <= entry - risk * profitLockTriggerR)
             resultForShort = Math.Min(resultForShort, entry - Math.Max(risk * profitLockR,
-                (entry - highWater) * (differentiatedRunner ? DifferentiatedRunnerPolicy.PeakGainLockFraction
-                    : PeakProfitLockFraction((entry - highWater) / risk))));
+                (entry - highWater) * LockFraction((entry - highWater) / risk)));
         if (!differentiatedRunner && highWater <= entry - risk * (breakEvenTriggerR + trailingDistanceR))
             resultForShort = Math.Min(resultForShort, highWater + risk * trailingDistanceR);
         return resultForShort;

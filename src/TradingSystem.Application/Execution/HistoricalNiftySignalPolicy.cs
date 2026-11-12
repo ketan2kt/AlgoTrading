@@ -126,6 +126,7 @@ public sealed class HistoricalNiftySignalPolicy(
             frame.ClosedTrades.Count + frame.OpenPositions.Count)
         {
             RelaxedNiftyEntries = true,
+            CandleIntervalSeconds = candleIntervalSeconds,
             Vwap = vwap,
             FastEma = fast,
             SlowEma = slow,
@@ -137,6 +138,9 @@ public sealed class HistoricalNiftySignalPolicy(
         var signal = strategy.EvaluateDetailed(context).Signal;
         if (signal is null || !FirstEntryTimingPolicy.Evaluate(recent,
                 signal.Direction).Permitted) return [];
+        frame.Market.LatestQuotes.TryGetValue(spotSymbol, out var spotQuote);
+        if (!NiftyBreakoutRetestStrategy.AllowsCurrentPrice(signal,
+                admissionSettings is null ? latest.Close : spotQuote!.LastPrice)) return [];
         var marketState = MarketStateRouterV2.Analyze(recent, vwap, fast, slow);
         var persistentDirection = ProfessionalTradeFramework.Map(marketState) ==
             ProfessionalTradeRegime.Directional;
@@ -221,7 +225,6 @@ public sealed class HistoricalNiftySignalPolicy(
                 ? Math.Max(1, optionSelection.NormalInTheMoneySteps)
                 : optionSelection.NormalInTheMoneySteps
         };
-        frame.Market.LatestQuotes.TryGetValue(spotSymbol, out var spotQuote);
         var contract = NiftyOptionContractSelector.Select(optionContracts,
             signal.Direction,
             admissionSettings is null ? latest.Close : spotQuote!.LastPrice,

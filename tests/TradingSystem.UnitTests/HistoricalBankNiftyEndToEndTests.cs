@@ -5,21 +5,14 @@ namespace TradingSystem.UnitTests;
 
 public sealed class HistoricalBankNiftyEndToEndTests
 {
-    [Fact]
-    public void RealBankEntryAndSharedProtectionRunOnSameFrozenClock()
+    [Theory]
+    [InlineData(4, 0)]
+    [InlineData(8, 49)] // 14:50 IST: a confirmed late trade is still eligible.
+    public void RealBankEntryAndSharedProtectionRunOnSameFrozenClock(int hourUtc, int minuteUtc)
     {
         var date = new DateOnly(2026, 11, 4);
-        var start = new DateTimeOffset(2026, 11, 4, 4, 0, 0, TimeSpan.Zero);
-        var bars = Enumerable.Range(0, 30).Select(index =>
-        {
-            var open = 55000m - .35m * index;
-            var close = open - .245m;
-            return new HistoricalReplayBar(start.AddMinutes(index), 60,
-                open, open + .15m, close - .15m, close) { Symbol = "BANKNIFTY" };
-        }).Append(new HistoricalReplayBar(start.AddMinutes(30), 60,
-            54989.5m, 54989.6m, 54988.3m, 54988.5m) { Symbol = "BANKNIFTY" })
-            .Append(new HistoricalReplayBar(start.AddDays(-1), 60,
-                55100m, 55105m, 55095m, 55100m) { Symbol = "BANKNIFTY" }).ToArray();
+        var start = new DateTimeOffset(2026, 11, 4, hourUtc, minuteUtc, 0, TimeSpan.Zero);
+        var bars = Session(start);
         var signalAt = start.AddMinutes(31);
         const string symbol = "BANKNIFTY55000PE";
         var contracts = new[] { new NiftyOptionContractCandidate(Guid.Empty, symbol,
@@ -54,4 +47,16 @@ public sealed class HistoricalBankNiftyEndToEndTests
         Assert.Equal(0, result.MissingEntryQuoteCount);
         Assert.Equal(0, result.MissingExitQuoteCount);
     }
+
+    private static HistoricalReplayBar[] Session(DateTimeOffset start) =>
+        Enumerable.Range(0, 30).Select(index =>
+        {
+            var open = 55000m - .35m * index;
+            var close = open - .245m;
+            return new HistoricalReplayBar(start.AddMinutes(index), 60,
+                open, open + .15m, close - .15m, close) { Symbol = "BANKNIFTY" };
+        }).Append(new HistoricalReplayBar(start.AddMinutes(30), 60,
+            54989.5m, 54989.6m, 54988.3m, 54988.5m) { Symbol = "BANKNIFTY" })
+            .Append(new HistoricalReplayBar(start.AddDays(-1), 60,
+                55100m, 55105m, 55095m, 55100m) { Symbol = "BANKNIFTY" }).ToArray();
 }

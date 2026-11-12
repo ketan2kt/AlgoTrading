@@ -1,4 +1,4 @@
-import { TradingWorkspaceSnapshot, WorkspaceCandle, WorkspaceStrategyEvaluation } from './trading-workspace';
+import { TradingWorkspaceSnapshot, WorkspaceCandle, WorkspaceStrategyEvaluation, WorkspaceTradeOverlay } from './trading-workspace';
 import { TradingMarketCode } from './trade-alerts';
 
 export type NarratorMode = 'quiet' | 'essential' | 'learning';
@@ -35,10 +35,13 @@ export interface MarketNarratorEvent {
   market: Exclude<TradingMarketCode, 'natural-gas'>;
   category: NarratorCategory;
   priority: NarratorPriority;
+  alertText: string;
   message: string;
   evidence: string;
   occurredAtUtc: string;
 }
+
+const marketCodes = { nifty: 'N', sensex: 'S', 'bank-nifty': 'BN', bankex: 'BX' } as const;
 
 interface MarketLevels {
   dayHigh: number;
@@ -61,8 +64,10 @@ export function buildMarketNarratorEvents(
   const events: MarketNarratorEvent[] = [];
   const now = current.observedAtUtc;
   const add = (category: NarratorCategory, priority: NarratorPriority, code: string,
-    message: string, evidence: string, time = now): void => {
-    events.push({ key: `${market}:${category}:${code}`, market, category, priority, message, evidence, occurredAtUtc: time });
+    message: string, evidence: string, time = now, compact?: string): void => {
+    const summary = compact ?? message.slice(name.length).replace(/^[:\s]+|\.$/g, '');
+    events.push({ key: `${market}:${category}:${code}`, market, category, priority,
+      alertText: `${marketCodes[market]} · ${summary}`, message, evidence, occurredAtUtc: time });
   };
 
   detectTradeEvents(name, previous, current, add);
@@ -149,23 +154,28 @@ function eventCode(event: MarketNarratorEvent): string {
 }
 
 type AddEvent = (category: NarratorCategory, priority: NarratorPriority, code: string,
-  message: string, evidence: string, time?: string) => void;
+  message: string, evidence: string, time?: string, compact?: string) => void;
 
 function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
   current: TradingWorkspaceSnapshot, add: AddEvent): void {
   const old = new Map(previous.overlays.map((trade) => [trade.signalId, trade]));
   for (const trade of current.overlays) {
     const before = old.get(trade.signalId);
+    const symbol = alertContract(trade);
     if (trade.fillPrice !== null && (!before || before.fillPrice === null)) {
+      const stop = trade.executionStopLoss ?? trade.stopLoss;
       add('trade', 'critical', `entry:${trade.signalId}:${trade.entryTimeUtc ?? trade.signalTimeUtc}`,
-        `${name} ${spokenTradeBias(trade.executionInstrument, trade.executionInstrumentType, trade.direction)} entry. ${spokenContract(trade.executionInstrument)}. Entry ${price(trade.fillPrice)}. Stop loss ${price(trade.executionStopLoss ?? trade.stopLoss)}.`,
-        `${trade.strategy}; quantity ${trade.quantity ?? 'unavailable'}`, trade.entryTimeUtc ?? trade.signalTimeUtc);
+        `${name} ${spokenTradeBias(trade.executionInstrument, trade.executionInstrumentType, trade.direction)} entry. ${spokenContract(trade.executionInstrument)}. Entry ${price(trade.fillPrice)}. Stop loss ${price(stop)}.`,
+        `${trade.strategy}; quantity ${trade.quantity ?? 'unavailable'}`, trade.entryTimeUtc ?? trade.signalTimeUtc,
+        alertParts(symbol, `E ${rupeePrice(trade.fillPrice)}`, Number.isFinite(stop) ? `SL ${rupeePrice(stop)}` : null));
     }
     if (before && before.lifecycleStatus !== trade.lifecycleStatus && isClosedStatus(trade.lifecycleStatus)) {
       const result = (trade.realisedPnl ?? 0) >= 0 ? 'profit' : 'loss';
       add('trade', 'critical', `exit:${trade.signalId}:${trade.lifecycleStatus}:${trade.exitTimeUtc}`,
         `${name} exit. ${spokenExit(trade.lifecycleStatus)}. ${result} ${money(Math.abs(trade.realisedPnl ?? 0))}.`,
-        `Exit ${price(trade.exitPrice)}; ${trade.strategy}`, trade.exitTimeUtc ?? current.observedAtUtc);
+        `Exit ${price(trade.exitPrice)}; ${trade.strategy}`, trade.exitTimeUtc ?? current.observedAtUtc,
+        alertParts(symbol, alertExit(trade.lifecycleStatus), trade.exitPrice == null ? null : `Exit ${rupeePrice(trade.exitPrice)}`,
+          trade.realisedPnl == null ? null : signedRupees(trade.realisedPnl)));
     }
     if (before && trade.fillPrice !== null && before.stopLoss !== trade.stopLoss) {
       const protectedProfit = trade.direction.toLowerCase().includes('sell')
@@ -177,7 +187,8 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
       if (protectedProfit && !wasProtected) {
         add('trade', 'opportunity', `profit-lock:${trade.signalId}`,
           `${name} stop loss has crossed the entry and is now protecting profit at ${price(trade.stopLoss)}.`,
-          `Previous stop ${price(before.stopLoss)}; current unrealised ${money(trade.unrealisedPnl)}`);
+          `Previous stop ${price(before.stopLoss)}; current unrealised ${money(trade.unrealisedPnl)}`, undefined,
+          alertParts(symbol, 'Profit protected', `SL ${rupeePrice(trade.stopLoss)}`));
       }
     }
     // Automation summaries can reset to zero during readiness/error updates or after
@@ -199,7 +210,8 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
     if (crossedProfit !== undefined) {
       add('trade', 'opportunity', `open-pnl:${trade.signalId}:${crossedProfit}`,
         `${name} ${contract} open profit crossed ${money(crossedProfit)}. Review profit protection.`,
-        `Open P&L ${money(pnl)}; quantity ${trade.quantity}`);
+        `Open P&L ${money(pnl)}; quantity ${trade.quantity}`, undefined,
+        alertParts(symbol, `Open P&L ${signedRupees(pnl)}`));
     }
     if (oldPnl >= 500 && pnl < oldPnl * 0.5) {
       const movement = `Open P&L fell from ${money(oldPnl)} to ${money(pnl)}.`;
@@ -207,7 +219,9 @@ function detectTradeEvents(name: string, previous: TradingWorkspaceSnapshot,
       add('trade', pnl < 0 ? 'critical' : 'warning',
         `profit-giveback:${trade.signalId}:${roundBucket(pnl, 250)}`,
         `${name} ${contract}. ${movement} ${state}`,
-        `Same open trade; quantity ${trade.quantity}; excludes previously booked P&L and exit charges.`);
+        `Same open trade; quantity ${trade.quantity}; excludes previously booked P&L and exit charges.`, undefined,
+        alertParts(symbol, `Open P&L ${signedRupees(oldPnl)} → ${signedRupees(pnl)}`,
+          pnl > 0 ? 'Still green' : pnl === 0 ? 'Breakeven' : 'Now in loss'));
     }
   }
 }
@@ -218,12 +232,13 @@ function detectSystemEvents(name: string, previous: TradingWorkspaceSnapshot,
     add('risk-system', current.isFresh && current.isLive ? 'info' : 'critical',
       `feed:${current.isLive}:${current.isFresh}:${current.feedStatus}`,
       current.isFresh && current.isLive ? `${name} live feed restored.` : `${name} live feed is stale or disconnected.`,
-      current.feedStatus);
+      current.feedStatus, undefined, current.isFresh && current.isLive ? 'Feed restored' : 'Feed stale or offline');
   }
   if (previous.paperAutomation.status !== current.paperAutomation.status) {
     add('risk-system', current.paperAutomation.tradingPermitted ? 'info' : 'warning',
       `automation:${current.paperAutomation.status}`,
-      `${name} automation status: ${current.paperAutomation.status}.`, current.paperAutomation.message);
+      `${name} automation status: ${current.paperAutomation.status}.`, current.paperAutomation.message, undefined,
+      `Auto · ${humanize(current.paperAutomation.status)}`);
   }
   const oldRisk = previous.paperAutomation.portfolioRisk;
   const risk = current.paperAutomation.portfolioRisk;
@@ -234,18 +249,21 @@ function detectSystemEvents(name: string, previous: TradingWorkspaceSnapshot,
       if (oldRatio < threshold && ratio >= threshold) {
         add('risk-system', threshold >= 0.9 ? 'critical' : 'warning', `daily-risk:${threshold}`,
           `${name} has consumed ${Math.round(threshold * 100)} percent of the daily loss allowance.`,
-          `${money(risk.dailyLossConsumed)} of ${money(risk.maximumDailyLoss)}`);
+          `${money(risk.dailyLossConsumed)} of ${money(risk.maximumDailyLoss)}`, undefined,
+          `Daily loss limit ${Math.round(threshold * 100)}% used`);
       }
     }
     if (oldRisk?.reconciliationHealthy !== risk.reconciliationHealthy && !risk.reconciliationHealthy) {
       add('risk-system', 'critical', 'reconciliation', `${name} position reconciliation needs attention.`,
-        `${risk.openPositions} open positions; ${risk.quoteUnavailablePositions} quotes unavailable`);
+        `${risk.openPositions} open positions; ${risk.quoteUnavailablePositions} quotes unavailable`, undefined,
+        'Position check needed');
     }
   }
   const oldChecks = new Map((previous.paperAutomation.readinessChecks ?? []).map((check) => [check.code, check]));
   for (const check of current.paperAutomation.readinessChecks ?? []) {
     if (!check.ready && oldChecks.get(check.code)?.ready !== false) {
-      add('risk-system', 'warning', `readiness:${check.code}:${check.detail}`, `${name} readiness blocked: ${check.label}.`, check.detail);
+      add('risk-system', 'warning', `readiness:${check.code}:${check.detail}`, `${name} readiness blocked: ${check.label}.`,
+        check.detail, undefined, `Blocked · ${check.label}`);
     }
   }
 }
@@ -261,7 +279,7 @@ function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
     if (Math.abs(pcr - oldPcr) >= 0.1) {
       add('options-oi', 'opportunity', `pcr:${roundBucket(pcr, 0.1)}`,
         `${name} put call open interest ratio moved to ${pcr.toFixed(2)}${pcr > oldPcr ? ', put support is increasing' : ', call pressure is increasing'}.`,
-        advanced.options.evidence, at);
+        advanced.options.evidence, at, `PCR ${oldPcr.toFixed(2)} → ${pcr.toFixed(2)}`);
     }
     if (Math.abs(advanced.options.ivSkew - oldAdvanced.options.ivSkew) >= 1) {
       add('options-oi', 'info', `iv-skew:${roundBucket(advanced.options.ivSkew, 1)}`,
@@ -280,7 +298,8 @@ function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
   if (oldAdvanced?.setupLifecycle.phase !== advanced.setupLifecycle.phase) {
     add('trend', 'opportunity', `setup:${advanced.setupLifecycle.phase}:${advanced.setupLifecycle.direction}`,
       `${name} setup phase is now ${humanize(advanced.setupLifecycle.phase)}${advanced.setupLifecycle.direction ? `, ${spokenDirection(advanced.setupLifecycle.direction)}` : ''}.`,
-      advanced.setupLifecycle.evidence, at);
+      advanced.setupLifecycle.evidence, at, alertParts(`Setup · ${humanize(advanced.setupLifecycle.phase)}`,
+        advanced.setupLifecycle.direction ? directionLabel(advanced.setupLifecycle.direction) : null));
   }
   const oldPremium = latestEvaluation(previous.evaluations)?.optionPremium;
   const premium = latestEvaluation(current.evaluations)?.optionPremium;
@@ -290,7 +309,8 @@ function detectResearchEvents(name: string, previous: TradingWorkspaceSnapshot,
       add('options-oi', change > 0 ? 'opportunity' : 'warning',
         `premium-jump:${latestEvaluation(current.evaluations)?.optionSymbol}:${roundBucket(change, 0.1)}`,
         `${name} selected option premium ${change > 0 ? 'jumped' : 'fell'} ${Math.round(Math.abs(change) * 100)} percent to ${price(premium)}.`,
-        `Previous premium ${price(oldPremium)}`, at);
+        `Previous premium ${price(oldPremium)}`, at,
+        `Premium ${change > 0 ? '+' : '−'}${Math.round(Math.abs(change) * 100)}% · ${rupeePrice(premium)}`);
     }
   }
   for (const level of advanced.levels) {
@@ -314,15 +334,16 @@ function detectAverageEvents(name: string, candles: WorkspaceCandle[], before: W
   crossed(name, 'EMA 21', before.close, bar.close, previousSlow, evaluation.slowEma, 'ema-vwap', add, at);
   if (previousFast <= previousSlow && evaluation.fastEma > evaluation.slowEma) {
     add('ema-vwap', 'opportunity', `ema-bull:${at}`, `${name} bullish EMA 9 and EMA 21 crossover confirmed.`,
-      `EMA 9 ${price(evaluation.fastEma)}; EMA 21 ${price(evaluation.slowEma)}`, at);
+      `EMA 9 ${price(evaluation.fastEma)}; EMA 21 ${price(evaluation.slowEma)}`, at, 'EMA 9 crossed above EMA 21');
   } else if (previousFast >= previousSlow && evaluation.fastEma < evaluation.slowEma) {
     add('ema-vwap', 'opportunity', `ema-bear:${at}`, `${name} bearish EMA 9 and EMA 21 crossover confirmed.`,
-      `EMA 9 ${price(evaluation.fastEma)}; EMA 21 ${price(evaluation.slowEma)}`, at);
+      `EMA 9 ${price(evaluation.fastEma)}; EMA 21 ${price(evaluation.slowEma)}`, at, 'EMA 9 crossed below EMA 21');
   }
   if (atr > 0 && Math.abs(bar.close - evaluation.vwap) >= atr * 1.5 && Math.abs(before.close - previousVwap) < atr * 1.5) {
     add('ema-vwap', 'warning', `vwap-extension:${side(bar.close - evaluation.vwap)}:${at}`,
       `${name} is extended ${side(bar.close - evaluation.vwap)} VWAP by more than one and a half A T R.`,
-      `Price ${price(bar.close)}; VWAP ${price(evaluation.vwap)}; ATR ${price(atr)}`, at);
+      `Price ${price(bar.close)}; VWAP ${price(evaluation.vwap)}; ATR ${price(atr)}`, at,
+      `${(Math.abs(bar.close - evaluation.vwap) / atr).toFixed(1)} ATR ${side(bar.close - evaluation.vwap)} VWAP`);
   }
   const ema50 = exponentialMovingAverage(candles, 50);
   const ema200 = exponentialMovingAverage(candles, 200);
@@ -354,45 +375,45 @@ function detectStructureEvents(name: string, candles: WorkspaceCandle[], levels:
   }
   const lastSix = candles.slice(-6);
   const green = lastSix.filter((item) => item.close > item.open).length;
-  if (green >= 5) add('structure', 'opportunity', `impulse-up:${at}`, `${name} bullish impulse: five of the last six candles are green.`, `Close ${price(c.close)}`, at);
-  if (green <= 1) add('structure', 'opportunity', `impulse-down:${at}`, `${name} bearish impulse: five of the last six candles are red.`, `Close ${price(c.close)}`, at);
+  if (green >= 5) add('structure', 'opportunity', `impulse-up:${at}`, `${name} bullish impulse: five of the last six candles are green.`, `Close ${price(c.close)}`, at, 'Bullish impulse');
+  if (green <= 1) add('structure', 'opportunity', `impulse-down:${at}`, `${name} bearish impulse: five of the last six candles are red.`, `Close ${price(c.close)}`, at, 'Bearish impulse');
   if (levels.openingRangeHigh && b.close > levels.openingRangeHigh && c.low <= levels.openingRangeHigh && c.close > levels.openingRangeHigh) {
-    add('structure', 'opportunity', `or-retest-up:${at}`, `${name} opening-range breakout retest held on the upside.`, `Opening range high ${price(levels.openingRangeHigh)}`, at);
+    add('structure', 'opportunity', `or-retest-up:${at}`, `${name} opening-range breakout retest held on the upside.`, `Opening range high ${price(levels.openingRangeHigh)}`, at, 'OR high retest held');
   }
   if (levels.openingRangeLow && b.close < levels.openingRangeLow && c.high >= levels.openingRangeLow && c.close < levels.openingRangeLow) {
-    add('structure', 'opportunity', `or-retest-down:${at}`, `${name} opening-range breakdown retest held on the downside.`, `Opening range low ${price(levels.openingRangeLow)}`, at);
+    add('structure', 'opportunity', `or-retest-down:${at}`, `${name} opening-range breakdown retest held on the downside.`, `Opening range low ${price(levels.openingRangeLow)}`, at, 'OR low retest held');
   }
   const prior = candles.slice(-11, -1);
   if (prior.length >= 5) {
     const priorHigh = Math.max(...prior.map((item) => item.high));
     const priorLow = Math.min(...prior.map((item) => item.low));
     if (c.close > priorHigh) {
-      add('structure', 'opportunity', `local-breakout:${at}`, `${name} closed above its recent swing range. Bullish change of character.`, `Prior high ${price(priorHigh)}`, at);
+      add('structure', 'opportunity', `local-breakout:${at}`, `${name} closed above its recent swing range. Bullish change of character.`, `Prior high ${price(priorHigh)}`, at, `Break above ${price(priorHigh)}`);
     } else if (c.close < priorLow) {
-      add('structure', 'opportunity', `local-breakdown:${at}`, `${name} closed below its recent swing range. Bearish change of character.`, `Prior low ${price(priorLow)}`, at);
+      add('structure', 'opportunity', `local-breakdown:${at}`, `${name} closed below its recent swing range. Bearish change of character.`, `Prior low ${price(priorLow)}`, at, `Break below ${price(priorLow)}`);
     }
     if (b.high > priorHigh && c.close < priorHigh) {
-      add('structure', 'warning', `failed-breakout:${at}`, `${name} upside breakout failed and price closed back inside the range.`, `Range high ${price(priorHigh)}`, at);
+      add('structure', 'warning', `failed-breakout:${at}`, `${name} upside breakout failed and price closed back inside the range.`, `Range high ${price(priorHigh)}`, at, 'Upside breakout failed');
     }
     if (b.low < priorLow && c.close > priorLow) {
-      add('structure', 'warning', `failed-breakdown:${at}`, `${name} downside breakdown failed and price closed back inside the range.`, `Range low ${price(priorLow)}`, at);
+      add('structure', 'warning', `failed-breakdown:${at}`, `${name} downside breakdown failed and price closed back inside the range.`, `Range low ${price(priorLow)}`, at, 'Downside breakout failed');
     }
   }
 }
 
 function detectLevelEvents(name: string, before: WorkspaceCandle, bar: WorkspaceCandle,
   levels: MarketLevels, atr: number, add: AddEvent, at: string): void {
-  const candidates: [string, number | null][] = [
-    ['previous high', levels.previousHigh], ['previous low', levels.previousLow],
-    ['previous close', levels.previousClose], ['opening range high', levels.openingRangeHigh],
-    ['opening range low', levels.openingRangeLow],
+  const candidates: [string, string, number | null][] = [
+    ['previous high', 'Prev high', levels.previousHigh], ['previous low', 'Prev low', levels.previousLow],
+    ['previous close', 'Prev close', levels.previousClose], ['opening range high', 'OR high', levels.openingRangeHigh],
+    ['opening range low', 'OR low', levels.openingRangeLow],
   ];
-  for (const [label, level] of candidates) {
+  for (const [label, short, level] of candidates) {
     if (level === null) continue;
     if (before.close <= level && bar.close > level) {
-      add('levels', 'opportunity', `break-above:${label}:${at}`, `${name} closed above ${label} at ${price(level)}.`, `Close ${price(bar.close)}`, at);
+      add('levels', 'opportunity', `break-above:${label}:${at}`, `${name} closed above ${label} at ${price(level)}.`, `Close ${price(bar.close)}`, at, `Above ${short} ${price(level)}`);
     } else if (before.close >= level && bar.close < level) {
-      add('levels', 'opportunity', `break-below:${label}:${at}`, `${name} closed below ${label} at ${price(level)}.`, `Close ${price(bar.close)}`, at);
+      add('levels', 'opportunity', `break-below:${label}:${at}`, `${name} closed below ${label} at ${price(level)}.`, `Close ${price(bar.close)}`, at, `Below ${short} ${price(level)}`);
     } else if (atr > 0 && bar.low <= level && bar.close > level && before.close > level) {
       add('levels', 'info', `support-reaction:${label}:${at}`, `${name} reacted from ${label}; support held near ${price(level)}.`, `Low ${price(bar.low)}; close ${price(bar.close)}`, at);
     } else if (atr > 0 && bar.high >= level && bar.close < level && before.close < level) {
@@ -419,7 +440,8 @@ function detectRegimeEvents(name: string, previous: WorkspaceStrategyEvaluation 
     add('trend', current.regime.toLowerCase().includes('trend') ? 'opportunity' : 'info',
       `regime:${current.regime}:${current.regimeBias}`,
       `${name} market regime is ${humanize(current.regime)}${current.regimeBias ? ` with ${humanize(current.regimeBias)} bias` : ''}.`,
-      `Confidence ${Math.round(current.regimeConfidence * 100)} percent`, at);
+      `Confidence ${Math.round(current.regimeConfidence * 100)} percent`, at,
+      alertParts(`Regime · ${humanize(current.regime)}`, current.regimeBias ? humanize(current.regimeBias) : null));
   }
 }
 
@@ -429,13 +451,13 @@ function detectGapEvents(name: string, candles: WorkspaceCandle[], levels: Marke
   const gap = levels.sessionOpen - levels.previousClose;
   if (Math.abs(gap) >= atr * 0.5 && isFirstSessionBar(candles, bar)) {
     add('gap', 'info', `gap-open:${sessionKey(at)}`, `${name} opened with a ${gap > 0 ? 'gap up' : 'gap down'} of ${price(Math.abs(gap))} points.`,
-      `Open ${price(levels.sessionOpen)}; previous close ${price(levels.previousClose)}`, at);
+      `Open ${price(levels.sessionOpen)}; previous close ${price(levels.previousClose)}`, at, `Gap ${gap > 0 ? 'up' : 'down'} ${price(Math.abs(gap))} pts`);
   }
   const wasUnfilled = gap > 0 ? before.low > levels.previousClose : before.high < levels.previousClose;
   const isFilled = gap > 0 ? bar.low <= levels.previousClose : bar.high >= levels.previousClose;
   if (wasUnfilled && isFilled) {
     add('gap', 'opportunity', `gap-fill:${sessionKey(at)}`, `${name} opening gap has filled at the previous close.`,
-      `Previous close ${price(levels.previousClose)}`, at);
+      `Previous close ${price(levels.previousClose)}`, at, `Gap filled · ${price(levels.previousClose)}`);
   }
 }
 
@@ -447,12 +469,12 @@ function detectRangeAndVolatilityEvents(name: string, candles: WorkspaceCandle[]
   const range = Math.max(...recent.map((item) => item.high)) - Math.min(...recent.map((item) => item.low));
   if (range <= atr * 1.6) {
     add('range-volatility', 'warning', `tight-range:${at}`, `${name} is compressed in a tight eight-candle range.`,
-      `Range ${price(range)}; ATR ${price(atr)}`, at);
+      `Range ${price(range)}; ATR ${price(atr)}`, at, `Tight range · ${price(range)} pts`);
   }
   const candleRange = bar.high - bar.low;
   if (candleRange >= atr * 1.8) {
     add('range-volatility', 'warning', `range-expansion:${at}`, `${name} range expansion candle is ${candleRange >= atr * 2.5 ? 'very large' : 'large'}.`,
-      `${(candleRange / atr).toFixed(1)} ATR`, at);
+      `${(candleRange / atr).toFixed(1)} ATR`, at, `Range expansion · ${(candleRange / atr).toFixed(1)} ATR`);
   }
   if (evaluation) {
     const reference = evaluation.vwap || evaluation.slowEma;
@@ -460,7 +482,7 @@ function detectRangeAndVolatilityEvents(name: string, candles: WorkspaceCandle[]
     if (extension >= 2) {
       add('range-volatility', 'warning', `mature-move:${side(bar.close - reference)}:${at}`,
         `${name} move is mature and extended ${extension.toFixed(1)} A T R ${side(bar.close - reference)} its reference. Avoid chasing.`,
-        `Price ${price(bar.close)}; reference ${price(reference)}`, at);
+        `Price ${price(bar.close)}; reference ${price(reference)}`, at, `Extended ${extension.toFixed(1)} ATR · Avoid chasing`);
     }
   }
 }
@@ -474,16 +496,17 @@ function detectVolumeAndMomentumEvents(name: string, candles: WorkspaceCandle[],
   const observedVolume = futuresVolume || bar.volume;
   if (averageVolume > 0 && observedVolume >= averageVolume * 1.8) {
     add('volume-momentum', 'opportunity', `volume-spike:${at}`, `${name} volume spike confirmed at ${(observedVolume / averageVolume).toFixed(1)} times average.`,
-      `Volume ${Math.round(observedVolume)}; average ${Math.round(averageVolume)}`, at);
+      `Volume ${Math.round(observedVolume)}; average ${Math.round(averageVolume)}`, at, `Vol spike · ${(observedVolume / averageVolume).toFixed(1)}× avg`);
   } else if (evaluation && evaluation.relativeFuturesVolume >= 1.5) {
     add('volume-momentum', 'opportunity', `relative-volume:${at}`, `${name} futures volume is ${evaluation.relativeFuturesVolume.toFixed(1)} times normal.`,
-      `Price candle ${bar.close > bar.open ? 'green' : 'red'}`, at);
+      `Price candle ${bar.close > bar.open ? 'green' : 'red'}`, at, `Futures vol · ${evaluation.relativeFuturesVolume.toFixed(1)}× avg`);
   }
   const body = Math.abs(bar.close - bar.open);
   if (atr > 0 && body >= atr * 1.1) {
     add('volume-momentum', 'opportunity', `momentum:${side(bar.close - bar.open)}:${at}`,
       `${name} strong ${bar.close > bar.open ? 'bullish' : 'bearish'} momentum candle confirmed.`,
-      `Body ${(body / atr).toFixed(1)} ATR; relative volume ${evaluation?.relativeFuturesVolume?.toFixed(2) ?? 'unavailable'}`, at);
+      `Body ${(body / atr).toFixed(1)} ATR; relative volume ${evaluation?.relativeFuturesVolume?.toFixed(2) ?? 'unavailable'}`, at,
+      `${bar.close > bar.open ? 'Bullish' : 'Bearish'} momentum · ${(body / atr).toFixed(1)} ATR`);
   }
   const lastFour = candles.slice(-4);
   const sameDirection = lastFour.every((item) => item.close > item.open) || lastFour.every((item) => item.close < item.open);
@@ -497,15 +520,15 @@ function detectSessionEvents(name: string, previous: WorkspaceCandle | null, cur
   add: AddEvent, at: string): void {
   const minute = istMinute(current.openTimeUtc);
   const priorMinute = previous ? istMinute(previous.openTimeUtc) : -1;
-  const milestones: [number, string, string][] = [
-    [570, 'opening-range-complete', 'the first 15-minute opening range is complete'],
-    [720, 'lunch-window', 'the lunch-time range window has started'],
-    [870, 'power-window', 'the closing power-move window has started'],
-    [900, 'late-entry-cutoff', 'the late-session entry caution window has started'],
-    [915, 'new-entry-stop', 'the no-new-entry time has arrived'],
+  const milestones: [number, string, string, string][] = [
+    [570, 'opening-range-complete', 'the first 15-minute opening range is complete', 'Opening range set'],
+    [720, 'lunch-window', 'the lunch-time range window has started', 'Midday window'],
+    [870, 'power-window', 'the closing power-move window has started', 'Closing window'],
+    [900, 'late-entry-cutoff', 'the late-session entry caution window has started', 'Late entry caution'],
+    [915, 'new-entry-stop', 'the no-new-entry time has arrived', 'No new entries'],
   ];
-  for (const [target, code, message] of milestones) {
-    if (priorMinute < target && minute >= target) add('session', target >= 900 ? 'warning' : 'info', `${code}:${sessionKey(at)}`, `${name}: ${message}.`, `IST minute ${minute}`, at);
+  for (const [target, code, message, short] of milestones) {
+    if (priorMinute < target && minute >= target) add('session', target >= 900 ? 'warning' : 'info', `${code}:${sessionKey(at)}`, `${name}: ${message}.`, `IST minute ${minute}`, at, short);
   }
 }
 
@@ -612,6 +635,10 @@ function spokenDirection(direction: string): string {
   return 'bullish or call-side';
 }
 
+function directionLabel(direction: string): string {
+  return spokenDirection(direction).startsWith('bearish') ? 'bearish' : 'bullish';
+}
+
 function spokenTradeBias(contract: string | null, instrumentType: string | null, transactionDirection: string): string {
   const normalizedContract = (contract ?? '').toUpperCase();
   const normalizedType = (instrumentType ?? '').toLowerCase();
@@ -622,6 +649,28 @@ function spokenTradeBias(contract: string | null, instrumentType: string | null,
 
 function spokenContract(contract: string | null): string {
   return contract ? `Contract ${contract.replace(/([A-Z])/g, '$1 ')}` : 'Selected option contract';
+}
+
+function alertContract(trade: WorkspaceTradeOverlay): string {
+  const symbol = trade.executionInstrument?.trim();
+  const side = trade.executionInstrumentType === 'PutOption' ? 'PE' :
+    trade.executionInstrumentType === 'CallOption' ? 'CE' : symbol?.toUpperCase().match(/(?:CE|PE)$/)?.[0];
+  return side && trade.executionStrike != null ? `${trade.executionStrike} ${side}` : symbol || 'Option';
+}
+
+function alertExit(status: string): string {
+  if (status === 'SL hit' || status === 'StopLossHit') return 'SL hit';
+  if (status === 'Target hit' || status === 'TargetHit') return 'Target hit';
+  if (status === 'Closed') return 'Closed';
+  const text = humanize(status);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function alertParts(...parts: (string | null)[]): string { return parts.filter(Boolean).join(' · '); }
+function rupeePrice(value: number): string { return `₹${value.toFixed(2)}`; }
+const pnlFormat = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+function signedRupees(value: number): string {
+  return `${value < 0 ? '−' : value > 0 ? '+' : ''}₹${pnlFormat.format(Math.abs(value))}`;
 }
 
 function side(value: number): string { return value >= 0 ? 'above' : 'below'; }

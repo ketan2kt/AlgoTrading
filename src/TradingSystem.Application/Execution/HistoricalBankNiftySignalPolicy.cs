@@ -16,7 +16,8 @@ public sealed class HistoricalBankNiftySignalPolicy(
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => candleIntervalSeconds is 60 or 300;
-    public string CodeVersion => "bank-nifty-deferred-admission-v8/" + OptionRiskBudgetPolicy.Version;
+    public string CodeVersion => "bank-nifty-deferred-admission-v9/" + BankNiftyEntryStructurePolicy.Version +
+        "/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         tradingDate, candleIntervalSeconds, entryStart, entryCutoff, lots,
@@ -79,6 +80,17 @@ public sealed class HistoricalBankNiftySignalPolicy(
             .OrderByDescending(value => value.ExitAtUtc)
             .Select(value => (DateTimeOffset?)value.ExitAtUtc).FirstOrDefault();
         if (!StructuralReentryPolicy.Evaluate(current, direction, previousExit).Permitted) return [];
+        var oppositeSuffix = direction == Direction.Buy ? "PE" : "CE";
+        var oppositeFailedExit = frame.ClosedTrades.Where(value =>
+                value.Symbol.EndsWith(oppositeSuffix, StringComparison.Ordinal) &&
+                value.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
+                value.ExitReason == BankNiftyFailedSetupCooldownPolicy.FailedExit &&
+                value.NetPnl < 0m && !value.IsPartialExit &&
+                BankNiftyFailedSetupCooldownPolicy.Blocks(asOf, value.ExitAtUtc))
+            .OrderByDescending(value => value.ExitAtUtc)
+            .Select(value => (DateTimeOffset?)value.ExitAtUtc).FirstOrDefault();
+        if (!BankNiftyEntryStructurePolicy.Evaluate(current, direction, atr,
+                candleIntervalSeconds, asOf, oppositeFailedExit).Permitted) return [];
         if (!OptionOpenInterestEntryPolicy.Evaluate(direction, session[^1].Close,
                 atr, frame.LatestOptionChain?.Strikes ?? [],
                 frame.PreviousOptionChain?.Strikes ?? []).Permitted) return [];

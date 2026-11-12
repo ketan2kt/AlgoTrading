@@ -1,4 +1,10 @@
-# Current handover — 11 November 2026
+# Current handover — 12 November 2026
+
+## 12 November after-hours release
+
+- Website: compact trade/risk/replay alerts; Nifty 70% minimum peak-gain protection from the existing first trigger and a confirmed retest fallback within the original chase limits; Sensex same-side weak failed-setup re-entry and stalled-thesis guards; Bank Nifty countertrend location and opposite-side failed-setup confirmation, without the unpublished afternoon cutoff. Regular paper/live policy and replay share the entry/exit changes; no sizing, arming, or specialty-trade change.
+- Includes the already-checked main recorder frame-warning correction (`95e51f5`) in the requested after-hours recorder rollout. Preserve gap detection, archived books and existing capture ownership safeguards. Older independent-feed, recorder writer and channel-renewal drafts, and offline research experiments remain outside this batch.
+- Prior focused checks passed: 70 Nifty, 22 Bank Nifty, 31 Sensex re-entry, 23 Sensex stalled trend, and 27 frontend tests. Three dated entry-path reviews accompany this change. Publish only after-hours from this exact commit's successful main push CI package using `./scripts/tasks.ps1 deploy -Ref main -IncludeRecorder`; workflow verifies rollout.
 
 ## Gap-aware replay — website release
 

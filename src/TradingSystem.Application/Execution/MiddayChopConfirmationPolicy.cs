@@ -104,7 +104,7 @@ public static class MiddayChopConfirmationPolicy
                 ["Choppy structure is active; waiting for a completed five-minute direction-aligned structure break or pullback resumption."]);
     }
 
-    private static StrategyPriceBar[] AggregateFiveMinuteBars(
+    internal static StrategyPriceBar[] AggregateFiveMinuteBars(
         IReadOnlyList<StrategyPriceBar> source, int sourceIntervalSeconds)
     {
         if (sourceIntervalSeconds == 300)

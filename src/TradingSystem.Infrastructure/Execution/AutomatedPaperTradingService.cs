@@ -444,6 +444,7 @@ internal sealed partial class AutomatedPaperTradingService(
             tradeState.TradesToday)
         {
             RelaxedNiftyEntries = true,
+            CandleIntervalSeconds = marketOptions.Value.CandleIntervalSeconds,
             Vwap = vwap,
             FastEma = fast,
             SlowEma = slow,
@@ -507,13 +508,16 @@ internal sealed partial class AutomatedPaperTradingService(
 
         var firstEntryTiming = FirstEntryTimingPolicy.Evaluate(strategyContext.RecentCandles,
             signal.Direction);
-        if (!firstEntryTiming.Permitted)
+        var retestPricePermitted = NiftyBreakoutRetestStrategy.AllowsCurrentPrice(signal, currentPrice);
+        if (!firstEntryTiming.Permitted || !retestPricePermitted)
         {
+            var timingReasons = !firstEntryTiming.Permitted ? firstEntryTiming.Reasons :
+                ["Current Nifty price no longer holds the retest pivot or is beyond its chase boundary."];
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,
                 latestCandle.Close, openingRangeHigh, openingRangeLow, vwap, fast, slow, atr,
-                relativeVolume, regime, "EntryTimingRejected", firstEntryTiming.Reasons,
+                relativeVolume, regime, "EntryTimingRejected", timingReasons,
                 signal, null, null, cancellationToken, shadowStructure);
-            state.Record("EntryTimingRejected", true, string.Join(" ", firstEntryTiming.Reasons),
+            state.Record("EntryTimingRejected", true, string.Join(" ", timingReasons),
                 tradeState.TradesToday, tradeState.RealisedPnl, signalId: signal.SignalId,
                 direction: signal.Direction.ToString());
             return;
@@ -998,7 +1002,8 @@ internal sealed partial class AutomatedPaperTradingService(
             open.Entry.Direction, entryPrice, open.StopLoss, favourable,
             exitPlan, options.Value.BreakEvenEnabled,
             options.Value.TrailingStopEnabled, open.TotalQuantity,
-            open.Entry.FilledQuantity, "NSE", differentiatedRunner);
+            open.Entry.FilledQuantity, "NSE", differentiatedRunner,
+            PaperProtectiveStopPolicy.NiftyMinimumPeakGainLockFraction);
         var unrealised = (price - entryPrice) * open.RemainingQuantity * multiplier;
         await PersistProfitProtectionSnapshotAsync(researchDb, open, underlyingInstrumentId,
             price, effectiveStop, peakPoint?.OptionPrice ?? price,

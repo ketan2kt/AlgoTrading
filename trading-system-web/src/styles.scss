@@ -271,13 +271,10 @@ app-root .narrator-event p { margin:0; color:#8fa198; font-size:.73rem; line-hei
 app-root .narrator-event--opportunity { border-left-color:#28d17c; }
 app-root .narrator-event--warning { border-left-color:#f2c94c; }
 app-root .narrator-event--critical { border-left-color:#ff5d68; background:#1a1011; }
-app-root .narrator-toast-stack { position:fixed; right:1rem; bottom:1rem; z-index:1200; display:flex; width:min(390px,calc(100vw - 2rem)); flex-direction:column-reverse; gap:.55rem; pointer-events:none; }
-app-root .narrator-toast { position:relative; display:grid; gap:.4rem; overflow:hidden; padding:.72rem .8rem .82rem; border:1px solid #365245; border-left:4px solid #4a6659; border-radius:.5rem; color:#e7f1ec; background:rgba(8,20,15,.97); box-shadow:0 .8rem 2.2rem rgba(0,0,0,.48); pointer-events:auto; animation:narrator-toast-in .28s ease-out both; }
-app-root .narrator-toast > div { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
-app-root .narrator-toast span { color:#93aa9f; font-size:.67rem; letter-spacing:.07em; text-transform:uppercase; }
+app-root .narrator-toast-stack { position:fixed; right:.5rem; bottom:.5rem; z-index:1200; display:flex; width:min(510px,calc(100vw - 1rem)); flex-direction:column-reverse; align-items:flex-end; gap:.4rem; pointer-events:none; }
+app-root .narrator-toast { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:.35rem; max-width:100%; overflow:hidden; padding:.35rem .45rem .4rem .6rem; border:1px solid #365245; border-left:4px solid #4a6659; border-radius:.5rem; color:#e7f1ec; background:rgba(8,20,15,.97); box-shadow:0 .8rem 2.2rem rgba(0,0,0,.48); pointer-events:auto; animation:narrator-toast-in .28s ease-out both; }
 app-root .narrator-toast button { display:grid; width:1.6rem; height:1.6rem; place-items:center; padding:0; border:0; color:#aebfb7; background:transparent; font-size:1.1rem; line-height:1; }
-app-root .narrator-toast strong { font-size:.84rem; line-height:1.42; }
-app-root .narrator-toast small { color:#789086; font-size:.66rem; }
+app-root .narrator-toast-line { font-size:clamp(.7rem, 2.35vw, .82rem); line-height:1.4; white-space:nowrap; overflow-x:auto; scrollbar-width:thin; font-variant-numeric:tabular-nums; }
 app-root .narrator-toast i { position:absolute; right:0; bottom:0; left:0; height:2px; background:#7de2ae; transform-origin:left; animation:narrator-toast-life 15s linear both; }
 app-root .narrator-toast--opportunity { border-left-color:#28d17c; }
 app-root .narrator-toast--warning { border-left-color:#f2c94c; }

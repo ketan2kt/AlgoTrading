@@ -311,12 +311,13 @@ public sealed class MomentumExpansionStrategy(PriceActionStrategyOptions options
     }
 }
 
-public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> strategies) : ITradingStrategy
+public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> strategies,
+    ITradingStrategy? retestFallback = null) : ITradingStrategy
 {
     public string StrategyId => "price-action-portfolio";
-    public string Version => "1.0.0";
+    public string Version => retestFallback is null ? "1.0.0" : "1.1.0";
     public string ConfigurationManifest =>
-        System.Text.Json.JsonSerializer.Serialize(strategies.Select(value =>
+        System.Text.Json.JsonSerializer.Serialize((retestFallback is null ? strategies : strategies.Append(retestFallback)).Select(value =>
             new { value.StrategyId, value.Version,
                 value.ConfigurationManifest }));
     public StrategySignal? Evaluate(StrategyEvaluationContext context) => EvaluateDetailed(context).Signal;
@@ -368,10 +369,21 @@ public sealed class CompositeTradingStrategy(IReadOnlyList<ITradingStrategy> str
                         .Append("Exploration lane: one strong strategy qualified with EMA/VWAP and structure alignment, and no opposing signal.")
                         .ToArray()
                 }, []);
+            if (Retest(context, single.Direction) is { } confirmedRetest)
+                return confirmedRetest;
             return new(null, [$"Only {single.StrategyId} qualified; two-strategy consensus or a high-quality momentum expansion is required."]);
         }
+        if (Retest(context) is { } retest) return retest;
         return new(null, results.SelectMany(value => value.result.FailedConditions
             .Select(reason => $"{value.strategy.StrategyId}: {reason}")).ToArray());
+    }
+
+    private StrategyEvaluationResult? Retest(StrategyEvaluationContext context, Direction? existingSide = null)
+    {
+        if (!context.RelaxedNiftyEntries || retestFallback is null) return null;
+        var result = retestFallback.EvaluateDetailed(context);
+        return result.Signal is { } signal && (existingSide is null || signal.Direction == existingSide)
+            ? result : null;
     }
 
     private static bool IsExplorationEligible(StrategySignal signal,

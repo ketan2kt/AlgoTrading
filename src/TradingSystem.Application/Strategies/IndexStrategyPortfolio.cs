@@ -13,5 +13,5 @@ public static class IndexStrategyPortfolio
         new RangeBreakoutRetestStrategy(priceAction),
         new VwapRejectionReversalStrategy(priceAction),
         new MomentumExpansionStrategy(priceAction)
-    ]);
+    ], new NiftyBreakoutRetestStrategy(priceAction));
 }

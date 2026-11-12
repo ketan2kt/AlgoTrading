@@ -14,6 +14,7 @@ public sealed record StrategySignal(
 {
     // Optional display evidence; only populated by a policy that used this exact index threshold.
     public decimal? IndexConfirmationLevel { get; init; }
+    public decimal? RetestChaseBoundary { get; init; }
 }
 
 public sealed record StrategyEvaluationContext(
@@ -24,6 +25,7 @@ public sealed record StrategyEvaluationContext(
     DateTimeOffset? LastSignalAtUtc, int TradesToday)
 {
     public bool RelaxedNiftyEntries { get; init; }
+    public int CandleIntervalSeconds { get; init; } = 60;
     public decimal Vwap { get; init; }
     public decimal FastEma { get; init; }
     public decimal SlowEma { get; init; }

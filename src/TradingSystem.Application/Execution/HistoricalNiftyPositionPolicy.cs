@@ -32,7 +32,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v11/" + DifferentiatedRunnerPolicy.Version;
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v12/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
@@ -78,7 +78,8 @@ public sealed class HistoricalNiftyPositionPolicy(
                 settings.BreakEvenEnabled, settings.TrailingStopEnabled,
                 quantity, position.BaseQuantity > 0
                     ? position.BaseQuantity : quantity, "NSE",
-                RunnerEligible(position, Invalidation(frame, position), mark));
+                RunnerEligible(position, Invalidation(frame, position), mark),
+                PaperProtectiveStopPolicy.NiftyMinimumPeakGainLockFraction);
             var invalidation = Invalidation(frame, position);
             if (invalidation.ShouldExit && mark > position.EntryPrice &&
                 settings.ProtectProfitableConfirmedReversals)

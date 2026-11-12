@@ -59,7 +59,11 @@ describe('market narrator', () => {
       const current = snapshot(bars, { overlays: [{ ...trade, ...changes }] });
       const alerts = buildMarketNarratorEvents('nifty', previous, current).filter(e => e.key.includes('profit-giveback:'));
       expect(alerts).toHaveLength(expected ? 1 : 0);
-      if (expected) expect(alerts[0].message).toContain(text);
+      if (expected) {
+        expect(alerts[0].message).toContain(text);
+        expect(alerts[0].alertText).toContain(changes.unrealisedPnl! > 0 ? 'Still green' :
+          changes.unrealisedPnl === 0 ? 'Breakeven' : 'Now in loss');
+      }
       current.isFresh = false;
       expect(buildMarketNarratorEvents('nifty', previous, current).some(e => e.key.includes('profit-giveback:'))).toBe(false);
     });
@@ -73,6 +77,7 @@ describe('market narrator', () => {
     const events = buildMarketNarratorEvents('nifty', snapshot(bars.slice(0, 2)), snapshot(bars));
     expect(events.some((event) => event.message.includes('closed above VWAP'))).toBe(true);
     expect(events.some((event) => event.message.includes('bullish EMA 9 and EMA 21 crossover'))).toBe(true);
+    expect(events.find(event => event.key.includes('ema-bull:'))?.alertText).toBe('N · EMA 9 crossed above EMA 21');
   });
 
   it('does not evaluate analytical alerts from sub-five-minute bars', () => {
@@ -112,23 +117,35 @@ describe('market narrator', () => {
     const current = snapshot(bars, { overlays: [exited] });
     const events = buildMarketNarratorEvents('nifty', previous, current);
     expect(events.some((event) => event.message.includes('target or profit objective reached'))).toBe(true);
+    expect(events.find(event => event.key.includes('exit:'))?.alertText).toBe('N · 25000 CE · Target hit · Exit ₹110.00 · +₹3,750');
   });
 
   it.each([
-    ['NIFTY26OCT25000CE', 'CallOption', 'bullish call-side'],
-    ['SENSEX26OCT73500PE', 'PutOption', 'bearish put-side'],
-  ])('narrates %s using option bias rather than Buy transaction side', (contract, type, expectedBias) => {
+    ['nifty', 'NIFTY26OCT25000CE', 'CallOption', 25000, 'bullish call-side', 'N · 25000 CE'],
+    ['sensex', 'SENSEX26OCT73500PE', 'PutOption', 73500, 'bearish put-side', 'S · 73500 PE'],
+    ['bank-nifty', 'BANKNIFTY26NOV61200PE', 'PutOption', 61200, 'bearish put-side', 'BN · 61200 PE'],
+  ] as const)('shows compact alerts for %s without changing voice bias', (market, contract, type, strike, expectedBias, label) => {
     const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
     const trade = { signalId: 'option-side', strategy: 'test', direction: 'Buy', signalTimeUtc: bars[0].openTimeUtc,
-      entry: 100, stopLoss: 95, target: 110, status: 'Active', quantity: 5, fillPrice: 100,
+      entry: 100, stopLoss: 95, target: 110, status: 'Active', quantity: 5, fillPrice: 837.60,
       executionInstrument: contract, executionInstrumentType: type, executionExpiry: null,
-      executionStrike: 25000, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
-      executionOneLotRisk: 375, executionStopLoss: 95, executionTarget: 110, executionRiskAmount: 1875,
+      executionStrike: strike, executionLotSize: 75, executionMaximumLots: 5, executionProposedEntry: 100,
+      executionOneLotRisk: 375, executionStopLoss: 753.85, executionTarget: 110, executionRiskAmount: 1875,
       executionCapitalExposure: 37500, rejectionReasons: [], lifecycleStatus: 'Active', currentOptionPrice: 102,
       exitPrice: null, realisedPnl: null, unrealisedPnl: 750, entryTimeUtc: bars[0].openTimeUtc, exitTimeUtc: null,
       maximumFavourablePnl: null, maximumAdverseLoss: null };
-    const events = buildMarketNarratorEvents('sensex', snapshot(bars), snapshot(bars, { overlays: [trade] }));
-    expect(events.find(event => event.key.includes('entry:'))?.message).toContain(expectedBias);
+    const events = buildMarketNarratorEvents(market, snapshot(bars), snapshot(bars, { overlays: [trade] }));
+    const entry = events.find(event => event.key.includes('entry:'));
+    expect(entry?.message).toContain(expectedBias);
+    expect(entry?.alertText).toBe(`${label} · E ₹837.60 · SL ₹753.85`);
+  });
+
+  it('shortens a feed alert without dropping its diagnostic evidence', () => {
+    const bars = [candle('2026-10-12T03:45:00Z', 99, 100, 98, 99)];
+    const current = snapshot(bars, { isFresh: false, feedStatus: 'DataStale' });
+    const events = selectHighSignalNarratorEvents(buildMarketNarratorEvents('sensex', snapshot(bars), current));
+    expect(events[0].alertText).toBe('S · Feed stale or offline');
+    expect(events[0].evidence).toBe('DataStale');
   });
 
   it('does not narrate every trailing-stop adjustment after profit is protected', () => {

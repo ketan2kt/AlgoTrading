@@ -71,6 +71,20 @@ public sealed class PaperProtectiveStopPolicyTests
             Assert.Equal(lockedFraction, PaperProtectiveStopPolicy.PeakProfitLockFraction(peakR));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NiftyFloorStartsAtFirstProfitLockAndAppliesToRunner(bool runner)
+    {
+        var plan = ProfessionalExitPolicy.For(ProfessionalTradeRegime.Directional);
+        decimal Stop(decimal mark) => PaperProtectiveStopPolicy.CalculateNetProtected(
+            Direction.Buy, 217.90m, 196.10m, mark, plan, true, true, 650, 650, "NSE", runner,
+            PaperProtectiveStopPolicy.NiftyMinimumPeakGainLockFraction);
+        Assert.Equal(196.10m, Stop(228.79m));
+        Assert.Equal(225.53m, Stop(228.80m));
+        Assert.Equal(227.84m, Stop(232.10m));
+    }
+
     [Fact]
     public void NearOneRWinnerProtectsSixtyFivePercentWithoutUsingCurrencyThreshold()
     {
