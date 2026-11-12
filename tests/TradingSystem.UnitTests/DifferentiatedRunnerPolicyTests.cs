@@ -65,7 +65,16 @@ public sealed class DifferentiatedRunnerPolicyTests
         var normalStop = Assert.Single(normal.EvaluateStopUpdates(Frame(position))).NewStopPrice;
         var runnerStop = Assert.Single(runner.EvaluateStopUpdates(Frame(position))).NewStopPrice;
         Assert.InRange(runnerStop, 100m, normalStop);
-        Assert.True(runnerStop < normalStop);
+        if (market == "nifty")
+        {
+            // Both modes must keep at least 70% of the ₹10.40 peak gain.
+            Assert.Equal(107.28m, runnerStop);
+            Assert.Equal(runnerStop, normalStop);
+        }
+        else
+        {
+            Assert.True(runnerStop < normalStop);
+        }
         var alreadyProtected = position with { StopPrice = 108m };
         Assert.All(runner.EvaluateStopUpdates(Frame(alreadyProtected)), update => Assert.True(update.NewStopPrice >= 108m));
         quotes.Remove(underlying);
@@ -140,11 +149,12 @@ public sealed class DifferentiatedRunnerPolicyTests
         var baseline = Policy(false);
         var runner = Policy(true);
         Assert.Equal(122.5m, Assert.Single(baseline.EvaluateStopUpdates(frame)).NewStopPrice);
-        Assert.Equal(115m, Assert.Single(runner.EvaluateStopUpdates(frame)).NewStopPrice);
+        var expectedRunnerStop = market == "nifty" ? 121m : 115m;
+        Assert.Equal(expectedRunnerStop, Assert.Single(runner.EvaluateStopUpdates(frame)).NewStopPrice);
         var tighter = position with { StopPrice = 124m };
         Assert.Empty(runner.EvaluateStopUpdates(frame with { OpenPosition = tighter, OpenPositions = [tighter] }));
         var unbanked = position with { Quantity = 150 };
-        Assert.Equal(115m, Assert.Single(runner.EvaluateStopUpdates(frame with
+        Assert.Equal(expectedRunnerStop, Assert.Single(runner.EvaluateStopUpdates(frame with
             { OpenPosition = unbanked, OpenPositions = [unbanked] })).NewStopPrice);
         quotes[underlying] = quotes[underlying] with { AvailableAtUtc = now.AddSeconds(-31) };
         Assert.Equal(122.5m, Assert.Single(runner.EvaluateStopUpdates(frame)).NewStopPrice);
