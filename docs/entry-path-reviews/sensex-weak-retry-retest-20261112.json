@@ -1,0 +1,21 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-12T09:01:30.2029195+00:00",
+  "market": "sensex",
+  "from": "2026-11-11",
+  "to": "2026-11-12",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 13,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 13,
+  "sessions": [
+    { "Date": "2026-11-11", "RegularEntries": 7 },
+    { "Date": "2026-11-12", "RegularEntries": 6 }
+  ],
+  "strategyBreakdown": [
+    { "strategy": "Sensex persistent directional thesis", "count": 7, "netPnl": -4115.78, "removed": false },
+    { "strategy": "Sensex directional pullback participation", "count": 5, "netPnl": -11410.62, "removed": false },
+    { "strategy": "Sensex controlled early pullback", "count": 1, "netPnl": 3661.18, "removed": false }
+  ],
+  "limitation": "Route-use counts from saved diagnostics; November 12 snapshot through 14:31 IST. No entire strategy route was removed. Separate as-of matched-entry screen is not a full replacement replay or profitability proof."
+}

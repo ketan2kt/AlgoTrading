@@ -23,8 +23,8 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v7/" + SensexStalledTrendEntryPolicy.Version +
-        "/" + OptionRiskBudgetPolicy.Version;
+    public string CodeVersion => "sensex-normal-entry-v8/" + SensexStalledTrendEntryPolicy.Version +
+        "/" + SensexWeakRetryEntryPolicy.Version + "/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,
@@ -112,15 +112,17 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
         var persistent = selection.PersistentDirectional ||
             ProfessionalTradeFramework.Map(state) == ProfessionalTradeRegime.Directional;
         if (!StructuralReentryPolicy.Evaluate(bars, direction, priorExit, persistent).Permitted) return new([], "StructuralReentry");
-        var priorRegular = priorSame is not null && Specialty(priorSame.Strategy)
-            ? frame.ClosedTrades.Where(value => IsSide(value.Symbol, direction) && !Specialty(value.Strategy))
-                .OrderByDescending(value => value.ExitAtUtc).FirstOrDefault()
-            : priorSame;
+        var sessionOpen = new DateTimeOffset(tradingDate.ToDateTime(SensexStalledTrendEntryPolicy.CashSessionOpen),
+            IndiaOffset);
+        var priorRegular = frame.ClosedTrades.Where(value => IsSide(value.Symbol, direction) &&
+                !Specialty(value.Strategy) && !value.IsPartialExit && value.ExitAtUtc >= sessionOpen && value.ExitAtUtc <= now)
+            .OrderByDescending(value => value.ExitAtUtc).FirstOrDefault();
         if (SensexFailedSetupReentryPolicy.Blocks(now, priorRegular?.ExitAtUtc,
                 priorRegular?.ExitReason, priorRegular?.NetPnl, state, direction))
             return new([], SensexFailedSetupReentryPolicy.Rejection);
-        var sessionOpen = new DateTimeOffset(tradingDate.ToDateTime(SensexStalledTrendEntryPolicy.CashSessionOpen),
-            IndiaOffset);
+        var retry = SensexWeakRetryEntryPolicy.Evaluate(bars, direction, sessionOpen, now, settings.IntervalSeconds,
+            priorRegular?.ExitAtUtc, priorRegular?.ExitReason, priorRegular?.NetPnl, state);
+        if (!retry.Permitted) return new([], retry.Rejection!);
         var stalled = SensexStalledTrendEntryPolicy.Evaluate(selection.PersistentDirectional,
             bars, direction, sessionOpen, now, settings.IntervalSeconds);
         if (!stalled.Permitted) return new([], stalled.Rejection!);

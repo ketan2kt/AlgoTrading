@@ -487,6 +487,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     on priorPosition.ExecutionInstrumentId equals executionInstrument.Id
                 where priorPosition.Market == market.Code && priorPosition.Status != "Active" &&
                       priorPosition.ClosedAtUtc != null && priorPosition.ClosedAtUtc >= sessionStartUtc &&
+                      priorPosition.ClosedAtUtc <= now &&
                       (decision.Direction == Direction.Buy
                           ? executionInstrument.Type == InstrumentType.CallOption
                           : executionInstrument.Type == InstrumentType.PutOption)
@@ -531,11 +532,10 @@ internal sealed partial class MultiMarketPaperTradingService(
                 return;
             }
 
-            // Keep the existing structural/morning checks unchanged. A specialty
-            // close cannot hide a more recent regular failed setup within this guard.
-            var cooldownStart = now - SensexFailedSetupReentryPolicy.ResetPeriod;
-            var recentRegular = priorIsSpecialty && priorSameDirectionExit > cooldownStart
-                ? await sameDirectionExits.Where(value => value.ClosedAtUtc > cooldownStart &&
+            // A specialty close cannot hide the last regular same-side trade,
+            // including for the post-cooldown level retest.
+            var recentRegular = priorIsSpecialty
+                ? await sameDirectionExits.Where(value =>
                     !value.Strategy.StartsWith("Hero Zero|") && !value.Strategy.StartsWith("Expansion Pair|") &&
                     !value.Strategy.StartsWith("PaperOnly|Pyramid|")).FirstOrDefaultAsync(cancellationToken)
                 : priorSameDirectionPosition;
@@ -552,6 +552,15 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
 
             var cashOpen = new DateTimeOffset(today.ToDateTime(market.SessionStart), india.Offset);
+            var retry = SensexWeakRetryEntryPolicy.Evaluate(priceBars, decision.Direction.Value,
+                cashOpen, now, interval, recentRegular?.ClosedAtUtc, recentRegular?.Status,
+                recentRegular?.RealisedPnl, marketStateV2);
+            if (!retry.Permitted)
+            {
+                await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                    retry.Rejection!, decision.Confidence, retry.Reasons, cancellationToken);
+                return;
+            }
             var stalled = SensexStalledTrendEntryPolicy.Evaluate(persistentDirectionalEntry,
                 priceBars, decision.Direction.Value, cashOpen, now, interval);
             if (!stalled.Permitted)

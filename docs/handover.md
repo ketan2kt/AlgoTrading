@@ -1,5 +1,10 @@
 # Current handover — 12 November 2026
 
+## Sensex weak same-side retry
+
+- Website-only release. The regular Sensex entry path and replay share a gate for weak retries near an opposing level after a losing same-side failed setup. It requires a completed break, a held retest, and a separate continuation without chasing. Bank Nifty, hard stops, and exit rules are unchanged.
+- 26 focused checks passed. The 11–12 November matched-entry screen retained all seven winners in 13 recorded Sensex entries. The incremental deferred entry was 12 November 12:41 `81900PE` (−₹3,334.17 recorded net); this does not price a replacement trade. Required dated route evidence is included. Dispatch only after exact main push CI passes.
+
 ## 12 November after-hours release
 
 - Website: compact trade/risk/replay alerts; Nifty 70% minimum peak-gain protection from the existing first trigger and a confirmed retest fallback within the original chase limits; Sensex same-side weak failed-setup re-entry and stalled-thesis guards; Bank Nifty countertrend location and opposite-side failed-setup confirmation, without the unpublished afternoon cutoff. Regular paper/live policy and replay share the entry/exit changes; no sizing, arming, or specialty-trade change.
