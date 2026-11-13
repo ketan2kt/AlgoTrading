@@ -42,7 +42,9 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     private readonly BlobClient? keyRing;
     private readonly string keyDirectory;
     private string? keyRingHash;
-    private readonly SemaphoreSlim hydrateGate = new(1, 1);
+    private readonly SemaphoreSlim quoteHydrateGate = new(1, 1);
+    private readonly SemaphoreSlim feedHydrateGate = new(1, 1);
+    private readonly SemaphoreSlim policyHydrateGate = new(1, 1);
     private readonly ReplayQuoteCacheBudget quoteCache;
     private readonly Dictionary<string, (long Length, DateTime Modified)> uploaded = new(StringComparer.Ordinal);
     internal readonly string Root;
@@ -311,16 +313,23 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         return HydrateCoreAsync("policies", null, streamingOnly: false, token, buildId);
     }
 
+    internal Task HydratePolicyCatalogueAsync(CancellationToken token) =>
+        HydrateCoreAsync("policies", null, streamingOnly: false, token, manifestsOnly: true);
+
     private async Task HydrateCoreAsync(string category, DateOnly? tradingDate, bool streamingOnly, CancellationToken token,
-        string? policyId = null)
+        string? policyId = null, bool manifestsOnly = false)
     {
         var date = tradingDate;
         if (container is null) return;
         if (category is not ("quotes" or "feed" or "policies") || category != "policies" && date is null)
             throw new ArgumentException("A bounded archive category/date is required.");
         using var pinned = date is { } requested ? Pin(requested) : null;
-        await hydrateGate.WaitAsync(token);
+        var hydrateGate = category switch
+        {
+            "quotes" => quoteHydrateGate, "feed" => feedHydrateGate, _ => policyHydrateGate
+        };
         var started = Stopwatch.GetTimestamp();
+        await hydrateGate.WaitAsync(token);
         try
         {
             if (category == "quotes")
@@ -335,6 +344,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             await foreach (var item in container.GetBlobsAsync(BlobTraits.Metadata, BlobStates.None, prefix: prefix, cancellationToken: token))
             {
                 if (streamingOnly && IsWebsiteQuotePath(item.Name)) continue;
+                if (manifestsOnly && !item.Name.EndsWith("/manifest.json", StringComparison.Ordinal)) continue;
                 if (!Allowed(item.Name) || !item.Metadata.TryGetValue("sha256", out var hash))
                     throw new InvalidDataException("Invalid replay cloud artifact.");
                 var path = Path.Combine(CacheRoot, item.Name.Replace('/', Path.DirectorySeparatorChar));
@@ -432,7 +442,13 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         }
     }
 
-    public override void Dispose() { hydrateGate.Dispose(); base.Dispose(); }
+    public override void Dispose()
+    {
+        quoteHydrateGate.Dispose();
+        feedHydrateGate.Dispose();
+        policyHydrateGate.Dispose();
+        base.Dispose();
+    }
 }
 
 public sealed record ReplayRecorderSnapshot(DateOnly Date, DateTimeOffset AtUtc,

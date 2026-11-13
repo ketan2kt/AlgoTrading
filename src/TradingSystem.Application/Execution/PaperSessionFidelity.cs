@@ -6,10 +6,13 @@ public sealed record FidelityTrade(string Symbol,IReadOnlyList<FidelityAction> A
     public FidelityAction Entry => Actions.First(x=>x.Kind=="Entry");
 }
 public sealed record RecordedPaperSession(IReadOnlyList<FidelityTrade> Trades,IReadOnlyList<string> Gaps);
+public sealed record PaperReplayPreflight(SessionPolicyReceipt? Receipt, string? CaptureExclusion = null, int? PaperTrades = null);
 public interface IRecordedPaperSessionReader
 {
     Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly tradingDate,CancellationToken token);
     Task<RecordedPaperSession> ReadTradesAsync(DateOnly tradingDate,CancellationToken token);
+    async Task<PaperReplayPreflight> PreflightAsync(DateOnly tradingDate, CancellationToken token) =>
+        new(await ReceiptAsync(tradingDate, token));
 }
 public sealed record FidelityRow(string Symbol,string Kind,string Finding,FidelityAction? Paper,FidelityAction? Replay)
 {

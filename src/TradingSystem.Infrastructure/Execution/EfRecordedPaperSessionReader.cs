@@ -17,8 +17,34 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
     {
         var end=Time(tradingDate,15,30).ToUniversalTime();
         var receipt=(await manifests.ReadEvidenceAsync(tradingDate,Time(tradingDate,9,15),end,token))?.PolicyReceipt;
+        return await VerifyReceiptAsync(tradingDate, end, receipt, token);
+    }
+
+    public async Task<PaperReplayPreflight> PreflightAsync(DateOnly tradingDate, CancellationToken token)
+    {
+        var start = Time(tradingDate, 9, 15).ToUniversalTime();
+        var end = Time(tradingDate, 15, 30).ToUniversalTime();
+        var manifest = await manifests.ReadEvidenceAsync(tradingDate, start, end, token);
+        if (manifest is not null && HistoricalFeedCaptureEvidence.CoversWindow(manifest, tradingDate, start, end))
+            return new(await VerifyReceiptAsync(tradingDate, end, manifest.PolicyReceipt, token));
+
+        var nifty = await db.PaperTradeResults.AsNoTracking().CountAsync(r => r.ClosedAtUtc >= start &&
+            r.ClosedAtUtc <= end && r.TradingSymbol.StartsWith("NIFTY"), token);
+        var others = await db.MarketPaperPositions.AsNoTracking().CountAsync(p =>
+            (p.Market == "sensex" || p.Market == "bank-nifty") && p.OpenedAtUtc >= start && p.OpenedAtUtc <= end &&
+            !p.Strategy.StartsWith("Hero Zero|") && !p.Strategy.StartsWith("Expansion Pair|"), token);
+        var reason = manifest is null ? "No dated recorder manifest was available." :
+            $"Recorder capture did not cover the full session: gaps={manifest.HasGaps}; " +
+            $"subscribed {manifest.SubscribedAtUtc:O}; completed {manifest.CompletedAtUtc:O}.";
+        return new(null, reason, nifty + others);
+    }
+
+    private async Task<SessionPolicyReceipt?> VerifyReceiptAsync(DateOnly tradingDate, DateTimeOffset end,
+        SessionPolicyReceipt? receipt, CancellationToken token)
+    {
         if(receipt?.ValidFor(tradingDate)!=true) return null;
         if(await db.AuditLogs.AsNoTracking().AnyAsync(a=>a.Action=="IndexTradingLotsChanged" &&
+            a.EntityType==nameof(TradingSystem.Domain.Trading.ApplicationSetting) && a.EntityId==EfTradingLotConfigurationService.Key &&
             a.OccurredAtUtc>=receipt.ObservedAt && a.OccurredAtUtc<=end,token)) return null;
         return receipt;
     }

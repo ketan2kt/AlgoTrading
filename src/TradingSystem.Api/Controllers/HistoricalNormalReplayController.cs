@@ -20,6 +20,7 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
     IHistoricalPolicyBuildStore builds, IHistoricalNormalReplayRunStore runs) : ControllerBase
 {
     private static readonly SemaphoreSlim ComparisonSlot = new(1, 1);
+    private static readonly TimeSpan ComparisonBudget = TimeSpan.FromMinutes(2);
 
     [HttpGet("runs")]
     public async Task<ActionResult<IReadOnlyList<HistoricalNormalReplayRunSummary>>> Runs(CancellationToken cancellationToken)
@@ -50,8 +51,11 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
     public async Task<ActionResult<IReadOnlyList<HistoricalPolicyBuild>>> Builds(CancellationToken cancellationToken)
     {
         Response.Headers.CacheControl = "no-store";
-        await builds.CaptureCurrentAsync(cancellationToken);
-        return Ok(await builds.ListAsync(cancellationToken));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try { return Ok(await builds.ListAsync(timeout.Token)); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { return StatusCode(StatusCodes.Status408RequestTimeout, "The archived build catalogue exceeded its time budget."); }
     }
 
     [HttpGet("configuration")]
@@ -94,16 +98,46 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
         Response.Headers.CacheControl="no-store";
         if(date.Year<2020 || !HistoricalReplaySessionCalendar.IsCompletedDate(date,clock.GetUtcNow()))
             return BadRequest("Choose a completed session.");
+        if (!await ComparisonSlot.WaitAsync(0, cancellationToken))
+            return Conflict("A normal-policy replay is already running. Retry when it finishes.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(AvailableBudget());
+        var stage = "capture and policy preflight";
         try
         {
-            var receipt=await recorded.ReceiptAsync(date,cancellationToken);
+            var preflight = await recorded.PreflightAsync(date, timeout.Token);
+            if (preflight.CaptureExclusion is { } reason)
+            {
+                var cohort = new HistoricalReplayCohortSelection(Array.Empty<HistoricalReplaySessionData>(), [new(date, [reason])]);
+                var excluded = new HistoricalSharedPortfolioResult(cohort, [], "", "", 0, 0, "InsufficientCoverage", [reason]);
+                return Ok(new HistoricalNormalReplayComparisonReport(excluded,
+                    ["Use gap-aware replay to inspect individual markets without treating unverified fills as matches."])
+                {
+                    PaperFidelity = new("Not simulated: strict coverage incomplete", preflight.PaperTrades ?? 0, 0, [reason], [])
+                });
+            }
+            var receipt = preflight.Receipt;
             if(receipt is null) return Conflict("Inconclusive: verified pre-open policy is missing, conflicting, or lot settings changed. Current settings will not be substituted.");
             var execution=SessionPolicyReceipt.ComparisonExecution;
-            return await Compare(new(date,date,receipt.Settings,receipt.Settings,execution) {
+            stage = "input assembly or simulation";
+            return Ok(await comparison.CompareAsync(new(date,date,receipt.Settings,receipt.Settings,execution) {
                 BaselineBuildId=receipt.BuildId,ProposalBuildId=receipt.BuildId,PaperSessionPolicyFingerprint=receipt.Fingerprint
-            },cancellationToken);
+            }, timeout.Token));
         }
+        catch (UnsupportedReplayContractException exception) { return Conflict(exception.Message); }
+        catch (ArgumentException) { return BadRequest("The frozen research configuration or historical inputs are invalid."); }
         catch (InvalidDataException) { return Conflict("Inconclusive: dated policy evidence or strategy archive is invalid."); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { return StatusCode(StatusCodes.Status408RequestTimeout, $"Paper verification exceeded its time budget during {stage}."); }
+        finally { ComparisonSlot.Release(); }
+    }
+
+    private TimeSpan AvailableBudget()
+    {
+        var local = clock.GetUtcNow().ToOffset(TimeSpan.FromHours(5.5));
+        if (local.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && local.TimeOfDay < TimeSpan.FromHours(9))
+            return TimeSpan.FromTicks(Math.Min(ComparisonBudget.Ticks, (TimeSpan.FromHours(9) - local.TimeOfDay).Ticks));
+        return ComparisonBudget;
     }
 
     [ValidateAntiForgeryToken]

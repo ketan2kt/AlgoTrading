@@ -120,6 +120,46 @@ internal sealed class FileHistoricalReplayQuotePath(string path, HistoricalQuote
         }
     }
 
+    // Recorder files are independent receipt minutes. Once each minute has
+    // been sorted, write directly to the immutable path instead of sorting and
+    // compressing the whole session again. Order and duplicates are validated.
+    internal static async Task<FileHistoricalReplayQuotePath> BuildOrderedAsync(string root,
+        IAsyncEnumerable<HistoricalReplayQuote> source, CancellationToken token)
+    {
+        Directory.CreateDirectory(root);
+        var pending = Path.Combine(root, Guid.NewGuid().ToString("N") + ".pending");
+        try
+        {
+            var count = 0;
+            HistoricalReplayQuote? previous = null;
+            await using (var file = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+            await using (var gzip = new GZipStream(file, CompressionLevel.Fastest))
+            await using (var writer = new StreamWriter(gzip, new UTF8Encoding(false), 65536) { NewLine = "\n" })
+            {
+                await foreach (var row in source.WithCancellation(token))
+                {
+                    if (previous is not null)
+                    {
+                        var order = HistoricalQuoteOrderComparer.Instance.Compare(previous, row);
+                        if (order > 0 || order == 0 && previous != row)
+                            throw new InvalidDataException("Conflicting or unordered quote observations.");
+                        if (order == 0) continue;
+                    }
+                    await writer.WriteLineAsync(JsonSerializer.Serialize(row).AsMemory(), token);
+                    previous = row;
+                    count = checked(count + 1);
+                }
+            }
+            string id;
+            await using (var file = File.OpenRead(pending)) id = Convert.ToHexString(await SHA256.HashDataAsync(file, token));
+            var final = Path.Combine(root, id + ".quotes.gz");
+            try { File.Move(pending, final, overwrite: false); }
+            catch (IOException) when (File.Exists(final)) { return await OpenAsync(root, new(id, count), token); }
+            return new(final, new(id, count));
+        }
+        finally { File.Delete(pending); }
+    }
+
     private static async Task<int> WriteAsync(string path, IEnumerable<HistoricalReplayQuote> rows, CancellationToken token)
     {
         await using var file = File.Create(path);

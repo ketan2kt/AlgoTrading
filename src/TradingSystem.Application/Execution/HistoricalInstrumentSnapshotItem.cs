@@ -19,6 +19,18 @@ public static class HistoricalInstrumentMasterFingerprint
     public static HistoricalInstrumentMasterManifest Create(
         IReadOnlyList<HistoricalInstrumentSnapshotItem> source)
     {
+        var ordered = OrderAndValidate(source);
+        return new(JsonSerializer.Serialize(ordered), ComputeFingerprint(ordered), ordered.Length);
+    }
+
+    public static (string Fingerprint, int ContractCount) Verify(IReadOnlyList<HistoricalInstrumentSnapshotItem> source)
+    {
+        var ordered = OrderAndValidate(source);
+        return (ComputeFingerprint(ordered), ordered.Length);
+    }
+
+    private static HistoricalInstrumentSnapshotItem[] OrderAndValidate(IReadOnlyList<HistoricalInstrumentSnapshotItem> source)
+    {
         ArgumentNullException.ThrowIfNull(source);
         if (source.Count == 0 || source.Any(item =>
                 string.IsNullOrWhiteSpace(item.Exchange) ||
@@ -31,21 +43,24 @@ public static class HistoricalInstrumentMasterFingerprint
                 .Any(group => group.Count() > 1))
             throw new ArgumentException("A unique, validated instrument master is required.",
                 nameof(source));
-        var ordered = source.OrderBy(item => item.Exchange, StringComparer.Ordinal)
+        return source.OrderBy(item => item.Exchange, StringComparer.Ordinal)
             .ThenBy(item => item.TradingSymbol, StringComparer.Ordinal)
             .ThenBy(item => item.Type)
             .ThenBy(item => item.ExpiryDate)
             .ThenBy(item => item.StrikePrice).ToArray();
-        var json = JsonSerializer.Serialize(ordered);
-        var canonical = string.Join('\n', ordered.Select(item => string.Join('|',
+    }
+
+    private static string ComputeFingerprint(IReadOnlyList<HistoricalInstrumentSnapshotItem> ordered)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var item in ordered)
+            hash.AppendData(Encoding.UTF8.GetBytes(string.Join('|',
             item.Exchange, item.TradingSymbol, item.GrowwSymbol,
             item.Segment.ToString(), item.Type.ToString(),
             item.ExpiryDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
             item.StrikePrice?.ToString("G29", CultureInfo.InvariantCulture) ?? "",
             item.LotSize.ToString(CultureInfo.InvariantCulture),
-            item.TickSize.ToString("G29", CultureInfo.InvariantCulture)))) + "\n";
-        var fingerprint = Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(canonical)));
-        return new(json, fingerprint, ordered.Length);
+            item.TickSize.ToString("G29", CultureInfo.InvariantCulture)) + "\n"));
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 }

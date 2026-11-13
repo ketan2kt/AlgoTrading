@@ -114,6 +114,8 @@ public sealed class HistoricalPolicyBuildStoreContractTests : IDisposable
         using var store = new FileHistoricalPolicyBuildStore(TimeProvider.System, directory);
         var build = await store.CaptureCurrentAsync(CancellationToken.None);
         await File.AppendAllTextAsync(Path.Combine(directory, build.Id, "TradingSystem.Application.dll"), "tampered");
+        // A picker must not read old assemblies; execution must still reject them.
+        Assert.Equal(build.Id, Assert.Single(await store.ListAsync(CancellationToken.None)).Id);
         await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(build.Id, CancellationToken.None));
         await Assert.ThrowsAsync<InvalidDataException>(() => store.CaptureCurrentAsync(CancellationToken.None));
     }

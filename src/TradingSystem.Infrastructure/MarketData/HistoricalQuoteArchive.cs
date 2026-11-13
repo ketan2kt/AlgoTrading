@@ -261,8 +261,38 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         if (!Directory.Exists(root)) return new([], true);
         var gaps = false;
         var unreadable = new HashSet<HistoricalReplayGap>();
-        var result = await FileHistoricalReplayQuotePath.BuildAsync(Path.Combine(root, "replay-paths"), ProjectAsync(token), token);
+        var pathRoot = Path.Combine(root, "replay-paths");
+        var partitioned = streamingOnly && Directory.EnumerateFiles(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
+            .Where(path => !ReplayBlobStorage.IsWebsiteQuotePath(path))
+            .All(path => Path.GetFileName(path) is { } name && (name.EndsWith("-gaps.ndjson.gz", StringComparison.Ordinal) ||
+                name.Length == 26 && name.EndsWith(".ndjson.gz", StringComparison.Ordinal) &&
+                TimeOnly.TryParseExact(name.AsSpan(11, 5), "HH-mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)));
+        var result = partitioned
+            ? await FileHistoricalReplayQuotePath.BuildOrderedAsync(pathRoot, OrderMinuteShardsAsync(token), token)
+            : await FileHistoricalReplayQuotePath.BuildAsync(pathRoot, ProjectAsync(token), token);
         return new(result, gaps) { UnreadableIntervals = unreadable.OrderBy(value => value.StartUtc).ToArray() };
+
+        async IAsyncEnumerable<HistoricalReplayQuote> OrderMinuteShardsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            var buffer = new List<HistoricalReplayQuote>();
+            var minute = long.MinValue;
+            await foreach (var quote in ProjectAsync(cancellationToken))
+            {
+                var next = quote.AvailableAtUtc.UtcTicks / TimeSpan.TicksPerMinute;
+                if (next < minute) throw new InvalidDataException("Recorder quote lies outside its receipt-minute partition.");
+                if (next != minute && buffer.Count != 0)
+                {
+                    buffer.Sort(HistoricalQuoteOrderComparer.Instance);
+                    foreach (var row in buffer) yield return row;
+                    buffer.Clear();
+                }
+                minute = next;
+                if (buffer.Count == 100_000) throw new InvalidDataException("Recorder quote minute exceeds its bounded read size.");
+                buffer.Add(quote);
+            }
+            buffer.Sort(HistoricalQuoteOrderComparer.Instance);
+            foreach (var row in buffer) yield return row;
+        }
 
         async IAsyncEnumerable<HistoricalReplayQuote> ProjectAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -336,7 +366,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             if(!Directory.Exists(root)){if (!remoteAvailable) gap();yield break;}
             var paths=Directory.GetFiles(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"*.ndjson*")
                 .Where(p=>(includeWebsite || !ReplayBlobStorage.IsWebsiteQuotePath(p)) &&
-                    (p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal))).ToArray();
+                    (p.EndsWith(".ndjson",StringComparison.Ordinal)||p.EndsWith(".ndjson.gz",StringComparison.Ordinal)))
+                .Order(StringComparer.Ordinal).ToArray();
             if((paths.Length==0 && !remoteAvailable) || dropped.GetValueOrDefault(date)>0 || buffered.GetValueOrDefault(date)>0 ||
                File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+".capture-gap")) ||
                includeWebsite && File.Exists(Path.Combine(root,date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)+"-website.capture-gap")))gap();

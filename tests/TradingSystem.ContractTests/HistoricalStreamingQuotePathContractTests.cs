@@ -76,6 +76,25 @@ public sealed class HistoricalStreamingQuotePathContractTests : IDisposable
     }
 
     [Fact]
+    public async Task RecorderMinutePathMatchesExternalSortAcrossUnorderedBatches()
+    {
+        using var archive = new HistoricalQuoteArchive(TimeProvider.System, NullLogger<HistoricalQuoteArchive>.Instance, directory);
+        foreach (var second in new[] { 61, 3, 1, 63, 3 })
+            archive.TryRecord(new(Guid.NewGuid(), At.AddSeconds(second), new("NSE", "FNO", "NIFTYCE"),
+                new(100 + second, null, 99 + second, 65, 101 + second, 65, 1000, 5000, null))
+            { Source = "GrowwFeedSample", DepthSourceAtUtc = At.AddSeconds(second) });
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var date = new DateOnly(2026, 11, 4);
+        var symbols = new Dictionary<string, string> { ["NIFTYCE"] = "NIFTYCE" };
+        var ordered = await archive.ReadReplayAsync(date, "NIFTY", "NSE", symbols, At, At.AddMinutes(2),
+            CancellationToken.None, streamingOnly: true);
+        var sorted = await archive.ReadReplayAsync(date, "NIFTY", "NSE", symbols, At, At.AddMinutes(2), CancellationToken.None);
+        Assert.Equal(4, ordered.Quotes.Count);
+        Assert.Equal(sorted.Quotes.AsEnumerable(), ordered.Quotes.AsEnumerable());
+        Assert.False(ordered.HasCaptureGaps);
+    }
+
+    [Fact]
     public async Task DiskAndMemoryPathsProduceExactlyTheSameFillsAndFingerprint()
     {
         var quotes = new[] { new HistoricalReplayQuote("NIFTYCE", At.AddMinutes(2), 100),

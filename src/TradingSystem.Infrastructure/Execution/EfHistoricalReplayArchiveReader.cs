@@ -62,6 +62,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 value.CapturedAtUtc <= start)
             .OrderByDescending(value => value.CapturedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
+        Stage("dated-master-loaded");
         HistoricalInstrumentSnapshotItem[]? datedItems = null;
         if (datedMaster is not null)
         {
@@ -75,12 +76,13 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 throw new InvalidOperationException(
                     "The dated instrument-master snapshot cannot be parsed.", exception);
             }
-            var verified = HistoricalInstrumentMasterFingerprint.Create(datedItems ?? []);
+            var verified = HistoricalInstrumentMasterFingerprint.Verify(datedItems ?? []);
             if (verified.Fingerprint != datedMaster.Fingerprint ||
                 verified.ContractCount != datedMaster.ContractCount)
                 throw new InvalidOperationException(
                     "The dated instrument-master snapshot fingerprint does not match its payload.");
         }
+        Stage("dated-master-verified");
         var index = await db.Instruments.AsNoTracking().Where(value =>
                 value.Exchange == exchange && value.Segment == InstrumentSegment.Cash &&
                 value.Type == InstrumentType.Index &&
@@ -118,11 +120,13 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             .ToDictionary(group => group.Key,
                 group => group.Single().TradingSymbol, StringComparer.Ordinal);
         var optionIds = optionInstruments.Select(value => value.Id).ToArray();
-        var pageReceipts = await db.HistoricalUniversePageReceipts.AsNoTracking()
+        var pageReceipts = gapAware ? [] : await db.HistoricalUniversePageReceipts.AsNoTracking()
             .Where(value => value.SessionDate == tradingDate && value.Market == market)
             .OrderBy(value => value.ExpiryDate).ThenBy(value => value.Page)
             .ToArrayAsync(cancellationToken);
-        var ids = optionIds.Append(index.Id)
+        // Gap-aware policy/coverage uses only executable quote observations,
+        // never option OHLC or research-import option bars and page receipts.
+        var ids = (gapAware ? [] : optionIds).Append(index.Id)
             .Concat(future is null ? [] : [future.Id]).ToArray();
         var candles = await db.Candles.AsNoTracking().Where(value =>
                 ids.Contains(value.InstrumentId) && value.Source == "Groww" &&
@@ -132,15 +136,18 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 value.Open, value.High, value.Low, value.Close, value.Volume,
                 value.OpenInterest })
             .ToArrayAsync(cancellationToken);
+        Stage("recorded-bars-loaded");
         var unmappedPaths = await db.HistoricalResearchCandles.AsNoTracking()
             .Where(value => value.Exchange == exchange &&
                 value.Underlying == underlying && (value.Source == "GrowwHistoricalApiV1" || value.Source == GrowwHistoricalResearchImporter.IndexSource) &&
+                (!gapAware || value.Source == GrowwHistoricalResearchImporter.IndexSource || value.GrowwSymbol.EndsWith("-FUT")) &&
                 value.IntervalSeconds == 60 && value.OpenTimeUtc >= start &&
                 value.OpenTimeUtc < end)
             .Select(value => new { value.GrowwSymbol, value.ExpiryDate, value.Source,
                 value.OpenTimeUtc, value.Open, value.High, value.Low,
                 value.Close, value.Volume, value.OpenInterest })
             .ToArrayAsync(cancellationToken);
+        Stage("research-bars-loaded");
         var rawFront = unmappedPaths.Where(value =>
                 value.GrowwSymbol.EndsWith("-FUT", StringComparison.Ordinal) &&
                 value.ExpiryDate >= tradingDate &&
@@ -161,6 +168,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             .Select(value => new { value.ReceivedAtUtc, value.Source,
                 value.SourceTimestampUtc, value.ExpiryDate, value.PayloadJson })
             .ToArrayAsync(cancellationToken);
+        Stage("chain-receipts-loaded");
         var prior = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == index.Id && value.Source == "Groww" &&
                 value.IntervalSeconds == 60 && value.OpenTimeUtc >= priorStart &&
@@ -272,7 +280,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 value.OpenTimeUtc.AddMinutes(1), value.Close)
             { Volume = value.Volume, OpenInterest = value.OpenInterest }))
             .Concat(chainQuotes));
-        IReadOnlyList<HistoricalReplayQuote> quotes = HistoricalQuotePaths.Merge([proxyQuotes, observedQuotes]);
+        IReadOnlyList<HistoricalReplayQuote> quotes = gapAware ? observedQuotes : HistoricalQuotePaths.Merge([proxyQuotes, observedQuotes]);
         var contracts = datedItems is null
             ? optionInstruments.Where(value => value.ExpiryDate.HasValue &&
                     value.StrikePrice.HasValue && value.LotSize > 0 && value.TickSize > 0)

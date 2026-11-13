@@ -61,14 +61,17 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
 
     public async Task<IReadOnlyList<HistoricalPolicyBuild>> ListAsync(CancellationToken cancellationToken)
     {
-        if (cloud?.Enabled == true) await cloud.HydrateAsync("policies", null, cancellationToken);
+        if (cloud?.Enabled == true) await cloud.HydratePolicyCatalogueAsync(cancellationToken);
         var builds = new List<HistoricalPolicyBuild>();
         var roots = new[] { root, cloud is null ? root : Path.Combine(cloud.CacheRoot, "policies") };
         foreach (var path in roots.Distinct().Where(Directory.Exists).SelectMany(Directory.EnumerateDirectories))
         {
             var id = Path.GetFileName(path);
             if (!Guid.TryParseExact(id, "N", out _) || !File.Exists(Path.Combine(path, "manifest.json"))) continue;
-            builds.Add(await VerifyAsync(id, cancellationToken));
+            // Listing is metadata only. Loading a selected build still verifies
+            // both assembly hashes and the compiled module's identity.
+            try { builds.Add(await ReadManifestAsync(path, id, cancellationToken)); }
+            catch (Exception exception) when (exception is InvalidDataException or JsonException) { }
         }
         return builds.DistinctBy(value => value.Id).OrderByDescending(value => value.CapturedAtUtc).ToArray();
     }
@@ -93,6 +96,20 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
         if (!Guid.TryParseExact(id, "N", out var parsed) || id != parsed.ToString("N"))
             throw new ArgumentException("Invalid archived build identifier.", nameof(id));
         var path = BuildPath(id);
+        var build = await ReadManifestAsync(path, id, token);
+        foreach (var name in AssemblyNames)
+        {
+            var file = new FileInfo(Path.Combine(path, name));
+            if (!file.Exists || file.LinkTarget is not null || file.Length > 32 * 1024 * 1024)
+                throw new InvalidDataException("An approved policy assembly is absent or invalid.");
+            var hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(file.FullName, token)));
+            if (hash != build.AssemblyHashes[name]) throw new InvalidDataException("Policy assembly integrity check failed.");
+        }
+        return build;
+    }
+
+    private static async Task<HistoricalPolicyBuild> ReadManifestAsync(string path, string id, CancellationToken token)
+    {
         if (new DirectoryInfo(path).LinkTarget is not null)
             throw new InvalidDataException("Linked policy artifact paths are not permitted.");
         var manifestPath = Path.Combine(path, "manifest.json");
@@ -103,14 +120,6 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
         if (build?.Id != id || build.AssemblyHashes is null || build.AssemblyHashes.Count != AssemblyNames.Length ||
             AssemblyNames.Any(name => !build.AssemblyHashes.ContainsKey(name)))
             throw new InvalidDataException("The approved policy manifest does not match its identity.");
-        foreach (var name in AssemblyNames)
-        {
-            var file = new FileInfo(Path.Combine(path, name));
-            if (!file.Exists || file.LinkTarget is not null || file.Length > 32 * 1024 * 1024)
-                throw new InvalidDataException("An approved policy assembly is absent or invalid.");
-            var hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(file.FullName, token)));
-            if (hash != build.AssemblyHashes[name]) throw new InvalidDataException("Policy assembly integrity check failed.");
-        }
         return build;
     }
 
