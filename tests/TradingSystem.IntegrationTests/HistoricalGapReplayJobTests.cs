@@ -113,6 +113,25 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
     }
 
     [Fact]
+    public async Task CompletedComparisonBaselineSurvivesWorkerRestartWithoutAffectingOtherJobsOrMarkets()
+    {
+        var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+        var jobId = Guid.NewGuid();
+        var result = new HistoricalGapAwareMarket("NIFTY", 4, 100, true, [], [], null, []);
+        using (var jobs = new HistoricalGapReplayJobs(clock, directory.FullName))
+            await jobs.SaveGapBaselineAsync(jobId, "nifty", new("data", "policy", result), default);
+        using var restarted = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var checkpoint = Assert.IsType<HistoricalGapComparisonBaseline>(await restarted.ReadGapBaselineAsync(jobId, "nifty", default));
+        Assert.Equal("data", checkpoint.DataFingerprint);
+        Assert.Equal("policy", checkpoint.PolicyFingerprint);
+        Assert.Equal("NIFTY", checkpoint.Result.Market);
+        Assert.Equal(100, checkpoint.Result.FreshBookSamples);
+        Assert.Null(await restarted.ReadGapBaselineAsync(jobId, "sensex", default));
+        Assert.Null(await restarted.ReadGapBaselineAsync(Guid.NewGuid(), "nifty", default));
+        Assert.Null(await restarted.ReadAsync(jobId, default));
+    }
+
+    [Fact]
     public async Task SlowArchiveDoesNotConsumeSimulationTime()
     {
         var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));

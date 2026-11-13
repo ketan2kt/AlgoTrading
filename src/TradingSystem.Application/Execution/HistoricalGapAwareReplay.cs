@@ -48,6 +48,8 @@ public sealed record HistoricalGapMarketComparison(DateOnly Date, string Market,
 public sealed record HistoricalGapComparisonReport(DateOnly Date, string BaselineBuildId, string ProposalBuildId,
     IReadOnlyList<HistoricalGapMarketComparison> Markets);
 
+public sealed record HistoricalGapComparisonBaseline(string DataFingerprint, string PolicyFingerprint, HistoricalGapAwareMarket Result);
+
 public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds,
     IRecordedPaperSessionReader? recorded = null)
 {
@@ -122,7 +124,9 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
     }
 
     public async Task<HistoricalGapComparisonReport> CompareAsync(HistoricalNormalReplayComparisonRequest request,
-        string? onlyMarket, Func<string, CancellationToken, Task> progress, CancellationToken token)
+        string? onlyMarket, Func<string, CancellationToken, Task> progress, CancellationToken token,
+        Func<string, CancellationToken, Task<HistoricalGapComparisonBaseline?>>? readBaseline = null,
+        Func<string, HistoricalGapComparisonBaseline, CancellationToken, Task>? saveBaseline = null)
     {
         if (request.From != request.To || request.FrozenInputRunId is not null ||
             request.BaselineBuildId is null || request.ProposalBuildId is null)
@@ -134,6 +138,13 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
             proposal.ContractSelectionVersion != RegularOptionContractSelector.Version)
             throw new UnsupportedReplayContractException("Both strategy builds must use the supported contract-selection protocol.");
         var date = request.To;
+        var execution = request.Execution with { RequireDisplayedFillSize = true };
+        var policyFingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                baseline.BuildId, request.Baseline, Execution = execution,
+                Engine = typeof(HistoricalGapAwareReplay).Assembly.ManifestModule.ModuleVersionId
+            })));
         var markets = new List<HistoricalGapMarketComparison>();
         foreach (var (key, label) in Markets)
         {
@@ -157,20 +168,35 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                 }
                 var captured = slice.RecordedContractUniverse!.Instruments.Where(value => value.Market == label)
                     .Select(value => value.TradingSymbol).ToHashSet(StringComparer.Ordinal);
-                var execution = request.Execution with { RequireDisplayedFillSize = true };
-                await progress($"Simulating {label} baseline", token);
-                var original = HistoricalGapAwareReplay.Run(slice,
-                    () => new HistoricalContractCoveragePolicy(baseline.Create(request.Baseline, slice), label, date, captured),
-                    cancellationToken: token, execution: execution);
+                await progress($"Verifying {label} input fingerprint", token);
+                var inputFingerprint = HistoricalPortfolioComparison.Fingerprint([slice.Session with
+                {
+                    PolicyInputManifest = slice.Session.PolicyInputManifest + "|gap-evidence=" + System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        slice.UnreadableQuoteIntervals, slice.MonitoredDepthGaps, slice.CaptureSampleSeconds,
+                        slice.ArchiveReportedCaptureGaps, slice.FrontFutureSymbol
+                    })
+                }], token);
+                var saved = readBaseline is null ? null : await readBaseline(key, token);
+                HistoricalGapAwareMarket original;
+                if (saved?.DataFingerprint == inputFingerprint && saved.PolicyFingerprint == policyFingerprint &&
+                    saved.Result.Market == label)
+                    original = saved.Result;
+                else
+                {
+                    await progress($"Simulating {label} baseline", token);
+                    original = HistoricalGapAwareReplay.Run(slice,
+                        () => new HistoricalContractCoveragePolicy(baseline.Create(request.Baseline, slice), label, date, captured),
+                        cancellationToken: token, execution: execution);
+                    if (saveBaseline is not null) await saveBaseline(key, new(inputFingerprint, policyFingerprint, original), token);
+                }
                 await progress($"Simulating {label} proposal", token);
                 var changed = HistoricalGapAwareReplay.Run(slice,
                     () => new HistoricalContractCoveragePolicy(proposal.Create(request.Proposal, slice), label, date, captured),
                     cancellationToken: token, execution: execution);
-                var gapEvidence = System.Text.Json.JsonSerializer.Serialize(original.Gaps);
                 markets.Add(HistoricalGapAwareReplay.Compare(date, original, changed) with
                 {
-                    DataFingerprint = HistoricalPortfolioComparison.Fingerprint(
-                        [slice.Session with { PolicyInputManifest = slice.Session.PolicyInputManifest + "|gap-evidence=" + gapEvidence }], token)
+                    DataFingerprint = inputFingerprint
                 });
             }
             catch (UnsupportedReplayContractException exception) { AddUnavailable(exception.Message); }

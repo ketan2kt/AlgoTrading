@@ -189,7 +189,9 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
             if (job.Kind == "gap-comparison")
             {
                 var service = scope.ServiceProvider.GetRequiredService<HistoricalGapAwareReplayService>();
-                var gapReport = await service.CompareAsync(request!, job.Market, PublishPhaseAsync, execution.Token);
+                var gapReport = await service.CompareAsync(request!, job.Market, PublishPhaseAsync, execution.Token,
+                    (market, token) => jobs.ReadGapBaselineAsync(job.Id, market, token),
+                    (market, baseline, token) => jobs.SaveGapBaselineAsync(job.Id, market, baseline, token));
                 execution.Token.ThrowIfCancellationRequested();
                 await jobs.SaveAsync(job with { Status = "Completed", Phase = null, GapComparisonReport = gapReport }, stoppingToken);
                 return;

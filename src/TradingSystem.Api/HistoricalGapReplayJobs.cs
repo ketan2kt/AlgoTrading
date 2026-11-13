@@ -63,6 +63,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
                 File.Delete(ReportPath(old.Id));
                 File.Delete(ComparisonPath(old.Id));
                 File.Delete(GapComparisonPath(old.Id));
+                foreach (var key in ComparisonMarkets) File.Delete(GapBaselinePath(old.Id, key));
             }
             var next = new GapReplayJob(requestId ?? Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow())
                 { Kind = kind, ComparisonRequest = comparison, DefaultBuildId = defaultBuildId, From = comparison?.From };
@@ -132,6 +133,12 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
         await WriteAsync(JobPath(job.Id), job with { Report = null, ComparisonReport = null, GapComparisonReport = null }, token);
     }
 
+    internal Task<HistoricalGapComparisonBaseline?> ReadGapBaselineAsync(Guid id, string market, CancellationToken token) =>
+        ReadFileAsync<HistoricalGapComparisonBaseline>(GapBaselinePath(id, market), token);
+
+    internal Task SaveGapBaselineAsync(Guid id, string market, HistoricalGapComparisonBaseline baseline, CancellationToken token) =>
+        WriteAsync(GapBaselinePath(id, market), baseline, token);
+
     private static async Task WriteAsync<T>(string path, T value, CancellationToken token)
     {
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".pending";
@@ -153,6 +160,10 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     private string ReportPath(Guid id) => Path.Combine(root, id.ToString("N") + ".report");
     private string ComparisonPath(Guid id) => Path.Combine(root, id.ToString("N") + ".comparison");
     private string GapComparisonPath(Guid id) => Path.Combine(root, id.ToString("N") + ".gap-comparison");
+    private static readonly string[] ComparisonMarkets = ["nifty", "sensex", "bank-nifty"];
+    private string GapBaselinePath(Guid id, string market) => ComparisonMarkets.Contains(market, StringComparer.Ordinal)
+        ? Path.Combine(root, id.ToString("N") + "." + market + ".gap-baseline")
+        : throw new ArgumentOutOfRangeException(nameof(market));
     private IEnumerable<Guid> JobIds() => Directory.EnumerateFiles(root, "*.json")
         .Select(path => Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) ? id : Guid.Empty)
         .Where(id => id != Guid.Empty);

@@ -182,6 +182,59 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task ComparisonResumesBaselineOnlyWhenInputAndPolicyFingerprintsStillMatch()
+    {
+        var contracts = new[] { InstrumentType.CallOption, InstrumentType.PutOption }.Select((type, index) =>
+            new NiftyOptionContractCandidate(Guid.Empty, index == 0 ? "NIFTYCE" : "NIFTYPE", type,
+                Date.AddDays(7), 100, 1, .05m)).ToArray();
+        var quotes = Enumerable.Range(0, 121).Select(second =>
+            Book(Start.AddSeconds(second), second is >= 70 and <= 75 ? 120 : 100)).ToArray();
+        var initial = Slice("NIFTY", quotes, Start.AddMinutes(2)) with
+        {
+            GapAwarePolicyInputsReady = true,
+            OptionContracts = contracts,
+            RecordedContractUniverse = new(RegularOptionContractSelector.Version, contracts.Select((contract, index) =>
+                new HistoricalFeedInstrument("NIFTY", "NSE", "FNO", index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    contract.TradingSymbol, contract.Type, contract.ExpiryDate, contract.StrikePrice, contract.LotSize, contract.TickSize)).ToArray())
+        };
+        var archive = new ReplayArchive(initial);
+        var builds = new TestBuilds();
+        var service = new HistoricalGapAwareReplayService(archive, builds);
+        var settings = new HistoricalNormalPolicyConfiguration(60, 4, 2, new(9, 30), 5, 5, 10m, new(),
+            new(true, 1.5m, 500m, 100m, 100m, 10m, 1m, 8, 100_000m, 1_000_000m, 100_000m,
+                new(9, 15), new(15, 0), new(15, 15), 5, 5, true, .35m, 1m, .6m),
+            new(new(15, 15), true, true, true, true, .6m, true, .55m, 3, true, .8m, 5, 5, 60),
+            new(new(9, 15), new(15, 0), new(15, 15), 5, 60, 10m, 5),
+            new(new(15, 15), true, true, true, .55m, 3, true, .8m, 5, 5, 60),
+            new(), new(), new());
+        var request = new HistoricalNormalReplayComparisonRequest(Date, Date, settings, settings,
+            SessionPolicyReceipt.ComparisonExecution) { BaselineBuildId = "base", ProposalBuildId = "proposal" };
+        HistoricalGapComparisonBaseline? checkpoint = null;
+        Task Save(string market, HistoricalGapComparisonBaseline value, CancellationToken _) { checkpoint = value; return Task.CompletedTask; }
+        Task<HistoricalGapComparisonBaseline?> Read(string market, CancellationToken _) => Task.FromResult(checkpoint);
+        Task Continue(string phase, CancellationToken _) => Task.CompletedTask;
+        static Task Interrupt(string phase, CancellationToken _) => phase.EndsWith("proposal", StringComparison.Ordinal)
+            ? throw new OperationCanceledException() : Task.CompletedTask;
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.CompareAsync(request, "nifty", Interrupt, default, Read, Save));
+        Assert.NotNull(checkpoint);
+        Assert.Equal(["base"], builds.Created);
+        var resumed = await service.CompareAsync(request, "nifty", Continue, default, Read, Save);
+        Assert.Equal(["base", "proposal"], builds.Created);
+        var window = Assert.Single(Assert.Single(resumed.Markets).Windows);
+        Assert.Equal(1, window.BaselineTrades);
+        Assert.Equal(window.BaselinePositions, window.ProposalPositions);
+
+        builds.Created.Clear();
+        archive.Slice = initial with { Session = initial.Session with { Quotes = quotes.Select(quote => quote with { BidQuantity = 120 }).ToArray() } };
+        await service.CompareAsync(request, "nifty", Continue, default, Read, Save);
+        Assert.Equal(["base", "proposal"], builds.Created);
+        builds.Created.Clear();
+        await service.CompareAsync(request with { Baseline = settings with { NiftyLots = 2 } }, "nifty", Continue, default, Read, Save);
+        Assert.Equal(["base", "proposal"], builds.Created);
+    }
+
+    [Fact]
     public void PaperComparisonDoesNotCountTradesOutsideTheOpeningWindow()
     {
         var end = Start.AddMinutes(4);
@@ -273,6 +326,29 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
             var at = frame.Market.AvailableAtUtc;
             return seconds.Contains((int)(at - Start).TotalSeconds)
                 ? [new("NIFTYCE", at, CodeVersion, .8m, 10) { LotSize = 1 }] : [];
+        }
+    }
+
+    private sealed class ReplayArchive(HistoricalReplayArchiveSlice slice) : IHistoricalReplayArchiveReader
+    {
+        public HistoricalReplayArchiveSlice Slice { get; set; } = slice;
+        public Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly date, string market, CancellationToken token) => Task.FromResult(Slice);
+    }
+
+    private sealed class TestBuilds : IHistoricalPolicyBuildStore
+    {
+        public List<string> Created { get; } = [];
+        public Task<HistoricalPolicyBuild> CaptureCurrentAsync(CancellationToken token) => throw new NotSupportedException();
+        public Task<IReadOnlyList<HistoricalPolicyBuild>> ListAsync(CancellationToken token) => throw new NotSupportedException();
+        public Task<IHistoricalPolicyModuleFactory> LoadAsync(string buildId, CancellationToken token) =>
+            Task.FromResult<IHistoricalPolicyModuleFactory>(new Build(buildId, Created));
+        private sealed class Build(string id, List<string> created) : IHistoricalPolicyModuleFactory
+        {
+            public string BuildId => id;
+            public string? ContractSelectionVersion => RegularOptionContractSelector.Version;
+            public IHistoricalReplayPortfolioPolicy Create(HistoricalNormalPolicyConfiguration settings, HistoricalReplayArchiveSlice slice)
+            { created.Add(id); return new Policy(60); }
+            public void Dispose() { }
         }
     }
 }
