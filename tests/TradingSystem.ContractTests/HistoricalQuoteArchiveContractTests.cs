@@ -257,6 +257,36 @@ public sealed class HistoricalQuoteArchiveContractTests : IDisposable
         Assert.True(File.Exists(Path.Combine(directory, "2026-11-04-04-01.ndjson.gz")));
     }
 
+    [Fact]
+    public async Task InterruptedShardWriteKeepsCommittedBytesAndRetriesOnlyTheUncommittedObservations()
+    {
+        using var archive = Archive();
+        var original = Observation();
+        var earlier = Observation() with { ReceivedAtUtc = At.AddSeconds(-1) };
+        var next = Observation() with { ReceivedAtUtc = At.AddSeconds(2) };
+        archive.TryRecord(original);
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var shard = Path.Combine(directory, "2026-11-04-04-00.ndjson.gz");
+        var committed = await File.ReadAllBytesAsync(shard);
+        var staging = shard + ".pending";
+        Directory.CreateDirectory(staging);
+        archive.TryRecord(earlier);
+        archive.TryRecord(next);
+        var failure = await Record.ExceptionAsync(() => archive.FlushBatchAsync(CancellationToken.None));
+        Assert.True(failure is IOException or UnauthorizedAccessException);
+        Assert.Equal(committed, await File.ReadAllBytesAsync(shard));
+        Assert.Equal(1, archive.ReadHealth(Date).Buffered);
+        Directory.Delete(staging);
+        // Simulate a leftover, truncated staging file after an abrupt process stop.
+        await File.WriteAllBytesAsync(staging, [0x1f, 0x8b, 0x08]);
+        Assert.Equal(2, (await archive.ReadAsync(Date, CancellationToken.None)).Observations.Count);
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var result = await archive.ReadAsync(Date, CancellationToken.None);
+        Assert.Equal(new[] { earlier.Id, original.Id, next.Id }.Order(), result.Observations.Select(item => item.Id).Order());
+        Assert.False(result.HasCaptureGaps);
+        Assert.False(File.Exists(staging));
+    }
+
     private HistoricalQuoteArchive Archive(int capacity = 10) => new(TimeProvider.System,
         NullLogger<HistoricalQuoteArchive>.Instance, directory, capacity);
     private static HistoricalQuoteObservation Observation() => new(Guid.NewGuid(), At,

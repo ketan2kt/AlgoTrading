@@ -117,8 +117,9 @@ public interface IHistoricalReplayPortfolioPolicy
 
 public static class HistoricalPortfolioReplay
 {
-    public const string EngineVersion = "portfolio-replay-v11";
+    public const string EngineVersion = "portfolio-replay-v12";
     private static readonly TimeSpan MaximumQuoteAge = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan MaximumBookAge = TimeSpan.FromSeconds(30);
 
     public static HistoricalReplayResult Run(
         IReadOnlyList<HistoricalReplayBar> sourceBars,
@@ -155,6 +156,24 @@ public static class HistoricalPortfolioReplay
             throw new ArgumentException("A versioned policy and valid session are required.");
         ValidateInputs(sourceBars, sourceQuotes, sourceChains ?? [], cancellationToken);
         var controls = HistoricalReplayControls.Validate(sourceControls ?? []);
+        var consumedBook = new Dictionary<(string Symbol, bool Buy), (DateTimeOffset At, long Units)>();
+        bool CanFill(HistoricalReplayQuote quote, int units, bool buy)
+        {
+            if (!parameters.RequireDisplayedFillSize) return true;
+            if (quote.Source != "GrowwFeedSample" || !quote.HasExecutableBook() ||
+                quote.DepthSourceAtUtc is not { } depthAt || depthAt > quote.AvailableAtUtc ||
+                quote.AvailableAtUtc - depthAt > MaximumBookAge) return false;
+            var consumed = consumedBook.GetValueOrDefault((quote.Symbol, buy));
+            return depthAt >= consumed.At &&
+                (buy ? quote.OfferQuantity : quote.BidQuantity) - (depthAt == consumed.At ? consumed.Units : 0) >= units;
+        }
+        void Consume(HistoricalReplayQuote quote, int units, bool buy)
+        {
+            if (!parameters.RequireDisplayedFillSize || quote.DepthSourceAtUtc is not { } depthAt) return;
+            var key = (quote.Symbol, buy);
+            var prior = consumedBook.GetValueOrDefault(key);
+            consumedBook[key] = (depthAt, (prior.At == depthAt ? prior.Units : 0) + units);
+        }
 
         var bars = sourceBars.Where(value => value.IntervalSeconds > 0 &&
                 value.AvailableAtUtc <= sessionEndUtc)
@@ -355,8 +374,8 @@ public static class HistoricalPortfolioReplay
                 // desired partial before the next executable option quote. Keep
                 // the original queued order/time; do not submit it twice.
                 if (pendingPartials.TryGetValue(partial.Symbol, out var pendingPartial) &&
-                    partial.DecidedAtUtc == atUtc && partial.Quantity == pendingPartial.Quantity &&
-                    partial.Reason == pendingPartial.Reason) continue;
+                    partial.DecidedAtUtc == atUtc && (parameters.RequireDisplayedFillSize ||
+                    partial.Quantity == pendingPartial.Quantity && partial.Reason == pendingPartial.Reason)) continue;
                 if (partial.DecidedAtUtc != atUtc ||
                     string.IsNullOrWhiteSpace(partial.Reason) ||
                     !openPositions.TryGetValue(partial.Symbol, out var position) ||
@@ -465,7 +484,8 @@ public static class HistoricalPortfolioReplay
             {
                 var bar = bars[barIndex++];
                 completedBars.Add(bar);
-                if (!openPositions.TryGetValue(bar.Symbol, out var open) ||
+                if (parameters.RequireDisplayedFillSize ||
+                    !openPositions.TryGetValue(bar.Symbol, out var open) ||
                     open.Unpriced || open.ExitTriggeredAtUtc is not null ||
                     bar.IntervalSeconds != 60 ||
                     bar.OpenTimeUtc < open.EntryAtUtc ||
@@ -497,6 +517,17 @@ public static class HistoricalPortfolioReplay
                 missingAddOn++;
                 stale++;
                 FlagUncertainty(openPositions.TryGetValue(pending.Symbol, out var unresolved) ? unresolved.EntryAtUtc : pending.DecidedAtUtc);
+            }
+            if (parameters.RequireDisplayedFillSize)
+            {
+                foreach (var pending in pendingPartials.Values.ToArray())
+                {
+                    if (time - pending.DecidedAtUtc <= MaximumQuoteAge) continue;
+                    pendingPartials.Remove(pending.Symbol);
+                    unsupportedPartials.Add(pending.Symbol);
+                    if (openPositions.TryGetValue(pending.Symbol, out var unresolved))
+                        FlagUncertainty(unresolved.EntryAtUtc);
+                }
             }
             if (barIndex != firstBarIndex && time >= sessionStartUtc &&
                 time < sessionEndUtc)
@@ -563,7 +594,8 @@ public static class HistoricalPortfolioReplay
             {
                 // A recorded withdrawn/one-sided book must invalidate the latest
                 // liquidity, not silently fill at LTP. Keep it in the as-of frame.
-                if (quote.Source == "GrowwFeedSample" && !quote.HasExecutableBook())
+                if (quote.Source == "GrowwFeedSample" && !quote.HasExecutableBook() &&
+                    !parameters.RequireDisplayedFillSize)
                 {
                     if (openPositions.TryGetValue(quote.Symbol, out var illiquid)) illiquid.Unpriced = true;
                     continue;
@@ -579,14 +611,16 @@ public static class HistoricalPortfolioReplay
                     else if (!open.Unpriced)
                     {
                         var liquidationMark = SellReferencePrice(quote);
+                        var canMark = !parameters.RequireDisplayedFillSize || quote.HasExecutableBook();
                         var decisionMark = open.Candidate.TriggerOnLastPrice
                             ? quote.LastPrice : liquidationMark;
-                        open.HighestObservedPrice = Math.Max(open.HighestObservedPrice,
-                            liquidationMark);
-                        open.LowestObservedPrice = Math.Min(open.LowestObservedPrice,
-                            liquidationMark);
-                        open.HighestDecisionPrice = Math.Max(open.HighestDecisionPrice,
-                            decisionMark);
+                        if (canMark)
+                        {
+                            open.HighestObservedPrice = Math.Max(open.HighestObservedPrice, liquidationMark);
+                            open.LowestObservedPrice = Math.Min(open.LowestObservedPrice, liquidationMark);
+                        }
+                        if (canMark || open.Candidate.TriggerOnLastPrice)
+                            open.HighestDecisionPrice = Math.Max(open.HighestDecisionPrice, decisionMark);
                         // A queued reduction cannot fill through a protective
                         // stop touched by this same quote. Its internal order
                         // relative to that stop is unknown, so take the
@@ -594,7 +628,7 @@ public static class HistoricalPortfolioReplay
                         if (open.ExitTriggeredAtUtc is null &&
                             quote.AvailableAtUtc > open.EntryAtUtc &&
                             quote.AvailableAtUtc <= open.DeadlineUtc &&
-                            decisionMark <= open.StopPrice)
+                            (canMark || open.Candidate.TriggerOnLastPrice) && decisionMark <= open.StopPrice)
                         {
                             open.ExitTriggeredAtUtc = quote.AvailableAtUtc;
                             open.ExitReason = "ObservedStop";
@@ -603,7 +637,8 @@ public static class HistoricalPortfolioReplay
                         }
                         if (pendingAddOns.TryGetValue(quote.Symbol,
                                 out var addOn) &&
-                            quote.AvailableAtUtc > addOn.DecidedAtUtc)
+                            quote.AvailableAtUtc > addOn.DecidedAtUtc &&
+                            CanFill(quote, addOn.Quantity, buy: true))
                         {
                             pendingAddOns.Remove(quote.Symbol);
                             var addOnPrice = BuyReferencePrice(quote) *
@@ -620,6 +655,7 @@ public static class HistoricalPortfolioReplay
                                 open.AddOnPrice = addOnPrice;
                                 open.AddOnAt = quote.AvailableAtUtc;
                                 open.RemainingQuantity += addOn.Quantity;
+                                Consume(quote, addOn.Quantity, buy: true);
                                 filledAddOnsThisTime.Add(quote.Symbol);
                                 peakEntryCapitalExposure = Math.Max(
                                     peakEntryCapitalExposure,
@@ -634,7 +670,8 @@ public static class HistoricalPortfolioReplay
                         }
                         if (pendingPartials.TryGetValue(quote.Symbol,
                                 out var partial) &&
-                            quote.AvailableAtUtc > partial.DecidedAtUtc)
+                            quote.AvailableAtUtc > partial.DecidedAtUtc &&
+                            CanFill(quote, partial.Quantity, buy: false))
                         {
                             pendingPartials.Remove(quote.Symbol);
                             if (open.ExitTriggeredAtUtc is null &&
@@ -644,6 +681,7 @@ public static class HistoricalPortfolioReplay
                             {
                                 closed.Add(Close(open, quote, parameters,
                                     partial.Quantity, partial.Reason));
+                                Consume(quote, partial.Quantity, buy: false);
                                 open.RemainingQuantity -= partial.Quantity;
                             }
                             else if (open.ExitTriggeredAtUtc is null &&
@@ -657,10 +695,12 @@ public static class HistoricalPortfolioReplay
                         if (!open.Unpriced && open.ExitTriggeredAtUtc is not null)
                         {
                             if (quote.AvailableAtUtc > open.ExitTriggeredAtUtc.Value &&
-                                quote.AvailableAtUtc - open.ExitTriggeredAtUtc.Value <= MaximumQuoteAge)
+                                quote.AvailableAtUtc - open.ExitTriggeredAtUtc.Value <= MaximumQuoteAge &&
+                                CanFill(quote, open.RemainingQuantity, buy: false))
                             {
                                 closed.Add(Close(open, quote, parameters,
                                     open.RemainingQuantity, open.ExitReason));
+                                Consume(quote, open.RemainingQuantity, buy: false);
                                 openPositions.Remove(quote.Symbol);
                                 pendingAddOns.Remove(quote.Symbol);
                             }
@@ -672,29 +712,33 @@ public static class HistoricalPortfolioReplay
                             {
                                 // The time exit was triggered at its deadline, not by
                                 // the later quote used to model the fill.
-                                if (quote.AvailableAtUtc - open.DeadlineUtc <= MaximumQuoteAge)
+                                if (quote.AvailableAtUtc - open.DeadlineUtc <= MaximumQuoteAge &&
+                                    CanFill(quote, open.RemainingQuantity, buy: false))
                                 {
                                     open.ExitReason = "TimeExit";
                                     closed.Add(Close(open, quote, parameters,
                                         open.RemainingQuantity,
                                         open.ExitReason));
+                                    Consume(quote, open.RemainingQuantity, buy: false);
                                     openPositions.Remove(quote.Symbol);
                                     pendingAddOns.Remove(quote.Symbol);
                                 }
-                                else open.Unpriced = true;
+                                else if (quote.AvailableAtUtc - open.DeadlineUtc > MaximumQuoteAge)
+                                    open.Unpriced = true;
                             }
-                            else if (decisionMark <= open.StopPrice)
+                            else if ((canMark || open.Candidate.TriggerOnLastPrice) && decisionMark <= open.StopPrice)
                             {
                                 open.ExitTriggeredAtUtc = quote.AvailableAtUtc;
                                 open.ExitReason = "ObservedStop";
                             }
-                            else if (decisionMark >= open.TargetPrice)
+                            else if ((canMark || open.Candidate.TriggerOnLastPrice) && decisionMark >= open.TargetPrice)
                                 quoteTargets.Add(quote.Symbol);
                         }
                     }
                     if (openPositions.ContainsKey(quote.Symbol))
                     {
-                        open.LatestPrice = SellReferencePrice(quote);
+                        if (!parameters.RequireDisplayedFillSize || quote.HasExecutableBook())
+                            open.LatestPrice = SellReferencePrice(quote);
                         open.LastQuoteAtUtc = quote.AvailableAtUtc;
                     }
                 }
@@ -706,9 +750,12 @@ public static class HistoricalPortfolioReplay
                     if (pendingEntry.DeferredNiftyAdmission is not null ||
                         pendingEntry.RequiresDeferredQuoteAdmission)
                     {
+                        if (parameters.RequireDisplayedFillSize && !CanFill(quote, 1, buy: true))
+                            continue;
                         quoteAdmissions.Add(quote.Symbol);
                         continue;
                     }
+                    if (!CanFill(quote, pendingEntry.Quantity, buy: true)) continue;
                     var entryPrice = BuyReferencePrice(quote) *
                         (1m + parameters.EntrySlippagePercent);
                     if (pendingEntry.PlannedStopPrice is { } plannedStop &&
@@ -742,6 +789,7 @@ public static class HistoricalPortfolioReplay
                         quote.OfferPrice is > 0m
                             ? "ObservedOffer" : quote.Source == "GrowwChainReceiptLtp"
                                 ? "ObservedChainLtpNonExecutable" : "ModeledLastPrice"));
+                    Consume(quote, pendingEntry.Quantity, buy: true);
                     peakEntryCapitalExposure = Math.Max(peakEntryCapitalExposure,
                         openPositions.Values.Sum(value => value.EntryPrice *
                             value.RemainingQuantity));
@@ -824,7 +872,9 @@ public static class HistoricalPortfolioReplay
                     position.RemainingQuantity - estimatedCosts;
             }
             if (openPositions.Values.All(position => !position.Unpriced &&
-                time - position.LastQuoteAtUtc <= MaximumQuoteAge))
+                time - position.LastQuoteAtUtc <= MaximumQuoteAge &&
+                latest.TryGetValue(position.Candidate.Symbol, out var mark) &&
+                CanFill(mark, position.RemainingQuantity, buy: false)))
             {
                 equityPeak = Math.Max(equityPeak, markedEquity);
                 markToMarketDrawdown = Math.Max(markToMarketDrawdown,
@@ -842,9 +892,10 @@ public static class HistoricalPortfolioReplay
             equity, markToMarketDrawdown,
             "Portfolio-aware completed-bar replay. Entry and stop/target exit fills require " +
             "a later fresh option quote; time exits use the first fresh post-deadline quote. " +
-            "Maximum drawdown includes sampled open-position liquidation marks. Observed " +
-            "offer/bid are used when present; otherwise option LTP is a non-executable " +
-            "proxy. Configured slippage and charges are modeled. Concurrent " +
+            (parameters.RequireDisplayedFillSize
+                ? "Fills wait for fresh recorded top-of-book size; drawdown uses only size-supported liquidation marks. "
+                : "Maximum drawdown includes sampled open-position liquidation marks. Observed offer/bid are used when present; otherwise option LTP is a non-executable proxy. ") +
+            "Configured slippage and charges are modeled. Concurrent " +
             "positions require explicit research capacity. Partial reductions " +
             "fill only on later fresh quotes; entry costs are allocated once " +
             "across exit tranches. Same-contract winner add-ons use a later " +

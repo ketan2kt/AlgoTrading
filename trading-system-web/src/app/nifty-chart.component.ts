@@ -36,7 +36,7 @@ import {
 import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
 import { chartLevels, ema, sessionVwap } from './chart-overlays';
-import { activeFills } from './chart-active-fills';
+import { chartEntryFills } from './chart-entry-fills';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -79,10 +79,10 @@ import { activeFills } from './chart-active-fills';
       </div>
       @if (fills().length) {
         <details class="fill-key">
-          <summary>Active fills ({{fills().length}}) · select a candle for details</summary>
-          @for (fill of fills(); track fill.trade.signalId) { <p>{{fillDetail(fill)}}</p> }
+          <summary>Trade entries ({{fills().length}}) · select a candle for details</summary>
+          @for (fill of fills(); track fill.tradeId) { <p>{{fillDetail(fill)}}</p> }
         </details>
-        @for (fill of selectedFills; track fill.trade.signalId) { <p class="fill-readout">{{fillDetail(fill)}}</p> }
+        @for (fill of selectedFills; track fill.tradeId) { <p class="fill-readout">{{fillDetail(fill)}}</p> }
       }
     </div>
   `,
@@ -160,7 +160,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private renderedInstrument = '';
   private renderedSessionDate: string | null = null;
   protected rangeText = '';
-  protected readonly fills = signal<ReturnType<typeof activeFills>>([]);
+  protected readonly fills = signal<ReturnType<typeof chartEntryFills>>([]);
   private readonly hovered = signal<number|null>(null);
   private readonly pinned = signal<number|null>(null);
   private confirmationSeries: ISeriesApi<'Line'> | null = null;
@@ -168,9 +168,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   protected timeIst(iso:string) { return this.clock.format(Date.parse(iso)); }
   protected humanize(value:string) { return value.replace(/([a-z])([A-Z])/g,'$1 $2'); }
   protected get selectedFills() { return this.fills().filter(f=>f.time===(this.hovered() ?? this.pinned())); }
-  protected fillDetail(f:ReturnType<typeof activeFills>[number]) {
-    return [f.trade.executionInstrument, this.timeIst(f.trade.entryTimeUtc!)+' IST', 'Entry ₹'+f.trade.fillPrice!.toFixed(2),
-      f.trade.entryEvidence?.join(' · ') || 'Entry reason not recorded'].join(' · ');
+  protected fillDetail(f:ReturnType<typeof chartEntryFills>[number]) {
+    return [f.contract, this.timeIst(f.entryTimeUtc)+' IST', 'Entry ₹'+f.entryPrice.toFixed(2),
+      ...(f.evidence ?? [])].join(' · ');
   }
   protected visibility = this.readVisibility();
 
@@ -328,7 +328,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       .filter(c=>Date.parse(c.openTimeUtc)-Date.parse(displayCandles[index].openTimeUtc)<=displayCandles[index].intervalSeconds*1000)
       .map(c=>({time:(Date.parse(c.openTimeUtc)/1000) as Time,value:price})) : [];
     this.confirmationSeries?.setData(segment);
-    const fills = activeFills(this.snapshot.overlays, displayCandles);
+    const fills = chartEntryFills(this.snapshot.overlays, displayCandles, this.snapshot.historicalChartEntries ?? []);
     this.fills.set(fills);
     const markers = fills.map(f=>({time:f.time as Time,
       position:f.side==='CE'?'belowBar' as const:'aboveBar' as const,

@@ -41,8 +41,22 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         var report = HistoricalGapAwareReplay.Run(Slice("NIFTY", quotes, Start.AddMinutes(2)), () => new Policy(60));
         Assert.Empty(report.Gaps);
         Assert.Null(report.VerifiedNetPnl);
-        var fill = Assert.Single(Assert.Single(report.Windows).Fills);
-        Assert.Contains("displayed size", fill.ExclusionReason);
+        var window = Assert.Single(report.Windows);
+        Assert.Empty(window.Fills);
+        Assert.Equal(1, window.UnresolvedExecutions);
+    }
+
+    [Fact]
+    public void RecordedPersistenceGapSeparatesReplayEvenWhenAvailableQuotesLookContinuous()
+    {
+        var quotes = Enumerable.Range(0, 241).Select(s => Book(Start.AddSeconds(s), 100m)).ToArray();
+        var gap = new HistoricalReplayGap(Start.AddSeconds(145), Start.AddSeconds(180), "Recorder depth gap");
+        var slice = Slice("NIFTY", quotes, Start.AddMinutes(4)) with { MonitoredDepthGaps = [gap] };
+        var report = HistoricalGapAwareReplay.Run(slice, () => new Policy(120));
+        Assert.Equal(gap, Assert.Single(report.Gaps));
+        Assert.Equal(2, report.Windows.Count);
+        Assert.True(report.Windows[1].IndependentFlatRestart);
+        Assert.Null(report.Windows[1].VerifiedNetPnl);
     }
 
     // Opt-in diagnostic using a local, read-only copy of the actual recorder archive.

@@ -87,13 +87,14 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             coverage.AddRange(ReplayContractCoverage.ValidateReplay(slice, request.Proposal).Select(r => "Proposal: " + r));
             slices[key] = slice with { Session = slice.Session with { UnsupportedContractCoverage = coverage } };
         }
+        var execution = request.Execution with { RequireDisplayedFillSize = true };
         var result = HistoricalSharedPortfolioComparison.RunEligible(
             slices.Values.Select(value => value.Session).ToArray(), ["NIFTY", "SENSEX", "BANKNIFTY"],
             (date, market) => Guard(baselineModule?.Create(request.Baseline, slices[(date, market)])
                 ?? baseline.Create(slices[(date, market)]), date, market),
             (date, market) => Guard(proposalModule?.Create(request.Proposal, slices[(date, market)])
                 ?? proposal.Create(slices[(date, market)]), date, market),
-            request.Execution, request.Execution, dates, cancellationToken);
+            execution, execution, dates, cancellationToken);
         var exclusions = result.Cohort.ExcludedDates.Select(value => new HistoricalReplayExcludedDate(value.Date,
             value.Reasons.Concat(slices.Values.Where(slice => slice.Session.Date == value.Date)
                 .SelectMany(slice => slice.ControlStateGaps.Select(gap => slice.Session.IndexSymbol + ": " + gap)))
@@ -131,7 +132,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             "Contract selection is shared by trading, recording and replay. Both versions must prove their entire session price-range selections exist in the saved universe; unsupported strikes, expiries, selection builds or missing manifests explicitly exclude the date before simulation. Pre-open coverage is a bounded plan, not unlimited future-strategy coverage.",
             "Approved archived compiled normal-policy builds can be compared using explicit frozen configurations. Arbitrary uploaded code is not accepted.",
             "Intraday, flat-start research only. Enabled overnight carry is rejected. Unmatched original manual interventions and reconciliation-outage dates are excluded, not silently applied to different simulated trades.",
-            "Verified decision scope: normal 1/5-minute entries and protection, with as-of pre-session state. Fill latency, spreads, slippage and charges remain explicit models. Non-whole-lot paper partials invalidate execution coverage instead of silently being credited or rounded.",
+            "Verified decision scope: normal 1/5-minute entries and protection, with as-of pre-session state. Orders wait for fresh observed bid/offer size that covers the whole order. Fill latency, slippage and charges remain modeled; unresolved executions and unsupported paper partials are not proof of strategy performance.",
             "Current or explicitly saved settings are used; they are not presented as recovered historical controls. Executable quote/universe coverage and supported-policy validation still govern the verdict."
         ])
         {

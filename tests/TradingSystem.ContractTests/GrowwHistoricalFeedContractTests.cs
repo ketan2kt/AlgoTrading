@@ -307,9 +307,9 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
     {
         var date = new DateOnly(2026, 11, 4);
         using var archive = new HistoricalQuoteArchive(new RecordingClock(At), NullLogger<HistoricalQuoteArchive>.Instance, directory);
-        void Add(string market, bool option, DateTimeOffset priceAt) => archive.TryRecord(new(Guid.NewGuid(), At,
+        void Add(string market, bool option, DateTimeOffset priceAt, long units = 30L) => archive.TryRecord(new(Guid.NewGuid(), At,
             new(market == "SENSEX" ? "BSE" : "NSE", option ? "FNO" : "CASH", market + (option ? "CE" : "")),
-            new(100m, priceAt.ToUnixTimeMilliseconds(), 99m, 30L, 101m, 30L, null, null, null))
+            new(100m, priceAt.ToUnixTimeMilliseconds(), 99m, units, 101m, 30L, null, null, null))
             { Source = "GrowwFeedSample", DepthSourceAtUtc = At });
         Add("NIFTY", true, At); Add("SENSEX", true, At); Add("BANKNIFTY", false, At);
         Assert.Empty(archive.ReadHealth(date).LastOptionWrittenAtByMarket);
@@ -317,9 +317,10 @@ public sealed class GrowwHistoricalFeedContractTests : IDisposable
         Assert.Equal(2, archive.ReadHealth(date).LastOptionWrittenAtByMarket.Count);
         Assert.False(archive.ReadHealth(date).LastOptionWrittenAtByMarket.ContainsKey("BANKNIFTY"));
         Add("BANKNIFTY", true, At.AddSeconds(-31));
+        Add("BANKNIFTY", true, At, 0L);
         await archive.FlushBatchAsync(CancellationToken.None);
-        Assert.Equal(At, archive.ReadHealth(date).LastOptionWrittenAtByMarket["BANKNIFTY"]);
-        Assert.Equal(At.AddSeconds(-31), archive.ReadHealth(date).LastOptionSourceAtByMarket["BANKNIFTY"]);
+        Assert.False(archive.ReadHealth(date).LastOptionWrittenAtByMarket.ContainsKey("BANKNIFTY"));
+        Assert.False(archive.ReadHealth(date).LastOptionSourceAtByMarket.ContainsKey("BANKNIFTY"));
         Add("BANKNIFTY", true, At);
         await archive.FlushBatchAsync(CancellationToken.None);
         Assert.Equal(At, archive.ReadHealth(date).LastOptionSourceAtByMarket["BANKNIFTY"]);

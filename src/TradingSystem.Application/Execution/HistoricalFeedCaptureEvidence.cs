@@ -15,7 +15,14 @@ public sealed record HistoricalFeedCaptureManifest(DateOnly Date, DateTimeOffset
     public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
     public string? InterruptionReason { get; init; }
     public HistoricalFeedFrameRejection? LastRejectedFrame { get; init; }
+    public IReadOnlyList<HistoricalDepthMarketAudit> OptionDepthAudit { get; init; } = [];
 }
+
+public sealed record HistoricalDepthGap(DateTimeOffset StartUtc, DateTimeOffset EndUtc);
+
+// Market-level continuity, not a guarantee that every individual strike was liquid.
+public sealed record HistoricalDepthMarketAudit(string Market, DateTimeOffset? LastReceiptUtc,
+    DateTimeOffset? LastSourceUtc, IReadOnlyList<HistoricalDepthGap> Gaps);
 
 public sealed record HistoricalFeedFrameRejection(DateTimeOffset AtUtc, string Market, string TradingSymbol, string Channel);
 

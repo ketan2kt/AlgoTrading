@@ -99,6 +99,9 @@ public sealed record HistoricalReplayParameters(decimal StopPercent, decimal Tar
     // Explicit research assumption; never turn modeled fees into a claim that
     // the original broker contract-note charges were independently verified.
     public bool AllowModeledHistoricalCosts { get; init; }
+    // Portfolio replay can wait for recorded top-of-book liquidity instead of
+    // assuming the displayed price is executable for the entire order.
+    public bool RequireDisplayedFillSize { get; init; }
     public static HistoricalReplayParameters Default { get; } =
         new(0.10m, 0.15m, 0.0025m, 0.0025m, 45, 5);
 

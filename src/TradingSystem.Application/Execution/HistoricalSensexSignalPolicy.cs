@@ -24,7 +24,8 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
     public string CodeVersion => "sensex-normal-entry-v8/" + SensexStalledTrendEntryPolicy.Version +
-        "/" + SensexWeakRetryEntryPolicy.Version + "/" + OptionRiskBudgetPolicy.Version;
+        "/" + SensexWeakRetryEntryPolicy.Version + "/" + SensexMaturePullbackConfirmationPolicy.Version +
+        "/" + OptionRiskBudgetPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,

@@ -18,6 +18,7 @@ public sealed class ResearchCapturePulse
     private bool priorReady;
     private ReplayContractPreflight? coverage;
     private IReadOnlyList<string> coverageIssues = [];
+    private IReadOnlyList<HistoricalDepthMarketAudit> optionDepthAudit = [];
     private readonly Dictionary<string, DateTimeOffset> receipts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> optionPrices = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> optionDepth = new(StringComparer.Ordinal);
@@ -27,7 +28,7 @@ public sealed class ResearchCapturePulse
     {
         lock (gate)
         {
-            if (session != date) { gap = false; failure = null; lastRejectedFrame = null; }
+            if (session != date) { gap = false; failure = null; lastRejectedFrame = null; optionDepthAudit = []; }
             date = session; phase = "Connecting"; instruments = 0; subscribed = null; receipts.Clear();
             optionPrices.Clear(); optionDepth.Clear(); requiredOptionMarkets = [];
             policyReady = false; priorReady = false;
@@ -54,6 +55,7 @@ public sealed class ResearchCapturePulse
     internal void Metadata(bool policy, bool prior) { lock (gate) { policyReady = policy; priorReady = prior; } }
     internal void ContractCoverage(ReplayContractPreflight value) { lock (gate) coverage = value; }
     internal void ContractCoverageIssues(IReadOnlyList<string> values) { lock (gate) coverageIssues = values; }
+    internal void OptionDepthAudit(IReadOnlyList<HistoricalDepthMarketAudit> values) { lock (gate) optionDepthAudit = values; }
     internal void Failed(string code, bool gapObserved = true)
     { lock (gate) { gap |= gapObserved; phase = "Interrupted"; failure = stage + ": " + code; } }
     internal void RejectedFrame(HistoricalFeedFrameRejection rejection, bool gapObserved)
@@ -76,6 +78,7 @@ public sealed class ResearchCapturePulse
             return new(phase, subscribed, instruments, gap, new Dictionary<string,DateTimeOffset>(receipts))
                 { LastFailure = failure, LastRejectedFrame = lastRejectedFrame, Stage = stage, PreOpenPolicyReady = policyReady, PriorSensexStateReady = priorReady,
                     ContractPreflight = coverage, ContractCoverageIssues = coverageIssues,
+                    OptionDepthAudit = optionDepthAudit,
                     RequiredOptionMarkets = requiredOptionMarkets.ToArray(),
                     LastOptionPriceSourceByMarket = new Dictionary<string, DateTimeOffset>(optionPrices),
                     LastOptionDepthSourceByMarket = new Dictionary<string, DateTimeOffset>(optionDepth) };
@@ -94,6 +97,7 @@ public sealed record ResearchCaptureSnapshot(string Phase, DateTimeOffset? Subsc
     public bool PriorSensexStateReady { get; init; }
     public ReplayContractPreflight? ContractPreflight { get; init; }
     public IReadOnlyList<string> ContractCoverageIssues { get; init; } = [];
+    public IReadOnlyList<HistoricalDepthMarketAudit> OptionDepthAudit { get; init; } = [];
     public IReadOnlyList<string> RequiredOptionMarkets { get; init; } = [];
     public IReadOnlyDictionary<string, DateTimeOffset> LastOptionPriceSourceByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
     public IReadOnlyDictionary<string, DateTimeOffset> LastOptionDepthSourceByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();

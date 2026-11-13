@@ -124,9 +124,10 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             }
         }
         var gaps = dropped.Where(value => value.Value > 0).ToArray();
-        var dates = pending.Select(value => LocalDate(value.ReceivedAtUtc)).Concat(gaps.Select(value => value.Key)).Distinct();
+        var dates = pending.Select(value => LocalDate(value.ReceivedAtUtc)).Concat(gaps.Select(value => value.Key)).Distinct().ToArray();
         foreach (var date in dates)
         {
+            var loss = gaps.FirstOrDefault(value => value.Key == date).Value;
             if (!storageAvailable)
             {
                 knownGaps[date] = true;
@@ -135,59 +136,104 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
                 // or retry an unlimited research backlog into the live host.
                 await File.WriteAllTextAsync(Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".capture-gap"),
                     "Research quote storage capacity reached.", token);
+                CompleteObservations(date, pending.RemoveAll(value => LocalDate(value.ReceivedAtUtc) == date));
+                CompleteGap(date, loss);
                 continue;
             }
-            var loss = gaps.FirstOrDefault(value => value.Key == date).Value;
             // Partition by receipt minute, including batches spanning a boundary.
             // A full 1,000-instrument session must not create hourly members
             // exceeding the reader's compressed/decompressed shard safety limits.
             var shards = pending.Where(value => LocalDate(value.ReceivedAtUtc) == date)
-                .GroupBy(value => value.ReceivedAtUtc.UtcDateTime.ToString("HH-mm", CultureInfo.InvariantCulture))
-                .ToDictionary(group => group.Key,
-                    group => group.Select(value => JsonSerializer.Serialize(new ArchiveLine(value, 0))).ToList());
-            if (loss > 0)
-            {
-                if (!shards.TryGetValue("gaps", out var lines)) shards["gaps"] = lines = [];
-                lines.Add(JsonSerializer.Serialize(new ArchiveLine(null, loss)));
-            }
+                .GroupBy(value => value.ReceivedAtUtc.UtcTicks / TimeSpan.TicksPerMinute).ToArray();
             foreach (var shard in shards)
             {
-                var path = Path.Combine(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) +
-                    "-" + shard.Key + ".ndjson.gz");
-                await using var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read,
-                    bufferSize: 65536, useAsync: true);
-                await using var gzip = new GZipStream(file, CompressionLevel.Fastest, leaveOpen: true);
-                // A leading newline resynchronises after an interrupted partial write.
-                var bytes = Encoding.UTF8.GetBytes("\n" + string.Join('\n', shard.Value) + "\n");
-                await gzip.WriteAsync(bytes, token);
-                // Dispose the compressed member before reporting a durable receipt.
-                await gzip.DisposeAsync();
-                await file.FlushAsync(token);
+                var minute = shard.First().ReceivedAtUtc.UtcDateTime.ToString("HH-mm", CultureInfo.InvariantCulture);
+                await CommitMemberAsync(ShardPath(date, minute),
+                    shard.Select(value => JsonSerializer.Serialize(new ArchiveLine(value, 0))), token);
+                // A failed later shard must not replay this already committed batch.
+                CompleteObservations(date, pending.RemoveAll(value => value.ReceivedAtUtc.UtcTicks / TimeSpan.TicksPerMinute == shard.Key));
+                persisted[date] = clock.GetUtcNow();
+                foreach (var value in shard) RecordOptionProgress(date, value);
             }
-            persisted[date] = clock.GetUtcNow();
-            foreach (var value in pending.Where(value => LocalDate(value.ReceivedAtUtc) == date && value.Source == "GrowwFeedSample" &&
-                (value.Request.TradingSymbol.EndsWith("CE", StringComparison.Ordinal) || value.Request.TradingSymbol.EndsWith("PE", StringComparison.Ordinal))))
+            if (loss > 0)
             {
-                var symbol = value.Request.TradingSymbol;
-                var market = symbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
-                    symbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY";
-                var key = (date, market);
-                optionWritten.AddOrUpdate(key, value.ReceivedAtUtc, (_, previous) => value.ReceivedAtUtc > previous ? value.ReceivedAtUtc : previous);
-                var priceAt = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds);
-                if (priceAt is { } price && value.DepthSourceAtUtc is { } depth &&
-                    price <= value.ReceivedAtUtc && depth <= value.ReceivedAtUtc &&
-                    value.Quote.BidPrice > 0m && value.Quote.OfferPrice >= value.Quote.BidPrice)
-                {
-                    var sourceAt = price < depth ? price : depth;
-                    optionSource.AddOrUpdate(key, sourceAt, (_, previous) => sourceAt > previous ? sourceAt : previous);
-                }
+                await CommitMemberAsync(ShardPath(date, "gaps"), [JsonSerializer.Serialize(new ArchiveLine(null, loss))], token);
+                CompleteGap(date, loss);
             }
             Volatile.Write(ref failure, null);
         }
-        foreach (var gap in gaps) dropped.AddOrUpdate(gap.Key, 0, (_, count) => Math.Max(0, count - gap.Value));
-        foreach (var group in pending.GroupBy(value => LocalDate(value.ReceivedAtUtc)))
-            buffered.AddOrUpdate(group.Key, 0, (_, count) => Math.Max(0, count - group.Count()));
-        pending.Clear();
+    }
+
+    private string ShardPath(DateOnly date, string shard) => Path.Combine(root,
+        date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "-" + shard + ".ndjson.gz");
+
+    private void CompleteGap(DateOnly date, long loss)
+    {
+        if (loss > 0) dropped.AddOrUpdate(date, 0, (_, count) => Math.Max(0, count - loss));
+    }
+
+    private void CompleteObservations(DateOnly date, int count)
+    {
+        if (count > 0) buffered.AddOrUpdate(date, 0, (_, previous) => Math.Max(0, previous - count));
+    }
+
+    private void RecordOptionProgress(DateOnly date, HistoricalQuoteObservation value)
+    {
+        var symbol = value.Request.TradingSymbol;
+        if (value.Source != "GrowwFeedSample" ||
+            !(symbol.EndsWith("CE", StringComparison.Ordinal) || symbol.EndsWith("PE", StringComparison.Ordinal))) return;
+        var market = symbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
+            symbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY";
+        var key = (date, market);
+        var priceAt = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds);
+        if (priceAt is { } price && value.DepthSourceAtUtc is { } depth &&
+            price <= value.ReceivedAtUtc && depth <= value.ReceivedAtUtc &&
+            value.ReceivedAtUtc - price <= TimeSpan.FromSeconds(30) &&
+            value.ReceivedAtUtc - depth <= TimeSpan.FromSeconds(30) &&
+            value.Quote.LastPrice > 0m && value.Quote.BidPrice > 0m && value.Quote.OfferPrice >= value.Quote.BidPrice &&
+            value.Quote.BidQuantity > 0 && value.Quote.OfferQuantity > 0)
+        {
+            var sourceAt = price < depth ? price : depth;
+            optionSource.AddOrUpdate(key, sourceAt, (_, previous) => sourceAt > previous ? sourceAt : previous);
+            optionWritten.AddOrUpdate(key, value.ReceivedAtUtc,
+                (_, previous) => value.ReceivedAtUtc > previous ? value.ReceivedAtUtc : previous);
+        }
+    }
+
+    private static async Task CommitMemberAsync(string path, IEnumerable<string> lines, CancellationToken token)
+    {
+        // Only the archive's single flush worker writes. A same-directory
+        // replacement publishes a complete snapshot, even across interruption.
+        var staging = path + ".pending";
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            await using (var output = new FileStream(staging, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 65536, useAsync: true))
+            {
+                if (File.Exists(path))
+                {
+                    await using var previous = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+                        bufferSize: 65536, useAsync: true);
+                    await previous.CopyToAsync(output, token);
+                }
+                await using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    var bytes = Encoding.UTF8.GetBytes("\n" + string.Join('\n', lines) + "\n");
+                    await gzip.WriteAsync(bytes, token);
+                }
+                await output.FlushAsync(token);
+                output.Flush(flushToDisk: true);
+            }
+            token.ThrowIfCancellationRequested();
+            File.Move(staging, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(staging); }
+            catch (IOException) { /* Leave the uncommitted file for the next write. */ }
+            catch (UnauthorizedAccessException) { /* Preserve the original error. */ }
+        }
     }
 
     public Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken) =>

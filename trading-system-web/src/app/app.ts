@@ -9,7 +9,7 @@ import { PublicHomeComponent } from './public-home.component';
 import { AdminPanelComponent } from './admin-panel.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
 import { SystemStatusService } from './system-status.service';
-import { mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
+import { mergeChartEntries, mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
 import { indexChange } from './index-change';
 import { activeTradeCount, deskPortfolio } from './desk-portfolio';
@@ -174,7 +174,12 @@ export class App implements OnInit, OnDestroy {
       const first=Date.parse(live[0].openTimeUtc);
       return [...older.filter(c=>Date.parse(c.openTimeUtc)<first),...live].slice(-7000);
     };
-    return {...view,candles:prepend(h.candles,view.candles),futuresVolume:prepend(h.futuresVolume??[],view.futuresVolume??[])};
+    return {
+      ...view,
+      candles: prepend(h.candles, view.candles),
+      futuresVolume: prepend(h.futuresVolume ?? [], view.futuresVolume ?? []),
+      historicalChartEntries: mergeChartEntries(h.historicalChartEntries ?? [], view.historicalChartEntries ?? []),
+    };
   }
   protected chartTimeframeMinutes = this.readChartTimeframe();
   protected readonly chartTimeframes = [1, 5, 15];

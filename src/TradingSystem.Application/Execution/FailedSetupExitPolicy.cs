@@ -13,14 +13,11 @@ public sealed record FailedSetupExitDecision(bool ShouldExit, decimal AdverseR,
 /// </summary>
 public static class FailedSetupExitPolicy
 {
-    // Shared by production and replay. Only ordinary entry paths are eligible;
-    // specialty baskets and selective hedges retain their own management.
+    // The reclaim test is a fallback for these Nifty paths. For regular Sensex
+    // and Bank Nifty positions it is the only failed-setup confirmation.
     public static bool AllowsEntryReclaim(string market, string strategy)
     {
-        if (market == "sensex")
-            return strategy.Equals("Sensex persistent directional thesis", StringComparison.OrdinalIgnoreCase);
-        if (market == "bank-nifty")
-            return strategy.Equals("Bank index directional breakout", StringComparison.OrdinalIgnoreCase);
+        if (RequiresConfirmedEntryFailure(market, strategy)) return true;
         if (market != "nifty") return false;
         var normalStrategy = strategy.StartsWith("exploration-", StringComparison.Ordinal)
             ? strategy["exploration-".Length..] : strategy;
@@ -28,6 +25,12 @@ public static class FailedSetupExitPolicy
             "vwap-trend-pullback" or "ema-pullback-continuation" or
             "intraday-range-breakout-retest" or "vwap-rejection-reversal" or "momentum-expansion";
     }
+
+    private static bool RequiresConfirmedEntryFailure(string market, string strategy) =>
+        market is "sensex" or "bank-nifty" &&
+        !strategy.StartsWith("Hero Zero|", StringComparison.OrdinalIgnoreCase) &&
+        !strategy.StartsWith("Expansion Pair|", StringComparison.OrdinalIgnoreCase) &&
+        !strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.OrdinalIgnoreCase);
 
     public static FailedSetupExitDecision EvaluateForMarket(string market, string strategy,
         Direction direction, decimal entryOption, decimal optionPrice, decimal initialRisk,
@@ -42,12 +45,16 @@ public static class FailedSetupExitPolicy
             bars.Any(bar => bar.OpenTimeUtc.AddSeconds(intervalSeconds) > observedAt) ||
             observedAt - bars[^1].OpenTimeUtc.AddSeconds(intervalSeconds) > TimeSpan.FromSeconds(intervalSeconds))
             return new(false, adverseR, ["Completed underlying candle evidence is missing, incomplete or stale."]);
-        var original = Evaluate(direction, entryOption, optionPrice, initialRisk,
-            peakOption, entryAt, observedAt, underlyingPrice, bars);
-        if (original.ShouldExit || !AllowsEntryReclaim(market, strategy) ||
-            !IsAdverseCandidate(entryOption, optionPrice, initialRisk, peakOption, entryAt, observedAt) ||
+        var requireConfirmation = RequiresConfirmedEntryFailure(market, strategy);
+        if (!requireConfirmation)
+        {
+            var original = Evaluate(direction, entryOption, optionPrice, initialRisk,
+                peakOption, entryAt, observedAt, underlyingPrice, bars);
+            if (original.ShouldExit || !AllowsEntryReclaim(market, strategy)) return original;
+        }
+        if (!IsAdverseCandidate(entryOption, optionPrice, initialRisk, peakOption, entryAt, observedAt) ||
             underlyingPrice <= 0m)
-            return original;
+            return new(false, adverseR, ["Fast failed-setup prerequisites are not met."]);
 
         var signalIndex = -1;
         for (var index = 0; index < bars.Count; index++)
@@ -70,10 +77,12 @@ public static class FailedSetupExitPolicy
             Math.Max(Math.Abs(bar.High - recent[index].Close), Math.Abs(bar.Low - recent[index].Close)))).Average();
         var buffer = atr * .10m;
         var reclaimed = atr > 0m && (direction == Direction.Sell
-            ? signal.Close < signal.Open && prior.Close > prior.Open && last.Close > last.Open &&
+            ? (requireConfirmation || signal.Close < signal.Open) &&
+              prior.Close > prior.Open && last.Close > last.Open &&
               last.Close > prior.Close && prior.Close > signal.High + buffer && last.Close > signal.High + buffer &&
               underlyingPrice > signal.High + buffer && underlyingPrice > ema9 + buffer
-            : signal.Close > signal.Open && prior.Close < prior.Open && last.Close < last.Open &&
+            : (requireConfirmation || signal.Close > signal.Open) &&
+              prior.Close < prior.Open && last.Close < last.Open &&
               last.Close < prior.Close && prior.Close < signal.Low - buffer && last.Close < signal.Low - buffer &&
               underlyingPrice < signal.Low - buffer && underlyingPrice < ema9 - buffer);
         return reclaimed

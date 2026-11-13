@@ -7,6 +7,7 @@ using TradingSystem.Application.Diagnostics;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.Diagnostics;
 using TradingSystem.Infrastructure.Execution;
 using TradingSystem.Infrastructure.Persistence;
 using TradingSystem.Infrastructure.SystemStatus;
@@ -156,6 +157,7 @@ internal sealed class EfTradingWorkspaceReader(
         var futuresVolume = futuresCandles.Select(value =>
             new WorkspaceVolumeBar(value.OpenTimeUtc, value.Volume, value.IsClosed)).ToArray();
 
+        const int workspaceSignalLimit = 30;
         var signalRows = market == TradingMarketCatalog.Nifty.Code
             ? await (from value in dbContext.Signals.AsNoTracking()
             join version in dbContext.StrategyVersions.AsNoTracking()
@@ -178,7 +180,7 @@ internal sealed class EfTradingWorkspaceReader(
                 value.Status,
                 Strategy = strategy.Code + " " + version.Version
             })
-            .Take(30)
+            .Take(workspaceSignalLimit)
             .ToListAsync(cancellationToken)
             : [];
         var signalIds = signalRows.Select(value => value.Id).ToArray();
@@ -505,6 +507,17 @@ internal sealed class EfTradingWorkspaceReader(
         }
         var operationalReports = await operationalReportReader.GetLatestAsync(
             sessionDate, definition.Code, cancellationToken);
+        var loadOlderEntries = candleCount == MaximumWorkspaceRequestCount;
+        // Keep older trades out of the session trade list, alerts and totals. Load
+        // only small entry receipts with the explicit extended candle request.
+        // Also recover Nifty entries pushed out by the live signal display limit.
+        var chartEntries = definition.ExecuteOptions && closed.Count > 0 &&
+            (loadOlderEntries || signalRows.Count == workspaceSignalLimit)
+            ? await ReadClosedChartEntriesAsync(definition, instrument.Id,
+                loadOlderEntries ? closed[0].OpenTimeUtc : sessionStartUtc,
+                sessionEndUtc, loadOlderEntries ? [] : overlays.Where(row => row.EntryTimeUtc.HasValue && row.FillPrice > 0)
+                    .Select(row => row.SignalId).ToArray(), loadOlderEntries, cancellationToken)
+            : null;
         return new TradingWorkspaceSnapshot(
             instrument.TradingSymbol,
             definition.Exchange,
@@ -523,7 +536,7 @@ internal sealed class EfTradingWorkspaceReader(
             futuresVolume,
             research,
             operationalReports,
-            definition.Code, engineRead, previousSessionClose);
+            definition.Code, engineRead, previousSessionClose, chartEntries);
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => new(
             definition.UnderlyingSymbol,
@@ -543,6 +556,64 @@ internal sealed class EfTradingWorkspaceReader(
                 ? paperAutomation.GetCurrent()
                 : CreateUnavailableAutomation(definition, status, detail, now),
             MarketCode: definition.Code);
+    }
+
+    private async Task<IReadOnlyList<WorkspaceChartEntry>> ReadClosedChartEntriesAsync(
+        TradingMarketDefinition definition, Guid underlyingId, DateTimeOffset fromUtc, DateTimeOffset endUtc,
+        Guid[] displayedIds, bool includeOlderPositions, CancellationToken cancellationToken)
+    {
+        var entries = new List<WorkspaceChartEntry>();
+        var isNifty = definition.Code == TradingMarketCatalog.Nifty.Code;
+        if (includeOlderPositions)
+        {
+            var positions = await (from position in dbContext.MarketPaperPositions.AsNoTracking()
+                join contract in dbContext.Instruments.AsNoTracking() on position.ExecutionInstrumentId equals contract.Id
+                where position.Market == definition.Code && position.OpenedAtUtc >= fromUtc &&
+                      position.OpenedAtUtc < endUtc && position.ClosedAtUtc != null &&
+                      !displayedIds.Contains(position.Id) &&
+                      (contract.Type == InstrumentType.CallOption || contract.Type == InstrumentType.PutOption) &&
+                      (!isNifty || position.Strategy.StartsWith("Hero Zero|") || position.Strategy.StartsWith("Expansion Pair|"))
+                select new { position.Id, position.OpenedAtUtc, contract.TradingSymbol, contract.Type, position.EntryPrice })
+                .ToListAsync(cancellationToken);
+            entries.AddRange(positions.Select(row => new WorkspaceChartEntry(row.Id, row.OpenedAtUtc,
+                row.TradingSymbol, row.Type == InstrumentType.CallOption ? "CE" : "PE", row.EntryPrice)));
+        }
+
+        if (!isNifty) return entries;
+
+        var results = await (from result in dbContext.PaperTradeResults.AsNoTracking()
+            join signal in dbContext.Signals.AsNoTracking() on result.SignalId equals signal.Id
+            join contract in dbContext.Instruments.AsNoTracking() on result.InstrumentId equals contract.Id
+            where signal.InstrumentId == underlyingId && result.ClosedAtUtc >= fromUtc && result.ClosedAtUtc < endUtc &&
+                  !displayedIds.Contains(result.SignalId) &&
+                  (contract.Type == InstrumentType.CallOption || contract.Type == InstrumentType.PutOption)
+            select new { result.SignalId, result.TradingSymbol, contract.Type, result.EntryPrice })
+            .ToListAsync(cancellationToken);
+        if (results.Count == 0) return entries;
+
+        // A signal timestamp is not a fill timestamp. Use the same execution-ledger
+        // then paper-journal precedence as Daily Analysis, without its signal fallback.
+        var references = results.Select(row => $"{row.SignalId:N}-ENTRY").ToArray();
+        var fillTimes = await (from order in dbContext.Orders.AsNoTracking()
+            join fill in dbContext.Trades.AsNoTracking() on order.Id equals fill.OrderId
+            where order.Mode == TradingMode.Paper && references.Contains(order.ClientReference)
+            group fill by order.ClientReference into fills
+            select new { Reference = fills.Key, At = fills.Min(fill => fill.ExecutedAtUtc) })
+            .ToDictionaryAsync(row => row.Reference, row => row.At, cancellationToken);
+        var missing = references.Where(reference => !fillTimes.ContainsKey(reference)).ToArray();
+        if (missing.Length > 0)
+        {
+            var receipts = await EfDailyTradingDiagnosticsReader.JournalEntryFills(
+                dbContext.PaperBrokerEvents.AsNoTracking(), missing).ToListAsync(cancellationToken);
+            foreach (var receipt in receipts) fillTimes.TryAdd(receipt.ClientReference, receipt.At);
+        }
+        foreach (var row in results)
+        {
+            if (fillTimes.TryGetValue($"{row.SignalId:N}-ENTRY", out var at) && at >= fromUtc && at < endUtc)
+                entries.Add(new(row.SignalId, at, row.TradingSymbol,
+                    row.Type == InstrumentType.CallOption ? "CE" : "PE", row.EntryPrice));
+        }
+        return entries;
     }
 
     internal static PaperAutomationSnapshot CreateUnavailableAutomation(

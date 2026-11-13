@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,12 @@ namespace TradingSystem.Infrastructure.MarketData;
 // historical copy. No credentials, orders or arbitrary paths enter this store.
 public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
 {
+    private const int QuoteHydrationConcurrency = 4;
+    private const long MinimumFreeDiskBytes = 1024L * 1024 * 1024;
+    private static readonly Action<ILogger, string, DateOnly?, long, Exception?> Hydrated =
+        LoggerMessage.Define<string, DateOnly?, long>(LogLevel.Information,
+            new EventId(6761, "ReplayArchiveHydrated"),
+            "Replay archive hydration for {Category} on {Date} finished in {ElapsedMs} ms.");
     private readonly BlobContainerClient? container;
     private readonly bool recorder;
     private readonly TimeProvider clock;
@@ -118,8 +125,12 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                 {
                     var now = clock.GetUtcNow();
                     var date = DateOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
-                    var status = new ReplayRecorderSnapshot(date, now,
-                        services.GetRequiredService<ResearchCapturePulse>().Read(date, true),
+                    var feed = services.GetRequiredService<ResearchCapturePulse>().Read(date, true);
+                    // The full history stays in the dated manifest. Keep the live
+                    // heartbeat within its existing 64 KiB reader limit.
+                    feed = feed with { OptionDepthAudit = feed.OptionDepthAudit
+                        .Select(market => market with { Gaps = market.Gaps.TakeLast(8).ToArray() }).ToArray() };
+                    var status = new ReplayRecorderSnapshot(date, now, feed,
                         services.GetRequiredService<IHistoricalQuoteArchive>().ReadHealth(date), LastUploadAtUtc);
                     await container.GetBlobClient("recorder-health.json").UploadAsync(
                         BinaryData.FromObjectAsJson(status), overwrite: true, stoppingToken);
@@ -284,7 +295,15 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     public Task HydrateStreamingQuotesAsync(DateOnly tradingDate, CancellationToken token) =>
         HydrateCoreAsync("quotes", tradingDate, streamingOnly: true, token);
 
-    private async Task HydrateCoreAsync(string category, DateOnly? tradingDate, bool streamingOnly, CancellationToken token)
+    internal Task HydratePolicyAsync(string buildId, CancellationToken token)
+    {
+        if (!Guid.TryParseExact(buildId, "N", out var parsed) || buildId != parsed.ToString("N"))
+            throw new ArgumentException("Invalid archived build identifier.", nameof(buildId));
+        return HydrateCoreAsync("policies", null, streamingOnly: false, token, buildId);
+    }
+
+    private async Task HydrateCoreAsync(string category, DateOnly? tradingDate, bool streamingOnly, CancellationToken token,
+        string? policyId = null)
     {
         var date = tradingDate;
         if (container is null) return;
@@ -292,14 +311,18 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             throw new ArgumentException("A bounded archive category/date is required.");
         using var pinned = date is { } requested ? Pin(requested) : null;
         await hydrateGate.WaitAsync(token);
+        var started = Stopwatch.GetTimestamp();
         try
         {
             if (category == "quotes")
             {
                 var disk = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(CacheRoot))!);
-                quoteCache.Reserve(0, disk.IsReady ? disk.AvailableFreeSpace : -1, 1024L * 1024 * 1024);
+                quoteCache.Reserve(0, disk.IsReady ? disk.AvailableFreeSpace : -1, MinimumFreeDiskBytes);
             }
-            var prefix = category + "/" + date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var prefix = category + "/" + (policyId is null
+                ? date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : policyId + "/");
+            var capacity = category == "quotes" ? QuoteHydrationConcurrency : 1;
+            var pendingDownloads = new List<(BlobItem Item, string Path, string Hash)>(capacity);
             await foreach (var item in container.GetBlobsAsync(BlobTraits.Metadata, BlobStates.None, prefix: prefix, cancellationToken: token))
             {
                 if (streamingOnly && IsWebsiteQuotePath(item.Name)) continue;
@@ -316,16 +339,39 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                         continue;
                     }
                 }
-                var pending = path + ".pending";
-                var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!);
-                if (category == "quotes") quoteCache.Reserve(item.Properties.ContentLength ?? 0,
-                    drive.IsReady ? drive.AvailableFreeSpace : -1, 1024L * 1024 * 1024);
-                if (drive.IsReady && drive.AvailableFreeSpace < (item.Properties.ContentLength ?? 0) + 1024L * 1024 * 1024)
+                pendingDownloads.Add((item, path, hash));
+                if (pendingDownloads.Count == capacity) await DownloadBatchAsync();
+            }
+            if (pendingDownloads.Count > 0) await DownloadBatchAsync();
+            Hydrated(logger, category, date, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
+
+            async Task DownloadBatchAsync()
+            {
+                var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(CacheRoot))!);
+                var bytes = pendingDownloads.Sum(value => value.Item.Properties.ContentLength
+                    ?? throw new InvalidDataException("Replay cloud artifact size is missing."));
+                var free = drive.IsReady ? drive.AvailableFreeSpace : -1;
+                // Reserve all simultaneous temporary files before any download
+                // starts. The hydration gate holds until every task has exited.
+                if (category == "quotes") quoteCache.Reserve(bytes, free, MinimumFreeDiskBytes);
+                else if (free >= 0 && free < bytes + MinimumFreeDiskBytes)
                     throw new IOException("Replay cache needs additional free space; cloud history is retained.");
+                await Task.WhenAll(pendingDownloads.Select(value => DownloadAsync(value.Item, value.Path, value.Hash)));
+                pendingDownloads.Clear();
+            }
+
+            async Task DownloadAsync(BlobItem item, string path, string hash)
+            {
+                var pending = path + ".pending";
                 try
                 {
                     await container.GetBlobClient(item.Name).DownloadToAsync(pending, new BlobDownloadToOptions
-                    { Conditions = new BlobRequestConditions { IfMatch = item.Properties.ETag } }, token);
+                    {
+                        Conditions = new BlobRequestConditions { IfMatch = item.Properties.ETag },
+                        TransferOptions = new Azure.Storage.StorageTransferOptions { MaximumConcurrency = 1 }
+                    }, token);
+                    if (new FileInfo(pending).Length != item.Properties.ContentLength)
+                        throw new InvalidDataException("Replay cloud artifact size mismatch.");
                     await using (var input = File.OpenRead(pending))
                         if (Convert.ToHexString(await SHA256.HashDataAsync(input, token)) != hash)
                             throw new InvalidDataException("Replay cloud artifact checksum mismatch.");

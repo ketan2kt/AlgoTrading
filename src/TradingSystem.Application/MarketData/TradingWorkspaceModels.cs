@@ -18,6 +18,13 @@ public sealed record WorkspaceVolumeBar(
     long Volume,
     bool IsClosed);
 
+public sealed record WorkspaceChartEntry(
+    Guid TradeId,
+    DateTimeOffset EntryTimeUtc,
+    string Contract,
+    string Side,
+    decimal EntryPrice);
+
 public sealed record WorkspaceTradeOverlay(
     Guid SignalId,
     string Strategy,
@@ -104,7 +111,8 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<OperationalAutomationReport>? OperationalReports = null,
     string? MarketCode = null,
     WorkspaceEngineRead? EngineRead = null,
-    WorkspacePreviousClose? PreviousSessionClose = null);
+    WorkspacePreviousClose? PreviousSessionClose = null,
+    IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null);
 
 public sealed record WorkspacePreviousClose(decimal Price, DateOnly SessionDate);
 

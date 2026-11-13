@@ -219,6 +219,34 @@ public sealed class HistoricalPortfolioReplayTests
     }
 
     [Fact]
+    public void SizedReplayWaitsForFullDisplayedQuantityOnEntryAndExit()
+    {
+        HistoricalReplayQuote Book(int seconds, decimal price, long bid, long ask, int age = 0)
+        {
+            var at = Start.AddSeconds(seconds);
+            return new("NIFTY22000CE", at, price)
+            {
+                Source = "GrowwFeedSample", DepthSourceAtUtc = at.AddSeconds(-age),
+                BidPrice = price, OfferPrice = price, BidQuantity = bid, OfferQuantity = ask
+            };
+        }
+        var result = HistoricalPortfolioReplay.Run([Bar(0)], [
+            Book(61, 100, 150, 30),
+            Book(65, 100, 150, 150, age: 31),
+            Book(70, 101, 150, 150),
+            Book(73, 120, 30, 150),
+            Book(74, 119, 30, 150),
+            Book(78, 118, 150, 150)
+        ], new ObservePortfolioPolicy(), Parameters with { RequireDisplayedFillSize = true },
+            Start, Start.AddMinutes(2));
+        var fill = Assert.Single(result.Trades);
+        Assert.Equal(Start.AddSeconds(70), fill.EntryAtUtc);
+        Assert.Equal(Start.AddSeconds(78), fill.ExitAtUtc);
+        Assert.Equal(101m, fill.EntryPrice);
+        Assert.Equal(118m, fill.ExitPrice);
+    }
+
+    [Fact]
     public void ObservedOfferAndBidControlLongEntryAndExitWhenAvailable()
     {
         var quotes = new[]

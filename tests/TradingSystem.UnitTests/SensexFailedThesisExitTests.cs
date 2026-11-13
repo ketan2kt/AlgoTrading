@@ -48,11 +48,11 @@ public sealed class SensexFailedThesisExitTests
     }
 
     [Theory]
-    [InlineData("bank-nifty", Strategy)]
     [InlineData("nifty", Strategy)]
-    [InlineData("sensex", "Sensex controlled early pullback")]
     [InlineData("sensex", "Hero Zero|example")]
-    public void OtherEntryPathsDoNotUseNewReclaimExit(string market, string strategy) =>
+    [InlineData("sensex", "Expansion Pair|example")]
+    [InlineData("bank-nifty", "PaperOnly|Pyramid|example")]
+    public void PathsOutsideRegularSensexAndBankNiftyDoNotUseThisReclaimExit(string market, string strategy) =>
         Assert.False(Evaluate(market: market, strategy: strategy).ShouldExit);
 
     [Theory]

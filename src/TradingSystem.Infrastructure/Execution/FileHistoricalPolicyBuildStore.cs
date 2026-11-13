@@ -75,7 +75,12 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
 
     public async Task<IHistoricalPolicyModuleFactory> LoadAsync(string buildId, CancellationToken cancellationToken)
     {
-        if (cloud?.Enabled == true) await cloud.HydrateAsync("policies", null, cancellationToken);
+        if (!Guid.TryParseExact(buildId, "N", out var parsed) || buildId != parsed.ToString("N"))
+            throw new ArgumentException("Invalid archived build identifier.", nameof(buildId));
+        // Local approved builds already carry their own assembly checksums.
+        // For an older remote build, fetch that build only, not the whole catalogue.
+        if (cloud?.Enabled == true && !File.Exists(Path.Combine(root, buildId, "manifest.json")))
+            await cloud.HydratePolicyAsync(buildId, cancellationToken);
         var build = await VerifyAsync(buildId, cancellationToken);
         return new ArchivedFactory(BuildPath(build.Id), build.Id);
     }

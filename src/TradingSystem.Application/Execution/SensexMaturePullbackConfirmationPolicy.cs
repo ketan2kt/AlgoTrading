@@ -12,7 +12,7 @@ public sealed record SensexPullbackConfirmation(bool Permitted, bool Applies,
 // neither threshold was fitted to the November 5 losing trade.
 public static class SensexMaturePullbackConfirmationPolicy
 {
-    public const string Version = "sensex-mature-pullback-v1";
+    public const string Version = "sensex-mature-pullback-v2";
 
     public static SensexPullbackConfirmation Evaluate(
         IReadOnlyList<StrategyPriceBar> bars, Direction direction, decimal moveMaturityAtr)
@@ -52,10 +52,13 @@ public static class SensexMaturePullbackConfirmationPolicy
         var confirmed = direction == Direction.Buy
             ? latest.Close > latest.Open && latest.Close > level
             : latest.Close < latest.Open && latest.Close < level;
-        return new(confirmed, true, room, level,
-            [$"Mature pullback: {moveMaturityAtr:F2} ATR move, {room:F2} ATR room; " +
-             $"completed close {latest.Close:F2} must break the pullback " +
-             $"{(direction == Direction.Buy ? "high" : "low")} {level:F2}. " +
-             (confirmed ? "Structure break confirmed." : "Waiting for structure confirmation.")]);
+        // Clearing the pullback does not clear a separate level beyond it.
+        // Re-evaluate on the next candidate; do not promote a smaller local
+        // break while the remaining room is still below the existing budget.
+        return new(false, true, room, level,
+            [$"Mature pullback: {moveMaturityAtr:F2} ATR move, only {room:F2} ATR room to " +
+             $"{(direction == Direction.Buy ? "resistance" : "support")} {opposing:F2}. " +
+             (confirmed ? "The local structure break does not clear that level. Wait for room to reopen."
+                : $"Waiting for structure confirmation beyond the pullback level {level:F2}.")]);
     }
 }

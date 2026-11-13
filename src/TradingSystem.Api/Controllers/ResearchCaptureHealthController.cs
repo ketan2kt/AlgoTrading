@@ -55,6 +55,8 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             if (feed.Phase != "Subscribed") issues.Add("Feed " + feed.Phase + " · " + (feed.LastFailure ?? feed.Stage));
             else if (quotesExpected && feed.HasStalledMarket(observedAt)) issues.Add("Feed silent over 30 seconds");
             if (feed.GapObserved) issues.Add("Feed interruption recorded");
+            foreach (var market in feed.OptionDepthAudit.Where(value => value.Gaps.Count > 0))
+                issues.Add(market.Market + " recorded option price/depth gap");
             if (!feed.PreOpenPolicyReady) issues.Add("Pre-open strategy/settings receipt missing");
             if (feed.ContractPreflight is not { Ready: true })
             {

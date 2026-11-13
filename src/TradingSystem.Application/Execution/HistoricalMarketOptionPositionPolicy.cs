@@ -25,7 +25,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private (string Symbol, DateTimeOffset EntryAt)? bankPosition;
     private BankNiftyTrailSpot? bankEntrySpot;
     private BankNiftyTrailState bankTrail = new();
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v10/" + DifferentiatedRunnerPolicy.Version;
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,

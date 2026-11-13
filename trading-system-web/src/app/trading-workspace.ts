@@ -53,6 +53,14 @@ export interface WorkspaceTradeOverlay {
   entryEvidence?: string[] | null;
 }
 
+export interface WorkspaceChartEntry {
+  tradeId: string;
+  entryTimeUtc: string;
+  contract: string;
+  side: 'CE' | 'PE';
+  entryPrice: number;
+}
+
 export interface TradingWorkspaceSnapshot {
   previousSessionClose?: { price: number; sessionDate: string } | null;
   marketCode?: string;
@@ -69,11 +77,19 @@ export interface TradingWorkspaceSnapshot {
   statusMessage: string | null;
   candles: WorkspaceCandle[];
   overlays: WorkspaceTradeOverlay[];
+  historicalChartEntries?: WorkspaceChartEntry[] | null;
   evaluations: WorkspaceStrategyEvaluation[];
   paperAutomation: PaperAutomationSnapshot;
   futuresVolume?: WorkspaceVolumeBar[] | null;
   research?: DailyResearchPipelineReport | null;
   operationalReports?: OperationalAutomationReport[] | null;
+}
+
+export function mergeChartEntries(
+  older: readonly WorkspaceChartEntry[] = [],
+  newer: readonly WorkspaceChartEntry[] = [],
+): WorkspaceChartEntry[] {
+  return [...new Map([...older, ...newer].map(entry => [entry.tradeId, entry])).values()];
 }
 
 export interface OperationalAutomationReport {

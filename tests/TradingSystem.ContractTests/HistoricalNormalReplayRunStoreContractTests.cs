@@ -66,14 +66,21 @@ public sealed class HistoricalNormalReplayRunStoreContractTests : IDisposable
             {
                 var at = start.AddSeconds(second);
                 quotes[(symbol, at)] = new(symbol, at, price);
-                quotes[(option, at)] = new(option, at, 100) { BidPrice = 99.5m, OfferPrice = 100m, Volume = 1000, OpenInterest = 5000 };
+                quotes[(option, at)] = Book(at, 100m);
             }
             if (symbol == "BANKNIFTY")
             foreach (var (second, premium) in new[] { (2, 100m), (4, 100m), (8, 120m), (10, 119m), (12, 105m), (14, 104m) })
             {
                 var at = start.AddMinutes(31).AddSeconds(second);
-                quotes[(option, at)] = new(option, at, premium) { BidPrice = premium - .5m, OfferPrice = premium };
+                quotes[(option, at)] = Book(at, premium);
             }
+
+            HistoricalReplayQuote Book(DateTimeOffset at, decimal premium) => new(option, at, premium)
+            {
+                Source = "GrowwFeedSample", DepthSourceAtUtc = at, SourceAtUtc = at,
+                BidPrice = premium - .5m, OfferPrice = premium, BidQuantity = 1000, OfferQuantity = 1000,
+                Volume = 1000, OpenInterest = 5000
+            };
             var contracts = new[] {
                 new NiftyOptionContractCandidate(Guid.NewGuid(), option,
                     symbol == "BANKNIFTY" ? InstrumentType.PutOption : InstrumentType.CallOption,

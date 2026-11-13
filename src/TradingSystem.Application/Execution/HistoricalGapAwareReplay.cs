@@ -123,7 +123,7 @@ public static class HistoricalGapAwareReplay
             else if (createPolicy is not null && quote.Symbol == session.IndexSymbol) source.Add(quote);
         }
 
-        var gaps = slice.UnreadableQuoteIntervals.ToList();
+        var gaps = slice.UnreadableQuoteIntervals.Concat(slice.MonitoredDepthGaps).ToList();
         var previous = session.StartUtc;
         foreach (var next in observed.Append(session.EndUtc))
         {
@@ -158,7 +158,7 @@ public static class HistoricalGapAwareReplay
                 {
                     var observedQuotes = source.Where(q => q.AvailableAtUtc >= from && q.AvailableAtUtc < until).ToArray();
                     var result = HistoricalPortfolioReplay.Run(session.Bars, observedQuotes, createPolicy(),
-                        SessionPolicyReceipt.ComparisonExecution, from, until,
+                        SessionPolicyReceipt.ComparisonExecution with { RequireDisplayedFillSize = true }, from, until,
                         session.OptionChains, session.ExchangeCode, sourceControls: session.ControlEvents,
                         cancellationToken: cancellationToken);
                     windows.Add(ScoreWindow(from, until, reset, result, books));

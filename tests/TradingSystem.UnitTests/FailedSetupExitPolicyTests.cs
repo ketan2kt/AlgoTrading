@@ -21,6 +21,37 @@ public sealed class FailedSetupExitPolicyTests
         Assert.InRange(decision.AdverseR, .45m, .47m);
     }
 
+    [Theory]
+    [InlineData("bank-nifty", "Bank index directional breakout")]
+    [InlineData("sensex", "Sensex persistent directional thesis")]
+    [InlineData("sensex", "Sensex controlled early pullback")]
+    [InlineData("sensex", "Sensex range-edge rejection")]
+    public void OneOpposingCandleCannotRepeatTheNovember13BankNiftyExit(string market, string strategy)
+    {
+        var entry = new DateTimeOffset(2026, 11, 13, 10, 35, 4, TimeSpan.FromMinutes(330));
+        var observed = entry.AddMinutes(2).AddSeconds(29);
+        // Real option prices and timing; a synthetic cash path that meets the old one-close rule.
+        var bars = FallingBars().Select(bar => bar with { OpenTimeUtc = bar.OpenTimeUtc.AddDays(15) }).ToArray();
+        FailedSetupExitDecision Evaluate(string code, string path, IReadOnlyList<StrategyPriceBar> cash,
+            DateTimeOffset at, decimal spot) =>
+            FailedSetupExitPolicy.EvaluateForMarket(code, path, Direction.Buy,
+                635.15m, 607.25m, 63.50m, 635.90m, entry, at, spot, at, cash, 60, 30);
+
+        Assert.True(Evaluate("nifty", "momentum-expansion", bars, observed, 104m).ShouldExit);
+        Assert.False(Evaluate(market, strategy, bars, observed, 104m).ShouldExit);
+
+        var next = bars[^1].OpenTimeUtc.AddMinutes(1);
+        StrategyPriceBar[] pullback = [.. bars, new(next, 108m, 109m, 104m, 105m)];
+        Assert.False(Evaluate(market, strategy, pullback, observed.AddMinutes(1), 104m).ShouldExit);
+
+        // Two opposing closes alone are not enough: the first must break the
+        // pre-entry candle's low (106), and the current quote must stay below it.
+        bars[^1] = bars[^1] with { Low = 103m, Close = 104m };
+        StrategyPriceBar[] failed = [.. bars, new(next, 104m, 105m, 100m, 101m)];
+        Assert.True(Evaluate(market, strategy, failed, observed.AddMinutes(1), 100m).ShouldExit);
+        Assert.False(Evaluate(market, strategy, failed, observed.AddMinutes(1), 107m).ShouldExit);
+    }
+
     [Fact]
     public void OrdinaryPullbackOrPriorWinnerDoesNotTriggerFastExit()
     {

@@ -360,6 +360,10 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             CapturedSessionPolicy = gapAware ? feedManifest?.PolicyReceipt : null,
             CaptureSampleSeconds = feedManifest?.SampleSeconds ?? 2,
             UnreadableQuoteIntervals = gapAware ? quoteDay.UnreadableIntervals : [],
+            MonitoredDepthGaps = gapAware && feedManifest?.OptionDepthAudit.FirstOrDefault(value => value.Market == underlying) is { } audit
+                ? audit.Gaps.Select(gap => new HistoricalReplayGap(gap.StartUtc, gap.EndUtc,
+                    "Recorder did not confirm fresh option price and sized bid/ask depth")).ToArray()
+                : [],
             ArchiveReportedCaptureGaps = gapAware && (quoteDay.HasCaptureGaps || feedManifest?.HasGaps == true),
             GapAwarePolicyInputsReady = gapAware && datedMaster is not null && controls.InitialStateVerified &&
                 previousClose is > 0m && (underlying == "BANKNIFTY" || frontFutureSymbol is not null) &&

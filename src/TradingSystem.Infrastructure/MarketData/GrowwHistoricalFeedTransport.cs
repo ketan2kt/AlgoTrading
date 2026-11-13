@@ -2,9 +2,11 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using NATS.Client.Core;
 using NATS.NKeys;
 using TradingSystem.Application.Execution;
+using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Broker.Groww;
 
 namespace TradingSystem.Infrastructure.MarketData;
@@ -20,10 +22,15 @@ internal interface IGrowwHistoricalFeedTransport
 // Read-only topics from the official Groww SDK. The ephemeral socket JWT/NKey
 // never enters files, reports, URLs, source control or application logs.
 internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
-    IGrowwAccessTokenProvider tokens, TimeProvider clock) : IGrowwHistoricalFeedTransport
+    IGrowwAccessTokenProvider tokens, TimeProvider clock, ILogger<GrowwHistoricalFeedTransport>? logger = null) : IGrowwHistoricalFeedTransport
 {
     internal const string HttpClientName = "GrowwHistoricalFeedAuth";
     internal const int MaximumSubjects = 1000;
+    private static readonly string[] IndexChannels = ["index"];
+    private static readonly string[] DerivativeChannels = ["price", "depth"];
+    private static readonly Action<ILogger, string, string, Exception?> RenewingOptionChannel = LoggerMessage.Define<string, string>(
+        LogLevel.Information, new EventId(6758, "ReplayOptionChannelRenewal"),
+        "Renewing {Market} option {Channel} subscriptions on the existing recorder connection.");
     internal static int SubscriptionCount(IReadOnlyList<HistoricalFeedInstrument> instruments)
     {
         var count = instruments.Sum(value => value.Type == TradingSystem.Domain.Trading.InstrumentType.Index ? 1 : 2);
@@ -49,33 +56,89 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
         connection.ConnectionDisconnected += (_, _) => { onGap(); lifetime.Cancel(); return ValueTask.CompletedTask; };
         connection.MessageDropped += (_, _) => { onGap(); lifetime.Cancel(); return ValueTask.CompletedTask; };
         await connection.ConnectAsync();
-        var subscriptions = new List<INatsSub<byte[]>>();
-        var consumers = new List<Task>();
+        var groups = instruments.SelectMany(instrument => (instrument.Type == InstrumentType.Index
+                ? IndexChannels : DerivativeChannels).Select(kind => (Instrument: instrument, Kind: kind)))
+            .GroupBy(topic => (Market: topic.Instrument.Market, topic.Kind,
+                Option: topic.Instrument.Type is InstrumentType.CallOption or InstrumentType.PutOption))
+            .Select(group => new SubscriptionGroup(group.Key.Kind, group.Key.Option,
+                group.Select(topic => topic.Instrument).ToArray())).ToArray();
         try
         {
-            foreach (var instrument in instruments)
-            foreach (var kind in instrument.Type == TradingSystem.Domain.Trading.InstrumentType.Index
-                         ? new[] { "index" } : new[] { "price", "depth" })
+            foreach (var group in groups) await OpenAsync(group);
+            var subscribed = clock.GetUtcNow();
+            onSubscribed(subscribed);
+            using var tick = new PeriodicTimer(TimeSpan.FromSeconds(1), clock);
+            while (await tick.WaitForNextTickAsync(lifetime.Token))
             {
-                lifetime.Token.ThrowIfCancellationRequested();
-                var subject = Subject(instrument, kind);
-                var subscription = await connection.SubscribeCoreAsync(subject,
-                    serializer: NatsRawSerializer<byte[]>.Default,
-                    opts: new NatsSubOpts { ChannelOpts = new NatsSubChannelOpts { Capacity = 128, FullMode = BoundedChannelFullMode.DropOldest } },
-                    cancellationToken: lifetime.Token);
-                subscriptions.Add(subscription);
-                consumers.Add(ConsumeSubscriptionAsync(subscription, instrument, kind, onPoint, onGap, onInvalidPoint, lifetime));
+                foreach (var group in groups)
+                {
+                    var now = clock.GetUtcNow();
+                    if (group.Recovery?.TryStartRenewal(subscribed, now) != true) continue;
+                    if (logger is not null) RenewingOptionChannel(logger, group.Instruments[0].Market, group.Kind, null);
+                    // Release old subjects first: never use a second connection or
+                    // temporarily exceed the original plan's subscription budget.
+                    await group.CloseAsync();
+                    await OpenAsync(group);
+                }
             }
-            onSubscribed(clock.GetUtcNow());
-            await Task.WhenAll(consumers);
         }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         finally
         {
             await lifetime.CancelAsync();
-            foreach (var subscription in subscriptions) await subscription.DisposeAsync();
-            try { await Task.WhenAll(consumers); }
-            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-            catch (Exception) when (consumers.Any(value => value.IsFaulted)) { /* Observe failed consumers before leaving the connection scope. */ }
+            await Task.WhenAll(groups.Select(group => group.CloseAsync()));
+        }
+
+        async Task OpenAsync(SubscriptionGroup group)
+        {
+            var groupStop = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            group.Stop = groupStop;
+            foreach (var instrument in group.Instruments)
+            {
+                groupStop.Token.ThrowIfCancellationRequested();
+                var subscription = await connection.SubscribeCoreAsync(Subject(instrument, group.Kind),
+                    serializer: NatsRawSerializer<byte[]>.Default,
+                    opts: new NatsSubOpts { ChannelOpts = new NatsSubChannelOpts { Capacity = 128, FullMode = BoundedChannelFullMode.DropOldest } },
+                    cancellationToken: groupStop.Token);
+                group.Subscriptions.Add(subscription);
+                group.Consumers.Add(ConsumeSubscriptionAsync(subscription, instrument, group.Kind, OnPoint,
+                    onGap, onInvalidPoint, lifetime, groupStop.Token));
+            }
+
+            void OnPoint(HistoricalFeedInstrument instrument, string kind, GrowwFeedPoint point, DateTimeOffset received)
+            {
+                if (kind == "depth" ? point.Bid is > 0m && point.Offer >= point.Bid &&
+                    point.BidQuantity > 0 && point.OfferQuantity > 0 : point.Last is > 0m)
+                    group.Recovery?.Observe(point.SourceAtUtc, received);
+                onPoint(instrument, kind, point, received);
+            }
+        }
+    }
+
+    private sealed class SubscriptionGroup(string kind, bool option, HistoricalFeedInstrument[] instruments)
+    {
+        public string Kind { get; } = kind;
+        public HistoricalFeedInstrument[] Instruments { get; } = instruments;
+        public GrowwOptionFeedRecovery? Recovery { get; } = option ? new() : null;
+        public CancellationTokenSource? Stop { get; set; }
+        public List<INatsSub<byte[]>> Subscriptions { get; } = [];
+        public List<Task> Consumers { get; } = [];
+
+        public async Task CloseAsync()
+        {
+            if (Stop is not { } stop) return;
+            Stop = null;
+            using (stop)
+            {
+                await stop.CancelAsync();
+                try { await Task.WhenAll(Subscriptions.Select(subscription => subscription.DisposeAsync().AsTask())); }
+                finally
+                {
+                    await Task.WhenAll(Consumers);
+                    Subscriptions.Clear();
+                    Consumers.Clear();
+                }
+            }
         }
     }
 
@@ -127,19 +190,19 @@ internal sealed class GrowwHistoricalFeedTransport(IHttpClientFactory clients,
         HistoricalFeedInstrument instrument, string kind,
         Action<HistoricalFeedInstrument, string, GrowwFeedPoint, DateTimeOffset> onPoint,
         Action onGap, Action<HistoricalFeedInstrument, string, DateTimeOffset> onInvalidPoint,
-        CancellationTokenSource lifetime)
+        CancellationTokenSource lifetime, CancellationToken subscriptionToken)
     {
         try
         {
-            await foreach (var message in subscription.Msgs.ReadAllAsync(lifetime.Token))
+            await foreach (var message in subscription.Msgs.ReadAllAsync(subscriptionToken))
             {
                 var received = clock.GetUtcNow();
                 DispatchFrame(message.Data ?? [], instrument, kind, received, onPoint,
                     () => onInvalidPoint(instrument, kind, received));
             }
-            if (!lifetime.IsCancellationRequested) throw new InvalidDataException("A feed subscription ended before the capture window closed.");
+            if (!subscriptionToken.IsCancellationRequested) throw new InvalidDataException("A feed subscription ended before the capture window closed.");
         }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (subscriptionToken.IsCancellationRequested) { }
         catch
         {
             onGap();

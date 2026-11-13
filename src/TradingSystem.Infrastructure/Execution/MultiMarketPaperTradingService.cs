@@ -960,6 +960,16 @@ internal sealed partial class MultiMarketPaperTradingService(
         {
             var oppositeType = decision.Direction == Direction.Buy ? InstrumentType.PutOption : InstrumentType.CallOption;
             var since = now.AddMinutes(-BankNiftyFailedSetupCooldownPolicy.Minutes);
+            var sameSideType = decision.Direction == Direction.Buy ? InstrumentType.CallOption : InstrumentType.PutOption;
+            var lastSameSide = await (from prior in db.MarketPaperPositions.AsNoTracking()
+                join instrument in db.Instruments.AsNoTracking() on prior.ExecutionInstrumentId equals instrument.Id
+                where prior.Market == market.Code && prior.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
+                    prior.Status != "Active" && prior.ClosedAtUtc >= sessionStartUtc &&
+                    prior.ClosedAtUtc <= now && instrument.Type == sameSideType
+                orderby prior.ClosedAtUtc descending
+                select new { prior.ClosedAtUtc, prior.Status, prior.RealisedPnl }).FirstOrDefaultAsync(cancellationToken);
+            var sameSideFailedExit = lastSameSide is { Status: BankNiftyFailedSetupCooldownPolicy.FailedExit,
+                RealisedPnl: < 0m } ? lastSameSide.ClosedAtUtc : null;
             var oppositeFailedExit = await (from prior in db.MarketPaperPositions.AsNoTracking()
                 join instrument in db.Instruments.AsNoTracking() on prior.ExecutionInstrumentId equals instrument.Id
                 where prior.Market == market.Code && prior.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
@@ -968,7 +978,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 orderby prior.ClosedAtUtc descending
                 select prior.ClosedAtUtc).FirstOrDefaultAsync(cancellationToken);
             var structure = BankNiftyEntryStructurePolicy.Evaluate(completed, decision.Direction.Value,
-                atr, interval, now, oppositeFailedExit);
+                atr, interval, now, oppositeFailedExit, sameSideFailedExit);
             if (!structure.Permitted)
             {
                 await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,

@@ -89,8 +89,18 @@ public sealed class HistoricalBankNiftySignalPolicy(
                 BankNiftyFailedSetupCooldownPolicy.Blocks(asOf, value.ExitAtUtc))
             .OrderByDescending(value => value.ExitAtUtc)
             .Select(value => (DateTimeOffset?)value.ExitAtUtc).FirstOrDefault();
+        var sameSideSuffix = direction == Direction.Buy ? "CE" : "PE";
+        var lastSameSide = frame.ClosedTrades.Where(value => !value.IsPartialExit &&
+                value.Strategy == BankNiftyFailedSetupCooldownPolicy.Strategy &&
+                value.Symbol.EndsWith(sameSideSuffix, StringComparison.Ordinal) &&
+                value.ExitAtUtc <= asOf &&
+                DateOnly.FromDateTime(value.ExitAtUtc.ToOffset(IndiaOffset).DateTime) == tradingDate)
+            .MaxBy(value => value.ExitAtUtc);
+        var sameSideFailedExit = lastSameSide is
+            { ExitReason: BankNiftyFailedSetupCooldownPolicy.FailedExit, NetPnl: < 0m }
+            ? (DateTimeOffset?)lastSameSide.ExitAtUtc : null;
         if (!BankNiftyEntryStructurePolicy.Evaluate(current, direction, atr,
-                candleIntervalSeconds, asOf, oppositeFailedExit).Permitted) return [];
+                candleIntervalSeconds, asOf, oppositeFailedExit, sameSideFailedExit).Permitted) return [];
         if (!OptionOpenInterestEntryPolicy.Evaluate(direction, session[^1].Close,
                 atr, frame.LatestOptionChain?.Strikes ?? [],
                 frame.PreviousOptionChain?.Strikes ?? []).Permitted) return [];

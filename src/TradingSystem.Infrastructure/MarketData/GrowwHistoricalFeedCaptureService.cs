@@ -44,6 +44,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     {
         if (!options.Value.Enabled) return;
         var consecutiveFailures = 0;
+        DateOnly? monitoredDate = null;
+        ReplayDepthMonitor? depthMonitor = null;
         while (!stoppingToken.IsCancellationRequested)
         {
             var local = clock.GetUtcNow().ToOffset(India);
@@ -52,8 +54,14 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 TimeOnly.FromDateTime(local.DateTime) >= new TimeOnly(15, 35))
             { await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken); continue; }
             var date = DateOnly.FromDateTime(local.DateTime);
+            if (date != monitoredDate)
+            {
+                var open = new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
+                depthMonitor = new ReplayDepthMonitor(open, open.AddHours(6.25));
+                monitoredDate = date;
+            }
             pulse.Starting(date);
-            try { await CaptureSessionAsync(date, stoppingToken); pulse.Finished(); consecutiveFailures = 0; }
+            try { await CaptureSessionAsync(date, stoppingToken, depthMonitor); pulse.Finished(); consecutiveFailures = 0; }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
             {
@@ -75,14 +83,15 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     internal static TimeSpan RecoveryDelay(int consecutiveFailures) =>
         TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Clamp(consecutiveFailures, 1, 6) - 1)));
 
-    internal async Task CaptureSessionAsync(DateOnly date, CancellationToken stoppingToken)
+    internal async Task CaptureSessionAsync(DateOnly date, CancellationToken stoppingToken,
+        ReplayDepthMonitor? depthMonitor = null)
     {
         pulse.Stage("Instrument plan / pre-session anchors");
         var receipt = await CapturePolicyReceiptOnceAsync(date, stoppingToken);
         var (plan, coverage) = await LoadPlanAsync(date, receipt?.Settings.NiftySelection, stoppingToken);
         await RecordSessionAsync(date, plan, (day, token) => receipt is null
                 ? CapturePolicyReceiptAsync(day, token) : Task.FromResult<SessionPolicyReceipt?>(receipt),
-            CapturePriorThesisAsync, root, stoppingToken, coverage);
+            CapturePriorThesisAsync, root, stoppingToken, coverage, depthMonitor);
     }
 
     // Separate input retrieval from the recording lifecycle so disconnect,
@@ -91,7 +100,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         Func<DateOnly, CancellationToken, Task<SessionPolicyReceipt?>> captureReceipt,
         Func<DateOnly, CancellationToken, Task<(bool Captured, PersistentDirectionalThesisV1? Thesis)>> capturePriorThesis,
         string outputDirectory, CancellationToken stoppingToken,
-        ReplayContractCoverageInput? coverageInput = null)
+        ReplayContractCoverageInput? coverageInput = null, ReplayDepthMonitor? depthMonitor = null)
     {
         var now = clock.GetUtcNow();
         var open = new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India);
@@ -107,6 +116,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         await WriteManifestAsync(path, manifest, stoppingToken);
         var accumulator = new GrowwHistoricalFeedAccumulator(archive);
         var end = new DateTimeOffset(date.ToDateTime(new TimeOnly(15, 35)), India).ToUniversalTime();
+        if (depthMonitor is null && plan.Any(value => value.Type is InstrumentType.CallOption or InstrumentType.PutOption))
+            depthMonitor = new ReplayDepthMonitor(open, open.AddHours(6.25));
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var timer = Task.Delay(end - now, clock, lifetime.Token);
         var captureGap = 0;
@@ -120,7 +131,9 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                     received - point.SourceAtUtc <= TimeSpan.FromSeconds(30))
                 {
                     pulse.Received(instrument.Market, received);
-                    if (instrument.Type is InstrumentType.CallOption or InstrumentType.PutOption)
+                    if (instrument.Type is InstrumentType.CallOption or InstrumentType.PutOption &&
+                        (kind != "depth" || point.Bid is > 0m && point.Offer >= point.Bid &&
+                         point.BidQuantity > 0 && point.OfferQuantity > 0))
                         pulse.OptionReceived(instrument.Market, kind, point.SourceAtUtc);
                 }
                 if (instrument.Type == InstrumentType.Index && kind != "depth" && point.Last is > 0m &&
@@ -147,7 +160,12 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 var gapObserved = RecordGap(at);
                 pulse.RejectedFrame(new(at, instrument.Market, instrument.TradingSymbol, kind), gapObserved);
             }, lifetime.Token);
-        var sampling = SampleAsync(date, accumulator, lifetime.Token);
+        var sampling = SampleAsync(date, accumulator, at =>
+        {
+            if (depthMonitor is null) return;
+            if (depthMonitor.Check(at, archive.ReadHealth(date))) RecordGap(at);
+            pulse.OptionDepthAudit(depthMonitor.Snapshot());
+        }, lifetime.Token);
         // Never hold subscription startup waiting for optional fidelity metadata.
         var receipt = captureReceipt(date, lifetime.Token);
         var priorThesis = capturePriorThesis(date, lifetime.Token);
@@ -168,6 +186,12 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             await timer;
             await lifetime.CancelAsync();
             try { await consume; } catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            try { await sampling; } catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            if (depthMonitor is not null)
+            {
+                if (depthMonitor.Check(clock.GetUtcNow(), archive.ReadHealth(date))) RecordGap(clock.GetUtcNow());
+                pulse.OptionDepthAudit(depthMonitor.Snapshot());
+            }
             manifest = manifest with { SubscribedAtUtc = subscribedAt, CompletedAtUtc = clock.GetUtcNow(),
                 HasGaps = manifest.HasGaps || Volatile.Read(ref captureGap) != 0 || subscribedAt is null ||
                     subscribedAt > open };
@@ -195,7 +219,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
             var prior = await priorThesis;
             manifest = manifest with { PolicyReceipt = await receipt,
                 LastRejectedFrame = pulse.Read(date, true).LastRejectedFrame,
-                SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
+                SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis,
+                OptionDepthAudit = pulse.Read(date, true).OptionDepthAudit };
             UpdateCoverage(manifest.PolicyReceipt);
             await WriteManifestAsync(path, manifest, CancellationToken.None);
         }
@@ -221,6 +246,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                     LastCheckpointAtUtc = clock.GetUtcNow(), HasGaps = manifest.HasGaps || Volatile.Read(ref captureGap) != 0 ||
                         subscribedAt is null || subscribedAt > open,
                     LastRejectedFrame = pulse.Read(date, true).LastRejectedFrame,
+                    OptionDepthAudit = pulse.Read(date, true).OptionDepthAudit,
                     PolicyReceipt = policy,
                     SensexPriorThesisStateCaptured = prior.Captured, PriorSensexThesis = prior.Thesis };
                 await WriteManifestAsync(path, manifest, lifetime.Token);
@@ -301,12 +327,14 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
     private static readonly Action<ILogger,string,Exception?> PolicyReceiptFailed = LoggerMessage.Define<string>(
         LogLevel.Warning,new EventId(6755,"ReplayPolicyReceiptMissing"),"Paper fidelity settings capture unavailable ({FailureType}).");
 
-    private async Task SampleAsync(DateOnly date, GrowwHistoricalFeedAccumulator accumulator, CancellationToken token)
+    private async Task SampleAsync(DateOnly date, GrowwHistoricalFeedAccumulator accumulator,
+        Action<DateTimeOffset> auditPersistedDepth, CancellationToken token)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.Value.SampleSeconds), clock);
         while (await timer.WaitForNextTickAsync(token))
         {
             var now = clock.GetUtcNow();
+            auditPersistedDepth(now);
             if (now >= new DateTimeOffset(date.ToDateTime(new TimeOnly(9, 15)), India) &&
                 now < new DateTimeOffset(date.ToDateTime(new TimeOnly(15, 30)), India) &&
                 pulse.Read(date, true).HasStalledMarket(now))

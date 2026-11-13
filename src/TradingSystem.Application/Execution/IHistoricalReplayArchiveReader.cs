@@ -18,6 +18,7 @@ public sealed record HistoricalReplayArchiveSlice(HistoricalReplaySessionData Se
     public IReadOnlyList<string> RecordedContractCoverageIssues { get; init; } = [];
     public SessionPolicyReceipt? CapturedSessionPolicy { get; init; }
     public IReadOnlyList<HistoricalReplayGap> UnreadableQuoteIntervals { get; init; } = [];
+    public IReadOnlyList<HistoricalReplayGap> MonitoredDepthGaps { get; init; } = [];
     public bool ArchiveReportedCaptureGaps { get; init; }
     public bool GapAwarePolicyInputsReady { get; init; }
     public int CaptureSampleSeconds { get; init; } = 2;

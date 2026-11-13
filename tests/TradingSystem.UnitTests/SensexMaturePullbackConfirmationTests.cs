@@ -58,7 +58,7 @@ public sealed class SensexMaturePullbackConfirmationTests
     [Theory]
     [InlineData(Direction.Buy)]
     [InlineData(Direction.Sell)]
-    public void ConfirmedBreakRemainsEligibleEvenWithNearbyOlderLevel(Direction direction)
+    public void ConfirmedLocalBreakWaitsWhileNearbyOlderLevelStillLimitsRoom(Direction direction)
     {
         var bars = November5Bars();
         // Synthetic boundary control: an older level is near the new close,
@@ -71,9 +71,14 @@ public sealed class SensexMaturePullbackConfirmationTests
                 Close = 160000m - bar.Close }).ToArray();
         var result = SensexMaturePullbackConfirmationPolicy.Evaluate(bars, direction, 8.89m);
         Assert.True(result.Applies);
-        Assert.True(result.Permitted);
+        Assert.False(result.Permitted);
+        Assert.Contains(result.Reasons, reason => reason.Contains("local structure break does not clear"));
         bars[^1] = bars[^1] with { Close = result.ConfirmationLevel!.Value };
         Assert.False(SensexMaturePullbackConfirmationPolicy.Evaluate(bars, direction, 8.89m).Permitted);
+        bars[^1] = direction == Direction.Buy
+            ? bars[^1] with { High = 79472m, Close = 79472m }
+            : bars[^1] with { Low = 80528m, Close = 80528m };
+        Assert.True(SensexMaturePullbackConfirmationPolicy.Evaluate(bars, direction, 8.89m).Permitted);
     }
 
     [Fact]
@@ -85,6 +90,23 @@ public sealed class SensexMaturePullbackConfirmationTests
         Assert.True(result.Permitted);
         Assert.False(result.Applies);
         Assert.Null(result.RoomAtr);
+    }
+
+    [Fact]
+    public void November13LocalBreakCannotOverruleTheSeparateSupport()
+    {
+        // Reproduce the audited geometry, not a synthetic trade fill:
+        // 81415.21 cleared the pullback low of 81422.58 but not 81409.95.
+        var bars = Enumerable.Range(0, 16).Select(i => new StrategyPriceBar(
+            new DateTimeOffset(2026, 11, 13, 11, 59, 0, TimeSpan.FromHours(5.5)).AddMinutes(i),
+            81435m, 81448m, 81422.58m, 81435m)).ToArray();
+        bars[0] = bars[0] with { Low = 81409.95m };
+        bars[^1] = bars[^1] with { Low = 81415.21m, Close = 81415.21m };
+        var result = SensexMaturePullbackConfirmationPolicy.Evaluate(bars, Direction.Sell, 7.85m);
+        Assert.False(result.Permitted);
+        Assert.InRange(result.RoomAtr!.Value, .20m, .24m);
+        Assert.Equal(81422.58m, result.ConfirmationLevel);
+        Assert.Contains(result.Reasons, reason => reason.Contains("local structure break does not clear"));
     }
 
     [Fact]
