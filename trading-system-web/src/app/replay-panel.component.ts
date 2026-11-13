@@ -1,8 +1,8 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, Input, OnInit, OnDestroy, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { HistoricalGapAwareReport, ReplayTrial } from './historical-replay.service';
-import { Subscription } from 'rxjs';
+import type { GapReplayJob, HistoricalGapAwareReport, ReplayTrial } from './historical-replay.service';
+import { catchError, exhaustMap, of, Subscription, timer } from 'rxjs';
 import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, HistoricalPolicyBuild, HistoricalReplayCohortCoverage, HistoricalReplayResearchReport, HistoricalReplayService } from './historical-replay.service';
 @Component({selector:'app-replay-panel', imports:[DatePipe,DecimalPipe,PercentPipe,FormsModule], templateUrl:'./replay-panel.component.html', styleUrl:'./replay-panel.component.scss'})
 export class ReplayPanelComponent implements OnInit, OnDestroy {
@@ -22,6 +22,9 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected gapAwareBusy = false;
   protected gapAwareError = '';
   protected gapAwareReport: HistoricalGapAwareReport | null = null;
+  protected gapAwareStatusText = '';
+  private readonly replayJobKey = 'sarthi.gap-replay.job';
+  private gapWatch?:Subscription;
   protected normalReplayStopPercent = 10;
   protected normalReplayTrial:ReplayTrial='control';
   protected replayPolicyBuilds:HistoricalPolicyBuild[]=[];
@@ -57,6 +60,8 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   }
   ngOnInit():void {
     if(this.initialDate){this.replayFrom=this.initialDate;this.replayTo=this.initialDate;}
+    const previous = this.savedGapJob();
+    if(previous) this.watchGapJob(previous);
     this.loadSavedNormalRuns();
     this.subscriptions.add(this.historicalReplayService.policyBuilds().subscribe({
       next:value=>{this.replayPolicyBuilds=value;this.refreshView();},
@@ -81,12 +86,40 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected gapAwareMarket = '';
   protected runGapAware():void {
     if (!this.replayTo || this.normalReplayBusy || this.gapAwareBusy) return;
-    this.gapAwareBusy=true;this.gapAwareError='';this.gapAwareReport=null;
+    this.gapAwareBusy=true;this.gapAwareError='';this.gapAwareReport=null;this.gapAwareStatusText='Saving replay request…';
     this.subscriptions.add(this.historicalReplayService.gapAware(this.replayTo, this.gapAwareMarket).subscribe({
-      next:value=>{this.gapAwareReport=value;this.gapAwareBusy=false;this.refreshView();},
+      next:job=>{this.savedGapJob(job.id);this.watchGapJob(job.id,job);},
       error:e=>{this.gapAwareError=typeof e?.error==='string'?e.error:'Gap-aware replay could not finish. No result was produced.';
         this.gapAwareBusy=false;this.refreshView();},
     }));
+  }
+  private savedGapJob(id?:string):string|null {
+    try {
+      if(id === '') localStorage.removeItem(this.replayJobKey);
+      else if(id) localStorage.setItem(this.replayJobKey,id);
+      return localStorage.getItem(this.replayJobKey);
+    } catch { return null; }
+  }
+  private watchGapJob(id:string, initial?:GapReplayJob):void {
+    this.gapWatch?.unsubscribe();
+    this.gapAwareBusy=true;
+    this.gapAwareStatusText=initial ? `${initial.date} · ${initial.status}` : 'Reconnecting to saved replay…';
+    this.gapWatch=timer(0,5000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
+      catchError(e=>of(e.status===404?'missing' as const:e.status===401||e.status===403?'sign-in' as const:null))
+    ))).subscribe(job=>{
+      if(job==='missing'||job==='sign-in') {
+        if(job==='missing') this.savedGapJob('');
+        this.gapAwareError=job==='missing'?'Saved replay job is no longer available.':'Sign in and reopen Historical Replay to resume watching the saved job.';
+        this.gapAwareBusy=false;this.gapWatch?.unsubscribe();
+      } else if(!job) this.gapAwareStatusText='Connection interrupted. Reconnecting to the saved replay…';
+      else if(job.status==='Completed'||job.status==='Failed') {
+        this.gapAwareReport=job.report;
+        this.gapAwareError=job.error??'';
+        this.gapAwareBusy=false;this.gapWatch?.unsubscribe();
+      } else this.gapAwareStatusText=`${job.date} · ${job.status}. You can close this panel and come back.`;
+      this.refreshView();
+    });
+    this.subscriptions.add(this.gapWatch);
   }
   protected verifyPaperSession():void {
     if(!this.replayTo || this.normalReplayBusy)return;

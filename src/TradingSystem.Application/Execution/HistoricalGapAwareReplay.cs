@@ -21,7 +21,8 @@ public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<Histo
 public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds,
     IRecordedPaperSessionReader? recorded = null)
 {
-    public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null)
+    public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null,
+        bool comparePaper = true)
     {
         var markets = new List<HistoricalGapAwareMarket>();
         foreach (var (key, label) in new[] { ("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY") })
@@ -67,7 +68,7 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
             markets.Add(HistoricalGapAwareReplay.Run(slice, null, notes, token));
         }
         var report = new HistoricalGapAwareReport(date, markets);
-        if (recorded is null || !markets.Any(market => market.Windows.Any(window =>
+        if (!comparePaper || recorded is null || !markets.Any(market => market.Windows.Any(window =>
                 window.Simulated && !window.IndependentFlatRestart))) return report;
         // The actual ledger is read only after simulation.
         var actual = await recorded.ReadTradesAsync(date, token);

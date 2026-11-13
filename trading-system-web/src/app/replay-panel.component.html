@@ -105,7 +105,7 @@
               }
             </section>
             @if(gapAwareError){<p class="historical-replay-warning" role="alert">{{gapAwareError}}</p>}
-            @if(gapAwareBusy){<p class="replay-empty" role="status">Checking recorded prices, depth and policy inputs separately for each market.</p>}
+            @if(gapAwareBusy){<p class="replay-empty" role="status">{{gapAwareStatusText}}</p>}
             @if(gapAwareReport;as report){
               <section class="daily-analysis-section">
                 <div class="section-heading"><div><span class="eyebrow">SESSION RESEARCH</span><h3>Gap-aware replay · {{report.date}}</h3></div><span class="market-badge">Not a full-day P&amp;L verdict</span></div>

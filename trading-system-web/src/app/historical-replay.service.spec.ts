@@ -25,6 +25,26 @@ describe('HistoricalReplayService', () => {
     providers: [provideHttpClient(), provideHttpClientTesting()],
   }));
 
+  it('submits a protected gap-aware job and retrieves it through a separate status request', () => {
+    const service=TestBed.inject(HistoricalReplayService);
+    const http=TestBed.inject(HttpTestingController);
+    let id='';
+    service.gapAware('2026-11-12','bank-nifty').subscribe(job=>id=job.id);
+    http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
+    const request=http.expectOne(req=>req.url.endsWith('/gap-aware/2026-11-12'));
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('X-CSRF-TOKEN')).toBe('csrf');
+    expect(request.request.params.get('market')).toBe('bank-nifty');
+    request.flush({id:'saved-job',status:'Queued'},{status:202,statusText:'Accepted'});
+    let status='';
+    service.gapAwareStatus(id).subscribe(job=>status=job.status);
+    const saved=http.expectOne('/api/research/historical-replay/normal-policy/gap-aware/jobs/saved-job');
+    expect(saved.request.method).toBe('GET');
+    saved.flush({id,status:'Completed',report:{date:'2026-11-12',markets:[]}});
+    expect(status).toBe('Completed');
+    http.verify();
+  });
+
   it('reads archive coverage for the selected completed market day', () => {
     const service = TestBed.inject(HistoricalReplayService);
     const http = TestBed.inject(HttpTestingController);

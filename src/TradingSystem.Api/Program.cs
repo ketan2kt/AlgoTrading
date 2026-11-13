@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Serilog;
+using TradingSystem.Api;
 using TradingSystem.Api.Hubs;
 using TradingSystem.Api.Controllers;
 using TradingSystem.Infrastructure;
@@ -106,8 +107,12 @@ builder.Services
 
 var recorder = ReplayRecorderHosting.IsRecorder(builder.Configuration);
 if (!recorder)
+{
+    builder.Services.AddSingleton<HistoricalGapReplayJobs>();
+    builder.Services.AddHostedService<HistoricalGapReplayWorker>();
     builder.Services.AddHealthChecks().AddCheck<TradingSystem.Infrastructure.MarketData.RecorderPrerequisiteHealthCheck>(
         "recorder-key-ring", tags: ["recorder-prerequisite"]);
+}
 if (recorder)
 {
     ReplayRecorderHosting.RestrictToRecorder(builder.Services);

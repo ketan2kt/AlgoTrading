@@ -122,6 +122,10 @@ export interface HistoricalNormalReplayReport {
   limitations:string[];
 }
 export interface HistoricalPolicyBuild {id:string;capturedAtUtc:string;assemblyHashes:Record<string,string>}
+export interface GapReplayJob {
+  id:string;date:string;market:string|null;status:'Queued'|'Running'|'Completed'|'Failed';
+  report:HistoricalGapAwareReport|null;error:string|null;
+}
 interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
 interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null}
 export interface HistoricalNormalReplayRunSummary {
@@ -137,8 +141,12 @@ export class HistoricalReplayService {
   private readonly http=inject(HttpClient);
   gapAware(date:string, market='') {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
-      this.http.post<HistoricalGapAwareReport>('/api/research/historical-replay/normal-policy/gap-aware/'+encodeURIComponent(date),
-        {},{headers:{'X-CSRF-TOKEN':csrf.token},params:market?{market}:{}})));
+      this.http.post<GapReplayJob>('/api/research/historical-replay/normal-policy/gap-aware/'+encodeURIComponent(date),
+        {},{headers:{'X-CSRF-TOKEN':csrf.token},params:market?{market}:{}})),timeout(30000));
+  }
+  gapAwareStatus(id:string) {
+    return this.http.get<GapReplayJob>('/api/research/historical-replay/normal-policy/gap-aware/jobs/'+encodeURIComponent(id))
+      .pipe(timeout(15000));
   }
   comparePaperSession(date:string) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
