@@ -70,14 +70,15 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
     [HttpPost("gap-aware/{date}")]
     public async Task<ActionResult<GapReplayJob>> GapAware(DateOnly date,
         [FromServices] HistoricalGapReplayJobs jobs, CancellationToken cancellationToken,
-        [FromQuery] string? market = null)
+        [FromQuery] string? market = null, [FromQuery] Guid? requestId = null)
     {
         Response.Headers.CacheControl = "no-store";
         if (date.Year < 2020 || !HistoricalReplaySessionCalendar.IsCompletedDate(date, clock.GetUtcNow()))
             return BadRequest("Choose a completed session.");
         if (market is not (null or "nifty" or "sensex" or "bank-nifty"))
             return BadRequest("Choose Nifty, Sensex or Bank Nifty.");
-        var job = await jobs.EnqueueAsync(date, market, cancellationToken);
+        if (requestId == Guid.Empty) return BadRequest("Choose a valid replay request ID.");
+        var job = await jobs.EnqueueAsync(date, market, cancellationToken, requestId);
         return job is null ? Conflict("The replay queue is busy. Retry shortly.") :
             AcceptedAtAction(nameof(GapAwareStatus), new { id = job.Id }, job with { CompletedMarkets = null });
     }

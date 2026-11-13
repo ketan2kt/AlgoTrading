@@ -13,6 +13,27 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
     private static readonly string[] ExpectedRequests = ["nifty", "sensex", "sensex", "bank-nifty"];
 
     [Fact]
+    public async Task LostAcknowledgmentRetryFindsTheSameJobEvenAfterItCompletes()
+    {
+        var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+        var archive = new Archive();
+        using var services = Services(archive);
+        using var jobs = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var requestId = Guid.NewGuid();
+        var original = Assert.IsType<GapReplayJob>(await jobs.EnqueueAsync(Date, "bank-nifty", default, requestId));
+        Assert.Equal(requestId, original.Id);
+        using var worker = Worker(jobs, services, clock);
+        await worker.RunNextAsync(default);
+        await worker.RunNextAsync(default);
+        var retry = Assert.IsType<GapReplayJob>(await jobs.EnqueueAsync(Date, "bank-nifty", default, requestId));
+        Assert.Equal(requestId, retry.Id);
+        Assert.Equal("Completed", retry.Status);
+        Assert.Null(await jobs.EnqueueAsync(Date, "nifty", default, requestId));
+        await worker.RunNextAsync(default);
+        Assert.Equal("bank-nifty", Assert.Single(archive.Requested));
+    }
+
+    [Fact]
     public async Task RestartResumesAtFirstUnfinishedMarketAndPublishesOneCompleteReport()
     {
         var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
@@ -66,6 +87,64 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
         Assert.Null(failed.Report);
     }
 
+    [Fact]
+    public async Task SlowArchiveDoesNotConsumeSimulationTime()
+    {
+        var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+        var archive = new Archive { OnRead = () => clock.Advance(TimeSpan.FromMinutes(9)),
+            OnQuotes = () => clock.Advance(TimeSpan.FromMinutes(11)) };
+        using var services = Services(archive);
+        using var jobs = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var job = (await jobs.EnqueueAsync(Date, "bank-nifty", default))!;
+        using var worker = Worker(jobs, services, clock);
+        await worker.RunNextAsync(default);
+        await worker.RunNextAsync(default);
+        var saved = (await jobs.ReadAsync(job.Id, default))!;
+        Assert.Equal("Completed", saved.Status);
+        Assert.Null(Assert.Single(saved.Report!.Markets).RunError);
+        Assert.Single(archive.Requested);
+    }
+
+    [Fact]
+    public async Task SimulationTimeoutKeepsOtherMarketsAndDoesNotRetryTheSameWork()
+    {
+        var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+        var archive = new Archive();
+        using var services = Services(archive);
+        using var jobs = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var job = (await jobs.EnqueueAsync(Date, null, default))!;
+        using var worker = Worker(jobs, services, clock);
+        await worker.RunNextAsync(default);
+        archive.OnQuotes = () => clock.Advance(TimeSpan.FromMinutes(31));
+        await worker.RunNextAsync(default);
+        archive.OnQuotes = null;
+        await worker.RunNextAsync(default);
+        await worker.RunNextAsync(default);
+        var saved = (await jobs.ReadAsync(job.Id, default))!;
+        Assert.Equal("Completed", saved.Status);
+        Assert.Collection(saved.Report!.Markets, m => Assert.Null(m.RunError),
+            m => Assert.Contains("simulation", m.RunError), m => Assert.Null(m.RunError));
+        Assert.Equal(3, archive.Requested.Count);
+    }
+
+    [Fact]
+    public async Task SimulationBudgetNeverRunsAcrossTheTradingBoundary()
+    {
+        var clock = new Clock(new(2026, 11, 13, 3, 18, 0, TimeSpan.Zero));
+        var archive = new Archive { OnRead = () => clock.Advance(TimeSpan.FromMinutes(9)),
+            OnQuotes = () => clock.Advance(TimeSpan.FromMinutes(3)) };
+        using var services = Services(archive);
+        using var jobs = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var job = (await jobs.EnqueueAsync(Date, "bank-nifty", default))!;
+        using var worker = Worker(jobs, services, clock);
+        await worker.RunNextAsync(default);
+        var saved = (await jobs.ReadAsync(job.Id, default))!;
+        Assert.Equal("Queued", saved.Status);
+        Assert.Equal(0, saved.Attempts);
+        await worker.RunNextAsync(default);
+        Assert.Single(archive.Requested);
+    }
+
     private static ServiceProvider Services(Archive archive) => new ServiceCollection()
         .AddSingleton<IHistoricalReplayArchiveReader>(archive).AddSingleton<IHistoricalPolicyBuildStore, NoBuilds>()
         .AddScoped<HistoricalGapAwareReplayService>().BuildServiceProvider();
@@ -74,23 +153,65 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
 
     private sealed class Clock(DateTimeOffset now) : TimeProvider
     {
+        private readonly List<ManualTimer> timers = [];
         public DateTimeOffset Now { get; set; } = now;
         public override DateTimeOffset GetUtcNow() => Now;
+        public void Advance(TimeSpan elapsed)
+        {
+            Now += elapsed;
+            foreach (var timer in timers.ToArray()) timer.Fire();
+        }
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            timers.Add(timer);
+            return timer;
+        }
+        private sealed class ManualTimer(Clock clock, TimerCallback callback, object? state) : ITimer
+        {
+            private DateTimeOffset? due;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                Assert.Equal(Timeout.InfiniteTimeSpan, period);
+                due = dueTime == Timeout.InfiniteTimeSpan ? null : clock.Now + dueTime;
+                return true;
+            }
+            public void Fire()
+            {
+                if (due > clock.Now || due is null) return;
+                due = null;
+                callback(state);
+            }
+            public void Dispose() => clock.timers.Remove(this);
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
     private sealed class Archive : IHistoricalReplayArchiveReader
     {
         public List<string> Requested { get; } = [];
         public CancellationTokenSource? Interrupt { get; set; }
         public bool Fails { get; init; }
+        public Action? OnRead { get; init; }
+        public Action? OnQuotes { get; set; }
         public async Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly date, string market, CancellationToken token)
         {
             Requested.Add(market);
             if (Interrupt is { } shutdown) { Interrupt = null; await shutdown.CancelAsync(); token.ThrowIfCancellationRequested(); }
             if (Fails) throw new IOException("Simulated unavailable archive");
+            OnRead?.Invoke();
             var symbol = market.Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
             var start = new DateTimeOffset(2026, 11, 12, 3, 45, 0, TimeSpan.Zero);
-            return new(new(date, symbol, [], [], start, start.AddMinutes(375)), null, null, [], []);
+            return new(new(date, symbol, [], new QuoteScan(OnQuotes, symbol, start), start, start.AddMinutes(375)), null, null, [], []);
         }
+    }
+
+    private sealed class QuoteScan(Action? onRead, string symbol, DateTimeOffset start) : IHistoricalChronologicalQuotePath
+    {
+        public int Count => 1;
+        public HistoricalReplayQuote this[int index] => index == 0 ? new(symbol, start, 100) : throw new ArgumentOutOfRangeException(nameof(index));
+        public IEnumerator<HistoricalReplayQuote> GetEnumerator() { onRead?.Invoke(); yield return this[0]; }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
     private sealed class NoBuilds : IHistoricalPolicyBuildStore
     {

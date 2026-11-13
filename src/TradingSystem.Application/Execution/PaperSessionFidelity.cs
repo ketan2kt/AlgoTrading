@@ -4,6 +4,8 @@ public sealed record FidelityAction(string Kind,DateTimeOffset At,int Quantity,d
 public sealed record FidelityTrade(string Symbol,IReadOnlyList<FidelityAction> Actions)
 {
     public FidelityAction Entry => Actions.First(x=>x.Kind=="Entry");
+    public DateTimeOffset? DecisionBarCloseUtc { get; init; }
+    public DateTimeOffset? EvaluationStartedAtUtc { get; init; }
 }
 public sealed record RecordedPaperSession(IReadOnlyList<FidelityTrade> Trades,IReadOnlyList<string> Gaps);
 public sealed record PaperReplayPreflight(SessionPolicyReceipt? Receipt, string? CaptureExclusion = null, int? PaperTrades = null);
@@ -17,13 +19,18 @@ public interface IRecordedPaperSessionReader
 public sealed record FidelityRow(string Symbol,string Kind,string Finding,FidelityAction? Paper,FidelityAction? Replay)
 {
     public DateTimeOffset At => Paper is null ? Replay!.At : Replay is null || Paper.At<Replay.At ? Paper.At : Replay.At;
+    public HistoricalReplayEntryEvidence? EntryEvidence { get; init; }
+    public DateTimeOffset? PaperDecisionBarCloseUtc { get; init; }
+    public DateTimeOffset? PaperEvaluationStartedAtUtc { get; init; }
 }
 public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int ReplayTrades,
     IReadOnlyList<string> Gaps,IReadOnlyList<FidelityRow> Rows)
 {
     public FidelityRow? FirstDifference => Rows.FirstOrDefault(x=>x.Finding!="Match");
+    public string? Scope { get; init; }
 
-    public static PaperSessionFidelity Compare(RecordedPaperSession actual,IReadOnlyList<HistoricalReplayFill> fills)
+    public static PaperSessionFidelity Compare(RecordedPaperSession actual,IReadOnlyList<HistoricalReplayFill> fills,
+        IReadOnlyList<HistoricalReplayEntryEvidence>? evidence = null)
     {
         var gaps=actual.Gaps.ToList();
         var replay=new List<FidelityTrade>();
@@ -35,17 +42,26 @@ public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int Rep
             var actions=new List<FidelityAction>{new("Entry",last.EntryAtUtc,last.EntryUnits,last.OriginalEntryPremium.Value,last.Strategy)};
             if(last.AddOnAt is { } at && last.AddOnPremium is { } price) actions.Add(new("Add-on",at,last.AddOnUnits,price));
             actions.AddRange(g.Select(x=>new FidelityAction(x.IsPartialExit?"Partial":"Exit",x.ExitAtUtc,x.Quantity,x.ExitPrice,x.IsPartialExit?null:x.ExitReason)));
-            replay.Add(new(last.Symbol,actions));
+            replay.Add(new(last.Symbol,actions){DecisionBarCloseUtc=last.DecisionAtUtc});
         }
         var rows=new List<FidelityRow>();
         // Match positions before their actions: never pair an exit from another entry.
         // A symmetric one-minute window is a matching aid, not a pass tolerance.
         static bool Near(FidelityTrade a,FidelityTrade b) => a.Symbol==b.Symbol &&
-            (a.Entry.At-b.Entry.At).Duration()<=TimeSpan.FromMinutes(1);
+            (a.DecisionBarCloseUtc is { } left && b.DecisionBarCloseUtc is { } right
+                ? left==right : (a.Entry.At-b.Entry.At).Duration()<=TimeSpan.FromMinutes(1));
         var paired=new HashSet<FidelityTrade>();
         foreach(var p in actual.Trades){
             var candidates=replay.Where(r=>Near(p,r)).ToArray();
-            if(candidates.Length==0){rows.Add(new(p.Symbol,"Entry","Paper only",p.Entry,null));continue;}
+            if(candidates.Length==0){
+                var traces=(evidence??[]).Where(x=>x.Symbol==p.Symbol &&
+                        (p.DecisionBarCloseUtc is { } close ? x.DecisionAtUtc==close :
+                            (x.DecisionAtUtc-p.Entry.At).Duration()<=TimeSpan.FromMinutes(1)))
+                    .GroupBy(x=>x.DecisionAtUtc).ToArray();
+                var trace=traces.Length==1?traces[0].Last():null;
+                rows.Add(new(p.Symbol,"Entry","Paper only",p.Entry,null){EntryEvidence=trace,
+                    PaperDecisionBarCloseUtc=p.DecisionBarCloseUtc,PaperEvaluationStartedAtUtc=p.EvaluationStartedAtUtc});continue;
+            }
             if(candidates.Length!=1 || actual.Trades.Count(x=>Near(x,candidates[0]))!=1){
                 gaps.Add($"{p.Symbol}: nearby repeated entries cannot be paired uniquely.");rows.Add(new(p.Symbol,"Entry","Ambiguous",p.Entry,null));continue;
             }
@@ -59,7 +75,9 @@ public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int Rep
                         kind=="Entry" && a.Reason!=b.Reason?"Entry strategy differs":
                         Reason(a.Reason)!=Reason(b.Reason)?"Exit reason differs":a.At!=b.At?"Time differs":
                         a.Price!=b.Price?"Fill price only":"Match";
-                    rows.Add(new(p.Symbol,kind,finding,a,b));
+                    rows.Add(new(p.Symbol,kind,finding,a,b){
+                        PaperDecisionBarCloseUtc=kind=="Entry"?p.DecisionBarCloseUtc:null,
+                        PaperEvaluationStartedAtUtc=kind=="Entry"?p.EvaluationStartedAtUtc:null});
                 }
             }
         }
@@ -73,7 +91,7 @@ public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int Rep
     }
 
     private static string? Reason(string? value) => value switch {
-        "ObservedStop" or "ObservedBarStop" or "PolicyStop" or "StopLossHit" => "Stop",
+        "ObservedStop" or "ObservedBarStop" or "PolicyStop" or "StopLossHit" or "StopLoss" => "Stop",
         "ObservedTarget" or "ObservedBarTarget" or "TargetHit" => "Target",
         _=>value
     };

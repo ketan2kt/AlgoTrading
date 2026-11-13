@@ -44,6 +44,10 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         var window = Assert.Single(report.Windows);
         Assert.Empty(window.Fills);
         Assert.Equal(1, window.UnresolvedExecutions);
+        Assert.Collection(window.EntryEvidence,
+            row => Assert.Equal("Candidate", row.Stage),
+            row => Assert.Equal("Queued", row.Stage),
+            row => Assert.Equal("Entry unresolved", row.Stage));
     }
 
     [Fact]

@@ -44,4 +44,41 @@ public sealed class PaperSessionFidelityTests
         Assert.Contains(r.Rows,x=>x.Symbol=="BANKNIFTYPE" && x.Finding=="Replay only");
         Assert.DoesNotContain(r.Rows,x=>x.Paper!=null && x.Replay!=null);
     }
+
+    [Fact]
+    public void PaperOnlyTradeLinksAnUnambiguousCandidateWithoutClaimingAFill()
+    {
+        const string symbol = "BANKNIFTYCE";
+        HistoricalReplayEntryEvidence[] evidence =
+        [new(symbol, At.AddSeconds(-4), At.AddSeconds(-4), "Candidate", 10),
+         new(symbol, At.AddSeconds(-4), At.AddSeconds(90), "Entry expired", 10, "No eligible fill")];
+        var result = PaperSessionFidelity.Compare(new([Paper(symbol)], []), [], evidence);
+        var row = Assert.Single(result.Rows);
+        Assert.Equal("Paper only", row.Finding);
+        Assert.Equal("Entry expired", row.EntryEvidence!.Stage);
+        Assert.Null(row.Replay);
+        Assert.Equal(0, result.ReplayTrades);
+    }
+
+    [Fact]
+    public void PaperStopLossAndReplayObservedStopAreTheSameExitReason()
+    {
+        var paper = Paper("NIFTYCE");
+        var stopped = paper with { Actions = [paper.Entry, paper.Actions[1] with { Reason = "StopLoss" }] };
+        var result = PaperSessionFidelity.Compare(new([stopped], []), [Fill(paper.Symbol) with { ExitReason = "ObservedStop" }]);
+        Assert.Equal("Recorded actions match", result.Verdict);
+    }
+
+    [Fact]
+    public void KnownDecisionCandleOverridesNearbyFillMatching()
+    {
+        var paper = Paper("BANKNIFTYCE") with { DecisionBarCloseUtc = At.AddMinutes(-1),
+            EvaluationStartedAtUtc = At.AddSeconds(-55) };
+        var wrong = Fill(paper.Symbol) with { EntryAtUtc = At.AddSeconds(2) };
+        var right = Fill(paper.Symbol) with { DecisionAtUtc = At.AddMinutes(-1), EntryAtUtc = At.AddMinutes(2) };
+        var result = PaperSessionFidelity.Compare(new([paper], []), [wrong, right]);
+        Assert.Contains(result.Rows, row => row.Finding == "Time differs" && row.Replay?.At == right.EntryAtUtc &&
+            row.PaperEvaluationStartedAtUtc == At.AddSeconds(-55));
+        Assert.Contains(result.Rows, row => row.Finding == "Replay only" && row.Replay?.At == wrong.EntryAtUtc);
+    }
 }

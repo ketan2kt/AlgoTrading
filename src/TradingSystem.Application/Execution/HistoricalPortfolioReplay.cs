@@ -132,6 +132,7 @@ public static class HistoricalPortfolioReplay
         string exchangeCode = "NSE",
         IReadOnlyDictionary<string, string>? contractExchanges = null,
         IReadOnlyList<HistoricalReplayControlEvent>? sourceControls = null,
+        Action<HistoricalReplayEntryEvidence>? entryEvidence = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sourceBars);
@@ -217,6 +218,9 @@ public static class HistoricalPortfolioReplay
         var chainIndex = 0;
         var controlIndex = 0;
         var activeControls = HistoricalReplayControlState.Empty;
+        void RecordEntry(HistoricalReplayCandidate entry, DateTimeOffset at, string stage, string? reason = null) =>
+            entryEvidence?.Invoke(new(entry.Symbol, entry.StrategyDecisionAtUtc ?? entry.DecidedAtUtc,
+                at, stage, entry.Quantity, reason));
         var chainMarkets = chains.Select(value => value.UnderlyingSymbol).Where(value => value.Length > 0)
             .Distinct(StringComparer.Ordinal).ToArray();
         HistoricalReplayBar[] frameBars = [];
@@ -517,6 +521,8 @@ public static class HistoricalPortfolioReplay
                 pendingEntries.Remove(pending.Symbol);
                 missingEntry++;
                 stale++;
+                RecordEntry(pending, time, "Entry expired", pending.RequiresDeferredQuoteAdmission || pending.DeferredNiftyAdmission is not null
+                    ? "No qualifying quote arrived for admission." : "No eligible fill arrived after admission.");
                 FlagUncertainty(pending.StrategyDecisionAtUtc ?? pending.DecidedAtUtc);
             }
             foreach (var pending in pendingAddOns.Values.ToArray())
@@ -563,6 +569,8 @@ public static class HistoricalPortfolioReplay
                         "A replay policy emitted an off-frame decision.");
                 QueuePolicyExits(ApplyStopUpdates(snapshot) ? Snapshot(time) : snapshot);
                 candidateCount += decisions.Length;
+                if (entryEvidence is not null)
+                    foreach (var decision in decisions) RecordEntry(decision, time, "Candidate");
                 if (decisions.Length > 0 && (lastEntryAt is null ||
                     time - lastEntryAt.Value >= TimeSpan.FromMinutes(
                         parameters.MinimumMinutesBetweenEntries)))
@@ -580,7 +588,10 @@ public static class HistoricalPortfolioReplay
                             StringComparer.Ordinal).Count() == decisions.Length)
                         foreach (var decision in decisions.OrderBy(value =>
                             value.Symbol, StringComparer.Ordinal))
+                        {
                             pendingEntries.Add(decision.Symbol, decision);
+                            RecordEntry(decision, time, "Queued");
+                        }
                 }
             }
             var firstQuoteIndex = quoteIndex;
@@ -775,6 +786,7 @@ public static class HistoricalPortfolioReplay
                         // Do not silently reprice it using future information.
                         pendingEntries.Remove(quote.Symbol);
                         missingEntry++;
+                        RecordEntry(pendingEntry, time, "Entry rejected", "The observed fill would invalidate the planned stop or target.");
                         continue;
                     }
                     var plannedDeadline = pendingEntry.PlannedExitAtUtc ??
@@ -784,6 +796,7 @@ public static class HistoricalPortfolioReplay
                     {
                         pendingEntries.Remove(quote.Symbol);
                         missingEntry++;
+                        RecordEntry(pendingEntry, time, "Entry rejected", "The holding deadline passed before the fill.");
                         continue;
                     }
                     openPositions.Add(quote.Symbol, new Position(pendingEntry,
@@ -798,6 +811,7 @@ public static class HistoricalPortfolioReplay
                             ? "ObservedOffer" : quote.Source == "GrowwChainReceiptLtp"
                                 ? "ObservedChainLtpNonExecutable" : "ModeledLastPrice"));
                     Consume(quote, pendingEntry.Quantity, buy: true);
+                    RecordEntry(pendingEntry, time, "Entry filled");
                     peakEntryCapitalExposure = Math.Max(peakEntryCapitalExposure,
                         openPositions.Values.Sum(value => value.EntryPrice *
                             value.RemainingQuantity));
@@ -820,13 +834,18 @@ public static class HistoricalPortfolioReplay
                         pendingEntries.Remove(symbol);
                         missingEntry++;
                         stale++;
+                        RecordEntry(pending, time, "Admission expired", "The admission quote missed the strategy's freshness or bid/ask requirement.");
                         FlagUncertainty(pending.StrategyDecisionAtUtc ?? pending.DecidedAtUtc);
                         continue;
                     }
                     var admitted = policy.AssessDeferredEntry(snapshot, pending,
                         latest[symbol]);
                     pendingEntries.Remove(symbol);
-                    if (admitted is null) continue;
+                    if (admitted is null)
+                    {
+                        RecordEntry(pending, time, "Admission rejected", "The archived policy declined the observed quote.");
+                        continue;
+                    }
                     if (admitted.Symbol != symbol ||
                         admitted.DecidedAtUtc != time ||
                         admitted.DeferredNiftyAdmission is not null ||
@@ -837,6 +856,7 @@ public static class HistoricalPortfolioReplay
                         throw new InvalidOperationException(
                             "Deferred quote admission emitted an invalid entry plan.");
                     pendingEntries.Add(symbol, admitted);
+                    RecordEntry(admitted, time, "Admitted");
                 }
             }
             // A protective policy may react to a newly observed option quote
@@ -891,6 +911,13 @@ public static class HistoricalPortfolioReplay
         missingEntry += pendingEntries.Count;
         missingAddOn += pendingAddOns.Count;
         missingExit += openPositions.Count;
+        if (entryEvidence is not null)
+        {
+            foreach (var entry in pendingEntries.Values)
+                RecordEntry(entry, sessionEndUtc, "Entry unresolved", "The window ended before the entry could fill.");
+            foreach (var open in openPositions.Values)
+                RecordEntry(open.Candidate, sessionEndUtc, "Exit unresolved", "The window ended without a supported exit.");
+        }
         foreach (var position in openPositions.Values) FlagUncertainty(position.EntryAtUtc);
         foreach (var entry in pendingEntries.Values) FlagUncertainty(entry.StrategyDecisionAtUtc ?? entry.DecidedAtUtc);
         foreach (var addOn in pendingAddOns.Values) FlagUncertainty(addOn.DecidedAtUtc);

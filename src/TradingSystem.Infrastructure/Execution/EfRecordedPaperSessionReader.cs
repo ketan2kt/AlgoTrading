@@ -55,7 +55,30 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
         var trades=new List<FidelityTrade>();var gaps=new List<string>();
         var heartbeat=await db.SystemEvents.AsNoTracking().Where(e=>EngineKeys.Contains(e.EventType) &&
             e.OccurredAtUtc>=start && e.OccurredAtUtc<=end)
-            .Select(e=>new {e.EventType,e.OccurredAtUtc,e.Severity}).ToArrayAsync(token);
+            .Select(e=>new {e.EventType,e.OccurredAtUtc,e.Severity,e.DetailsJson}).ToArrayAsync(token);
+        var evaluationCloses = new Dictionary<(string Market, DateTimeOffset StartedAt, DateTimeOffset BarOpen), DateTimeOffset>();
+        foreach (var row in heartbeat.Where(row => row.EventType is "EngineEvidence.sensex.regular" or "EngineEvidence.bank-nifty.regular"))
+        {
+            try
+            {
+                if (row.DetailsJson is null) continue;
+                using var doc = JsonDocument.Parse(row.DetailsJson);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("phase", out var phase) || phase.ValueKind != JsonValueKind.String || !phase.ValueEquals("CompletedCandles") ||
+                    !root.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String || !status.ValueEquals("Evaluating") ||
+                    !root.TryGetProperty("evidence", out var evidence) || evidence.ValueKind != JsonValueKind.Object ||
+                    !evidence.TryGetProperty("OpenTimeUtc", out var open) || open.ValueKind != JsonValueKind.String ||
+                    !open.TryGetDateTimeOffset(out var openAt) ||
+                    !evidence.TryGetProperty("interval", out var period) || period.ValueKind != JsonValueKind.Number ||
+                    !period.TryGetInt32(out var seconds) || seconds is not (60 or 300)) continue;
+                var close = openAt.AddSeconds(seconds);
+                if (close <= row.OccurredAtUtc)
+                    evaluationCloses[(row.EventType == "EngineEvidence.sensex.regular" ? "sensex" : "bank-nifty",
+                        row.OccurredAtUtc, openAt)] = close;
+            }
+            catch (JsonException) { /* Fall back to actual fill timestamps, not an inferred candle interval. */ }
+        }
         foreach(var key in EngineKeys){
             var series=heartbeat.Where(e=>e.EventType==key).ToArray();
             var stamps=series.Select(e=>e.OccurredAtUtc).Append(start).Append(end).Order().ToArray();
@@ -72,9 +95,10 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
             Guid.TryParseExact(e.ClientReference[..32],"N",out _)).ToLookup(e=>Guid.ParseExact(e.ClientReference[..32],"N"));
         var entryAudits=await db.MarketStrategyAudits.AsNoTracking().Where(a=>a.CandleTimeUtc>=start && a.CandleTimeUtc<=end &&
             (a.Outcome=="PaperPositionOpened" || a.Outcome=="EntryStage:PaperPositionOpened"))
-            .Select(a=>a.ReasonsJson).ToArrayAsync(token);
+            .Select(a=>new {a.Market,a.CandleTimeUtc,a.ReasonsJson}).ToArrayAsync(token);
         var names=new Dictionary<Guid,string>();
         var times=new Dictionary<Guid,DateTimeOffset>();
+        var decisions=new Dictionary<Guid,(DateTimeOffset StartedAt,DateTimeOffset? Close)>();
         // A repeated entry in the same decision candle may have no second EntryStage audit.
         var reasoning=await db.AuditLogs.AsNoTracking().Where(a=>a.Action=="NiftyTradeReasoning" &&
             a.OccurredAtUtc>=start && a.OccurredAtUtc<=end).Select(a=>new {a.EntityId,a.AfterJson}).ToArrayAsync(token);
@@ -87,17 +111,26 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
             }
             catch(JsonException){ /* Try the entry-stage record next. */ }
         }
-        foreach(var json in entryAudits)
+        foreach(var audit in entryAudits)
         {
             try{
-                using var doc=JsonDocument.Parse(json);
+                using var doc=JsonDocument.Parse(audit.ReasonsJson);
                 var root=doc.RootElement;
                 if(root.ValueKind!=JsonValueKind.Object) continue;
                 if(root.TryGetProperty("signalId",out var s) && s.ValueKind==JsonValueKind.String && s.TryGetGuid(out var id) &&
                     root.TryGetProperty("strategy",out var n) && n.ValueKind==JsonValueKind.String) names[id]=n.GetString()!;
                 if(root.TryGetProperty("positionId",out var p) && p.ValueKind==JsonValueKind.String && p.TryGetGuid(out var pos) &&
                     root.TryGetProperty("paperEntryRecordedAtUtc",out var t) && t.ValueKind==JsonValueKind.String &&
-                    t.TryGetDateTimeOffset(out var at)) times[pos]=at;
+                    t.TryGetDateTimeOffset(out var at))
+                {
+                    times[pos]=at;
+                    if(root.TryGetProperty("evaluationStartedAtUtc",out var evaluated) && evaluated.ValueKind==JsonValueKind.String &&
+                        evaluated.TryGetDateTimeOffset(out var began) && began<=at)
+                    {
+                        decisions[pos]=(began,evaluationCloses.TryGetValue((audit.Market,began,audit.CandleTimeUtc),out var close)
+                            ? close : null);
+                    }
+                }
             }
             catch(JsonException){ /* Affected source will be marked incomplete below. */ }
         }
@@ -141,7 +174,8 @@ internal sealed class EfRecordedPaperSessionReader(TradingDbContext db,FileHisto
             }
             if(p.ClosedAtUtc is not { } closed || closed>end) gaps.Add($"{symbol}: no terminal exit within session.");
             else actions.Add(new("Exit",closed,p.Quantity-p.PartialExitQuantity,p.CurrentPrice,p.Status));
-            trades.Add(new(symbol,actions));
+            trades.Add(decisions.TryGetValue(p.Id,out var decision) ? new(symbol,actions)
+                { DecisionBarCloseUtc=decision.Close, EvaluationStartedAtUtc=decision.StartedAt } : new(symbol,actions));
         }
         return new(trades,gaps);
     }

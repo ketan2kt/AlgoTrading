@@ -20,7 +20,8 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     private const int MaximumCompleted = 64;
     internal static SemaphoreSlim ComputeSlot { get; } = new(1, 1);
 
-    public async Task<GapReplayJob?> EnqueueAsync(DateOnly date, string? market, CancellationToken token)
+    public async Task<GapReplayJob?> EnqueueAsync(DateOnly date, string? market, CancellationToken token,
+        Guid? requestId = null)
     {
         await submissions.WaitAsync(token);
         try
@@ -29,11 +30,13 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
             // Keep admission atomic across rolling deployments, separately from the worker lock.
             await using var admission = TryLock("admission.lock");
             if (admission is null) return null;
+            if (requestId is { } id && await ReadStateAsync(id, token) is { } previous)
+                return previous.Date == date && previous.Market == market ? previous : null;
             var active = 0;
             var finished = new List<GapReplayJob>();
-            foreach (var id in JobIds())
+            foreach (var savedId in JobIds())
             {
-                var job = await ReadStateAsync(id, token);
+                var job = await ReadStateAsync(savedId, token);
                 if (job is null) continue;
                 if (job.Status is "Queued" or "Running")
                 {
@@ -49,7 +52,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
                 File.Delete(JobPath(old.Id));
                 File.Delete(ReportPath(old.Id));
             }
-            var next = new GapReplayJob(Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow());
+            var next = new GapReplayJob(requestId ?? Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow());
             await SaveAsync(next, token);
             return next;
         }

@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Observable, switchMap, timeout } from 'rxjs';
+import { Observable, retry, switchMap, throwError, timeout, TimeoutError, timer } from 'rxjs';
 
 export interface HistoricalReplayFill {
   symbol:string; strategy:string; decisionAtUtc:string; entryAtUtc:string; exitAtUtc:string;
@@ -59,13 +59,16 @@ export interface HistoricalReplayCohortCoverage {
 export interface HistoricalGapAwareReport {
   date:string;
   openingWindowFidelity?:HistoricalNormalReplayReport['paperFidelity'];
+  paperComparisonError?:string|null;
   markets:{
     market:string; contractsWithFreshBooks:number; contractsWithoutFreshBooks:string[];
     freshBookSamples:number; archiveReportedCaptureGaps:boolean;
-    verifiedNetPnl:number|null; limitations:string[];
+    verifiedNetPnl:number|null; limitations:string[]; runError?:string|null;
     gaps:{startUtc:string;endUtc:string;reason:string}[];
     windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;simulated:boolean;
       candidates:number;unresolvedExecutions:number;verifiedNetPnl:number|null;independentScenarioNetPnl:number|null;
+      entryEvidence?:{symbol:string;decisionAtUtc:string;atUtc:string;stage:string;quantity:number;reason:string|null}[];
+      entryEvidenceTruncated?:boolean;
       fills:{fill:HistoricalReplayFill;exclusionReason:string|null}[]}[];
   }[];
 }
@@ -102,7 +105,7 @@ export function replayProposal(base:HistoricalNormalPolicyConfiguration,trial:Re
   return p;
 }
 export interface HistoricalNormalReplayReport {
-  paperFidelity?:{verdict:string;paperTrades:number;replayTrades:number;gaps:string[];
+  paperFidelity?:{verdict:string;paperTrades:number;replayTrades:number;gaps:string[];scope?:string|null;
     rows:FidelityRow[];firstDifference:FidelityRow|null}|null;
   experimentFinding?:string|null;
   verifiedControlWithFills?:boolean;
@@ -127,7 +130,8 @@ export interface GapReplayJob {
   report:HistoricalGapAwareReport|null;error:string|null;
 }
 interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
-interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null}
+interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null;
+  entryEvidence?:{stage:string;reason:string|null};paperDecisionBarCloseUtc?:string|null;paperEvaluationStartedAtUtc?:string|null}
 export interface HistoricalNormalReplayRunSummary {
   id:string;createdAtUtc:string;from:string;to:string;baselineBuildId:string|null;proposalBuildId:string|null;
   includedDays:number;baselineNet:number;proposalNet:number;
@@ -139,10 +143,12 @@ interface NormalReplaySavedConfiguration {
 @Injectable({providedIn:'root'})
 export class HistoricalReplayService {
   private readonly http=inject(HttpClient);
-  gapAware(date:string, market='') {
+  gapAware(date:string, market='', requestId:string=crypto.randomUUID()) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
       this.http.post<GapReplayJob>('/api/research/historical-replay/normal-policy/gap-aware/'+encodeURIComponent(date),
-        {},{headers:{'X-CSRF-TOKEN':csrf.token},params:market?{market}:{}})),timeout(30000));
+        {},{headers:{'X-CSRF-TOKEN':csrf.token},params:market?{market,requestId}:{requestId}})),timeout(30000),
+      retry({count:2,delay:(error,attempt)=>error instanceof TimeoutError || error.status===0 ||
+        error.status===429 || error.status>=500 ? timer(attempt*2000) : throwError(()=>error)}));
   }
   gapAwareStatus(id:string) {
     return this.http.get<GapReplayJob>('/api/research/historical-replay/normal-policy/gap-aware/jobs/'+encodeURIComponent(id))

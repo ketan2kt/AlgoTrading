@@ -24,6 +24,8 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected gapAwareReport: HistoricalGapAwareReport | null = null;
   protected gapAwareStatusText = '';
   private readonly replayJobKey = 'sarthi.gap-replay.job';
+  private readonly replayRequestKey = 'sarthi.gap-replay.pending';
+  private pendingReplay?:{date:string;market:string;id:string};
   private gapWatch?:Subscription;
   protected normalReplayStopPercent = 10;
   protected normalReplayTrial:ReplayTrial='control';
@@ -61,7 +63,12 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   ngOnInit():void {
     if(this.initialDate){this.replayFrom=this.initialDate;this.replayTo=this.initialDate;}
     const previous = this.savedGapJob();
-    if(previous) this.watchGapJob(previous);
+    const pending=this.savedReplayRequest();
+    if(pending) {
+      this.replayTo=pending.date;
+      this.gapAwareMarket=pending.market;
+      this.runGapAware();
+    } else if(previous) this.watchGapJob(previous);
     this.loadSavedNormalRuns();
     this.subscriptions.add(this.historicalReplayService.policyBuilds().subscribe({
       next:value=>{this.replayPolicyBuilds=value;this.refreshView();},
@@ -86,12 +93,26 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected gapAwareMarket = '';
   protected runGapAware():void {
     if (!this.replayTo || this.normalReplayBusy || this.gapAwareBusy) return;
+    const pending=this.savedReplayRequest();
+    const request=pending?.date===this.replayTo && pending.market===this.gapAwareMarket ? pending :
+      {date:this.replayTo,market:this.gapAwareMarket,id:crypto.randomUUID()};
+    this.savedReplayRequest(request);
     this.gapAwareBusy=true;this.gapAwareError='';this.gapAwareReport=null;this.gapAwareStatusText='Saving replay request…';
-    this.subscriptions.add(this.historicalReplayService.gapAware(this.replayTo, this.gapAwareMarket).subscribe({
-      next:job=>{this.savedGapJob(job.id);this.watchGapJob(job.id,job);},
-      error:e=>{this.gapAwareError=typeof e?.error==='string'?e.error:'Gap-aware replay could not finish. No result was produced.';
+    this.subscriptions.add(this.historicalReplayService.gapAware(request.date,request.market,request.id).subscribe({
+      next:job=>{this.savedGapJob(job.id);this.savedReplayRequest(null);this.watchGapJob(job.id,job);},
+      error:e=>{if(e.status>=400 && e.status<500 && e.status!==429) this.savedReplayRequest(null);
+        this.gapAwareError=typeof e?.error==='string'?e.error:'The website did not confirm the replay request. Retry the same session and market to reconnect if it was queued.';
         this.gapAwareBusy=false;this.refreshView();},
     }));
+  }
+  private savedReplayRequest(request?:{date:string;market:string;id:string}|null) {
+    if(request!==undefined) this.pendingReplay=request??undefined;
+    try {
+      if(request===null) localStorage.removeItem(this.replayRequestKey);
+      else if(request) localStorage.setItem(this.replayRequestKey,JSON.stringify(request));
+      else return (JSON.parse(localStorage.getItem(this.replayRequestKey)??'null') as typeof this.pendingReplay)??this.pendingReplay;
+    } catch { /* Keep the pending request in memory if storage is unavailable. */ }
+    return this.pendingReplay;
   }
   private savedGapJob(id?:string):string|null {
     try {

@@ -1,6 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { HistoricalReplayService, replayProposal } from './historical-replay.service';
 import { TestScheduler } from 'rxjs/testing';
 
@@ -43,6 +44,28 @@ describe('HistoricalReplayService', () => {
     saved.flush({id,status:'Completed',report:{date:'2026-11-12',markets:[]}});
     expect(status).toBe('Completed');
     http.verify();
+  });
+
+  it('reuses the request ID when a saved replay is not acknowledged before the timeout', () => {
+    const service=TestBed.inject(HistoricalReplayService);
+    const http=TestBed.inject(HttpTestingController);
+    const id='743aae12-5287-4d14-903e-b9b2fada6aa6';
+    let result='';
+    vi.useFakeTimers();
+    try {
+      service.gapAware('2026-11-12','bank-nifty',id).subscribe(job=>result=job.id);
+      http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
+      const first=http.expectOne(req=>req.url.endsWith('/gap-aware/2026-11-12'));
+      expect(first.request.params.get('requestId')).toBe(id);
+      vi.advanceTimersByTime(32000);
+      expect(first.cancelled).toBe(true);
+      http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
+      const retry=http.expectOne(req=>req.url.endsWith('/gap-aware/2026-11-12'));
+      expect(retry.request.params.get('requestId')).toBe(id);
+      retry.flush({id,status:'Completed'},{status:202,statusText:'Accepted'});
+      expect(result).toBe(id);
+      http.verify();
+    } finally { vi.useRealTimers(); }
   });
 
   it('reads archive coverage for the selected completed market day', () => {

@@ -139,6 +139,9 @@ public sealed record HistoricalReplayFill(string Symbol, string Strategy, DateTi
     public decimal? SampledProfitGiveback { get; init; }
 }
 
+public sealed record HistoricalReplayEntryEvidence(string Symbol, DateTimeOffset DecisionAtUtc,
+    DateTimeOffset AtUtc, string Stage, int Quantity, string? Reason = null);
+
 public sealed record HistoricalReplayResult(IReadOnlyList<HistoricalReplayFill> Trades,
     int CandidateCount, int MissingEntryQuoteCount, int MissingExitQuoteCount,
     int StaleQuoteCount, decimal NetPnl, decimal MaximumDrawdown,

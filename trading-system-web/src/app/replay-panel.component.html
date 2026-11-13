@@ -110,19 +110,23 @@
               <section class="daily-analysis-section">
                 <div class="section-heading"><div><span class="eyebrow">SESSION RESEARCH</span><h3>Gap-aware replay · {{report.date}}</h3></div><span class="market-badge">Not a full-day P&amp;L verdict</span></div>
                 <p>Uncertain positions are excluded. Windows after a gap start flat and are shown as independent scenarios; their results are never added to verified P&amp;L.</p>
+                @if(report.paperComparisonError){<p class="historical-replay-warning" role="status">Paper comparison unavailable: {{report.paperComparisonError}} The market results below are still available.</p>}
                 @if(report.openingWindowFidelity;as f){
                   <details><summary>Opening-window paper comparison · {{f.paperTrades}} paper / {{f.replayTrades}} replay</summary>
-                    <p>Only positions entirely inside simulated opening windows are compared.</p>
+                    <p><strong>{{f.verdict}}</strong> · {{f.scope || 'Only positions entirely inside simulated opening windows are compared.'}}</p>
+                    @if(f.gaps.length){<ul>@for(gap of f.gaps;track gap){<li>{{gap}}</li>}</ul>}
                     <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Action</th><th>Paper · IST</th><th>Replay · IST</th><th>Finding</th></tr></thead><tbody>
                     @for(row of f.rows;track $index){<tr><td>{{row.symbol}}</td><td>{{row.kind}}</td>
-                      <td>{{row.paper?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.replay?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.finding}}</td></tr>}
+                      <td>{{row.paper?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.replay?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.finding}}@if(row.entryEvidence;as e){ · {{e.stage}}{{e.reason?' · '+e.reason:''}}}
+                        @if(row.paperEvaluationStartedAtUtc){<small><br>@if(row.paperDecisionBarCloseUtc){Candle closed {{row.paperDecisionBarCloseUtc|date:'HH:mm:ss':'+0530'}} · }Paper evaluated {{row.paperEvaluationStartedAtUtc|date:'HH:mm:ss.SSS':'+0530'}}</small>}</td></tr>}
                     </tbody></table></div>
                   </details>
                 }
                 @for(market of report.markets;track market.market){
                   <section class="daily-analysis-section">
-                    <h4>{{market.market==='BANKNIFTY'?'Bank Nifty':market.market}} · {{market.gaps.length}} marked gaps</h4>
-                    <p>{{market.contractsWithFreshBooks}} contracts with fresh depth · {{market.freshBookSamples|number}} observations.
+                    <h4>{{market.market==='BANKNIFTY'?'Bank Nifty':market.market}} · {{market.runError?'Replay unavailable':market.gaps.length+' marked gaps'}}</h4>
+                    @if(market.runError){<p class="historical-replay-warning" role="status">{{market.runError}}</p>}
+                    @else{<p>{{market.contractsWithFreshBooks}} contracts with fresh depth · {{market.freshBookSamples|number}} observations.
                       Verified simulated net: {{market.verifiedNetPnl===null?'Not available':'₹'+(market.verifiedNetPnl|number:'1.2-2')}}.</p>
                     @if(market.contractsWithoutFreshBooks.length){
                       <details><summary>{{market.contractsWithoutFreshBooks.length}} planned contracts without a fresh two-sided book</summary>
@@ -145,10 +149,20 @@
                           @for(row of window.fills;track $index){
                             @if(row.exclusionReason){<tr><td>{{row.fill.exitAtUtc|date:'HH:mm:ss':'+0530'}}</td><td colspan="4">{{row.fill.symbol}} · Excluded: {{row.exclusionReason}}</td></tr>}
                           }
+                          @if(window.entryEvidence?.length){
+                            <tr><td colspan="5"><details><summary>Opening-window entry evidence</summary>
+                              <p>Only replay candidates are traced. A paper-only trade with no candidate here was not reproduced by the archived policy on these inputs.</p>
+                              <ul>@for(event of window.entryEvidence;track $index){
+                                <li>{{event.atUtc|date:'HH:mm:ss.SSS':'+0530'}} · {{event.symbol}} · {{event.stage}} · {{event.quantity}} units{{event.reason?' · '+event.reason:''}}</li>
+                              }</ul>
+                              @if(window.entryEvidenceTruncated){<p>Additional events were omitted from this report.</p>}
+                            </details></td></tr>
+                          }
                         }
                       </tbody></table></div>
                     </details>
                     <details><summary>Evidence limits</summary><ul>@for(note of market.limitations;track $index){<li>{{note}}</li>}</ul></details>
+                    }
                   </section>
                 }
               </section>

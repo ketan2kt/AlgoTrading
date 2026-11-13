@@ -6,23 +6,29 @@ public sealed record HistoricalReplayGap(DateTimeOffset StartUtc, DateTimeOffset
 public sealed record HistoricalGapAwareFill(HistoricalReplayFill Fill, string? ExclusionReason);
 public sealed record HistoricalGapAwareWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc,
     bool IndependentFlatRestart, bool Simulated, int Candidates, int UnresolvedExecutions,
-    IReadOnlyList<HistoricalGapAwareFill> Fills, decimal? VerifiedNetPnl, decimal? IndependentScenarioNetPnl);
+    IReadOnlyList<HistoricalGapAwareFill> Fills, decimal? VerifiedNetPnl, decimal? IndependentScenarioNetPnl)
+{
+    public IReadOnlyList<HistoricalReplayEntryEvidence> EntryEvidence { get; init; } = [];
+    public bool EntryEvidenceTruncated { get; init; }
+}
 public sealed record HistoricalGapAwareMarket(string Market, int ContractsWithFreshBooks, int FreshBookSamples,
     bool ArchiveReportedCaptureGaps, IReadOnlyList<HistoricalReplayGap> Gaps,
     IReadOnlyList<HistoricalGapAwareWindow> Windows, decimal? VerifiedNetPnl, IReadOnlyList<string> Limitations)
 {
     public IReadOnlyList<string> ContractsWithoutFreshBooks { get; init; } = [];
+    public string? RunError { get; init; }
 }
 public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<HistoricalGapAwareMarket> Markets)
 {
     public PaperSessionFidelity? OpeningWindowFidelity { get; init; }
+    public string? PaperComparisonError { get; init; }
 }
 
 public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds,
     IRecordedPaperSessionReader? recorded = null)
 {
     public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null,
-        bool comparePaper = true)
+        bool comparePaper = true, Action? inputsLoaded = null)
     {
         var markets = new List<HistoricalGapAwareMarket>();
         foreach (var (key, label) in new[] { ("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY") })
@@ -38,6 +44,7 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                     [], null, ["No verified P&L or simulation was produced for this market."]));
                 continue;
             }
+            inputsLoaded?.Invoke();
             var notes = new List<string>(slice.ControlStateGaps);
             if (slice.GapAwarePolicyInputsReady && slice.CapturedSessionPolicy is { } receipt && receipt.ValidFor(date))
             {
@@ -89,8 +96,11 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
             trade.Symbol.StartsWith(item.Market, StringComparison.Ordinal) &&
             trade.Entry.At >= item.Window.StartUtc && trade.Actions.Any(action => action.Kind == "Exit") &&
             trade.Actions.All(action => action.At < item.Window.EndUtc))).ToArray();
-        return PaperSessionFidelity.Compare(new(comparable,
-            actual.Gaps.Append("Opening windows only; trades outside these windows and post-gap restarts are not compared.").ToArray()), fills);
+        var evidence = opening.SelectMany(item => item.Window.EntryEvidence).ToArray();
+        return PaperSessionFidelity.Compare(new(comparable, actual.Gaps), fills, evidence) with
+        {
+            Scope = "Opening windows only; trades outside these windows and post-gap restarts are not compared."
+        };
     }
 }
 
@@ -102,6 +112,7 @@ public static class HistoricalGapAwareReplay
     private static readonly TimeSpan MaximumSourceAge = TimeSpan.FromSeconds(30);
     private const int MaxQuotesPerMarket = 2_000_000;
     private const int MaxSimulatedWindows = 32;
+    private const int MaxEntryEvidencePerWindow = 512;
 
     public static HistoricalGapAwareMarket Run(HistoricalReplayArchiveSlice slice,
         Func<IHistoricalReplayPortfolioPolicy>? createPolicy,
@@ -174,6 +185,7 @@ public static class HistoricalGapAwareReplay
             notes.Add("The archive reported capture loss; displayed intervals come from this market's recorded quote timestamps and known unreadable files.");
         var from = session.StartUtc;
         var windowCount = 0;
+        var quoteEnd = 0;
         foreach (var gap in mergedGaps.Append(new HistoricalReplayGap(session.EndUtc, session.EndUtc, "")))
         {
             if (gap.StartUtc > from)
@@ -185,12 +197,25 @@ public static class HistoricalGapAwareReplay
                     windows.Add(new(from, until, reset, false, 0, 0, [], null, null));
                 else
                 {
-                    var observedQuotes = source.Where(q => q.AvailableAtUtc >= from && q.AvailableAtUtc < until).ToArray();
+                    while (quoteEnd < source.Count && source[quoteEnd].AvailableAtUtc < from) quoteEnd++;
+                    var quoteStart = quoteEnd;
+                    while (quoteEnd < source.Count && source[quoteEnd].AvailableAtUtc < until) quoteEnd++;
+                    var observedQuotes = new ChronologicalWindow(source, quoteStart, quoteEnd - quoteStart);
+                    var evidence = new List<HistoricalReplayEntryEvidence>();
+                    var truncated = false;
                     var result = HistoricalPortfolioReplay.Run(session.Bars, observedQuotes, createPolicy(),
                         SessionPolicyReceipt.ComparisonExecution with { RequireDisplayedFillSize = true }, from, until,
                         session.OptionChains, session.ExchangeCode, sourceControls: session.ControlEvents,
-                        cancellationToken: cancellationToken);
-                    windows.Add(ScoreWindow(from, until, reset, result, books));
+                        cancellationToken: cancellationToken, entryEvidence: reset ? null : item =>
+                        {
+                            if (evidence.Count < MaxEntryEvidencePerWindow) evidence.Add(item);
+                            else truncated = true;
+                        });
+                    windows.Add(ScoreWindow(from, until, reset, result, books) with
+                    {
+                        EntryEvidence = evidence,
+                        EntryEvidenceTruncated = truncated
+                    });
                 }
             }
             from = gap.EndUtc;
@@ -211,6 +236,21 @@ public static class HistoricalGapAwareReplay
             for (var minute = session.StartUtc; minute.AddMinutes(1) <= session.EndUtc; minute = minute.AddMinutes(1))
                 if (!minutes.Contains(minute)) gaps.Add(new(minute, minute.AddMinutes(1), symbol + " minute bar unavailable"));
         }
+    }
+
+    // The source was ordered on ingestion. Each window is a forward-only slice,
+    // not another full-day scan, copy, or sort. Portfolio validation still runs.
+    private sealed class ChronologicalWindow(List<HistoricalReplayQuote> source, int start, int count)
+        : IHistoricalChronologicalQuotePath
+    {
+        public int Count => count;
+        public HistoricalReplayQuote this[int index] => index >= 0 && index < count
+            ? source[start + index] : throw new ArgumentOutOfRangeException(nameof(index));
+        public IEnumerator<HistoricalReplayQuote> GetEnumerator()
+        {
+            for (var i = start; i < start + count; i++) yield return source[i];
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private static bool IsFresh(DateTimeOffset? source, DateTimeOffset at) =>

@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.MarketData;
@@ -192,6 +193,7 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
     private sealed class JsonPolicy(Type type, object instance) : IHistoricalReplayPortfolioPolicy
     {
         private readonly MethodInfo query = type.GetMethod("Query") ?? throw new InvalidDataException("Policy query is missing.");
+        private readonly JsonSerializerOptions frameOptions = new() { Converters = { new CompletedBarFrameConverter() } };
         private HistoricalReplayPortfolioFrame? lastFrame;
         private string lastFrameJson = string.Empty;
         public string CodeVersion => (string)type.GetProperty("CodeVersion")!.GetValue(instance)!;
@@ -215,7 +217,7 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
             if (!ReferenceEquals(lastFrame, frame))
             {
                 lastFrame = frame;
-                lastFrameJson = JsonSerializer.Serialize(frame);
+                lastFrameJson = JsonSerializer.Serialize(frame, frameOptions);
             }
             try { return (string)query.Invoke(instance, [operation, lastFrameJson,
                 subject is null ? null : JsonSerializer.Serialize(subject)])!; }
@@ -224,6 +226,33 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
                 ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
                 throw;
             }
+        }
+    }
+
+    // The portfolio runner publishes a new completed-bar array only when a bar
+    // closes. Between closes, preserve the exact archived JSON protocol without
+    // serializing the entire current and prior sessions on every option tick.
+    private sealed class CompletedBarFrameConverter : JsonConverter<IReadOnlyList<HistoricalReplayBar>>
+    {
+        private HistoricalReplayBar[]? prior;
+        private byte[]? encoded;
+
+        public override IReadOnlyList<HistoricalReplayBar> Read(ref Utf8JsonReader reader, Type typeToConvert,
+            JsonSerializerOptions options) => throw new NotSupportedException();
+
+        public override void Write(Utf8JsonWriter writer, IReadOnlyList<HistoricalReplayBar> value, JsonSerializerOptions options)
+        {
+            if (value is not HistoricalReplayBar[] bars)
+            {
+                JsonSerializer.Serialize(writer, value);
+                return;
+            }
+            if (!ReferenceEquals(prior, bars))
+            {
+                encoded = JsonSerializer.SerializeToUtf8Bytes(bars);
+                prior = bars;
+            }
+            writer.WriteRawValue(encoded!, skipInputValidation: true);
         }
     }
 }
