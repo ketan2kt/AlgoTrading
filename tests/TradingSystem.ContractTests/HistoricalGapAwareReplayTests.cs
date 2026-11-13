@@ -90,6 +90,31 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void SplitExitDiagnosticNeverReusesTimestampOrUnchangedSizeAtSamePrice()
+    {
+        var quotes = Enumerable.Range(0, 181).Select(second =>
+        {
+            var at = Start.AddSeconds(second);
+            if (second < 65) return Book(at, 100m);
+            if (second == 69) return Book(at, 79m) with { BidQuantity = 5 };
+            if (second is 67 or 68) return Book(at, 80m) with
+            { BidQuantity = 7, DepthSourceAtUtc = second == 67 ? at.AddSeconds(-1) : at };
+            return Book(at, 80m) with { BidQuantity = 3 };
+        }).ToArray();
+        var report = HistoricalGapAwareReplay.Run(Slice("NIFTY", quotes, Start.AddMinutes(3)), () => new Policy(60));
+        var opening = report.Windows[0];
+        var scenario = Assert.Single(opening.ExitLiquidityScenarios);
+        Assert.Equal(10, scenario.ModeledUnits);
+        Assert.Equal(3, scenario.Fills.Count);
+        Assert.Equal([Start.AddSeconds(66), Start.AddSeconds(68), Start.AddSeconds(69)],
+            scenario.Fills.Select(fill => fill.AtUtc));
+        Assert.Equal([3, 4, 3], scenario.Fills.Select(fill => fill.Units));
+        Assert.NotNull(scenario.ModeledNetPnl);
+        Assert.Null(report.VerifiedNetPnl);
+        Assert.Empty(opening.Fills);
+    }
+
+    [Fact]
     public void RecordedPersistenceGapSeparatesReplayEvenWhenAvailableQuotesLookContinuous()
     {
         var quotes = Enumerable.Range(0, 241).Select(s => Book(Start.AddSeconds(s), 100m)).ToArray();

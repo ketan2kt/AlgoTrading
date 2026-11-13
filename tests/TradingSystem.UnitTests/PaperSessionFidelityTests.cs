@@ -61,6 +61,21 @@ public sealed class PaperSessionFidelityTests
     }
 
     [Fact]
+    public void MatchingDecisionAndModeledEntryAreDistinguishedFromAClosedTrade()
+    {
+        const string symbol = "BANKNIFTYCE";
+        HistoricalReplayEntryEvidence[] evidence =
+        [new(symbol, At, At, "Candidate", 10) { Strategy = "normal" },
+         new(symbol, At, At.AddSeconds(1), "Entry filled", 10),
+         new(symbol, At, At.AddMinutes(3), "Exit unsupported", 10)];
+        var result = PaperSessionFidelity.Compare(new([Paper(symbol)], []), [], evidence);
+        var row = Assert.Single(result.Rows);
+        Assert.Equal("Same entry contract and strategy", row.DecisionEvidence);
+        Assert.Equal("Modeled entry: 10 units; no verified closed replay trade", row.ExecutionEvidence);
+        Assert.Equal(0, result.ReplayTrades);
+    }
+
+    [Fact]
     public void PaperStopLossAndReplayObservedStopAreTheSameExitReason()
     {
         var paper = Paper("NIFTYCE");

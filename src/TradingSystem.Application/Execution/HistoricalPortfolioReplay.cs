@@ -225,9 +225,16 @@ public static class HistoricalPortfolioReplay
         var chainIndex = 0;
         var controlIndex = 0;
         var activeControls = HistoricalReplayControlState.Empty;
-        void RecordEntry(HistoricalReplayCandidate entry, DateTimeOffset at, string stage, string? reason = null) =>
+        void RecordEntry(HistoricalReplayCandidate entry, DateTimeOffset at, string stage, string? reason = null,
+            decimal? modeledPrice = null, Position? expiredExit = null) =>
             entryEvidence?.Invoke(new(entry.Symbol, entry.StrategyDecisionAtUtc ?? entry.DecidedAtUtc,
-                at, stage, entry.Quantity, reason));
+                at, stage, expiredExit?.RemainingQuantity ?? entry.Quantity, reason)
+            {
+                Strategy = entry.Strategy, LotSize = entry.LotSize, ModeledPrice = modeledPrice,
+                ExitTriggerAtUtc = expiredExit is null ? null : expiredExit.ExitTriggeredAtUtc ?? expiredExit.DeadlineUtc,
+                ExitDeadlineUtc = expiredExit is null ? null : (expiredExit.ExitTriggeredAtUtc ?? expiredExit.DeadlineUtc) + MaximumQuoteAge,
+                ExitReason = expiredExit?.ExitReason
+            });
         var chainMarkets = chains.Select(value => value.UnderlyingSymbol).Where(value => value.Length > 0)
             .Distinct(StringComparer.Ordinal).ToArray();
         HistoricalReplayBar[] frameBars = [];
@@ -510,7 +517,11 @@ public static class HistoricalPortfolioReplay
                         : time - position.LastQuoteAtUtc > MaximumQuoteAge ? "The held contract stopped providing fresh quotes." : null;
                     if (reason is null) continue;
                     FlagUncertainty(position.EntryAtUtc);
-                    RecordEntry(position.Candidate, time, "Exit unsupported", reason);
+                    // A fallback P&L comparison requires the complete entry basis;
+                    // don't diagnose a position with an add-on or prior reduction as a simple round trip.
+                    var eligible = time - due > MaximumQuoteAge && position.AddOnQuantity == 0 &&
+                        position.RemainingQuantity == position.Candidate.Quantity && due + MaximumQuoteAge < sessionEndUtc;
+                    RecordEntry(position.Candidate, time, "Exit unsupported", reason, expiredExit: eligible ? position : null);
                 }
                 if (firstUncertainty is not null) { stoppedAt = time; break; }
             }
@@ -856,7 +867,7 @@ public static class HistoricalPortfolioReplay
                             ? "ObservedOffer" : quote.Source == "GrowwChainReceiptLtp"
                                 ? "ObservedChainLtpNonExecutable" : "ModeledLastPrice"));
                     Consume(quote, pendingEntry.Quantity, buy: true);
-                    RecordEntry(pendingEntry, time, "Entry filled");
+                    RecordEntry(pendingEntry, time, "Entry filled", modeledPrice: entryPrice);
                     peakEntryCapitalExposure = Math.Max(peakEntryCapitalExposure,
                         openPositions.Values.Sum(value => value.EntryPrice *
                             value.RemainingQuantity));

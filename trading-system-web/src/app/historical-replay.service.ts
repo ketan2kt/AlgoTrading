@@ -71,6 +71,9 @@ export interface HistoricalGapAwareReport {
       entryEvidenceTruncated?:boolean;
       executionUncertainSinceUtc?:string|null;
       stoppedOnExecutionUncertainty?:boolean;
+      exitLiquidityScenarios?:{symbol:string;triggerAtUtc:string;deadlineUtc:string;exitReason:string;requestedUnits:number;
+        modeledUnits:number;averageModeledPrice:number|null;modeledNetPnl:number|null;
+        fills:{atUtc:string;bookAtUtc:string;units:number;observedBid:number;modeledPrice:number}[]}[];
       fills:{fill:HistoricalReplayFill;exclusionReason:string|null}[]}[];
   }[];
 }
@@ -133,7 +136,8 @@ export interface GapReplayJob {
 }
 interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
 interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null;
-  entryEvidence?:{stage:string;reason:string|null};paperDecisionBarCloseUtc?:string|null;paperEvaluationStartedAtUtc?:string|null}
+  entryEvidence?:{stage:string;reason:string|null};paperDecisionBarCloseUtc?:string|null;paperEvaluationStartedAtUtc?:string|null;
+  decisionEvidence?:string|null;executionEvidence?:string|null}
 export interface HistoricalNormalReplayRunSummary {
   id:string;createdAtUtc:string;from:string;to:string;baselineBuildId:string|null;proposalBuildId:string|null;
   includedDays:number;baselineNet:number;proposalNet:number;

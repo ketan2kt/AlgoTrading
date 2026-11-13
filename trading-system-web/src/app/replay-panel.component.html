@@ -118,6 +118,8 @@
                     <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Action</th><th>Paper · IST</th><th>Replay · IST</th><th>Finding</th></tr></thead><tbody>
                     @for(row of f.rows;track $index){<tr><td>{{row.symbol}}</td><td>{{row.kind}}</td>
                       <td>{{row.paper?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.replay?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.finding}}@if(row.entryEvidence;as e){ · {{e.stage}}{{e.reason?' · '+e.reason:''}}}
+                        @if(row.decisionEvidence){<br><small>Decision: {{row.decisionEvidence}}</small>}
+                        @if(row.executionEvidence){<br><small>Execution: {{row.executionEvidence}}</small>}
                         @if(row.paperEvaluationStartedAtUtc){<small><br>@if(row.paperDecisionBarCloseUtc){Candle closed {{row.paperDecisionBarCloseUtc|date:'HH:mm:ss':'+0530'}} · }Paper evaluated {{row.paperEvaluationStartedAtUtc|date:'HH:mm:ss.SSS':'+0530'}}</small>}</td></tr>}
                     </tbody></table></div>
                   </details>
@@ -149,6 +151,15 @@
                             <td>{{window.independentScenarioNetPnl===null?'—':'₹'+(window.independentScenarioNetPnl|number:'1.2-2')}}</td></tr>
                           @for(row of window.fills;track $index){
                             @if(row.exclusionReason){<tr><td>{{row.fill.exitAtUtc|date:'HH:mm:ss':'+0530'}}</td><td colspan="4">{{row.fill.symbol}} · Excluded: {{row.exclusionReason}}</td></tr>}
+                          }
+                          @for(scenario of window.exitLiquidityScenarios ?? [];track $index){
+                            <tr><td colspan="5"><details><summary>{{scenario.symbol}} · Modeled split exit: {{scenario.modeledUnits}}/{{scenario.requestedUnits}} units</summary>
+                              <p>Scenario only. Not a verified fill or part of verified P&amp;L. Uses distinct recorded books and does not assume liquidity replenished at the same price.</p>
+                              @if(scenario.modeledNetPnl !== null){<p>Modeled net after costs: ₹{{scenario.modeledNetPnl|number:'1.2-2'}}.</p>}
+                              <ul>@for(fill of scenario.fills;track fill.bookAtUtc){
+                                <li>{{fill.atUtc|date:'HH:mm:ss.SSS':'+0530'}} · {{fill.units}} at bid ₹{{fill.observedBid|number:'1.2-2'}}</li>
+                              }</ul>
+                            </details></td></tr>
                           }
                           @if(window.entryEvidence?.length){
                             <tr><td colspan="5"><details><summary>Opening-window entry evidence</summary>

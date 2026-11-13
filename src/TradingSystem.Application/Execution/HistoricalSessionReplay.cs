@@ -140,7 +140,15 @@ public sealed record HistoricalReplayFill(string Symbol, string Strategy, DateTi
 }
 
 public sealed record HistoricalReplayEntryEvidence(string Symbol, DateTimeOffset DecisionAtUtc,
-    DateTimeOffset AtUtc, string Stage, int Quantity, string? Reason = null);
+    DateTimeOffset AtUtc, string Stage, int Quantity, string? Reason = null)
+{
+    public string? Strategy { get; init; }
+    public int? LotSize { get; init; }
+    public decimal? ModeledPrice { get; init; }
+    public DateTimeOffset? ExitTriggerAtUtc { get; init; }
+    public DateTimeOffset? ExitDeadlineUtc { get; init; }
+    public string? ExitReason { get; init; }
+}
 
 public sealed record HistoricalReplayResult(IReadOnlyList<HistoricalReplayFill> Trades,
     int CandidateCount, int MissingEntryQuoteCount, int MissingExitQuoteCount,

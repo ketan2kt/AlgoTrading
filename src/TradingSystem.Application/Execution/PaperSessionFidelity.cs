@@ -22,6 +22,8 @@ public sealed record FidelityRow(string Symbol,string Kind,string Finding,Fideli
     public HistoricalReplayEntryEvidence? EntryEvidence { get; init; }
     public DateTimeOffset? PaperDecisionBarCloseUtc { get; init; }
     public DateTimeOffset? PaperEvaluationStartedAtUtc { get; init; }
+    public string? DecisionEvidence { get; init; }
+    public string? ExecutionEvidence { get; init; }
 }
 public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int ReplayTrades,
     IReadOnlyList<string> Gaps,IReadOnlyList<FidelityRow> Rows)
@@ -59,8 +61,17 @@ public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int Rep
                             (x.DecisionAtUtc-p.Entry.At).Duration()<=TimeSpan.FromMinutes(1)))
                     .GroupBy(x=>x.DecisionAtUtc).ToArray();
                 var trace=traces.Length==1?traces[0].Last():null;
+                var unambiguous = trace is not null && actual.Trades.Count(trade => trade.Symbol == trace.Symbol &&
+                    (trade.DecisionBarCloseUtc is { } bar ? bar == trace.DecisionAtUtc :
+                        (trade.Entry.At - trace.DecisionAtUtc).Duration() <= TimeSpan.FromMinutes(1))) == 1;
+                var replayEntry = unambiguous ? traces[0].LastOrDefault(item => item.Stage == "Entry filled") : null;
+                var candidate = unambiguous ? traces[0].FirstOrDefault(item => item.Stage == "Candidate") : null;
                 rows.Add(new(p.Symbol,"Entry","Paper only",p.Entry,null){EntryEvidence=trace,
-                    PaperDecisionBarCloseUtc=p.DecisionBarCloseUtc,PaperEvaluationStartedAtUtc=p.EvaluationStartedAtUtc});continue;
+                    PaperDecisionBarCloseUtc=p.DecisionBarCloseUtc,PaperEvaluationStartedAtUtc=p.EvaluationStartedAtUtc,
+                    DecisionEvidence=candidate is null ? null : candidate.Strategy is not null && candidate.Strategy == p.Entry.Reason
+                        ? "Same entry contract and strategy" : "Replay selected the same contract",
+                    ExecutionEvidence=replayEntry is null ? null : FormattableString.Invariant(
+                        $"Modeled entry: {replayEntry.Quantity} units; no verified closed replay trade")});continue;
             }
             if(candidates.Length!=1 || actual.Trades.Count(x=>Near(x,candidates[0]))!=1){
                 gaps.Add($"{p.Symbol}: nearby repeated entries cannot be paired uniquely.");rows.Add(new(p.Symbol,"Entry","Ambiguous",p.Entry,null));continue;
@@ -77,7 +88,12 @@ public sealed record PaperSessionFidelity(string Verdict,int PaperTrades,int Rep
                         a.Price!=b.Price?"Fill price only":"Match";
                     rows.Add(new(p.Symbol,kind,finding,a,b){
                         PaperDecisionBarCloseUtc=kind=="Entry"?p.DecisionBarCloseUtc:null,
-                        PaperEvaluationStartedAtUtc=kind=="Entry"?p.EvaluationStartedAtUtc:null});
+                        PaperEvaluationStartedAtUtc=kind=="Entry"?p.EvaluationStartedAtUtc:null,
+                        DecisionEvidence=a is null || b is null ? null : kind == "Entry" && a.Reason is not null && a.Reason == b.Reason
+                            ? "Same entry contract and strategy" : kind == "Exit" && a.Reason is not null && Reason(a.Reason) == Reason(b.Reason)
+                                ? "Same exit reason" : null,
+                        ExecutionEvidence=a is null || b is null ? null : a.Quantity == b.Quantity && a.At == b.At && a.Price == b.Price
+                            ? "Modeled fill matches paper" : "Modeled fill differs from paper"});
                 }
             }
         }

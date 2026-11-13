@@ -10,6 +10,7 @@ public sealed record HistoricalGapAwareWindow(DateTimeOffset StartUtc, DateTimeO
 {
     public IReadOnlyList<HistoricalReplayEntryEvidence> EntryEvidence { get; init; } = [];
     public bool EntryEvidenceTruncated { get; init; }
+    public IReadOnlyList<HistoricalExitLiquidityResult> ExitLiquidityScenarios { get; init; } = [];
     public DateTimeOffset? ExecutionUncertainSinceUtc { get; init; }
     public bool StoppedOnExecutionUncertainty { get; init; }
 }
@@ -269,6 +270,7 @@ public static class HistoricalGapAwareReplay
                     {
                         EntryEvidence = evidence,
                         EntryEvidenceTruncated = truncated,
+                        ExitLiquidityScenarios = reset || truncated ? [] : ExitScenarios(evidence, books, session.ExchangeCode),
                         ExecutionUncertainSinceUtc = result.FirstExecutionUncertaintyAtUtc,
                         StoppedOnExecutionUncertainty = stopped
                     });
@@ -303,6 +305,21 @@ public static class HistoricalGapAwareReplay
             for (var minute = session.StartUtc; minute.AddMinutes(1) <= session.EndUtc; minute = minute.AddMinutes(1))
                 if (!minutes.Contains(minute)) gaps.Add(new(minute, minute.AddMinutes(1), symbol + " minute bar unavailable"));
         }
+    }
+
+    private static HistoricalExitLiquidityResult[] ExitScenarios(IReadOnlyList<HistoricalReplayEntryEvidence> evidence,
+        Dictionary<string, List<HistoricalReplayQuote>> books, string exchange)
+    {
+        var results = new List<HistoricalExitLiquidityResult>();
+        foreach (var exit in evidence.Where(item => item.ExitTriggerAtUtc.HasValue))
+        {
+            if (!books.TryGetValue(exit.Symbol, out var path)) continue;
+            var entries = evidence.Where(item => item.Stage == "Entry filled" && item.Symbol == exit.Symbol &&
+                item.DecisionAtUtc == exit.DecisionAtUtc).Take(2).ToArray();
+            if (entries.Length == 1 && HistoricalExitLiquidityScenario.Evaluate(entries[0], exit, path, exchange) is { } result)
+                results.Add(result);
+        }
+        return results.ToArray();
     }
 
     // The source was ordered on ingestion. Each window is a forward-only slice,
