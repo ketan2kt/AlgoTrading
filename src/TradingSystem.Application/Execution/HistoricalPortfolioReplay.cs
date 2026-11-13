@@ -215,6 +215,11 @@ public static class HistoricalPortfolioReplay
         var barIndex = 0;
         var quoteIndex = 0;
         var chainIndex = 0;
+        var controlIndex = 0;
+        var activeControls = HistoricalReplayControlState.Empty;
+        var chainMarkets = chains.Select(value => value.UnderlyingSymbol).Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal).ToArray();
+        HistoricalReplayBar[] frameBars = [];
         decimal equityPeak = 0m;
         decimal markToMarketDrawdown = 0m;
         decimal peakEntryCapitalExposure = 0m;
@@ -226,18 +231,15 @@ public static class HistoricalPortfolioReplay
                     value.Value.IsFreshAsOf(atUtc, MaximumQuoteAge))
                 .ToDictionary(value => value.Key, value => value.Value,
                     StringComparer.Ordinal);
-            var market = new HistoricalReplayFrame(atUtc,
-                completedBars.ToArray(), visibleQuotes);
+            if (frameBars.Length != completedBars.Count) frameBars = completedBars.ToArray();
+            var market = new HistoricalReplayFrame(atUtc, frameBars, visibleQuotes);
             var (visibleChain, priorChain) = VisibleChains(chains,
                 chainIndex, atUtc);
             var latestByUnderlying = new Dictionary<string,
                 HistoricalOptionChainFrame>(StringComparer.Ordinal);
             var previousByUnderlying = new Dictionary<string,
                 HistoricalOptionChainFrame>(StringComparer.Ordinal);
-            foreach (var underlying in chains.Take(chainIndex)
-                         .Select(value => value.UnderlyingSymbol)
-                         .Where(value => value.Length > 0)
-                         .Distinct(StringComparer.Ordinal))
+            foreach (var underlying in chainMarkets)
             {
                 var (marketLatest, marketPrevious) = VisibleChains(chains,
                     chainIndex, atUtc, underlying);
@@ -275,7 +277,7 @@ public static class HistoricalPortfolioReplay
                 positionViews.FirstOrDefault(), closedPositions)
             {
                 OpenPositions = positionViews,
-                Controls = HistoricalReplayControls.At(controls, atUtc),
+                Controls = activeControls,
                 CompletedFills = closed.ToArray(),
                 PortfolioOpenPositions = positionViews,
                 PortfolioClosedTrades = closedPositions,
@@ -294,9 +296,10 @@ public static class HistoricalPortfolioReplay
             };
         }
 
-        void ApplyStopUpdates(HistoricalReplayPortfolioFrame snapshot, bool recomputeBeforeQuotes = false)
+        bool ApplyStopUpdates(HistoricalReplayPortfolioFrame snapshot, bool recomputeBeforeQuotes = false)
         {
             var atUtc = snapshot.Market.AvailableAtUtc;
+            var stopChanged = false;
             var stopUpdates = policy.EvaluateStopUpdates(snapshot);
             if (stopUpdates.Select(value => value.Symbol).Distinct(
                     StringComparer.Ordinal).Count() != stopUpdates.Count ||
@@ -326,6 +329,7 @@ public static class HistoricalPortfolioReplay
                     update.NewStopPrice == position.StopPrice ||
                     position.Unpriced) continue;
                 position.StopPrice = update.NewStopPrice;
+                stopChanged = true;
                 if (recomputeBeforeQuotes) continue; // This timestamp's quote tests the recomputed stop below.
                 var decisionPrice = position.Candidate.TriggerOnLastPrice &&
                     latest.TryGetValue(update.Symbol, out var decisionQuote)
@@ -337,6 +341,7 @@ public static class HistoricalPortfolioReplay
                     pendingAddOns.Remove(update.Symbol);
                 }
             }
+            return stopChanged;
         }
 
         void QueuePartialExits(HistoricalReplayPortfolioFrame snapshot,
@@ -463,7 +468,11 @@ public static class HistoricalPortfolioReplay
                 ? times[timeIndex] : quoteCursor.Current.AvailableAtUtc;
             while (timeIndex < times.Length && times[timeIndex] == time) timeIndex++;
             cancellationToken.ThrowIfCancellationRequested();
-            var controlState = HistoricalReplayControls.At(controls, time);
+            var previousControlIndex = controlIndex;
+            while (controlIndex < controls.Length && controls[controlIndex].AvailableAtUtc <= time) controlIndex++;
+            if (controlIndex != previousControlIndex)
+                activeControls = HistoricalReplayControls.At(controls.AsSpan(0, controlIndex).ToArray(), time);
+            var controlState = activeControls;
             if (controlState.BlocksNiftyEntries)
             {
                 foreach (var symbol in pendingEntries.Keys.Where(value => value.StartsWith("NIFTY", StringComparison.Ordinal)).ToArray())
@@ -471,7 +480,7 @@ public static class HistoricalPortfolioReplay
                 foreach (var symbol in pendingAddOns.Keys.Where(value => value.StartsWith("NIFTY", StringComparison.Ordinal)).ToArray())
                     pendingAddOns.Remove(symbol);
             }
-            if (time >= sessionStartUtc && time < sessionEndUtc && controls.Any(value => value.AvailableAtUtc == time))
+            if (time >= sessionStartUtc && time < sessionEndUtc && controlIndex != previousControlIndex)
                 QueuePolicyExits(Snapshot(time));
             var barTargets = new HashSet<string>(StringComparer.Ordinal);
             var quoteTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -552,8 +561,7 @@ public static class HistoricalPortfolioReplay
                 if (decisions.Any(value => value.DecidedAtUtc != time))
                     throw new InvalidOperationException(
                         "A replay policy emitted an off-frame decision.");
-                ApplyStopUpdates(snapshot);
-                QueuePolicyExits(Snapshot(time));
+                QueuePolicyExits(ApplyStopUpdates(snapshot) ? Snapshot(time) : snapshot);
                 candidateCount += decisions.Length;
                 if (decisions.Length > 0 && (lastEntryAt is null ||
                     time - lastEntryAt.Value >= TimeSpan.FromMinutes(
@@ -839,8 +847,7 @@ public static class HistoricalPortfolioReplay
                 time >= sessionStartUtc && time < sessionEndUtc)
             {
                 var snapshot = Snapshot(time);
-                ApplyStopUpdates(snapshot);
-                snapshot = Snapshot(time);
+                if (ApplyStopUpdates(snapshot)) snapshot = Snapshot(time);
                 foreach (var symbol in quoteTargets)
                 {
                     if (!openPositions.TryGetValue(symbol, out var open) ||
@@ -1015,19 +1022,23 @@ public static class HistoricalPortfolioReplay
         // Production selects the two newest *source* timestamps, not the
         // latest receipt. Receipt time still gates as-of visibility so a
         // delayed or out-of-order arrival cannot leak into an earlier frame.
-        var eligible = chains.Take(observedCount)
-            .Where(value => (underlying is null ||
-                    value.UnderlyingSymbol == underlying) &&
-                value.AvailableAtUtc < decisionAtUtc &&
-                value.SourceTimestampUtc >=
-                    decisionAtUtc.AddMinutes(-3))
-            .OrderByDescending(value => value.SourceTimestampUtc)
-            .ThenByDescending(value => value.AvailableAtUtc)
-            .Take(2).ToArray();
-        if (eligible.Length == 0) return (null, null);
-        return (eligible[0], eligible.Length > 1 &&
-            eligible[1].ExpiryDate == eligible[0].ExpiryDate
-                ? eligible[1] : null);
+        var cutoff = decisionAtUtc.AddMinutes(-3);
+        HistoricalOptionChainFrame? first = null, second = null;
+        // Source time cannot exceed receipt time. Older receipts cannot qualify.
+        for (var i = observedCount - 1; i >= 0 && chains[i].AvailableAtUtc >= cutoff; i--)
+        {
+            var candidate = chains[i];
+            if (candidate.AvailableAtUtc >= decisionAtUtc || candidate.SourceTimestampUtc < cutoff ||
+                underlying is not null && candidate.UnderlyingSymbol != underlying) continue;
+            // Iterate backward; for exact ties the earlier original row wins,
+            // matching the previous stable descending ordering.
+            if (first is null || Ahead(candidate, first)) { second = first; first = candidate; }
+            else if (second is null || Ahead(candidate, second)) second = candidate;
+        }
+        return (first, first is not null && second?.ExpiryDate == first.ExpiryDate ? second : null);
+
+        static bool Ahead(HistoricalOptionChainFrame x, HistoricalOptionChainFrame y) =>
+            x.SourceTimestampUtc > y.SourceTimestampUtc || x.SourceTimestampUtc == y.SourceTimestampUtc && x.AvailableAtUtc >= y.AvailableAtUtc;
     }
 
     private static void ValidateInputs(IReadOnlyList<HistoricalReplayBar> bars,
