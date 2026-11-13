@@ -55,7 +55,8 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
         [("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY")];
 
     public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null,
-        bool comparePaper = true, Action? inputsLoaded = null, HistoricalReplayTiming? timing = null)
+        bool comparePaper = true, Action? inputsLoaded = null, HistoricalReplayTiming? timing = null,
+        Func<CancellationToken, Task>? archiveReady = null)
     {
         var markets = new List<HistoricalGapAwareMarket>();
         foreach (var (key, label) in Markets)
@@ -76,6 +77,7 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                 continue;
             }
             inputsLoaded?.Invoke();
+            if (archiveReady is not null) await archiveReady(token);
             timing?.Checkpoint("archive-loaded");
             var notes = new List<string>(slice.ControlStateGaps);
             if (slice.GapAwarePolicyInputsReady && slice.CapturedSessionPolicy is { } receipt && receipt.ValidFor(date))
@@ -293,7 +295,7 @@ public static class HistoricalGapAwareReplay
             if (next - previous > sampling) gaps.Add(new(previous, next, "Missing fresh two-sided option samples"));
             previous = next;
         }
-        if (createPolicy is not null)
+        if (createPolicy is not null || slice.GapAwarePolicyInputsReady)
         {
             AddMissingBars(session.IndexSymbol);
             if (session.IndexSymbol != "BANKNIFTY" && slice.FrontFutureSymbol is { } symbol) AddMissingBars(symbol);

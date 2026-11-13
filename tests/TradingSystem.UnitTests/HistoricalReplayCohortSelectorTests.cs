@@ -56,6 +56,15 @@ public sealed class HistoricalReplayCohortSelectorTests
     }
 
     [Fact]
+    public void CoverageEnumerationHonorsTheResearchCancellationBoundary()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.Throws<OperationCanceledException>(() => HistoricalReplayCohortSelector.Select(
+            [Session(new(2026, 11, 3))], ["NIFTY"], cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
     public void MissingMarketExcludesWholeDateWithoutOutcomeSelection()
     {
         var date = new DateOnly(2026, 11, 3);

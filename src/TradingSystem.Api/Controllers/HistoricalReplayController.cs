@@ -61,11 +61,11 @@ public sealed class HistoricalReplayController(IHistoricalReplayReportReader rea
             {
                 try
                 {
-                    var slice = await archiveReader.ReadAsync(date, route,
+                    var slice = await archiveReader.ReadStrictAsync(date, route,
                         cancellationToken);
                     sessions.Add(slice.Session);
                 }
-                catch (InvalidOperationException)
+                catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or JsonException)
                 {
                     if (!unreadable.TryGetValue(date, out var reasons))
                         unreadable[date] = reasons = [];
@@ -74,7 +74,7 @@ public sealed class HistoricalReplayController(IHistoricalReplayReportReader rea
             }
         }
         var selection = HistoricalReplayCohortSelector.Select(sessions,
-            markets, dates, allowModeledHistoricalCosts);
+            markets, dates, allowModeledHistoricalCosts, cancellationToken);
         var excluded = selection.ExcludedDates.Select(value => new
             HistoricalReplayExcludedDate(value.Date,
                 value.Reasons.Concat(unreadable.GetValueOrDefault(value.Date) ?? [])

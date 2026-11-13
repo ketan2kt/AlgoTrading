@@ -45,7 +45,8 @@ public static class HistoricalReplayCohortSelector
         IReadOnlyList<HistoricalReplaySessionData> sessions,
         IReadOnlyList<string> requiredMarkets,
         IReadOnlyList<DateOnly>? requestedDates = null,
-        bool allowModeledHistoricalCosts = false)
+        bool allowModeledHistoricalCosts = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(requiredMarkets);
@@ -73,6 +74,7 @@ public static class HistoricalReplayCohortSelector
             .ToDictionary(value => value.Key, value => value.ToArray());
         foreach (var date in (requestedDates ?? byDate.Keys.ToArray()).OrderBy(value => value))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var byMarket = byDate.GetValueOrDefault(date, [])
                 .ToDictionary(value =>
                 value.IndexSymbol.Trim().ToUpperInvariant(),
@@ -108,10 +110,17 @@ public static class HistoricalReplayCohortSelector
                 // bid/offer sides. Do not reject every otherwise complete day
                 // merely because the archived index quote has no order book.
                 var optionSymbols = session.ExecutionOptionSymbols.ToHashSet(StringComparer.Ordinal);
-                var optionQuotes = session.Quotes.Where(value => optionSymbols.Count > 0 ? optionSymbols.Contains(value.Symbol) :
-                    value.Symbol != session.IndexSymbol && !value.Symbol.EndsWith("FUT", StringComparison.Ordinal));
-                if (!session.ExecutableQuoteSidesComplete ||
-                    !optionQuotes.Any() || optionQuotes.Any(value => !value.HasRecordedBookEvidence()))
+                var booksReady = false;
+                if (session.ExecutableQuoteSidesComplete)
+                foreach (var quote in session.Quotes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!(optionSymbols.Count > 0 ? optionSymbols.Contains(quote.Symbol) :
+                            quote.Symbol != session.IndexSymbol && !quote.Symbol.EndsWith("FUT", StringComparison.Ordinal))) continue;
+                    booksReady = quote.HasRecordedBookEvidence();
+                    if (!booksReady) break;
+                }
+                if (!booksReady)
                     reasons.Add($"{market}: executable option bid/offer coverage incomplete");
                 if (!session.HistoricalChargesVerified && !allowModeledHistoricalCosts)
                     reasons.Add($"{market}: date-effective charges unverified");

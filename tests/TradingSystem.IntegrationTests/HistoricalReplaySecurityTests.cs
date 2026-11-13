@@ -61,6 +61,10 @@ public sealed class HistoricalReplaySecurityTests
         Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
         Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));
         Assert.NotEmpty(typeof(HistoricalReplayController).GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));
+        var jobStatus = typeof(HistoricalNormalReplayController).GetMethod(nameof(HistoricalNormalReplayController.GapAwareStatus))!;
+        Assert.Equal("replay-job-status", Assert.Single(jobStatus.GetCustomAttributes(
+            typeof(Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute), true)
+            .Cast<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()).PolicyName);
     }
 
     private sealed class Clock(DateTimeOffset at) : TimeProvider { public override DateTimeOffset GetUtcNow() => at; }

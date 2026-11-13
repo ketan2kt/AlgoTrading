@@ -55,7 +55,8 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
             if (deadline <= TimeSpan.Zero) return;
             var tradingDeadline = deadline == TimeSpan.MaxValue ? (DateTimeOffset?)null : now + deadline;
             bool limitedByTrading = false;
-            job = job with { Status = "Running", Attempts = job.Attempts + 1 };
+            job = job with { Status = "Running", Attempts = job.Attempts + 1,
+                Phase = market is null ? "Comparing against the paper ledger" : $"Reading {market} archive" };
             await jobs.SaveAsync(job, stoppingToken);
             var timing = new HistoricalReplayTiming(sample => ReplayProgress(logger, job.Id, job.Date, market ?? "paper ledger",
                 sample.Stage, sample.MarketTimeUtc, sample.QuotesProcessed, sample.OpenPositions, sample.ElapsedMs, sample.Totals));
@@ -75,10 +76,15 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
                 {
                     var replay = scope.ServiceProvider.GetRequiredService<HistoricalGapAwareReplayService>();
                     var result = await replay.RunAsync(job.Date, execution.Token, market, comparePaper: false,
-                        inputsLoaded: () => StartPhase("simulation", SimulationBudget), timing: timing);
+                        inputsLoaded: () => StartPhase("simulation", SimulationBudget), timing: timing,
+                        archiveReady: async token =>
+                        {
+                            job = job with { Phase = $"Simulating {market}" };
+                            await jobs.SaveAsync(job, token);
+                        });
                     execution.Token.ThrowIfCancellationRequested();
                     completed.Add(result.Markets.Single());
-                    await jobs.SaveAsync(job with { Status = "Queued", Attempts = 0, CompletedMarkets = completed }, stoppingToken);
+                    await jobs.SaveAsync(job with { Status = "Queued", Phase = null, Attempts = 0, CompletedMarkets = completed }, stoppingToken);
                     timing.Checkpoint("market-saved");
                     return;
                 }
@@ -91,7 +97,7 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
                         completed, await ledger.ReadTradesAsync(job.Date, execution.Token)) };
                 }
                 execution.Token.ThrowIfCancellationRequested();
-                await jobs.SaveAsync(job with { Status = "Completed", CompletedMarkets = null, Report = report }, stoppingToken);
+                await jobs.SaveAsync(job with { Status = "Completed", Phase = null, CompletedMarkets = null, Report = report }, stoppingToken);
                 timing.Checkpoint("report-saved");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }

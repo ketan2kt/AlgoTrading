@@ -66,6 +66,14 @@ session moving beyond contract coverage. Existing freshness and genuine gap
 checks still apply independently. A successful preflight is not proof of
 complete quote recording or a completed session.
 
+Historical Replay submits durable after-hours jobs. Use **Verify replay against
+paper** for the original pre-open policy and recorded ledger, or **Compare
+strategies** for a strict shared-clock range. The **Compare with gaps** button
+uses the selected market and the “To” date; it compares only common, supported
+windows and shows independent flat-start windows separately. Reopening the
+panel reconnects to the last saved request. Never use a partial-window result
+as a verified full-day or cross-market P&L result.
+
 Before comparison, both frozen configurations must have every possible selected
 contract across the observed session price range in the saved manifest, with
 matching dated expiry, strike, lot and tick metadata. Unsupported dates are

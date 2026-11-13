@@ -137,7 +137,8 @@ public static class HistoricalSharedPortfolioComparison
         proposalParameters.Validate();
         var cohort = HistoricalReplayCohortSelector.Select(sessions,
             requiredMarkets, requestedDates,
-            baselineParameters.AllowModeledHistoricalCosts && proposalParameters.AllowModeledHistoricalCosts);
+            baselineParameters.AllowModeledHistoricalCosts && proposalParameters.AllowModeledHistoricalCosts,
+            cancellationToken);
         var days = new List<HistoricalSharedPortfolioDay>();
         var policyManifest = new List<object>();
         var allPoliciesVerified = true;

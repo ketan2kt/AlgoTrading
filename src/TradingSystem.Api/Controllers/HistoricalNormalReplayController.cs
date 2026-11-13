@@ -75,6 +75,7 @@ public sealed class HistoricalNormalReplayController(SessionPolicySettings setti
     }
 
     [HttpGet("gap-aware/jobs/{id:guid}")]
+    [EnableRateLimiting("replay-job-status")]
     public async Task<ActionResult<GapReplayJob>> GapAwareStatus(Guid id,
         [FromServices] HistoricalGapReplayJobs jobs, CancellationToken cancellationToken)
     {

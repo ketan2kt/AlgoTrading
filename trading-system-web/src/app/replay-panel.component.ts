@@ -131,7 +131,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     this.gapWatch?.unsubscribe();
     this.gapAwareBusy=true;
     this.gapAwareStatusText=initial ? `${initial.date} · ${initial.status}` : 'Reconnecting to saved replay…';
-    this.gapWatch=timer(0,5000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
+    this.gapWatch=timer(0,10000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
       catchError(e=>of(e.status===404?'missing' as const:e.status===401||e.status===403?'sign-in' as const:null))
     ))).subscribe(job=>{
       if(job==='missing'||job==='sign-in') {
@@ -143,7 +143,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
         this.gapAwareReport=job.report;
         this.gapAwareError=job.error??'';
         this.gapAwareBusy=false;this.gapWatch?.unsubscribe();
-      } else this.gapAwareStatusText=`${job.date} · ${job.status}. You can close this panel and come back.`;
+      } else this.gapAwareStatusText=`${job.date} · ${job.phase||job.status}. You can close this panel and come back.`;
       this.refreshView();
     });
     this.subscriptions.add(this.gapWatch);
@@ -223,7 +223,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   private watchNormalJob(id:string,initial?:GapReplayJob):void {
     this.normalReplayBusy=true;
     this.normalReplayStatusText=initial ? this.normalJobStatus(initial) : 'Reconnecting to saved comparison…';
-    const watch=timer(0,5000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
+    const watch=timer(0,10000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
       catchError(e=>of(e.status===404?'missing' as const:e.status===401||e.status===403?'sign-in' as const:null))
     ))).subscribe(job=>{
       if(job==='missing'||job==='sign-in'){
