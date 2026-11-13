@@ -52,11 +52,48 @@
                   <option value="sensex">Sensex</option><option value="bank-nifty">Bank Nifty</option>
                 </select></label>
                 <button type="button" (click)="runGapAware()" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo">{{gapAwareBusy?'Reading archive…':'Gap-aware replay · '+replayTo}}</button>
+                <button type="button" (click)="runNormalReplay(true)" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo || !!replayFrozenInputRun">Compare with gaps · {{replayTo}}</button>
               </div>
               <div class="replay-notes"><small>Paper verification uses only the “To” session and its recorded pre-open settings, not the experiment.</small><small>Frozen datasets retain their saved dates, settings and execution assumptions. Comparisons run outside market hours.</small></div>
               @if(normalReplayError){<p class="historical-replay-warning" role="alert">{{normalReplayError}}</p>}
               @if(normalReplayBusy){<p class="replay-empty" role="status">{{normalReplayStatusText || 'Loading the saved comparison…'}}</p>}
-              @if(!normalReplayReport && !normalReplayBusy && !normalReplayError){<div class="replay-empty"><strong>Your comparison will appear here</strong><span>Select a session range and experiment, then compare strategies or open a saved result.</span></div>}
+              @if(!normalReplayReport && !gapComparisonReport && !normalReplayBusy && !normalReplayError){<div class="replay-empty"><strong>Your comparison will appear here</strong><span>Select a session range and experiment, then compare strategies or open a saved result.</span></div>}
+              @if(gapComparisonReport;as result){
+                <section class="daily-analysis-section">
+                  <h4>Gap-aware strategy comparison · {{result.date}}</h4>
+                  <p>Both strategies use the same recorded data. Each market is separate; these are not full-day portfolio results.</p>
+                  @for(market of result.markets;track market.market){
+                    <h5>{{market.market==='BANKNIFTY'?'Bank Nifty':market.market}} · {{market.windows.length}} comparable windows · {{market.gaps.length}} data gaps</h5>
+                    @for(note of market.limitations;track $index){<small>{{note}} </small>}
+                    @if(market.windows.length){
+                    <div class="daily-analysis-table"><table><thead><tr><th>Common window · IST</th><th>State</th><th>Closed trades (base / proposal)</th><th>Baseline net</th><th>Proposal net</th><th>Net difference</th><th>Costs (base / proposal)</th><th>Realized drawdown</th></tr></thead><tbody>
+                      @for(window of market.windows;track window.startUtc){
+                        <tr><td>{{window.startUtc|date:'HH:mm:ss':'+0530'}} – {{window.endUtc|date:'HH:mm:ss':'+0530'}}</td>
+                          <td>{{window.independentFlatRestart?'Separate flat-start scenario':'From session open'}}</td>
+                          <td>{{window.baselineTrades}} / {{window.proposalTrades}}</td>
+                          <td>{{window.baselineTrades?'₹'+(window.baselineNet|number:'1.2-2'):'—'}}</td>
+                          <td>{{window.proposalTrades?'₹'+(window.proposalNet|number:'1.2-2'):'—'}}</td>
+                          <td [class.good]="window.netDifference>0" [class.bad]="window.netDifference<0">{{window.baselineTrades+window.proposalTrades?'₹'+(window.netDifference|number:'1.2-2'):'—'}}</td>
+                          <td>{{window.baselineCosts|number:'1.2-2'}} / {{window.proposalCosts|number:'1.2-2'}}</td>
+                          <td>{{window.baselineRealizedDrawdown|number:'1.2-2'}} / {{window.proposalRealizedDrawdown|number:'1.2-2'}}</td></tr>
+                        @if(window.baselineTrades+window.proposalTrades){
+                          <tr><td colspan="8"><details><summary>Closed trades in this window</summary>
+                            <ul>@for(trade of window.baselinePositions;track $index){<li>Baseline · {{trade.symbol}} · {{trade.entryAtUtc|date:'HH:mm:ss':'+0530'}} → {{trade.exitAtUtc|date:'HH:mm:ss':'+0530'}} · {{trade.exitReason}} · ₹{{trade.netPnl|number:'1.2-2'}}</li>}
+                            @for(trade of window.proposalPositions;track $index){<li>Proposal · {{trade.symbol}} · {{trade.entryAtUtc|date:'HH:mm:ss':'+0530'}} → {{trade.exitAtUtc|date:'HH:mm:ss':'+0530'}} · {{trade.exitReason}} · ₹{{trade.netPnl|number:'1.2-2'}}</li>}</ul>
+                          </details></td></tr>
+                        }
+                      }
+                    </tbody></table></div>}
+                    @if(market.gaps.length){
+                      <details><summary>Excluded data intervals · IST</summary><ul>@for(gap of market.gaps;track gap.startUtc){
+                        <li>{{gap.startUtc|date:'HH:mm:ss':'+0530'}} – {{gap.endUtc|date:'HH:mm:ss':'+0530'}} · {{gap.reason}}</li>
+                      }</ul></details>
+                    }
+                    @if(market.dataFingerprint){<small>Input fingerprint: {{market.dataFingerprint}}</small>}
+                  }
+                  <small>Baseline code: {{result.baselineBuildId}} · Proposal code: {{result.proposalBuildId}}</small>
+                </section>
+              }
               @if(normalReplayReport;as result){
                 @let c=result.comparison;
                 <div class="section-heading results-heading"><div><span class="eyebrow">03 · RESULTS</span><h3>Comparison overview</h3></div></div>

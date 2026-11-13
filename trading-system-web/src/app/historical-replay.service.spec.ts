@@ -174,6 +174,20 @@ describe('HistoricalReplayService', () => {
     http.verify();
   });
 
+  it('requests an explicit gap-aware comparison for the selected market', () => {
+    const service=TestBed.inject(HistoricalReplayService);
+    const http=TestBed.inject(HttpTestingController);
+    service.compareNormal('2026-11-13','2026-11-13',8,'','','','control','gap-1','bank-nifty').subscribe();
+    http.expectOne('/api/research/historical-replay/normal-policy/configuration').flush({});
+    http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
+    const request=http.expectOne(value=>value.url==='/api/research/historical-replay/normal-policy/compare');
+    expect(request.request.params.get('gapAware')).toBe('true');
+    expect(request.request.params.get('market')).toBe('bank-nifty');
+    expect(request.request.params.get('requestId')).toBe('gap-1');
+    request.flush({id:'gap-1',status:'Queued'});
+    http.verify();
+  });
+
   it('imports an index day only through an antiforgery-protected request', () => {
     const service = TestBed.inject(HistoricalReplayService);
     const http = TestBed.inject(HttpTestingController);

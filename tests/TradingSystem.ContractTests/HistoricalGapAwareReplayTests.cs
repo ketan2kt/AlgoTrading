@@ -128,6 +128,31 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void StrategyComparisonUsesOnlyCommonStateAndWholePositionsBeforeEitherUncertainty()
+    {
+        HistoricalGapAwareWindow Window(int from, int until, bool reset, params HistoricalReplayFill[] fills) =>
+            new(Start.AddSeconds(from), Start.AddSeconds(until), reset, true, 1, 0,
+                fills.Select(fill => new HistoricalGapAwareFill(fill, null)).ToArray(), null, null);
+        HistoricalReplayFill Fill(int decision, int exit, decimal net, bool partial = false) =>
+            new("NIFTYCE", "test", Start.AddSeconds(decision), Start.AddSeconds(decision + 1),
+                Start.AddSeconds(exit), 100, 110, 10, net + 2, 2, net, "ObservedTarget") { IsPartialExit = partial };
+        var baseline = new HistoricalGapAwareMarket("NIFTY", 1, 100, true, [],
+            [Window(0, 120, false, Fill(5, 20, 25), Fill(40, 49, 8, true), Fill(40, 75, 27)),
+             Window(140, 180, true, Fill(145, 150, 100))], null, []);
+        var proposal = baseline with { Windows =
+            [Window(0, 119, false, Fill(5, 20, 32)) with { ExecutionUncertainSinceUtc = Start.AddSeconds(60) },
+             Window(141, 180, true, Fill(145, 150, 100))] };
+        var result = HistoricalGapAwareReplay.Compare(Date, baseline, proposal);
+        var window = Assert.Single(result.Windows);
+        Assert.Equal(Start.AddSeconds(60), window.EndUtc);
+        Assert.Equal(1, window.BaselineTrades);
+        Assert.Equal(1, window.ProposalTrades);
+        Assert.Equal(25, window.BaselineNet);
+        Assert.Equal(32, window.ProposalNet);
+        Assert.Equal(7, window.NetDifference);
+    }
+
+    [Fact]
     public void PaperComparisonDoesNotCountTradesOutsideTheOpeningWindow()
     {
         var end = Start.AddMinutes(4);

@@ -5,6 +5,7 @@
 - Removed the two-minute HTTP execution limit from the other two Historical Replay buttons. They now use the existing single after-hours replay worker, retain the exact submitted settings and approved build IDs, show each recorded phase, and can reconnect after a browser close or website restart. Existing strict eligibility and separate gap-aware verdicts remain unchanged. Recorder and trading untouched.
 - Local checks: 23 focused backend and 95 frontend tests, plus the production web build. Required entry-path checks retained all 3 Nifty, 10 Sensex and 15 Bank Nifty entries in the Nov 12–13 ledger.
 - Deployment must wait for the in-flight website replay verification to finish. After rollout, verify one paper run and one baseline/proposal run from the website, then reopen the panel to confirm the saved result.
+- New single-session “Compare with gaps” runs both approved policies against the same per-market archive and only compares common windows before either run loses execution evidence. Shows closed positions, modeled costs, realized drawdown, and separate flat-start scenarios; strict comparison and any whole-day eligibility claims are unchanged. Data fingerprints now include displayed size. Shared-clock comparison reuses identical completed-bar projections between closes.
 
 ## Replay decision and liquidity evidence — website release
 

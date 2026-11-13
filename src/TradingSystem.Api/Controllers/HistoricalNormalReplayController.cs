@@ -100,13 +100,18 @@ public sealed class HistoricalNormalReplayController(SessionPolicySettings setti
     [ValidateAntiForgeryToken]
     [HttpPost("compare")]
     public async Task<ActionResult<GapReplayJob>> Compare(HistoricalNormalReplayComparisonRequest request,
-        [FromServices] HistoricalGapReplayJobs jobs, CancellationToken cancellationToken, [FromQuery] Guid? requestId = null)
+        [FromServices] HistoricalGapReplayJobs jobs, CancellationToken cancellationToken, [FromQuery] Guid? requestId = null,
+        [FromQuery] bool gapAware = false, [FromQuery] string? market = null)
     {
         Response.Headers.CacheControl = "no-store";
         if (request.From == default || !HistoricalReplaySessionCalendar.IsCompletedDate(request.To, clock.GetUtcNow()) ||
             request.From.Year < 2020 || request.To < request.From || request.To.DayNumber - request.From.DayNumber > 30)
             return BadRequest("Choose completed dates in a range of up to 31 days.");
         if (requestId == Guid.Empty) return BadRequest("Choose a valid replay request ID.");
+        if (gapAware && (request.From != request.To || request.FrozenInputRunId is not null ||
+                market is not (null or "nifty" or "sensex" or "bank-nifty")))
+            return BadRequest("Gap-aware strategy comparison requires one archive date and a supported market.");
+        if (!gapAware && market is not null) return BadRequest("Strict comparisons use all three markets.");
         if (request.PaperSessionPolicyFingerprint is not null)
             return BadRequest("Use Verify against paper to select the recorded policy.");
         try
@@ -122,14 +127,15 @@ public sealed class HistoricalNormalReplayController(SessionPolicySettings setti
         var defaultBuildId = request.BaselineBuildId is null || request.ProposalBuildId is null
             ? (await builds.CaptureCurrentAsync(cancellationToken)).Id
             : request.BaselineBuildId;
-        return await SubmitAsync(jobs, request.To, "strategy-comparison", requestId, cancellationToken, request, defaultBuildId);
+        return await SubmitAsync(jobs, request.To, gapAware ? "gap-comparison" : "strategy-comparison", requestId,
+            cancellationToken, request, defaultBuildId, market);
     }
 
     private async Task<ActionResult<GapReplayJob>> SubmitAsync(HistoricalGapReplayJobs jobs, DateOnly date,
         string kind, Guid? requestId, CancellationToken token, HistoricalNormalReplayComparisonRequest? comparison = null,
-        string? defaultBuildId = null)
+        string? defaultBuildId = null, string? market = null)
     {
-        var job = await jobs.EnqueueAsync(date, null, token, requestId, kind, comparison, defaultBuildId);
+        var job = await jobs.EnqueueAsync(date, market, token, requestId, kind, comparison, defaultBuildId);
         return job is null ? Conflict("The replay queue is busy or this request ID belongs to another replay.") :
             AcceptedAtAction(nameof(GapAwareStatus), new { id = job.Id }, PublicState(job));
     }

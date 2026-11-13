@@ -98,6 +98,12 @@ public sealed class HistoricalPortfolioComparisonTests
             _ => new EntryPolicy("baseline-v1", true),
             _ => new EntryPolicy("proposal-v1", false), Parameters, Parameters);
         Assert.NotEqual(result.DataFingerprint, spreadChanged.DataFingerprint);
+        var depthSizeChanged = HistoricalPortfolioComparison.Run([
+            first with { Quotes = first.Quotes.Select(quote => quote with
+                { BidQuantity = 10, OfferQuantity = 20 }).ToArray() }, second],
+            _ => new EntryPolicy("baseline-v1", true),
+            _ => new EntryPolicy("proposal-v1", false), Parameters, Parameters);
+        Assert.NotEqual(result.DataFingerprint, depthSizeChanged.DataFingerprint);
         var sidesCertified = HistoricalPortfolioComparison.Run([
             first with { ExecutableQuoteSidesComplete = true }, second],
             _ => new EntryPolicy("baseline-v1", true),

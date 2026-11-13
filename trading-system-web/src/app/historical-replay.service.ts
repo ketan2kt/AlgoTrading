@@ -133,8 +133,16 @@ export interface HistoricalPolicyBuild {id:string;capturedAtUtc:string;assemblyH
 export interface GapReplayJob {
   id:string;date:string;market:string|null;status:'Queued'|'Running'|'Completed'|'Failed';
   report:HistoricalGapAwareReport|null;error:string|null;
-  kind?:'gap-aware'|'paper-verification'|'strategy-comparison';from?:string|null;
-  phase?:string|null;comparisonReport?:HistoricalNormalReplayReport|null;
+  kind?:'gap-aware'|'paper-verification'|'strategy-comparison'|'gap-comparison';from?:string|null;
+  phase?:string|null;comparisonReport?:HistoricalNormalReplayReport|null;gapComparisonReport?:HistoricalGapComparisonReport|null;
+}
+export interface HistoricalGapComparisonReport {
+  date:string;baselineBuildId:string;proposalBuildId:string;
+  markets:{market:string;dataFingerprint?:string|null;gaps:{startUtc:string;endUtc:string;reason:string}[];limitations:string[];
+    windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;baselineTrades:number;proposalTrades:number;
+      baselineNet:number;proposalNet:number;baselineCosts:number;proposalCosts:number;netDifference:number;
+      baselineRealizedDrawdown:number;proposalRealizedDrawdown:number;
+      baselinePositions:HistoricalReplayFill[];proposalPositions:HistoricalReplayFill[]}[]}[];
 }
 interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
 interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null;
@@ -176,7 +184,7 @@ export class HistoricalReplayService {
     return this.http.get<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/runs/'+encodeURIComponent(id));
   }
   compareNormal(from:string,to:string,stopPercent:number,baselineBuildId='',proposalBuildId='',frozenInputRunId='',trial:ReplayTrial='custom-stop',
-    requestId:string=crypto.randomUUID()) {
+    requestId:string=crypto.randomUUID(),gapMarket:string|null=null) {
     const configuration:Observable<HistoricalNormalPolicyConfiguration|NormalReplaySavedConfiguration>=frozenInputRunId
       ? this.http.get<NormalReplaySavedConfiguration>('/api/research/historical-replay/normal-policy/runs/'+
           encodeURIComponent(frozenInputRunId)+'/configuration')
@@ -196,12 +204,17 @@ export class HistoricalReplayService {
                 entrySlippagePercent:.0025,exitSlippagePercent:.0025,
                 maximumHoldMinutes:375,minimumMinutesBetweenEntries:0,maximumConcurrentPositions:10,
                 allowModeledHistoricalCosts:true}
-            },csrf.token,requestId)));
+            },csrf.token,requestId,gapMarket)));
       }));
   }
-  private submitNormal(path:string,body:object,token:string,requestId:string) {
+  private submitNormal(path:string,body:object,token:string,requestId:string,gapMarket:string|null=null) {
+    let params=new HttpParams().set('requestId',requestId);
+    if(gapMarket!==null){
+      params=params.set('gapAware',true);
+      if(gapMarket)params=params.set('market',gapMarket);
+    }
     return this.http.post<GapReplayJob>('/api/research/historical-replay/normal-policy/'+path,body,
-      {headers:{'X-CSRF-TOKEN':token},params:{requestId}}).pipe(timeout(30000),
+      {headers:{'X-CSRF-TOKEN':token},params}).pipe(timeout(30000),
       retry({count:2,delay:(error,attempt)=>error instanceof TimeoutError || error.status===0 ||
         error.status===429 || error.status>=500 ? timer(attempt*2000) : throwError(()=>error)}));
   }

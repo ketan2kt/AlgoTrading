@@ -76,12 +76,32 @@ public sealed class HistoricalMultiMarketPortfolioPolicyTests
         Assert.Equal("NSE-NIFTY-26Nov26-FUT", observer.SeenSymbol);
     }
 
+    [Fact]
+    public void UnchangedBarHistoryKeepsItsProjectionButNewCompletedBarsDoNot()
+    {
+        var observer = new FutureObserver();
+        var policy = new HistoricalMultiMarketPortfolioPolicy(new Dictionary<string, IHistoricalReplayPortfolioPolicy>
+            { ["NIFTY"] = observer });
+        HistoricalReplayBar[] bars = [Bar("NIFTY", 0), Bar("SENSEX", 0)];
+        var frame = new HistoricalReplayPortfolioFrame(new(Start.AddMinutes(1), bars,
+            new Dictionary<string, HistoricalReplayQuote>()), null, []);
+        policy.Evaluate(frame);
+        var initial = observer.SeenBars;
+        policy.Evaluate(frame with { Market = frame.Market with { AvailableAtUtc = Start.AddMinutes(1).AddSeconds(2) } });
+        Assert.Same(initial, observer.SeenBars);
+        policy.Evaluate(frame with { Market = frame.Market with { CompletedBars = new[] { Bar("NIFTY", 1), Bar("SENSEX", 1) } } });
+        Assert.NotSame(initial, observer.SeenBars);
+        Assert.Equal(Start.AddMinutes(1), Assert.Single(observer.SeenBars).OpenTimeUtc);
+    }
+
     private sealed class FutureObserver : IHistoricalReplayPortfolioPolicy
     {
         public string CodeVersion => "future-projection-test";
         public string? SeenSymbol { get; private set; }
+        public IReadOnlyList<HistoricalReplayBar> SeenBars { get; private set; } = [];
         public IReadOnlyList<HistoricalReplayCandidate> Evaluate(HistoricalReplayPortfolioFrame frame)
         {
+            SeenBars = frame.Market.CompletedBars;
             SeenSymbol = Assert.Single(frame.Market.CompletedBars).Symbol;
             return [];
         }

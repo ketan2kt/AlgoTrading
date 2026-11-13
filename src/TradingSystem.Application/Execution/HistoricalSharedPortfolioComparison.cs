@@ -234,7 +234,7 @@ public static class HistoricalSharedPortfolioComparison
         var dataFingerprint = cohort.IncludedSessions.Count == 0 ? string.Empty :
             HistoricalPortfolioComparison.Fingerprint(cohort.IncludedSessions
                 .OrderBy(value => value.Date).ThenBy(value => value.IndexSymbol,
-                    StringComparer.Ordinal));
+                    StringComparer.Ordinal), cancellationToken);
         var runFingerprint = cohort.IncludedSessions.Count == 0 ? string.Empty :
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 dataFingerprint + "|" + HistoricalPortfolioReplay.EngineVersion +

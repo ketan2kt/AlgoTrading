@@ -1,7 +1,7 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, inject, Input, OnInit, OnDestroy, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { GapReplayJob, HistoricalGapAwareReport, ReplayTrial } from './historical-replay.service';
+import type { GapReplayJob, HistoricalGapAwareReport, HistoricalGapComparisonReport, ReplayTrial } from './historical-replay.service';
 import { catchError, exhaustMap, of, Subscription, timer } from 'rxjs';
 import { HistoricalNormalReplayReport, HistoricalNormalReplayRunSummary, HistoricalPolicyBuild, HistoricalReplayCohortCoverage, HistoricalReplayResearchReport, HistoricalReplayService } from './historical-replay.service';
 @Component({selector:'app-replay-panel', imports:[DatePipe,DecimalPipe,PercentPipe,FormsModule], templateUrl:'./replay-panel.component.html', styleUrl:'./replay-panel.component.scss'})
@@ -17,6 +17,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected replayError = '';
   protected replayReport: HistoricalReplayResearchReport | null = null;
   protected normalReplayReport: HistoricalNormalReplayReport | null = null;
+  protected gapComparisonReport: HistoricalGapComparisonReport | null = null;
   protected normalReplayBusy = false;
   protected normalReplayError = '';
   protected normalReplayStatusText = '';
@@ -87,6 +88,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   }
   protected showSavedNormalReport():void {
     if(!this.replayFrozenInputRun)return;
+    this.gapComparisonReport=null;
     this.normalReplayBusy=true;this.normalReplayError='';
     this.subscriptions.add(this.historicalReplayService.savedNormalReport(this.replayFrozenInputRun).subscribe({
       next:value=>{this.normalReplayReport=value;this.normalReplayBusy=false;this.refreshView();},
@@ -157,16 +159,18 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     this.normalReplayTrial='fixed-target';
     this.runNormalReplay();
   }
-  protected runNormalReplay():void {
+  protected runNormalReplay(gapAware = false):void {
     if(this.normalReplayBusy || this.gapAwareBusy)return;
-    if((!this.replayFrozenInputRun && (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo)) ||
+    if((gapAware && (!this.replayTo || !!this.replayFrozenInputRun)) ||
+        (!gapAware && !this.replayFrozenInputRun && (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo)) ||
         (this.normalReplayTrial==='custom-stop' && (this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75))) {
       this.normalReplayError='Choose completed dates and a premium stop between 0 and 75%.';return;
     }
     const {replayFrom:from,replayTo:to,normalReplayStopPercent:stop,replayBaselineBuild:baseline,
       replayProposalBuild:proposal,replayFrozenInputRun:dataset,normalReplayTrial:trial}=this;
-    this.submitNormalJob(['compare',from,to,stop,baseline,proposal,dataset,trial], id =>
-      this.historicalReplayService.compareNormal(from,to,stop,baseline,proposal,dataset,trial,id));
+    const market=gapAware?this.gapAwareMarket:null;
+    this.submitNormalJob(['compare',gapAware?to:from,to,stop,baseline,proposal,dataset,trial,market], id =>
+      this.historicalReplayService.compareNormal(gapAware?to:from,to,stop,baseline,proposal,dataset,trial,id,market));
   }
   private readJobKey(key:string):string|null {
     try{return localStorage.getItem(key);}catch{return null;}
@@ -200,7 +204,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     const existing=this.readJobKey(this.normalReplayRequestKey);
     const requestId=existing?.slice(37)===signature ? existing.slice(0,36) : crypto.randomUUID();
     this.writeJobKey(this.normalReplayRequestKey,requestId+':'+signature);
-    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
+    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;this.gapComparisonReport=null;
     this.normalReplayStatusText='Saving replay request…';
     this.subscriptions.add(submit(requestId).subscribe({
       next:job=>{
@@ -229,6 +233,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
       }else if(!job)this.normalReplayStatusText='Connection interrupted. Reconnecting to the saved comparison…';
       else if(job.status==='Completed'||job.status==='Failed'){
         this.normalReplayReport=job.comparisonReport??null;
+        this.gapComparisonReport=job.gapComparisonReport??null;
         this.normalReplayError=job.error??'';
         this.normalReplayBusy=false;watch.unsubscribe();
         if(this.normalReplayReport)this.loadSavedNormalRuns();

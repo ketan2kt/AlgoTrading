@@ -333,16 +333,17 @@ public static class HistoricalPortfolioComparison
     }
 
     internal static string Fingerprint(
-        IEnumerable<HistoricalReplaySessionData> sessions)
+        IEnumerable<HistoricalReplaySessionData> sessions, CancellationToken cancellationToken = default)
     {
         // Hash canonical rows incrementally: a full option universe must not
         // allocate another day-sized string plus its UTF-8 copy.
         using var hash = SHA256.Create();
         using var sink = new CryptoStream(Stream.Null, hash, CryptoStreamMode.Write);
         using var text = new StreamWriter(sink, new UTF8Encoding(false), 64 * 1024, leaveOpen: true);
-        text.Write("historical-portfolio-input-v2\n");
+        text.Write("historical-portfolio-input-v3\n");
         foreach (var session in sessions)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             text.Write(FormattableString.Invariant($"{session.Date:yyyy-MM-dd}|{session.IndexSymbol}|{session.ExchangeCode}|{session.StartUtc.ToUniversalTime():O}|{session.EndUtc.ToUniversalTime():O}|{session.RequiredInputsComplete}|{session.EligibleOptionUniverseComplete}|{session.StrategyInputsComplete}|{session.ExecutableQuoteSidesComplete}|{session.HistoricalChargesVerified}|{session.PolicyInputManifest}\n"));
             text.Write("OPTIONS|");
             var first = true;
@@ -365,7 +366,10 @@ public static class HistoricalPortfolioComparison
                          .ThenBy(value => value.IntervalSeconds))
                 text.Write(FormattableString.Invariant($"B|{bar.Symbol}|{bar.OpenTimeUtc.ToUniversalTime():O}|{bar.IntervalSeconds}|{bar.Open}|{bar.High}|{bar.Low}|{bar.Close}|{bar.Volume}|{bar.OpenInterest}|{bar.Source}\n"));
             foreach (var quote in HistoricalQuotePaths.Ordered(session.Quotes))
-                text.Write(FormattableString.Invariant($"Q|{quote.Symbol}|{quote.AvailableAtUtc.ToUniversalTime():O}|{quote.LastPrice}|{quote.BidPrice}|{quote.OfferPrice}|{quote.Volume}|{quote.OpenInterest}|{quote.Source}|{quote.SourceAtUtc:O}|{quote.DepthSourceAtUtc:O}\n"));
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                text.Write(FormattableString.Invariant($"Q|{quote.Symbol}|{quote.AvailableAtUtc.ToUniversalTime():O}|{quote.LastPrice}|{quote.BidPrice}|{quote.OfferPrice}|{quote.BidQuantity}|{quote.OfferQuantity}|{quote.Volume}|{quote.OpenInterest}|{quote.Source}|{quote.SourceAtUtc:O}|{quote.DepthSourceAtUtc:O}\n"));
+            }
             foreach (var chain in session.OptionChains.OrderBy(value =>
                          value.AvailableAtUtc).ThenBy(value => value.ExpiryDate))
             {

@@ -127,6 +127,8 @@ public sealed class HistoricalMultiMarketPortfolioPolicy :
 
     private HistoricalReplayPortfolioFrame? cachedSourceFrame;
     private readonly Dictionary<string, HistoricalReplayPortfolioFrame> cachedProjections = new(StringComparer.Ordinal);
+    private HistoricalReplayBar[]? cachedSourceBars;
+    private readonly Dictionary<string, HistoricalReplayBar[]> cachedMarketBars = new(StringComparer.Ordinal);
 
     private HistoricalReplayPortfolioFrame Project(
         HistoricalReplayPortfolioFrame frame, string market)
@@ -145,8 +147,7 @@ public sealed class HistoricalMultiMarketPortfolioPolicy :
             .ToArray();
         var ownMarket = frame.Market with
         {
-            CompletedBars = frame.Market.CompletedBars.Where(value =>
-                Owns(market, value.Symbol)).ToArray(),
+            CompletedBars = ProjectBars(frame.Market.CompletedBars, market),
             LatestQuotes = frame.Market.LatestQuotes.Where(value =>
                     Owns(market, value.Key)).ToDictionary(value => value.Key,
                     value => value.Value, StringComparer.Ordinal)
@@ -168,6 +169,23 @@ public sealed class HistoricalMultiMarketPortfolioPolicy :
                 .GetValueOrDefault(market)
         };
         cachedProjections.Add(market, projected);
+        return projected;
+    }
+
+    private HistoricalReplayBar[] ProjectBars(IReadOnlyList<HistoricalReplayBar> bars, string market)
+    {
+        // The runner publishes a new immutable array on each completed bar.
+        // Keep that identity in each market projection so the archived JSON
+        // adapter can reuse the exact encoded bar history on subsequent ticks.
+        if (bars is not HistoricalReplayBar[] array)
+            return bars.Where(value => Owns(market, value.Symbol)).ToArray();
+        if (!ReferenceEquals(cachedSourceBars, array))
+        {
+            cachedSourceBars = array;
+            cachedMarketBars.Clear();
+        }
+        if (!cachedMarketBars.TryGetValue(market, out var projected))
+            cachedMarketBars.Add(market, projected = array.Where(value => Owns(market, value.Symbol)).ToArray());
         return projected;
     }
 }

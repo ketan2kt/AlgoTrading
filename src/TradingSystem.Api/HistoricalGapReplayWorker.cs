@@ -174,21 +174,24 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
                     };
                 }
             }
-            else if (job.Kind != "strategy-comparison" || request is null || job.DefaultBuildId is null)
+            else if (job.Kind is not ("strategy-comparison" or "gap-comparison") || request is null || job.DefaultBuildId is null)
                 throw new InvalidDataException("Saved comparison request is invalid.");
             else
                 request = request with { BaselineBuildId = request.BaselineBuildId ?? job.DefaultBuildId,
                     ProposalBuildId = request.ProposalBuildId ?? job.DefaultBuildId };
 
+            if (job.Kind == "gap-comparison")
+            {
+                var service = scope.ServiceProvider.GetRequiredService<HistoricalGapAwareReplayService>();
+                var gapReport = await service.CompareAsync(request!, job.Market, PublishPhaseAsync, execution.Token);
+                execution.Token.ThrowIfCancellationRequested();
+                await jobs.SaveAsync(job with { Status = "Completed", Phase = null, GapComparisonReport = gapReport }, stoppingToken);
+                return;
+            }
             if (report is null)
             {
                 var service = scope.ServiceProvider.GetRequiredService<HistoricalNormalReplayComparisonService>();
-                report = await service.CompareAsync(request!, execution.Token, async (phase, token) =>
-                {
-                    job = job with { Phase = phase };
-                    await jobs.SaveAsync(job, token);
-                    ComparisonProgress(logger, job.Id, phase);
-                });
+                report = await service.CompareAsync(request!, execution.Token, PublishPhaseAsync);
             }
             execution.Token.ThrowIfCancellationRequested();
             await jobs.SaveAsync(job with { Status = "Completed", Phase = null, ComparisonReport = report }, stoppingToken);
@@ -211,6 +214,13 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
                 _ => $"The replay worker could not finish during {job.Phase}."
             };
             await jobs.SaveAsync(job with { Status = "Failed", Error = error }, stoppingToken);
+        }
+
+        async Task PublishPhaseAsync(string phase, CancellationToken token)
+        {
+            job = job with { Phase = phase };
+            await jobs.SaveAsync(job, token);
+            ComparisonProgress(logger, job.Id, phase);
         }
     }
 

@@ -10,6 +10,7 @@ public sealed record GapReplayJob(Guid Id, DateOnly Date, string? Market, string
     public string Kind { get; init; } = "gap-aware";
     public HistoricalNormalReplayComparisonRequest? ComparisonRequest { get; init; }
     public HistoricalNormalReplayComparisonReport? ComparisonReport { get; init; }
+    public HistoricalGapComparisonReport? GapComparisonReport { get; init; }
     public string? DefaultBuildId { get; init; }
     public DateOnly? From { get; init; }
     public string? Phase { get; init; }
@@ -61,6 +62,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
                 File.Delete(JobPath(old.Id));
                 File.Delete(ReportPath(old.Id));
                 File.Delete(ComparisonPath(old.Id));
+                File.Delete(GapComparisonPath(old.Id));
             }
             var next = new GapReplayJob(requestId ?? Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow())
                 { Kind = kind, ComparisonRequest = comparison, DefaultBuildId = defaultBuildId, From = comparison?.From };
@@ -78,6 +80,12 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     {
         var job = await ReadStateAsync(id, token);
         if (job?.Status != "Completed") return job;
+        if (job.Kind == "gap-comparison")
+        {
+            var comparison = await ReadFileAsync<HistoricalGapComparisonReport>(GapComparisonPath(id), token);
+            return comparison is null ? job with { Status = "Failed", Error = "The saved report is no longer available." } :
+                job with { GapComparisonReport = comparison };
+        }
         if (job.Kind != "gap-aware")
         {
             var comparison = await ReadFileAsync<HistoricalNormalReplayComparisonReport>(ComparisonPath(id), token);
@@ -120,7 +128,8 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     {
         if (job.Report is { } report) await WriteAsync(ReportPath(job.Id), report, token);
         if (job.ComparisonReport is { } comparison) await WriteAsync(ComparisonPath(job.Id), comparison, token);
-        await WriteAsync(JobPath(job.Id), job with { Report = null, ComparisonReport = null }, token);
+        if (job.GapComparisonReport is { } gapComparison) await WriteAsync(GapComparisonPath(job.Id), gapComparison, token);
+        await WriteAsync(JobPath(job.Id), job with { Report = null, ComparisonReport = null, GapComparisonReport = null }, token);
     }
 
     private static async Task WriteAsync<T>(string path, T value, CancellationToken token)
@@ -143,6 +152,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     private string JobPath(Guid id) => Path.Combine(root, id.ToString("N") + ".json");
     private string ReportPath(Guid id) => Path.Combine(root, id.ToString("N") + ".report");
     private string ComparisonPath(Guid id) => Path.Combine(root, id.ToString("N") + ".comparison");
+    private string GapComparisonPath(Guid id) => Path.Combine(root, id.ToString("N") + ".gap-comparison");
     private IEnumerable<Guid> JobIds() => Directory.EnumerateFiles(root, "*.json")
         .Select(path => Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) ? id : Guid.Empty)
         .Where(id => id != Guid.Empty);

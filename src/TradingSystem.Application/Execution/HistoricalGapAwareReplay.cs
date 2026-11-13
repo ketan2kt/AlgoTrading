@@ -27,14 +27,38 @@ public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<Histo
     public string? PaperComparisonError { get; init; }
 }
 
+public sealed record HistoricalGapComparisonWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc,
+    bool IndependentFlatRestart, int BaselineTrades, int ProposalTrades,
+    decimal BaselineNet, decimal ProposalNet, decimal BaselineCosts, decimal ProposalCosts)
+{
+    public decimal NetDifference => ProposalNet - BaselineNet;
+    public decimal BaselineRealizedDrawdown { get; init; }
+    public decimal ProposalRealizedDrawdown { get; init; }
+    public IReadOnlyList<HistoricalReplayFill> BaselinePositions { get; init; } = [];
+    public IReadOnlyList<HistoricalReplayFill> ProposalPositions { get; init; } = [];
+}
+
+public sealed record HistoricalGapMarketComparison(DateOnly Date, string Market,
+    IReadOnlyList<HistoricalReplayGap> Gaps, IReadOnlyList<HistoricalGapComparisonWindow> Windows,
+    IReadOnlyList<string> Limitations)
+{
+    public string? DataFingerprint { get; init; }
+}
+
+public sealed record HistoricalGapComparisonReport(DateOnly Date, string BaselineBuildId, string ProposalBuildId,
+    IReadOnlyList<HistoricalGapMarketComparison> Markets);
+
 public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds,
     IRecordedPaperSessionReader? recorded = null)
 {
+    private static readonly (string Key, string Label)[] Markets =
+        [("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY")];
+
     public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null,
         bool comparePaper = true, Action? inputsLoaded = null, HistoricalReplayTiming? timing = null)
     {
         var markets = new List<HistoricalGapAwareMarket>();
-        foreach (var (key, label) in new[] { ("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY") })
+        foreach (var (key, label) in Markets)
         {
             if (onlyMarket is not null && key != onlyMarket) continue;
             token.ThrowIfCancellationRequested();
@@ -74,7 +98,7 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                             .Select(value => value.TradingSymbol).ToHashSet(StringComparer.Ordinal);
                         markets.Add(HistoricalGapAwareReplay.Run(slice,
                             () => new HistoricalContractCoveragePolicy(module.Create(receipt.Settings, slice), label, date, captured),
-                            notes, timing, token));
+                            notes, timing, cancellationToken: token));
                         continue;
                     }
                     else if (receipt.Settings.WeeklyCarryForwardEnabled) notes.Add("Overnight carry is not supported in this research mode.");
@@ -85,7 +109,7 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                 }
             }
             else notes.Add("Required dated policy, controls, contract plan, or market anchors were not verified.");
-            markets.Add(HistoricalGapAwareReplay.Run(slice, null, notes, timing, token));
+            markets.Add(HistoricalGapAwareReplay.Run(slice, null, notes, timing, cancellationToken: token));
         }
         var report = new HistoricalGapAwareReport(date, markets);
         if (!comparePaper || recorded is null || !markets.Any(market => market.Windows.Any(window =>
@@ -93,6 +117,71 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
         // The actual ledger is read only after simulation.
         var actual = await recorded.ReadTradesAsync(date, token);
         return report with { OpeningWindowFidelity = CompareOpeningWindows(markets, actual) };
+    }
+
+    public async Task<HistoricalGapComparisonReport> CompareAsync(HistoricalNormalReplayComparisonRequest request,
+        string? onlyMarket, Func<string, CancellationToken, Task> progress, CancellationToken token)
+    {
+        if (request.From != request.To || request.FrozenInputRunId is not null ||
+            request.BaselineBuildId is null || request.ProposalBuildId is null)
+            throw new ArgumentException("Gap-aware comparison requires one archive date and two approved builds.", nameof(request));
+        request.Execution.Validate();
+        using var baseline = await builds.LoadAsync(request.BaselineBuildId, token);
+        using var proposal = await builds.LoadAsync(request.ProposalBuildId, token);
+        if (baseline.ContractSelectionVersion != RegularOptionContractSelector.Version ||
+            proposal.ContractSelectionVersion != RegularOptionContractSelector.Version)
+            throw new UnsupportedReplayContractException("Both strategy builds must use the supported contract-selection protocol.");
+        var date = request.To;
+        var markets = new List<HistoricalGapMarketComparison>();
+        foreach (var (key, label) in Markets)
+        {
+            if (onlyMarket is not null && key != onlyMarket) continue;
+            await progress($"Reading {label} archive", token);
+            HistoricalReplayArchiveSlice? slice = null;
+            try
+            {
+                slice = await archive.ReadGapAwareAsync(date, key, token);
+                if (!slice.GapAwarePolicyInputsReady)
+                {
+                    AddUnavailable("Dated controls, pre-open policy receipt, contract plan or market anchors could not be verified.");
+                    continue;
+                }
+                var issues = ReplayContractCoverage.ValidateReplay(slice, request.Baseline).Select(issue => "Baseline: " + issue)
+                    .Concat(ReplayContractCoverage.ValidateReplay(slice, request.Proposal).Select(issue => "Proposal: " + issue)).ToArray();
+                if (issues.Length > 0)
+                {
+                    AddUnavailable(issues);
+                    continue;
+                }
+                var captured = slice.RecordedContractUniverse!.Instruments.Where(value => value.Market == label)
+                    .Select(value => value.TradingSymbol).ToHashSet(StringComparer.Ordinal);
+                var execution = request.Execution with { RequireDisplayedFillSize = true };
+                await progress($"Simulating {label} baseline", token);
+                var original = HistoricalGapAwareReplay.Run(slice,
+                    () => new HistoricalContractCoveragePolicy(baseline.Create(request.Baseline, slice), label, date, captured),
+                    cancellationToken: token, execution: execution);
+                await progress($"Simulating {label} proposal", token);
+                var changed = HistoricalGapAwareReplay.Run(slice,
+                    () => new HistoricalContractCoveragePolicy(proposal.Create(request.Proposal, slice), label, date, captured),
+                    cancellationToken: token, execution: execution);
+                var gapEvidence = System.Text.Json.JsonSerializer.Serialize(original.Gaps);
+                markets.Add(HistoricalGapAwareReplay.Compare(date, original, changed) with
+                {
+                    DataFingerprint = HistoricalPortfolioComparison.Fingerprint(
+                        [slice.Session with { PolicyInputManifest = slice.Session.PolicyInputManifest + "|gap-evidence=" + gapEvidence }], token)
+                });
+            }
+            catch (UnsupportedReplayContractException exception) { AddUnavailable(exception.Message); }
+            catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException)
+            { AddUnavailable("The archive or simulation inputs could not be verified. No substitute was used."); }
+
+            void AddUnavailable(params string[] reasons)
+            {
+                var gaps = slice is null ? [] : HistoricalGapAwareReplay.Run(slice, null, cancellationToken: token).Gaps;
+                markets.Add(new(date, label, gaps, [], reasons));
+            }
+        }
+        return new(date, baseline.BuildId, proposal.BuildId, markets);
     }
 
     public static PaperSessionFidelity? CompareOpeningWindows(IReadOnlyList<HistoricalGapAwareMarket> markets,
@@ -148,7 +237,7 @@ public static class HistoricalGapAwareReplay
     public static HistoricalGapAwareMarket Run(HistoricalReplayArchiveSlice slice,
         Func<IHistoricalReplayPortfolioPolicy>? createPolicy,
         IReadOnlyList<string>? limitations = null, HistoricalReplayTiming? timing = null,
-        CancellationToken cancellationToken = default)
+        HistoricalReplayParameters? execution = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(slice);
         var session = slice.Session;
@@ -219,6 +308,7 @@ public static class HistoricalGapAwareReplay
         notes.Add("If an execution cannot be verified, the continuous run stops. Any later flat-start scenario does not assume the previous position closed.");
         if (slice.ArchiveReportedCaptureGaps)
             notes.Add("The archive reported capture loss; displayed intervals come from this market's recorded quote timestamps and known unreadable files.");
+        var parameters = (execution ?? SessionPolicyReceipt.ComparisonExecution) with { RequireDisplayedFillSize = true };
         var from = session.StartUtc;
         var windowCount = 0;
         var quoteEnd = 0;
@@ -256,7 +346,7 @@ public static class HistoricalGapAwareReplay
                     HistoricalReplayResult result;
                     using (timing?.Measure("simulation"))
                     result = HistoricalPortfolioReplay.Run(session.Bars, observedQuotes, policy,
-                        SessionPolicyReceipt.ComparisonExecution with { RequireDisplayedFillSize = true }, from, until,
+                        parameters, from, until,
                         session.OptionChains, session.ExchangeCode, sourceControls: session.ControlEvents,
                         timing: timing, stopOnExecutionUncertainty: true, cancellationToken: cancellationToken, entryEvidence: reset ? null : item =>
                         {
@@ -304,6 +394,53 @@ public static class HistoricalGapAwareReplay
                 .Select(bar => bar.OpenTimeUtc).ToHashSet();
             for (var minute = session.StartUtc; minute.AddMinutes(1) <= session.EndUtc; minute = minute.AddMinutes(1))
                 if (!minutes.Contains(minute)) gaps.Add(new(minute, minute.AddMinutes(1), symbol + " minute bar unavailable"));
+        }
+    }
+
+    // Each arm is evaluated independently without actual trades or the other
+    // arm's outputs. Only a matching start and a common evidence prefix may
+    // be scored; an arm-specific flat restart can never seed a comparison.
+    public static HistoricalGapMarketComparison Compare(DateOnly date, HistoricalGapAwareMarket baseline,
+        HistoricalGapAwareMarket proposal)
+    {
+        if (baseline.Market != proposal.Market || !baseline.Gaps.SequenceEqual(proposal.Gaps))
+            throw new InvalidOperationException("Both strategies must use the same historical gap boundaries.");
+        var other = proposal.Windows.Where(window => window.Simulated).ToDictionary(window => window.StartUtc);
+        var result = new List<HistoricalGapComparisonWindow>();
+        foreach (var left in baseline.Windows.Where(window => window.Simulated))
+        {
+            if (!other.TryGetValue(left.StartUtc, out var right) || left.IndependentFlatRestart != right.IndependentFlatRestart) continue;
+            var end = new[] { left.EndUtc, right.EndUtc, left.ExecutionUncertainSinceUtc ?? left.EndUtc,
+                right.ExecutionUncertainSinceUtc ?? right.EndUtc }.Min();
+            if (end <= left.StartUtc) continue;
+            var a = Before(left, end);
+            var b = Before(right, end);
+            result.Add(new(left.StartUtc, end, left.IndependentFlatRestart, a.Count, b.Count,
+                a.Sum(fill => fill.NetPnl), b.Sum(fill => fill.NetPnl), a.Sum(fill => fill.Costs), b.Sum(fill => fill.Costs))
+            {
+                BaselinePositions = a, ProposalPositions = b,
+                BaselineRealizedDrawdown = RealizedDrawdown(a), ProposalRealizedDrawdown = RealizedDrawdown(b)
+            });
+        }
+        return new(date, baseline.Market, baseline.Gaps, result,
+            ["Markets are evaluated separately. Only identical start times and common evidence before either arm's first uncertain execution are compared.",
+             "A post-gap flat start is a separate scenario, never verified whole-session P&L. An interval with no closed trades does not establish a strategy edge.",
+             .. baseline.Limitations.Concat(proposal.Limitations).Where(note => note.Contains("simulation budget", StringComparison.Ordinal)).Distinct(StringComparer.Ordinal)]);
+
+        static IReadOnlyList<HistoricalReplayFill> Before(HistoricalGapAwareWindow window, DateTimeOffset end) =>
+            HistoricalReplayTradeAggregation.CompletedPositions(window.Fills.Where(row =>
+                row.ExclusionReason is null && row.Fill.ExitAtUtc < end).Select(row => row.Fill).ToArray());
+
+        static decimal RealizedDrawdown(IReadOnlyList<HistoricalReplayFill> positions)
+        {
+            decimal equity = 0m, peak = 0m, drawdown = 0m;
+            foreach (var time in positions.GroupBy(value => value.ExitAtUtc))
+            {
+                equity += time.Sum(value => value.NetPnl);
+                peak = Math.Max(peak, equity);
+                drawdown = Math.Max(drawdown, peak - equity);
+            }
+            return drawdown;
         }
     }
 
