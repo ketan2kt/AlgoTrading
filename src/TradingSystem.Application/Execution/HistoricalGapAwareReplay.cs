@@ -233,7 +233,6 @@ public static class HistoricalGapAwareReplay
 {
     private static readonly TimeSpan MaximumSourceAge = TimeSpan.FromSeconds(30);
     private const int MaxQuotesPerMarket = 2_000_000;
-    private const int MaxSimulatedWindows = 32;
     private const int MaxEntryEvidencePerWindow = 512;
 
     public static HistoricalGapAwareMarket Run(HistoricalReplayArchiveSlice slice,
@@ -312,8 +311,10 @@ public static class HistoricalGapAwareReplay
             notes.Add("The archive reported capture loss; displayed intervals come from this market's recorded quote timestamps and known unreadable files.");
         var parameters = (execution ?? SessionPolicyReceipt.ComparisonExecution) with { RequireDisplayedFillSize = true };
         var from = session.StartUtc;
-        var windowCount = 0;
         var quoteEnd = 0;
+        var decisionCloses = session.Bars.Where(bar => bar.IntervalSeconds > 0)
+            .Select(bar => bar.AvailableAtUtc).Distinct().Order().ToArray();
+        var decisionIndex = 0;
         foreach (var gap in mergedGaps.Append(new HistoricalReplayGap(session.EndUtc, session.EndUtc, "")))
         {
             while (gap.StartUtc > from)
@@ -321,9 +322,18 @@ public static class HistoricalGapAwareReplay
                 cancellationToken.ThrowIfCancellationRequested();
                 var reset = from != session.StartUtc;
                 var until = gap.StartUtc;
-                if (createPolicy is null || windowCount++ >= MaxSimulatedWindows)
+                if (createPolicy is null)
                 {
                     windows.Add(new(from, until, reset, false, 0, 0, [], null, null));
+                    break;
+                }
+                // This window starts flat. Without a completed bar the engine
+                // cannot evaluate an entry, so avoid starting a policy solely
+                // to replay warmup bars that cannot produce a trade.
+                while (decisionIndex < decisionCloses.Length && decisionCloses[decisionIndex] < from) decisionIndex++;
+                if (decisionIndex == decisionCloses.Length || decisionCloses[decisionIndex] >= until)
+                {
+                    windows.Add(new(from, until, reset, true, 0, 0, [], null, null));
                     break;
                 }
                 else
@@ -380,7 +390,6 @@ public static class HistoricalGapAwareReplay
             }
             from = gap.EndUtc;
         }
-        if (windowCount > MaxSimulatedWindows) notes.Add("Additional fragmented windows are shown as coverage only (simulation budget).");
         var verified = windows.Where(value => value.VerifiedNetPnl.HasValue).ToArray();
         timing?.Checkpoint("market-complete", session.EndUtc, source.Count);
         return new(session.IndexSymbol, coveredContracts.Count, count, slice.ArchiveReportedCaptureGaps, mergedGaps, windows,
@@ -426,8 +435,7 @@ public static class HistoricalGapAwareReplay
         }
         return new(date, baseline.Market, baseline.Gaps, result,
             ["Markets are evaluated separately. Only identical start times and common evidence before either arm's first uncertain execution are compared.",
-             "A post-gap flat start is a separate scenario, never verified whole-session P&L. An interval with no closed trades does not establish a strategy edge.",
-             .. baseline.Limitations.Concat(proposal.Limitations).Where(note => note.Contains("simulation budget", StringComparison.Ordinal)).Distinct(StringComparer.Ordinal)]);
+             "A post-gap flat start is a separate scenario, never verified whole-session P&L. An interval with no closed trades does not establish a strategy edge."]);
 
         static IReadOnlyList<HistoricalReplayFill> Before(HistoricalGapAwareWindow window, DateTimeOffset end) =>
             HistoricalReplayTradeAggregation.CompletedPositions(window.Fills.Where(row =>

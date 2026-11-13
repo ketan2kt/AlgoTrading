@@ -1,6 +1,7 @@
 import importlib.util
 import io
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -35,6 +36,12 @@ class SchemaReadinessTests(unittest.TestCase):
             with self.subTest(value=value), patch.object(schema.subprocess, "run") as run:
                 run.return_value.stdout = value
                 self.assertFalse(schema.safety_settings_are_off("group", "app"))
+
+    def test_existing_diagnostics_configuration_is_required(self):
+        for count, result in (("0", False), ("1", True)):
+            with self.subTest(count=count), patch.object(schema.subprocess, "run") as run:
+                run.side_effect = [SimpleNamespace(stdout=value) for value in ("false", "false", count)]
+                self.assertEqual(result, schema.safety_settings_are_off("group", "app"))
 
 
 if __name__ == "__main__":

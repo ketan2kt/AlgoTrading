@@ -175,6 +175,7 @@ jobs:
               --src-path "$RUNNER_TEMP/release/trading-system.zip" \
               --type zip \
               --clean true \
+              --track-status false \
               --restart true; then
               deployed=true
               break
@@ -191,11 +192,13 @@ jobs:
 
       - name: Check the new package before enabling migrations
         id: migration
-        if: steps.baseline.outputs.reuse == 'true'
         env:
           APP: ${{ steps.infrastructure.outputs.app }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
         run: |
+          # ZipDeploy only verifies installation; we verify the running build
+          # and database here rather than letting Azure CLI's separate runtime
+          # tracker mistake a recovered startup for a failed upload.
           # /health/ready checks the exact deployed code's pending migrations.
           # Never skip controlled migrations based on the outgoing container.
           if python3 scripts/check-website-schema-ready.py; then

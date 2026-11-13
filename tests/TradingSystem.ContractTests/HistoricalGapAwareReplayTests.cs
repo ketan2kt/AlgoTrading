@@ -128,6 +128,35 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void FragmentedSessionStillSimulatesActionableWindowsAfterTheThirtySecondWindow()
+    {
+        const int decision = 38 * 60;
+        var end = Start.AddMinutes(42);
+        var quotes = Enumerable.Range(0, 42 * 60 + 1).Select(second =>
+            Book(Start.AddSeconds(second), second is >= decision + 8 and <= decision + 12 ? 120m : 100m)).ToArray();
+        var slice = Slice("NIFTY", quotes, end) with
+        {
+            MonitoredDepthGaps = Enumerable.Range(0, 41).Select(minute =>
+                new HistoricalReplayGap(Start.AddMinutes(minute).AddSeconds(45), Start.AddMinutes(minute).AddSeconds(55),
+                    "Recorder depth gap")).ToArray()
+        };
+        var policiesCreated = 0;
+        var report = HistoricalGapAwareReplay.Run(slice, () => { policiesCreated++; return new Policy(decision); });
+
+        Assert.Equal(42, report.Windows.Count);
+        Assert.Equal(41, report.Gaps.Count);
+        Assert.Equal(41, policiesCreated); // The opening fragment contains no completed decision bar.
+        Assert.All(report.Windows, window => Assert.True(window.Simulated));
+        var profitable = Assert.Single(report.Windows, window => window.IndependentScenarioNetPnl > 0);
+        Assert.True(profitable.IndependentFlatRestart);
+        Assert.True(profitable.StartUtc > report.Windows[31].EndUtc);
+        Assert.Null(report.VerifiedNetPnl);
+        var control = HistoricalGapAwareReplay.Compare(Date, report, report);
+        Assert.Contains(control.Windows, window => window.StartUtc == profitable.StartUtc &&
+            window.BaselineTrades == 1 && window.ProposalTrades == 1 && window.NetDifference == 0);
+    }
+
+    [Fact]
     public void StrategyComparisonUsesOnlyCommonStateAndWholePositionsBeforeEitherUncertainty()
     {
         HistoricalGapAwareWindow Window(int from, int until, bool reset, params HistoricalReplayFill[] fills) =>

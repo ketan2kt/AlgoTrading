@@ -17,7 +17,14 @@ def safety_settings_are_off(group, app):
         ).stdout.strip()
         if value.lower() != "false":
             return False
-    return True
+    # A new installation must still run the initialization step that creates
+    # this key. Return only its presence, never the setting's value.
+    result = subprocess.run(
+        ["az", "webapp", "config", "appsettings", "list", "-g", group, "-n", app,
+         "--query", "length([?name=='Diagnostics__ReadOnlyApiKey' && value != ''])", "-o", "tsv"],
+        check=True, capture_output=True, text=True, timeout=20,
+    )
+    return result.stdout.strip() == "1"
 
 
 def stable_schema_ready(verify, sleep=time.sleep, attempts=12):
