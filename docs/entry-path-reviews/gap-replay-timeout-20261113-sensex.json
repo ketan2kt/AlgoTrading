@@ -1,0 +1,46 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-13T15:13:12.5275570+00:00",
+  "market": "sensex",
+  "from": "2026-11-12",
+  "to": "2026-11-13",
+  "removeStrategies": [
+    "__no_removed_path__"
+  ],
+  "historicalRegularEntries": 10,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 10,
+  "sessions": [
+    {
+      "Date": "2026-11-12",
+      "RegularEntries": 6
+    },
+    {
+      "Date": "2026-11-13",
+      "RegularEntries": 4
+    }
+  ],
+  "strategyBreakdown": [
+    {
+      "strategy": "Sensex directional pullback participation",
+      "count": 5,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex persistent directional thesis",
+      "count": 3,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex controlled early pullback",
+      "count": 1,
+      "removed": false
+    },
+    {
+      "strategy": "Sensex range-edge rejection",
+      "count": 1,
+      "removed": false
+    }
+  ],
+  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability."
+}
