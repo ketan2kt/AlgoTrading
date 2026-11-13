@@ -86,14 +86,15 @@ describe('HistoricalReplayService', () => {
     const http=TestBed.inject(HttpTestingController);
     const baseline={niftyAdmission:{stopLossPercent:10,maximumPremium:500},
       sensexEntry:{stopPercent:10,lots:5},bankNiftyStopPercent:10,frozenMarker:'unchanged'};
-    service.compareNormal('2026-11-02','2026-11-03',8,'old-approved','new-approved').subscribe();
+    service.compareNormal('2026-11-02','2026-11-03',8,'old-approved','new-approved','','custom-stop','compare-1').subscribe();
     http.expectOne('/api/research/historical-replay/normal-policy/configuration').flush(baseline);
     http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
-    const request=http.expectOne('/api/research/historical-replay/normal-policy/compare');
+    const request=http.expectOne(value=>value.url==='/api/research/historical-replay/normal-policy/compare');
     expect(request.request.method).toBe('POST');
     expect(request.request.body.baselineBuildId).toBe('old-approved');
     expect(request.request.body.proposalBuildId).toBe('new-approved');
     expect(request.request.headers.get('X-CSRF-TOKEN')).toBe('csrf');
+    expect(request.request.params.get('requestId')).toBe('compare-1');
     expect(request.request.body.baseline.niftyAdmission.stopLossPercent).toBe(10);
     expect(request.request.body.proposal.niftyAdmission.stopLossPercent).toBe(8);
     expect(request.request.body.proposal.sensexEntry.stopPercent).toBe(8);
@@ -101,7 +102,7 @@ describe('HistoricalReplayService', () => {
     expect(request.request.body.proposal.frozenMarker).toBe('unchanged');
     expect(request.request.body.execution.minimumMinutesBetweenEntries).toBe(0);
     expect(baseline.niftyAdmission.stopLossPercent).toBe(10);
-    request.flush({comparison:{cohort:{includedDates:[],excludedDates:[]}},limitations:[]});
+    request.flush({id:'compare-1',status:'Queued'});
     http.verify();
   });
 
@@ -145,7 +146,7 @@ describe('HistoricalReplayService', () => {
     });
     http.expectNone('/api/research/historical-replay/normal-policy/configuration');
     http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
-    const request=http.expectOne('/api/research/historical-replay/normal-policy/compare');
+    const request=http.expectOne(value=>value.url==='/api/research/historical-replay/normal-policy/compare');
     expect(request.request.body.from).toBe('2026-11-02');
     expect(request.request.body.to).toBe('2026-11-03');
     expect(request.request.body.execution).toEqual({frozen:'cost-model'});
@@ -153,7 +154,23 @@ describe('HistoricalReplayService', () => {
     expect(request.request.body.proposalBuildId).toBeNull();
     expect(request.request.body.frozenInputRunId).toBe('saved-run');
     expect(request.request.body.proposal.niftyAdmission.stopLossPercent).toBe(7);
-    request.flush({comparison:{},limitations:[]});
+    request.flush({id:'compare-2',status:'Queued'});
+    http.verify();
+  });
+
+  it('queues paper verification and retrieves its persisted result separately', () => {
+    const service=TestBed.inject(HistoricalReplayService);
+    const http=TestBed.inject(HttpTestingController);
+    service.comparePaperSession('2026-11-13','paper-1').subscribe(job=>{
+      service.gapAwareStatus(job.id).subscribe(result=>expect(result.comparisonReport?.limitations).toEqual(['Excluded']));
+    });
+    http.expectOne('/api/security/antiforgery-token').flush({token:'csrf'});
+    const submit=http.expectOne(request=>request.url.endsWith('/paper-session/2026-11-13'));
+    expect(submit.request.params.get('requestId')).toBe('paper-1');
+    expect(submit.request.headers.get('X-CSRF-TOKEN')).toBe('csrf');
+    submit.flush({id:'paper-1',status:'Queued'});
+    http.expectOne('/api/research/historical-replay/normal-policy/gap-aware/jobs/paper-1')
+      .flush({id:'paper-1',status:'Completed',comparisonReport:{limitations:['Excluded']}});
     http.verify();
   });
 

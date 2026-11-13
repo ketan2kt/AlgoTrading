@@ -133,6 +133,8 @@ export interface HistoricalPolicyBuild {id:string;capturedAtUtc:string;assemblyH
 export interface GapReplayJob {
   id:string;date:string;market:string|null;status:'Queued'|'Running'|'Completed'|'Failed';
   report:HistoricalGapAwareReport|null;error:string|null;
+  kind?:'gap-aware'|'paper-verification'|'strategy-comparison';from?:string|null;
+  phase?:string|null;comparisonReport?:HistoricalNormalReplayReport|null;
 }
 interface FidelityAction {kind:string;at:string;quantity:number;price:number;reason:string|null}
 interface FidelityRow {symbol:string;kind:string;finding:string;at:string;paper:FidelityAction|null;replay:FidelityAction|null;
@@ -160,10 +162,9 @@ export class HistoricalReplayService {
     return this.http.get<GapReplayJob>('/api/research/historical-replay/normal-policy/gap-aware/jobs/'+encodeURIComponent(id))
       .pipe(timeout(15000));
   }
-  comparePaperSession(date:string) {
+  comparePaperSession(date:string,requestId:string=crypto.randomUUID()) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
-      this.http.post<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/paper-session/'+encodeURIComponent(date),
-        {},{headers:{'X-CSRF-TOKEN':csrf.token}})));
+      this.submitNormal('paper-session/'+encodeURIComponent(date),{},csrf.token,requestId)));
   }
   policyBuilds() {
     return this.http.get<HistoricalPolicyBuild[]>('/api/research/historical-replay/normal-policy/builds');
@@ -174,7 +175,8 @@ export class HistoricalReplayService {
   savedNormalReport(id:string) {
     return this.http.get<HistoricalNormalReplayReport>('/api/research/historical-replay/normal-policy/runs/'+encodeURIComponent(id));
   }
-  compareNormal(from:string,to:string,stopPercent:number,baselineBuildId='',proposalBuildId='',frozenInputRunId='',trial:ReplayTrial='custom-stop') {
+  compareNormal(from:string,to:string,stopPercent:number,baselineBuildId='',proposalBuildId='',frozenInputRunId='',trial:ReplayTrial='custom-stop',
+    requestId:string=crypto.randomUUID()) {
     const configuration:Observable<HistoricalNormalPolicyConfiguration|NormalReplaySavedConfiguration>=frozenInputRunId
       ? this.http.get<NormalReplaySavedConfiguration>('/api/research/historical-replay/normal-policy/runs/'+
           encodeURIComponent(frozenInputRunId)+'/configuration')
@@ -185,8 +187,7 @@ export class HistoricalReplayService {
         const baseline=saved?saved.baseline:value as HistoricalNormalPolicyConfiguration;
         const proposal=replayProposal(baseline,trial,stopPercent);
         return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(
-          switchMap(csrf=>this.http.post<HistoricalNormalReplayReport>(
-            '/api/research/historical-replay/normal-policy/compare',{
+          switchMap(csrf=>this.submitNormal('compare',{
               from:saved?.from??from,to:saved?.to??to,baseline,proposal,
               baselineBuildId:baselineBuildId||saved?.baselineBuildId||null,
               proposalBuildId:trial==='custom-stop' ? proposalBuildId||null : baselineBuildId||saved?.baselineBuildId||null,
@@ -195,8 +196,14 @@ export class HistoricalReplayService {
                 entrySlippagePercent:.0025,exitSlippagePercent:.0025,
                 maximumHoldMinutes:375,minimumMinutesBetweenEntries:0,maximumConcurrentPositions:10,
                 allowModeledHistoricalCosts:true}
-            },{headers:{'X-CSRF-TOKEN':csrf.token}})));
+            },csrf.token,requestId)));
       }));
+  }
+  private submitNormal(path:string,body:object,token:string,requestId:string) {
+    return this.http.post<GapReplayJob>('/api/research/historical-replay/normal-policy/'+path,body,
+      {headers:{'X-CSRF-TOKEN':token},params:{requestId}}).pipe(timeout(30000),
+      retry({count:2,delay:(error,attempt)=>error instanceof TimeoutError || error.status===0 ||
+        error.status===429 || error.status>=500 ? timer(attempt*2000) : throwError(()=>error)}));
   }
   get(from:string,to:string,market:string,stopPercent:number,targetPercent:number) {
     const params=new HttpParams().set('from',from).set('to',to).set('market',market)

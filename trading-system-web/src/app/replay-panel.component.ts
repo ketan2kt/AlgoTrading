@@ -19,12 +19,15 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
   protected normalReplayReport: HistoricalNormalReplayReport | null = null;
   protected normalReplayBusy = false;
   protected normalReplayError = '';
+  protected normalReplayStatusText = '';
   protected gapAwareBusy = false;
   protected gapAwareError = '';
   protected gapAwareReport: HistoricalGapAwareReport | null = null;
   protected gapAwareStatusText = '';
   private readonly replayJobKey = 'sarthi.gap-replay.job';
   private readonly replayRequestKey = 'sarthi.gap-replay.pending';
+  private readonly normalReplayJobKey = 'sarthi.normal-replay.job';
+  private readonly normalReplayRequestKey = 'sarthi.normal-replay.pending';
   private pendingReplay?:{date:string;market:string;id:string};
   private gapWatch?:Subscription;
   protected normalReplayStopPercent = 10;
@@ -69,6 +72,7 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
       this.gapAwareMarket=pending.market;
       this.runGapAware();
     } else if(previous) this.watchGapJob(previous);
+    this.resumeNormalJob();
     this.loadSavedNormalRuns();
     this.subscriptions.add(this.historicalReplayService.policyBuilds().subscribe({
       next:value=>{this.replayPolicyBuilds=value;this.refreshView();},
@@ -143,13 +147,8 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     this.subscriptions.add(this.gapWatch);
   }
   protected verifyPaperSession():void {
-    if(!this.replayTo || this.normalReplayBusy)return;
-    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
-    this.subscriptions.add(this.historicalReplayService.comparePaperSession(this.replayTo).subscribe({
-      next:r=>{this.normalReplayReport=r;this.normalReplayBusy=false;this.loadSavedNormalRuns();this.refreshView();},
-      error:e=>{this.normalReplayError=typeof e.error==='string'?e.error:'Paper-session verification unavailable.';
-        this.normalReplayBusy=false;this.refreshView();}
-    }));
+    if(!this.replayTo || this.normalReplayBusy || this.gapAwareBusy)return;
+    this.submitNormalJob(['paper',this.replayTo], id => this.historicalReplayService.comparePaperSession(this.replayTo,id));
   }
   protected testRunnerOnControl(report:HistoricalNormalReplayReport):void {
     if(!report.verifiedControlWithFills || !report.savedRunId || this.normalReplayBusy)return;
@@ -159,17 +158,88 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     this.runNormalReplay();
   }
   protected runNormalReplay():void {
+    if(this.normalReplayBusy || this.gapAwareBusy)return;
     if((!this.replayFrozenInputRun && (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo)) ||
         (this.normalReplayTrial==='custom-stop' && (this.normalReplayStopPercent<=0 || this.normalReplayStopPercent>75))) {
       this.normalReplayError='Choose completed dates and a premium stop between 0 and 75%.';return;
     }
-    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
-    this.subscriptions.add(this.historicalReplayService.compareNormal(this.replayFrom,
-      this.replayTo,this.normalReplayStopPercent,this.replayBaselineBuild,this.replayProposalBuild,this.replayFrozenInputRun,this.normalReplayTrial).subscribe({
-      next:value=>{this.normalReplayReport=value;this.normalReplayBusy=false;this.loadSavedNormalRuns();this.refreshView();},
-      error:error=>{this.normalReplayBusy=false;this.normalReplayError=
-        typeof error.error==='string'?error.error:error instanceof Error?error.message:'Normal-policy comparison failed. Check dates and frozen archive inputs.';this.refreshView();},
+    const {replayFrom:from,replayTo:to,normalReplayStopPercent:stop,replayBaselineBuild:baseline,
+      replayProposalBuild:proposal,replayFrozenInputRun:dataset,normalReplayTrial:trial}=this;
+    this.submitNormalJob(['compare',from,to,stop,baseline,proposal,dataset,trial], id =>
+      this.historicalReplayService.compareNormal(from,to,stop,baseline,proposal,dataset,trial,id));
+  }
+  private readJobKey(key:string):string|null {
+    try{return localStorage.getItem(key);}catch{return null;}
+  }
+  private writeJobKey(key:string,value:string|null):void {
+    try{if(value)localStorage.setItem(key,value);else localStorage.removeItem(key);}catch{/* Watching still works in memory. */}
+  }
+  private resumeNormalJob():void {
+    const previous=this.readJobKey(this.normalReplayJobKey);
+    const pending=this.readJobKey(this.normalReplayRequestKey)?.slice(0,36);
+    if(!pending){if(previous)this.watchNormalJob(previous);return;}
+    this.normalReplayBusy=true;
+    this.normalReplayStatusText='Looking for the saved comparison…';
+    this.subscriptions.add(this.historicalReplayService.gapAwareStatus(pending).subscribe({
+      next:job=>{
+        this.writeJobKey(this.normalReplayJobKey,job.id);
+        this.writeJobKey(this.normalReplayRequestKey,null);
+        this.watchNormalJob(job.id,job);
+        this.refreshView();
+      },
+      error:()=>{
+        this.normalReplayBusy=false;
+        this.normalReplayError='The last request was not confirmed. Retry the same comparison to reconnect.';
+        if(previous)this.watchNormalJob(previous);
+        this.refreshView();
+      },
     }));
+  }
+  private submitNormalJob(identity:unknown[],submit:(id:string)=>ReturnType<HistoricalReplayService['comparePaperSession']>):void {
+    const signature=JSON.stringify(identity);
+    const existing=this.readJobKey(this.normalReplayRequestKey);
+    const requestId=existing?.slice(37)===signature ? existing.slice(0,36) : crypto.randomUUID();
+    this.writeJobKey(this.normalReplayRequestKey,requestId+':'+signature);
+    this.normalReplayBusy=true;this.normalReplayError='';this.normalReplayReport=null;
+    this.normalReplayStatusText='Saving replay request…';
+    this.subscriptions.add(submit(requestId).subscribe({
+      next:job=>{
+        this.writeJobKey(this.normalReplayJobKey,job.id);
+        this.writeJobKey(this.normalReplayRequestKey,null);
+        this.watchNormalJob(job.id,job);
+      },
+      error:error=>{
+        if(error.status>=400 && error.status<500 && error.status!==429)this.writeJobKey(this.normalReplayRequestKey,null);
+        this.normalReplayBusy=false;
+        this.normalReplayError=typeof error.error==='string'?error.error:'The request was not confirmed. Retry the same comparison to reconnect.';
+        this.refreshView();
+      },
+    }));
+  }
+  private watchNormalJob(id:string,initial?:GapReplayJob):void {
+    this.normalReplayBusy=true;
+    this.normalReplayStatusText=initial ? this.normalJobStatus(initial) : 'Reconnecting to saved comparison…';
+    const watch=timer(0,5000).pipe(exhaustMap(()=>this.historicalReplayService.gapAwareStatus(id).pipe(
+      catchError(e=>of(e.status===404?'missing' as const:e.status===401||e.status===403?'sign-in' as const:null))
+    ))).subscribe(job=>{
+      if(job==='missing'||job==='sign-in'){
+        if(job==='missing')this.writeJobKey(this.normalReplayJobKey,null);
+        this.normalReplayError=job==='missing'?'Saved comparison is no longer available.':'Sign in and reopen Historical Replay to resume watching.';
+        this.normalReplayBusy=false;watch.unsubscribe();
+      }else if(!job)this.normalReplayStatusText='Connection interrupted. Reconnecting to the saved comparison…';
+      else if(job.status==='Completed'||job.status==='Failed'){
+        this.normalReplayReport=job.comparisonReport??null;
+        this.normalReplayError=job.error??'';
+        this.normalReplayBusy=false;watch.unsubscribe();
+        if(this.normalReplayReport)this.loadSavedNormalRuns();
+      }else this.normalReplayStatusText=this.normalJobStatus(job);
+      this.refreshView();
+    });
+    this.subscriptions.add(watch);
+  }
+  private normalJobStatus(job:GapReplayJob):string {
+    const dates=job.from && job.from!==job.date ? `${job.from} → ${job.date}` : job.date;
+    return `${dates} · ${job.phase||job.status}. You can close this panel and come back.`;
   }
   protected checkReplayCohort():void {
     if (!this.replayFrom || !this.replayTo || this.replayFrom>this.replayTo) {

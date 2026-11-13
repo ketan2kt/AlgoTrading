@@ -5,7 +5,15 @@ namespace TradingSystem.Api;
 
 public sealed record GapReplayJob(Guid Id, DateOnly Date, string? Market, string Status, DateTimeOffset CreatedAt,
     int Attempts = 0, IReadOnlyList<HistoricalGapAwareMarket>? CompletedMarkets = null,
-    HistoricalGapAwareReport? Report = null, string? Error = null);
+    HistoricalGapAwareReport? Report = null, string? Error = null)
+{
+    public string Kind { get; init; } = "gap-aware";
+    public HistoricalNormalReplayComparisonRequest? ComparisonRequest { get; init; }
+    public HistoricalNormalReplayComparisonReport? ComparisonReport { get; init; }
+    public string? DefaultBuildId { get; init; }
+    public DateOnly? From { get; init; }
+    public string? Phase { get; init; }
+}
 
 // The mounted app data directory survives worker replacements. Each checkpoint
 // is published atomically; the exclusive handle is released if the worker dies.
@@ -21,7 +29,8 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     internal static SemaphoreSlim ComputeSlot { get; } = new(1, 1);
 
     public async Task<GapReplayJob?> EnqueueAsync(DateOnly date, string? market, CancellationToken token,
-        Guid? requestId = null)
+        Guid? requestId = null, string kind = "gap-aware", HistoricalNormalReplayComparisonRequest? comparison = null,
+        string? defaultBuildId = null)
     {
         await submissions.WaitAsync(token);
         try
@@ -31,7 +40,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
             await using var admission = TryLock("admission.lock");
             if (admission is null) return null;
             if (requestId is { } id && await ReadStateAsync(id, token) is { } previous)
-                return previous.Date == date && previous.Market == market ? previous : null;
+                return Matches(previous) ? previous : null;
             var active = 0;
             var finished = new List<GapReplayJob>();
             foreach (var savedId in JobIds())
@@ -40,7 +49,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
                 if (job is null) continue;
                 if (job.Status is "Queued" or "Running")
                 {
-                    if (job.Date == date && job.Market == market) return job;
+                    if (Matches(job) && job.DefaultBuildId == defaultBuildId) return job;
                     active++;
                 }
                 else finished.Add(job);
@@ -51,18 +60,30 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
             {
                 File.Delete(JobPath(old.Id));
                 File.Delete(ReportPath(old.Id));
+                File.Delete(ComparisonPath(old.Id));
             }
-            var next = new GapReplayJob(requestId ?? Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow());
+            var next = new GapReplayJob(requestId ?? Guid.NewGuid(), date, market, "Queued", clock.GetUtcNow())
+                { Kind = kind, ComparisonRequest = comparison, DefaultBuildId = defaultBuildId, From = comparison?.From };
             await SaveAsync(next, token);
             return next;
         }
         finally { submissions.Release(); }
+
+        bool Matches(GapReplayJob other) => other.Date == date && other.Market == market && other.Kind == kind &&
+            (comparison is null ? other.ComparisonRequest is null :
+                other.ComparisonRequest is not null && JsonSerializer.Serialize(other.ComparisonRequest, Json) == JsonSerializer.Serialize(comparison, Json));
     }
 
     public async Task<GapReplayJob?> ReadAsync(Guid id, CancellationToken token)
     {
         var job = await ReadStateAsync(id, token);
         if (job?.Status != "Completed") return job;
+        if (job.Kind != "gap-aware")
+        {
+            var comparison = await ReadFileAsync<HistoricalNormalReplayComparisonReport>(ComparisonPath(id), token);
+            return comparison is null ? job with { Status = "Failed", Error = "The saved report is no longer available." } :
+                job with { ComparisonReport = comparison };
+        }
         var report = await ReadFileAsync<HistoricalGapAwareReport>(ReportPath(id), token);
         return report is null ? job with { Status = "Failed", Error = "The saved report is no longer available." } :
             job with { Report = report };
@@ -98,7 +119,8 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
     internal async Task SaveAsync(GapReplayJob job, CancellationToken token)
     {
         if (job.Report is { } report) await WriteAsync(ReportPath(job.Id), report, token);
-        await WriteAsync(JobPath(job.Id), job with { Report = null }, token);
+        if (job.ComparisonReport is { } comparison) await WriteAsync(ComparisonPath(job.Id), comparison, token);
+        await WriteAsync(JobPath(job.Id), job with { Report = null, ComparisonReport = null }, token);
     }
 
     private static async Task WriteAsync<T>(string path, T value, CancellationToken token)
@@ -120,6 +142,7 @@ public sealed class HistoricalGapReplayJobs(TimeProvider clock, string? director
 
     private string JobPath(Guid id) => Path.Combine(root, id.ToString("N") + ".json");
     private string ReportPath(Guid id) => Path.Combine(root, id.ToString("N") + ".report");
+    private string ComparisonPath(Guid id) => Path.Combine(root, id.ToString("N") + ".comparison");
     private IEnumerable<Guid> JobIds() => Directory.EnumerateFiles(root, "*.json")
         .Select(path => Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) ? id : Guid.Empty)
         .Where(id => id != Guid.Empty);

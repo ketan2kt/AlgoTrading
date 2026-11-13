@@ -29,7 +29,8 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
     TimeProvider? clock = null, IRecordedPaperSessionReader? recorded = null)
 {
     public async Task<HistoricalNormalReplayComparisonReport> CompareAsync(
-        HistoricalNormalReplayComparisonRequest request, CancellationToken cancellationToken)
+        HistoricalNormalReplayComparisonRequest request, CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.From == default || request.To < request.From ||
@@ -38,6 +39,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         request.Execution.Validate();
         var baseline = new HistoricalNormalPolicyFactory(request.Baseline);
         var proposal = new HistoricalNormalPolicyFactory(request.Proposal);
+        if (progress is not null) await progress("Loading approved strategy builds", cancellationToken);
         var current = builds is null ? null : await builds.CaptureCurrentAsync(cancellationToken);
         using var baselineModule = builds is null ? null :
             await builds.LoadAsync(request.BaselineBuildId ?? current!.Id, cancellationToken);
@@ -52,6 +54,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         if (request.FrozenInputRunId is not null)
         {
             if (runs is null) throw new InvalidOperationException("Saved replay inputs are unavailable.");
+            if (progress is not null) await progress("Loading frozen session inputs", cancellationToken);
             var saved = await runs.LoadAsync(request.FrozenInputRunId, cancellationToken);
             if (saved.Request.From != request.From || saved.Request.To != request.To)
                 throw new ArgumentException("Saved input dates do not match the requested comparison.", nameof(request));
@@ -63,6 +66,8 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         foreach (var market in new[] { "nifty", "sensex", "bank-nifty" })
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (progress is not null)
+                await progress(FormattableString.Invariant($"Reading {date:yyyy-MM-dd} · {market}"), cancellationToken);
             try
             {
                 var slice = await archive.ReadStrictAsync(date, market, cancellationToken);
@@ -75,6 +80,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             }
         }
         }
+        if (progress is not null) await progress("Checking common contract and session coverage", cancellationToken);
         foreach (var key in slices.Keys.ToArray())
         {
             var slice = slices[key];
@@ -88,6 +94,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             slices[key] = slice with { Session = slice.Session with { UnsupportedContractCoverage = coverage } };
         }
         var execution = request.Execution with { RequireDisplayedFillSize = true };
+        if (progress is not null) await progress("Simulating baseline and proposal", cancellationToken);
         var result = HistoricalSharedPortfolioComparison.RunEligible(
             slices.Values.Select(value => value.Session).ToArray(), ["NIFTY", "SENSEX", "BANKNIFTY"],
             (date, market) => Guard(baselineModule?.Create(request.Baseline, slices[(date, market)])
@@ -103,6 +110,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         var experiment = HistoricalExperimentReview.Assess(request, result, baselineModule?.BuildId == proposalModule?.BuildId);
         PaperSessionFidelity? fidelity=null;
         if(request.PaperSessionPolicyFingerprint is { } expected){
+            if (progress is not null) await progress("Comparing against the paper ledger", cancellationToken);
             if(request.From!=request.To || recorded is null || request.FrozenInputRunId is not null ||
                 request.Execution!=SessionPolicyReceipt.ComparisonExecution)
                 throw new ArgumentException("Use a single newly captured session for paper fidelity.");
@@ -151,6 +159,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
         if (runs is not null && current is not null &&
             (request.PaperSessionPolicyFingerprint is null || result.Days.Count != 0))
         {
+            if (progress is not null) await progress("Saving the reproducible run", cancellationToken);
             var frozenRequest = request with { BaselineBuildId = report.BaselineBuildId,
                 ProposalBuildId = report.ProposalBuildId };
             var id = await runs.SaveAsync(new((clock ?? TimeProvider.System).GetUtcNow(), current.Id,

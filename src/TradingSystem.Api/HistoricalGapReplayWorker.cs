@@ -1,5 +1,6 @@
 using TradingSystem.Api.Controllers;
 using TradingSystem.Application.Execution;
+using System.Text.Json;
 
 namespace TradingSystem.Api;
 
@@ -11,6 +12,7 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
     private static readonly TimeSpan InputBudget = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan SimulationBudget = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan LedgerBudget = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan ComparisonBudget = TimeSpan.FromHours(2);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -31,6 +33,11 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
         {
             await using var claim = jobs.TryClaimWorker();
             if (claim is null || await jobs.NextAsync(stoppingToken) is not { } job) return;
+            if (job.Kind != "gap-aware")
+            {
+                await RunComparisonAsync(job, stoppingToken);
+                return;
+            }
             var completed = job.CompletedMarkets?.ToList() ?? [];
             var remaining = Markets.Where(m => (job.Market is null || m.Key == job.Market) &&
                 !completed.Any(saved => saved.Market == m.Label)).ToArray();
@@ -126,6 +133,87 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
         finally { HistoricalGapReplayJobs.ComputeSlot.Release(); }
     }
 
+    private async Task RunComparisonAsync(GapReplayJob job, CancellationToken stoppingToken)
+    {
+        if (job.Attempts >= HistoricalGapReplayJobs.MaximumAttempts)
+        {
+            await jobs.SaveAsync(job with { Status = "Failed", Error = "The comparison was interrupted repeatedly." }, stoppingToken);
+            return;
+        }
+        var available = HistoricalReplayWorkWindowAttribute.AvailableTime(clock.GetUtcNow(), ComparisonBudget);
+        if (available <= TimeSpan.Zero) return;
+        job = job with { Status = "Running", Attempts = job.Attempts + 1, Phase = "Checking recorded inputs" };
+        await jobs.SaveAsync(job, stoppingToken);
+        using var budget = new CancellationTokenSource(available, clock);
+        using var execution = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, budget.Token);
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var request = job.ComparisonRequest;
+            HistoricalNormalReplayComparisonReport? report = null;
+            if (job.Kind == "paper-verification")
+            {
+                var recorded = scope.ServiceProvider.GetRequiredService<IRecordedPaperSessionReader>();
+                var preflight = await recorded.PreflightAsync(job.Date, execution.Token);
+                if (preflight.CaptureExclusion is { } reason)
+                {
+                    var cohort = new HistoricalReplayCohortSelection(Array.Empty<HistoricalReplaySessionData>(), [new(job.Date, [reason])]);
+                    var excluded = new HistoricalSharedPortfolioResult(cohort, [], "", "", 0, 0, "InsufficientCoverage", [reason]);
+                    report = new(excluded, ["Use gap-aware replay to inspect individual markets without treating unverified fills as matches."])
+                    {
+                        PaperFidelity = new("Not simulated: strict coverage incomplete", preflight.PaperTrades ?? 0, 0, [reason], [])
+                    };
+                }
+                else
+                {
+                    var receipt = preflight.Receipt ?? throw new InvalidDataException(
+                        "Verified pre-open policy is missing, conflicting, or lot settings changed. Current settings were not substituted.");
+                    request = new(job.Date, job.Date, receipt.Settings, receipt.Settings, SessionPolicyReceipt.ComparisonExecution)
+                    {
+                        BaselineBuildId = receipt.BuildId, ProposalBuildId = receipt.BuildId, PaperSessionPolicyFingerprint = receipt.Fingerprint
+                    };
+                }
+            }
+            else if (job.Kind != "strategy-comparison" || request is null || job.DefaultBuildId is null)
+                throw new InvalidDataException("Saved comparison request is invalid.");
+            else
+                request = request with { BaselineBuildId = request.BaselineBuildId ?? job.DefaultBuildId,
+                    ProposalBuildId = request.ProposalBuildId ?? job.DefaultBuildId };
+
+            if (report is null)
+            {
+                var service = scope.ServiceProvider.GetRequiredService<HistoricalNormalReplayComparisonService>();
+                report = await service.CompareAsync(request!, execution.Token, async (phase, token) =>
+                {
+                    job = job with { Phase = phase };
+                    await jobs.SaveAsync(job, token);
+                    ComparisonProgress(logger, job.Id, phase);
+                });
+            }
+            execution.Token.ThrowIfCancellationRequested();
+            await jobs.SaveAsync(job with { Status = "Completed", Phase = null, ComparisonReport = report }, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested && available < ComparisonBudget)
+        {
+            await jobs.SaveAsync(job with { Status = "Queued", Attempts = job.Attempts - 1,
+                Phase = "Paused for the trading session" }, stoppingToken);
+        }
+        catch (Exception exception)
+        {
+            JobError(logger, job.Id, job.Kind, job.Phase ?? "comparison", exception);
+            var error = exception switch
+            {
+                UnsupportedReplayContractException unsupported => unsupported.Message,
+                OperationCanceledException when budget.IsCancellationRequested => $"Comparison exceeded its worker time budget during {job.Phase}. Choose a shorter date range.",
+                InvalidDataException or JsonException => "Recorded settings, approved code, or a frozen input could not be verified. No substitute was used.",
+                ArgumentException => "The frozen research configuration or date range is invalid.",
+                _ => $"The replay worker could not finish during {job.Phase}."
+            };
+            await jobs.SaveAsync(job with { Status = "Failed", Error = error }, stoppingToken);
+        }
+    }
+
     private Task FinishUnavailableAsync(GapReplayJob job, List<HistoricalGapAwareMarket> completed,
         string? market, string message, CancellationToken token)
     {
@@ -145,6 +233,9 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
 
     [LoggerMessage(EventId = 6781, Level = LogLevel.Error, Message = "Historical replay queue could not be read.")]
     private static partial void WorkerError(ILogger logger, Exception error);
+
+    [LoggerMessage(EventId = 6783, Level = LogLevel.Information, Message = "Replay comparison {JobId}: {Stage}.")]
+    private static partial void ComparisonProgress(ILogger logger, Guid jobId, string stage);
 
     [LoggerMessage(EventId = 6782, Level = LogLevel.Information, Message = "Replay job {JobId} {Date} {Market}: {Stage} after {ElapsedMs} ms; market clock {MarketTimeUtc}, quotes {Quotes}, open {Open}; phase totals {Totals}.")]
     private static partial void ReplayProgress(ILogger logger, Guid jobId, DateOnly date, string market,

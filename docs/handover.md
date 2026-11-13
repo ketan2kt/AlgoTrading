@@ -1,9 +1,16 @@
 # Current handover — 13 November 2026
 
+## Durable strategy comparison and paper verification
+
+- Removed the two-minute HTTP execution limit from the other two Historical Replay buttons. They now use the existing single after-hours replay worker, retain the exact submitted settings and approved build IDs, show each recorded phase, and can reconnect after a browser close or website restart. Existing strict eligibility and separate gap-aware verdicts remain unchanged. Recorder and trading untouched.
+- Local checks: 23 focused backend and 95 frontend tests, plus the production web build. Required entry-path checks retained all 3 Nifty, 10 Sensex and 15 Bank Nifty entries in the Nov 12–13 ledger.
+- Deployment must wait for the in-flight website replay verification to finish. After rollout, verify one paper run and one baseline/proposal run from the website, then reopen the panel to confirm the saved result.
+
 ## Replay decision and liquidity evidence — website release
 
 - Compare matched decisions, simulated entry fills and supported exit fills separately. When a full-size exit is unsupported, show a separate whole-lot execution scenario from distinct fresh book timestamps, after slippage and per-order charges. It never closes the verified position, changes the verified P&L, or alters recorded prices, strategy, strict replay, or the recorder.
-- Saved books show a maximum 120-unit bid after the Bank Nifty exits on Nov 12 (`61200CE`) and Nov 13 (`61100CE`); the modeled positions held 150. Distinct later books support separate modeled tranches totaling 150 in both cases. Production verification: rerun Nov 12 Bank Nifty and Nov 13 all markets after the checked website rollout.
+- Saved books show a maximum 120-unit bid after the Bank Nifty exits on Nov 12 (`61200CE`) and Nov 13 (`61100CE`); the modeled positions held 150. Distinct later books support separate modeled tranches totaling 150 in both cases. [CI](https://github.com/ketan2kt/AlgoTrading/actions/runs/43469299566) and [website rollout](https://github.com/ketan2kt/AlgoTrading/actions/runs/43470012108) passed; recorder skipped. Nov 12 Bank Nifty production verification started, then rerun Nov 13 all markets.
+- Nov 13 gap classification from the saved report: 81 of Sensex's 83 intervals include missing `SENSEX26NOVFUT` minute bars; Nifty and Bank Nifty each show 10 archive/depth intervals totaling 7m33s. Two sampled bad gzip shards independently fail decompression with bytes between valid members. Do not weaken quote or futures evidence to make these look complete.
 - Checks: 76 focused backend and 94 frontend tests passed, plus frontend build. Required read-only entry-path evidence retained 3/3 Nifty, 10/10 Sensex and 15/15 Bank Nifty recorded trades.
 
 ## Replay execution-boundary fix — deployed and production-tested

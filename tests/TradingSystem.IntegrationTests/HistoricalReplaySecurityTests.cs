@@ -51,8 +51,12 @@ public sealed class HistoricalReplaySecurityTests
     {
         Assert.Equal("Administrator", Assert.Single(typeof(HistoricalNormalReplayController).GetCustomAttributes(typeof(AuthorizeAttribute), true)
             .Cast<AuthorizeAttribute>()).Roles);
-        Assert.NotEmpty(typeof(HistoricalNormalReplayController).GetMethod(nameof(HistoricalNormalReplayController.Compare))!
-            .GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
+        foreach (var name in new[] { nameof(HistoricalNormalReplayController.Compare), nameof(HistoricalNormalReplayController.PaperSession) })
+        {
+            var endpoint = typeof(HistoricalNormalReplayController).GetMethod(name)!;
+            Assert.NotEmpty(endpoint.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
+            Assert.NotEmpty(endpoint.GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));
+        }
         var gapAware = typeof(HistoricalNormalReplayController).GetMethod(nameof(HistoricalNormalReplayController.GapAware))!;
         Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
         Assert.NotEmpty(gapAware.GetCustomAttributes(typeof(HistoricalReplayWorkWindowAttribute), true));

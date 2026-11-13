@@ -55,7 +55,7 @@
               </div>
               <div class="replay-notes"><small>Paper verification uses only the “To” session and its recorded pre-open settings, not the experiment.</small><small>Frozen datasets retain their saved dates, settings and execution assumptions. Comparisons run outside market hours.</small></div>
               @if(normalReplayError){<p class="historical-replay-warning" role="alert">{{normalReplayError}}</p>}
-              @if(normalReplayBusy){<p class="replay-empty" role="status">Preparing the comparison. Results will appear here when the request completes.</p>}
+              @if(normalReplayBusy){<p class="replay-empty" role="status">{{normalReplayStatusText || 'Loading the saved comparison…'}}</p>}
               @if(!normalReplayReport && !normalReplayBusy && !normalReplayError){<div class="replay-empty"><strong>Your comparison will appear here</strong><span>Select a session range and experiment, then compare strategies or open a saved result.</span></div>}
               @if(normalReplayReport;as result){
                 @let c=result.comparison;

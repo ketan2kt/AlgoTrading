@@ -88,6 +88,31 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
     }
 
     [Fact]
+    public async Task PaperVerificationSurvivesMissingRequestAndIsNotDeduplicatedWithGapReplay()
+    {
+        var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+        var archive = new Archive();
+        using var services = Services(archive);
+        using var jobs = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var requestId = Guid.NewGuid();
+        var paper = (await jobs.EnqueueAsync(Date, null, default, requestId, "paper-verification"))!;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var gap = (await jobs.EnqueueAsync(Date, null, default))!;
+        Assert.NotEqual(gap.Id, paper.Id);
+        using var worker = Worker(jobs, services, clock);
+        await worker.RunNextAsync(default);
+        using var restarted = new HistoricalGapReplayJobs(clock, directory.FullName);
+        var saved = (await restarted.ReadAsync(paper.Id, default))!;
+        Assert.Equal("Completed", saved.Status);
+        Assert.Equal("Not simulated: strict coverage incomplete", saved.ComparisonReport!.PaperFidelity!.Verdict);
+        Assert.Equal(4, saved.ComparisonReport.PaperFidelity.PaperTrades);
+        Assert.Null(saved.Report);
+        Assert.Empty(archive.Requested);
+        Assert.Equal(paper.Id, (await restarted.EnqueueAsync(Date, null, default, requestId, "paper-verification"))!.Id);
+        Assert.Null(await restarted.EnqueueAsync(Date, null, default, requestId));
+    }
+
+    [Fact]
     public async Task SlowArchiveDoesNotConsumeSimulationTime()
     {
         var clock = new Clock(new(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
@@ -147,7 +172,7 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
 
     private static ServiceProvider Services(Archive archive) => new ServiceCollection()
         .AddSingleton<IHistoricalReplayArchiveReader>(archive).AddSingleton<IHistoricalPolicyBuildStore, NoBuilds>()
-        .AddScoped<HistoricalGapAwareReplayService>().BuildServiceProvider();
+        .AddSingleton<IRecordedPaperSessionReader, IncompletePaper>().AddScoped<HistoricalGapAwareReplayService>().BuildServiceProvider();
     private static HistoricalGapReplayWorker Worker(HistoricalGapReplayJobs jobs, ServiceProvider services, Clock clock) =>
         new(jobs, services.GetRequiredService<IServiceScopeFactory>(), clock, NullLogger<HistoricalGapReplayWorker>.Instance);
 
@@ -218,6 +243,13 @@ public sealed class HistoricalGapReplayJobTests : IDisposable
         public Task<HistoricalPolicyBuild> CaptureCurrentAsync(CancellationToken token) => throw new NotSupportedException();
         public Task<IReadOnlyList<HistoricalPolicyBuild>> ListAsync(CancellationToken token) => throw new NotSupportedException();
         public Task<IHistoricalPolicyModuleFactory> LoadAsync(string buildId, CancellationToken token) => throw new NotSupportedException();
+    }
+    private sealed class IncompletePaper : IRecordedPaperSessionReader
+    {
+        public Task<SessionPolicyReceipt?> ReceiptAsync(DateOnly date, CancellationToken token) => Task.FromResult<SessionPolicyReceipt?>(null);
+        public Task<RecordedPaperSession> ReadTradesAsync(DateOnly date, CancellationToken token) => throw new NotSupportedException();
+        public Task<PaperReplayPreflight> PreflightAsync(DateOnly date, CancellationToken token) =>
+            Task.FromResult(new PaperReplayPreflight(null, "Recorder test gap", 4));
     }
     public void Dispose() => directory.Delete(recursive: true);
 }
