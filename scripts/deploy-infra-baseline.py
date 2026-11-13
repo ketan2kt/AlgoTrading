@@ -69,7 +69,7 @@ def observe(outputs):
                 for s in network["subnets"]]), select(link,"registrationEnabled","virtualNetwork")]
     return {"outputs":outputs, "observed":digest(projection),
             "source":run("git","rev-parse","HEAD:infra","HEAD:.github/workflows/azure-deploy.yml",
-                         "HEAD:scripts/deploy-infra-baseline.py")}
+                         "HEAD:scripts/deploy-infra-baseline.py","HEAD:scripts/check-website-schema-ready.py")}
 
 
 def main():

@@ -136,6 +136,7 @@ jobs:
               AllowedHosts='*' \
               DataProtection__KeysPath=/home/data-protection-keys \
               DatabaseInitialization__ApplyMigrations=false \
+              PaperTradeReset__Enabled=false \
               MarketData__LiveNifty__Enabled=true \
               PaperTrading__Automation__Enabled=true \
               LiveExecution__BuildEnabled=true \
@@ -188,7 +189,25 @@ jobs:
             exit 1
           fi
 
+      - name: Check the new package before enabling migrations
+        id: migration
+        if: steps.baseline.outputs.reuse == 'true'
+        env:
+          APP: ${{ steps.infrastructure.outputs.app }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          # /health/ready checks the exact deployed code's pending migrations.
+          # Never skip controlled migrations based on the outgoing container.
+          if python3 scripts/check-website-schema-ready.py; then
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            echo 'Exact package and schema verified without additional app restarts.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Schema readiness was not established; use the controlled migration path.'
+          fi
+
       - name: Enable database initialization for the deployed package
+        id: enable_migration
+        if: steps.migration.outputs.skip != 'true'
         run: |
           # The package is present before this management operation. This restart now
           # starts that package in controlled migration mode without racing ZipDeploy.
@@ -204,13 +223,13 @@ jobs:
             --name "${{ steps.infrastructure.outputs.app }}" \
             --settings DatabaseInitialization__ApplyMigrations=true \
               LiveExecution__BuildEnabled=true \
-              PaperTradeReset__Enabled=true \
-              PaperTradeReset__RequestId=clean-slate-2026-10-21 \
+              PaperTradeReset__Enabled=false \
               "Diagnostics__ReadOnlyApiKey=$diagnostics_key" \
             --output none
           unset diagnostics_key
 
       - name: Wait for database initialization
+        if: steps.migration.outputs.skip != 'true'
         run: |
           app="${{ steps.infrastructure.outputs.app }}"
           expected="1.0.0+${GITHUB_SHA}"
@@ -229,7 +248,9 @@ jobs:
           exit 1
 
       - name: Disable database initialization
-        if: always() && steps.infrastructure.outputs.app != ''
+        if: >-
+          always() && steps.infrastructure.outputs.app != '' && steps.enable_migration.outcome != ''
+          && steps.enable_migration.outcome != 'skipped'
         run: |
           # Changing an App Service application setting already restarts the site.
           # A second immediate restart can cancel the new worker while it is starting.
