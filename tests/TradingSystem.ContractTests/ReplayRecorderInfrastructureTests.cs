@@ -20,7 +20,7 @@ public sealed class ReplayRecorderInfrastructureTests
             attempts.Add(attempt);
             return !attempt ? Task.FromException(new Azure.RequestFailedException(412, "changed")) : Task.CompletedTask;
         }, CancellationToken.None);
-        Assert.Equal(new[] { false, true }, attempts);
+        Assert.Collection(attempts, value => Assert.False(value), value => Assert.True(value));
         attempts.Clear();
         await Assert.ThrowsAsync<Azure.RequestFailedException>(() =>
             ReplayBlobStorage.ReadStableBlobAsync((attempt, _) =>
@@ -28,7 +28,7 @@ public sealed class ReplayRecorderInfrastructureTests
                 attempts.Add(attempt);
                 return Task.FromException(new Azure.RequestFailedException(412, "changed"));
             }, CancellationToken.None));
-        Assert.Equal(new[] { false, true, true }, attempts);
+        Assert.Collection(attempts, value => Assert.False(value), value => Assert.True(value), value => Assert.True(value));
     }
     private static readonly string[] MarketCodes = ["NIFTY", "SENSEX", "BANKNIFTY"];
     [Theory]
