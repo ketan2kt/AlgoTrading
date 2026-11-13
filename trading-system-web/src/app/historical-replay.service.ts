@@ -58,6 +58,7 @@ export interface HistoricalReplayCohortCoverage {
 }
 export interface HistoricalGapAwareReport {
   date:string;
+  openingWindowFidelity?:HistoricalNormalReplayReport['paperFidelity'];
   markets:{
     market:string; contractsWithFreshBooks:number; contractsWithoutFreshBooks:string[];
     freshBookSamples:number; archiveReportedCaptureGaps:boolean;
@@ -134,10 +135,10 @@ interface NormalReplaySavedConfiguration {
 @Injectable({providedIn:'root'})
 export class HistoricalReplayService {
   private readonly http=inject(HttpClient);
-  gapAware(date:string) {
+  gapAware(date:string, market='') {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>
       this.http.post<HistoricalGapAwareReport>('/api/research/historical-replay/normal-policy/gap-aware/'+encodeURIComponent(date),
-        {},{headers:{'X-CSRF-TOKEN':csrf.token}})));
+        {},{headers:{'X-CSRF-TOKEN':csrf.token},params:market?{market}:{}})));
   }
   comparePaperSession(date:string) {
     return this.http.get<{token:string}>('/api/security/antiforgery-token').pipe(switchMap(csrf=>

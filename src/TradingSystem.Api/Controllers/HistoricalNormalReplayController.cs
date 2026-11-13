@@ -65,19 +65,24 @@ public sealed class HistoricalNormalReplayController(HistoricalNormalReplayCompa
     [ValidateAntiForgeryToken]
     [HttpPost("gap-aware/{date}")]
     public async Task<ActionResult<HistoricalGapAwareReport>> GapAware(DateOnly date,
-        [FromServices] HistoricalGapAwareReplayService replay, CancellationToken cancellationToken)
+        [FromServices] HistoricalGapAwareReplayService replay, CancellationToken cancellationToken,
+        [FromQuery] string? market = null)
     {
         Response.Headers.CacheControl = "no-store";
         if (date.Year < 2020 || !HistoricalReplaySessionCalendar.IsCompletedDate(date, clock.GetUtcNow()))
             return BadRequest("Choose a completed session.");
+        if (market is not (null or "nifty" or "sensex" or "bank-nifty"))
+            return BadRequest("Choose Nifty, Sensex or Bank Nifty.");
         if (!await ComparisonSlot.WaitAsync(0, cancellationToken))
             return Conflict("A normal-policy replay is already running. Retry when it finishes.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        try { return Ok(await replay.RunAsync(date, timeout.Token)); }
+        try { return Ok(await replay.RunAsync(date, timeout.Token, market)); }
         catch (InvalidDataException) { return Conflict("The saved replay input exceeded its bounds or failed integrity checks."); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { return StatusCode(StatusCodes.Status408RequestTimeout, "Gap-aware replay exceeded its time budget; no incomplete verdict was returned."); }
+        { return StatusCode(StatusCodes.Status408RequestTimeout, market is null
+            ? "Gap-aware replay exceeded its time budget. Choose one market to run a smaller check."
+            : "Gap-aware replay exceeded its time budget for this market; no incomplete verdict was returned."); }
         finally { ComparisonSlot.Release(); }
     }
 

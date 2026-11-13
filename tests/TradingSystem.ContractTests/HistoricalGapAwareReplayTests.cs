@@ -59,6 +59,24 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         Assert.Null(report.Windows[1].VerifiedNetPnl);
     }
 
+    [Fact]
+    public void PaperComparisonDoesNotCountTradesOutsideTheOpeningWindow()
+    {
+        var end = Start.AddMinutes(4);
+        var openingEnd = Start.AddMinutes(2);
+        var market = new HistoricalGapAwareMarket("BANKNIFTY", 0, 0, true, [],
+            [new(Start, openingEnd, false, true, 0, 0, [], null, null),
+             new(openingEnd.AddSeconds(5), end, true, true, 0, 0, [], null, null)], null, []);
+        FidelityTrade Trade(string symbol, int entry, int exit) => new(symbol,
+            [new("Entry", Start.AddSeconds(entry), 30, 100), new("Exit", Start.AddSeconds(exit), 30, 110)]);
+        var result = HistoricalGapAwareReplayService.CompareOpeningWindows([market],
+            new([Trade("BANKNIFTY55000CE", 60, 90), Trade("BANKNIFTY55000CE", 100, 130),
+                Trade("BANKNIFTY55000PE", 160, 180), Trade("NIFTY22000CE", 60, 90)], []));
+        Assert.NotNull(result);
+        Assert.Equal(1, result.PaperTrades);
+        Assert.Equal("BANKNIFTY55000CE", Assert.Single(result.Rows).Symbol);
+    }
+
     // Opt-in diagnostic using a local, read-only copy of the actual recorder archive.
     // Does not invent policy inputs, candles, orders or a P&L verdict.
     [Theory]

@@ -11,6 +11,25 @@ namespace TradingSystem.ContractTests;
 
 public sealed class ReplayRecorderInfrastructureTests
 {
+    [Fact]
+    public async Task CloudReadRefreshesVersionAfterPreconditionFailureButBoundsRetries()
+    {
+        var attempts = new List<bool>();
+        await ReplayBlobStorage.ReadStableBlobAsync((attempt, _) =>
+        {
+            attempts.Add(attempt);
+            return !attempt ? Task.FromException(new Azure.RequestFailedException(412, "changed")) : Task.CompletedTask;
+        }, CancellationToken.None);
+        Assert.Equal(new[] { false, true }, attempts);
+        attempts.Clear();
+        await Assert.ThrowsAsync<Azure.RequestFailedException>(() =>
+            ReplayBlobStorage.ReadStableBlobAsync((attempt, _) =>
+            {
+                attempts.Add(attempt);
+                return Task.FromException(new Azure.RequestFailedException(412, "changed"));
+            }, CancellationToken.None));
+        Assert.Equal(new[] { false, true, true }, attempts);
+    }
     private static readonly string[] MarketCodes = ["NIFTY", "SENSEX", "BANKNIFTY"];
     [Theory]
     [InlineData(false, HealthStatus.Unhealthy)]

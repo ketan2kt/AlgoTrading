@@ -78,10 +78,11 @@ export class ReplayPanelComponent implements OnInit, OnDestroy {
     }));
   }
   protected closeHistoricalReplay():void { this.closed.emit(); }
+  protected gapAwareMarket = '';
   protected runGapAware():void {
     if (!this.replayTo || this.normalReplayBusy || this.gapAwareBusy) return;
     this.gapAwareBusy=true;this.gapAwareError='';this.gapAwareReport=null;
-    this.subscriptions.add(this.historicalReplayService.gapAware(this.replayTo).subscribe({
+    this.subscriptions.add(this.historicalReplayService.gapAware(this.replayTo, this.gapAwareMarket).subscribe({
       next:value=>{this.gapAwareReport=value;this.gapAwareBusy=false;this.refreshView();},
       error:e=>{this.gapAwareError=typeof e?.error==='string'?e.error:'Gap-aware replay could not finish. No result was produced.';
         this.gapAwareBusy=false;this.refreshView();},

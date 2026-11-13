@@ -65,7 +65,7 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var slice = await archive.ReadAsync(date, market, cancellationToken);
+                var slice = await archive.ReadStrictAsync(date, market, cancellationToken);
                 slices.Add((date, slice.Session.IndexSymbol), slice);
             }
             catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException)
@@ -114,7 +114,12 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
                 SessionPolicyReceipt.Create(receipt.Date,receipt.ObservedAt,receipt.BuildId,request.Proposal).Fingerprint!=expected)
                 fidelity=new("Inconclusive",0,0,["Captured build, settings or common three-market archive not verified."],[]);
             else if(result.Days.Count!=1)
-                fidelity=new("Inconclusive",0,0,result.Cohort.ExcludedDates.SelectMany(d=>d.Reasons).DefaultIfEmpty("Session not eligible.").ToArray(),[]);
+            {
+                var actual = await recorded.ReadTradesAsync(request.From, cancellationToken);
+                fidelity = new("Not simulated: strict coverage incomplete", actual.Trades.Count, 0,
+                    result.Cohort.ExcludedDates.SelectMany(d=>d.Reasons)
+                        .DefaultIfEmpty("Session not eligible.").Concat(actual.Gaps).Distinct().ToArray(), []);
+            }
             else {
                 // Read paper outcomes only after both simulations finish. Never seed entries with them.
                 var actual=await recorded.ReadTradesAsync(request.From,cancellationToken);
@@ -143,7 +148,8 @@ public sealed class HistoricalNormalReplayComparisonService(IHistoricalReplayArc
             PaperFidelity = fidelity,
             VerifiedControlWithFills = experiment.VerifiedControlWithFills
         };
-        if (runs is not null && current is not null)
+        if (runs is not null && current is not null &&
+            (request.PaperSessionPolicyFingerprint is null || result.Days.Count != 0))
         {
             var frozenRequest = request with { BaselineBuildId = report.BaselineBuildId,
                 ProposalBuildId = report.ProposalBuildId };

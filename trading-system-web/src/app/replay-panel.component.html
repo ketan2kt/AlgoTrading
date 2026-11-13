@@ -47,6 +47,10 @@
               <div class="replay-actions">
                 <button type="button" class="primary-action" (click)="runNormalReplay()" [disabled]="normalReplayBusy || gapAwareBusy">{{normalReplayBusy?'Comparing…':'Compare strategies'}}</button>
                 <button type="button" (click)="verifyPaperSession()" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo">Verify replay against paper · {{replayTo}}</button>
+                <label>Gap-aware market <select [(ngModel)]="gapAwareMarket" [disabled]="gapAwareBusy">
+                  <option value="">All three</option><option value="nifty">Nifty</option>
+                  <option value="sensex">Sensex</option><option value="bank-nifty">Bank Nifty</option>
+                </select></label>
                 <button type="button" (click)="runGapAware()" [disabled]="normalReplayBusy || gapAwareBusy || !replayTo">{{gapAwareBusy?'Reading archive…':'Gap-aware replay · '+replayTo}}</button>
               </div>
               <div class="replay-notes"><small>Paper verification uses only the “To” session and its recorded pre-open settings, not the experiment.</small><small>Frozen datasets retain their saved dates, settings and execution assumptions. Comparisons run outside market hours.</small></div>
@@ -56,11 +60,11 @@
               @if(normalReplayReport;as result){
                 @let c=result.comparison;
                 <div class="section-heading results-heading"><div><span class="eyebrow">03 · RESULTS</span><h3>Comparison overview</h3></div></div>
-                <div class="historical-replay-metrics comparison-metrics">
+                @if(c.cohort.includedDates.length){<div class="historical-replay-metrics comparison-metrics">
                   <article><span>Baseline net P&amp;L</span><strong [class.good]="c.baselineNet>0" [class.bad]="c.baselineNet<0">₹{{c.baselineNet|number:'1.2-2'}}</strong><small>After modeled costs</small></article>
                   <article><span>Proposal net P&amp;L</span><strong [class.good]="c.proposalNet>0" [class.bad]="c.proposalNet<0">₹{{c.proposalNet|number:'1.2-2'}}</strong><small>After modeled costs</small></article>
                   <article><span>Net difference</span><strong [class.good]="c.proposalNet>c.baselineNet" [class.bad]="c.proposalNet<c.baselineNet">₹{{c.proposalNet-c.baselineNet|number:'1.2-2'}}</strong><small>Proposal minus baseline</small></article>
-                </div>
+                </div>}
                 @if(result.paperFidelity;as f){
                   <section class="daily-analysis-section"><h4>Replay vs recorded paper · {{f.verdict}}</h4>
                     <p>{{f.paperTrades}} recorded positions · {{f.replayTrades}} replay positions compared.
@@ -81,7 +85,7 @@
                   <button type="button" [disabled]="normalReplayBusy" (click)="testRunnerOnControl(result)">Test fixed targets on these exact inputs</button>
                 }
                 <p role="status">{{c.cohort.includedDates.length}} included days · {{c.cohort.excludedDates.length}} excluded · {{c.evidenceStatus}}</p>
-                <div class="daily-analysis-table" tabindex="0" role="region" aria-label="Strategy performance comparison"><table><caption>Performance · after costs</caption><thead><tr><th>Measure</th><th>Baseline</th><th>Proposal</th></tr></thead><tbody>
+                @if(c.cohort.includedDates.length){<div class="daily-analysis-table" tabindex="0" role="region" aria-label="Strategy performance comparison"><table><caption>Performance · after costs</caption><thead><tr><th>Measure</th><th>Baseline</th><th>Proposal</th></tr></thead><tbody>
                   <tr><td>Net P&amp;L</td><td>₹{{c.baselineNet|number:'1.2-2'}}</td><td>₹{{c.proposalNet|number:'1.2-2'}}</td></tr>
                   <tr><td>Completed trades</td><td>{{c.baselineTrades}}</td><td>{{c.proposalTrades}}</td></tr>
                   <tr><td>Win rate</td><td>{{c.baselineWinRate*100|number:'1.1-1'}}%</td><td>{{c.proposalWinRate*100|number:'1.1-1'}}%</td></tr>
@@ -89,7 +93,7 @@
                   <tr><td>Worst sampled session drawdown</td><td>₹{{c.baselineWorstSessionDrawdown|number:'1.2-2'}}</td><td>₹{{c.proposalWorstSessionDrawdown|number:'1.2-2'}}</td></tr>
                   <tr><td>Costs</td><td>₹{{c.baselineCosts|number:'1.2-2'}}</td><td>₹{{c.proposalCosts|number:'1.2-2'}}</td></tr>
                   <tr><td>Sampled giveback</td><td>{{c.baselineSampledGiveback===null?'Unavailable':'₹'+(c.baselineSampledGiveback|number:'1.2-2')}}</td><td>{{c.proposalSampledGiveback===null?'Unavailable':'₹'+(c.proposalSampledGiveback|number:'1.2-2')}}</td></tr>
-                </tbody></table></div>
+                </tbody></table></div>}
                 @if(c.days.length){<div class="daily-analysis-table" tabindex="0" role="region" aria-label="Session by session comparison"><table><caption>Session-by-session results</caption><thead><tr><th>Session</th><th>Split</th><th>Baseline net</th><th>Proposal net</th><th>Difference</th></tr></thead><tbody>
                   @for(day of c.days;track day.date;let index=$index){<tr><td>{{day.date}}</td><td>{{index >= c.trainingDays ? 'Held-out' : 'Training'}}</td><td>₹{{day.baseline.netPnl|number:'1.2-2'}}</td><td>₹{{day.proposal.netPnl|number:'1.2-2'}}</td><td [class.good]="day.netDifference>0" [class.bad]="day.netDifference<0">₹{{day.netDifference|number:'1.2-2'}}</td></tr>}
                 </tbody></table></div>}
@@ -106,6 +110,15 @@
               <section class="daily-analysis-section">
                 <div class="section-heading"><div><span class="eyebrow">SESSION RESEARCH</span><h3>Gap-aware replay · {{report.date}}</h3></div><span class="market-badge">Not a full-day P&amp;L verdict</span></div>
                 <p>Uncertain positions are excluded. Windows after a gap start flat and are shown as independent scenarios; their results are never added to verified P&amp;L.</p>
+                @if(report.openingWindowFidelity;as f){
+                  <details><summary>Opening-window paper comparison · {{f.paperTrades}} paper / {{f.replayTrades}} replay</summary>
+                    <p>Only positions entirely inside simulated opening windows are compared.</p>
+                    <div class="daily-analysis-table"><table><thead><tr><th>Contract</th><th>Action</th><th>Paper · IST</th><th>Replay · IST</th><th>Finding</th></tr></thead><tbody>
+                    @for(row of f.rows;track $index){<tr><td>{{row.symbol}}</td><td>{{row.kind}}</td>
+                      <td>{{row.paper?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.replay?.at|date:'HH:mm:ss.SSS':'+0530'}}</td><td>{{row.finding}}</td></tr>}
+                    </tbody></table></div>
+                  </details>
+                }
                 @for(market of report.markets;track market.market){
                   <section class="daily-analysis-section">
                     <h4>{{market.market==='BANKNIFTY'?'Bank Nifty':market.market}} · {{market.gaps.length}} marked gaps</h4>

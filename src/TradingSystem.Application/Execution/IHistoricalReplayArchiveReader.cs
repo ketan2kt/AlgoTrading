@@ -28,6 +28,8 @@ public interface IHistoricalReplayArchiveReader
 {
     Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly tradingDate, string market,
         CancellationToken cancellationToken);
+    Task<HistoricalReplayArchiveSlice> ReadStrictAsync(DateOnly tradingDate, string market,
+        CancellationToken cancellationToken) => ReadAsync(tradingDate, market, cancellationToken);
     Task<HistoricalReplayArchiveSlice> ReadGapAwareAsync(DateOnly tradingDate, string market,
         CancellationToken cancellationToken) => ReadAsync(tradingDate, market, cancellationToken);
 }

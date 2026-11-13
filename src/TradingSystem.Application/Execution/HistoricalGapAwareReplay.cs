@@ -13,15 +13,20 @@ public sealed record HistoricalGapAwareMarket(string Market, int ContractsWithFr
 {
     public IReadOnlyList<string> ContractsWithoutFreshBooks { get; init; } = [];
 }
-public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<HistoricalGapAwareMarket> Markets);
-
-public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds)
+public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<HistoricalGapAwareMarket> Markets)
 {
-    public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token)
+    public PaperSessionFidelity? OpeningWindowFidelity { get; init; }
+}
+
+public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveReader archive, IHistoricalPolicyBuildStore builds,
+    IRecordedPaperSessionReader? recorded = null)
+{
+    public async Task<HistoricalGapAwareReport> RunAsync(DateOnly date, CancellationToken token, string? onlyMarket = null)
     {
         var markets = new List<HistoricalGapAwareMarket>();
         foreach (var (key, label) in new[] { ("nifty", "NIFTY"), ("sensex", "SENSEX"), ("bank-nifty", "BANKNIFTY") })
         {
+            if (onlyMarket is not null && key != onlyMarket) continue;
             token.ThrowIfCancellationRequested();
             HistoricalReplayArchiveSlice slice;
             try { slice = await archive.ReadGapAwareAsync(date, key, token); }
@@ -61,7 +66,30 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
             else notes.Add("Required dated policy, controls, contract plan, or market anchors were not verified.");
             markets.Add(HistoricalGapAwareReplay.Run(slice, null, notes, token));
         }
-        return new(date, markets);
+        var report = new HistoricalGapAwareReport(date, markets);
+        if (recorded is null || !markets.Any(market => market.Windows.Any(window =>
+                window.Simulated && !window.IndependentFlatRestart))) return report;
+        // The actual ledger is read only after simulation.
+        var actual = await recorded.ReadTradesAsync(date, token);
+        return report with { OpeningWindowFidelity = CompareOpeningWindows(markets, actual) };
+    }
+
+    public static PaperSessionFidelity? CompareOpeningWindows(IReadOnlyList<HistoricalGapAwareMarket> markets,
+        RecordedPaperSession actual)
+    {
+        var opening = markets.SelectMany(market => market.Windows
+            .Where(window => window.Simulated && !window.IndependentFlatRestart)
+            .Select(window => (market.Market, Window: window))).ToArray();
+        if (opening.Length == 0) return null;
+        // Never compare a post-gap flat restart, or treat out-of-window paper trades as misses.
+        var fills = opening.SelectMany(item => item.Window.Fills)
+            .Where(item => item.ExclusionReason is null).Select(item => item.Fill).ToArray();
+        var comparable = actual.Trades.Where(trade => opening.Any(item =>
+            trade.Symbol.StartsWith(item.Market, StringComparison.Ordinal) &&
+            trade.Entry.At >= item.Window.StartUtc && trade.Actions.Any(action => action.Kind == "Exit") &&
+            trade.Actions.All(action => action.At < item.Window.EndUtc))).ToArray();
+        return PaperSessionFidelity.Compare(new(comparable,
+            actual.Gaps.Append("Opening windows only; trades outside these windows and post-gap restarts are not compared.").ToArray()), fills);
     }
 }
 

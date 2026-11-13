@@ -1,10 +1,17 @@
 # Current handover — 13 November 2026
 
+## Replay timeout follow-up
+
+- Production Serilog after `d59b24d`: Nov 12 paper verification HTTP 408 at 153.45s; Nov 13 at 130.74s. Both completed the dated feed-manifest read inside comparison but never logged a completed quote hydration. The concurrent build-list route independently hit Azure 412 (ETag changed between listing and download). Local dated manifests record gaps. Do not infer fill parity from them.
+- Strict paper verification now returns known capture exclusions without quote hydration or freezing an ineligible dataset. It reports actual paper-position counts without showing a fictitious zero P&L. Stage timings distinguish DB preparation, archive hydration and subsequent work. Disposable Azure hydration/sort cache uses local worker disk; a version race refreshes metadata and retries with bounded attempts, still requiring exact size, ETag and SHA-256.
+- Gap-aware replay can run one market at a time and compare independently simulated opening-window fills against the recorded paper ledger. Post-gap flat starts and positions with uncertain fills are not counted as matches. No change to strategies, recorder capture, settings, arming or orders. Release website only; verify Nov 12 and 13 after successful rollout.
+
 ## 13 November — after-hours release batch
 
 - Replay performance: hydrate up to four quote shards concurrently with a combined disk reservation, one stream per shard, the original ETag/SHA-256 checks, and an exact size check before publishing to cache. Load only the requested archived policy build; local manifests and assemblies still undergo verification. Hydration duration is logged by category and date. The production single-day comparison and gap-aware routes timed out before this fix; rerun both after rollout before claiming replay parity.
 - Includes sized replay fills, the tested Bank Nifty and Sensex entry gates and two-close FailedSetupExit confirmation, persistent CE/PE entry markers for all three markets, and recorder-owned option price/depth monitoring and channel recovery. Nifty exit rules, hard stops, targets, lots, arming, and broker orders are unchanged. The 12–13 November entry-path reviews document path usage, not verified strategy gains.
-- Keep unrelated worktree drafts and the Upstox probe out. Release website and recorder once from the successful exact main CI package after capture, with no emergency override. Verify replay fidelity on 12–13 November after rollout when authorized.
+- Published `d59b24d` to main. Required [CI 43411507555](https://github.com/ketan2kt/AlgoTrading/actions/runs/43411507555) passed, including package build. After capture, dispatched the [website and recorder deployment 43411905908](https://github.com/ketan2kt/AlgoTrading/actions/runs/43411905908) once, with no emergency override. Completion unverified; do not poll unless requested. Upstox probe and unrelated worktree drafts were excluded.
+- User-authorized post-deploy verification: both workflow jobs succeeded on `d59b24d`. On a fresh authenticated production page, separate Nov 12 and 13 **Verify replay against paper** requests still returned “Comparison exceeded its time budget” with no result or action table. The final ledgers contain 17 regular trades on Nov 12 (Nifty 1, Sensex 6, Bank Nifty 10) and 11 on Nov 13 (2, 4, 5). No production matches can be certified. The earlier size-aware local Nov 13 Bank Nifty study matched 11:16 `61000PE` and 12:18 `60800PE` by symbol within 60 seconds and by exit reason, not exact fill times. No hydration timing was found in the available app log export, so the remaining slow stage is unconfirmed. No additional production changes.
 
 ## 13 November — executable-size replay (local)
 

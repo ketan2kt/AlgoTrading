@@ -30,6 +30,10 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         LoggerMessage.Define<string, DateOnly?, long>(LogLevel.Information,
             new EventId(6761, "ReplayArchiveHydrated"),
             "Replay archive hydration for {Category} on {Date} finished in {ElapsedMs} ms.");
+    private static readonly Action<ILogger, string, DateOnly?, long, Exception?> HydrationInterrupted =
+        LoggerMessage.Define<string, DateOnly?, long>(LogLevel.Warning,
+            new EventId(6764, "ReplayArchiveHydrationInterrupted"),
+            "Replay archive hydration for {Category} on {Date} stopped after {ElapsedMs} ms.");
     private readonly BlobContainerClient? container;
     private readonly bool recorder;
     private readonly TimeProvider clock;
@@ -42,7 +46,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     private readonly ReplayQuoteCacheBudget quoteCache;
     private readonly Dictionary<string, (long Length, DateTime Modified)> uploaded = new(StringComparer.Ordinal);
     internal readonly string Root;
-    public string CacheRoot => Path.Combine(Root, "remote");
+    public string CacheRoot { get; }
     public bool Enabled => container is not null;
     public string? LastFailure { get; private set; }
     public DateTimeOffset? LastUploadAtUtc { get; private set; }
@@ -79,6 +83,11 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         var configuredKeys = configuration["DataProtection:KeysPath"];
         keyDirectory = string.IsNullOrWhiteSpace(configuredKeys) ? Path.Combine(environment.ContentRootPath, ".data-protection-keys") : configuredKeys;
         Root = Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? AppContext.BaseDirectory, "data", "historical-replay");
+        // Azure mounts HOME on network storage. Keep disposable, verified
+        // downloads and sort scratch on this worker's local disk.
+        CacheRoot = configuration["ReplayStorage:CacheDirectory"] ??
+            (OperatingSystem.IsLinux() && Environment.GetEnvironmentVariable("WEBSITE_SITE_NAME") is { Length: > 0 }
+                ? Path.Combine(Path.GetTempPath(), "sarthi-replay-cache") : Path.Combine(Root, "remote"));
         quoteCache = new ReplayQuoteCacheBudget(Path.Combine(CacheRoot, "quotes"),
             configuration.GetValue<long?>("ReplayStorage:MaximumQuoteCacheBytes") ?? 3L * 1024 * 1024 * 1024);
         recorder = configuration["ApplicationRole"] == "ReplayRecorder";
@@ -365,23 +374,62 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                 var pending = path + ".pending";
                 try
                 {
-                    await container.GetBlobClient(item.Name).DownloadToAsync(pending, new BlobDownloadToOptions
+                    var blob = container.GetBlobClient(item.Name);
+                    await ReadStableBlobAsync(async (refresh, ct) =>
                     {
-                        Conditions = new BlobRequestConditions { IfMatch = item.Properties.ETag },
-                        TransferOptions = new Azure.Storage.StorageTransferOptions { MaximumConcurrency = 1 }
-                    }, token);
-                    if (new FileInfo(pending).Length != item.Properties.ContentLength)
-                        throw new InvalidDataException("Replay cloud artifact size mismatch.");
-                    await using (var input = File.OpenRead(pending))
-                        if (Convert.ToHexString(await SHA256.HashDataAsync(input, token)) != hash)
+                        var properties = refresh ? (await blob.GetPropertiesAsync(cancellationToken: ct)).Value : null;
+                        var etag = properties?.ETag ?? item.Properties.ETag;
+                        var length = properties?.ContentLength ?? item.Properties.ContentLength;
+                        var checksum = hash;
+                        if (properties is not null)
+                        {
+                            if (!properties.Metadata.TryGetValue("sha256", out var refreshedChecksum))
+                                throw new InvalidDataException("Replay cloud artifact checksum is missing.");
+                            checksum = refreshedChecksum;
+                        }
+                        if (length is null || length < 0 || category == "quotes" && length > item.Properties.ContentLength)
+                            throw new InvalidDataException("Replay cloud artifact changed beyond its reserved size; retry on a new archive snapshot.");
+                        if (category != "quotes" && length > item.Properties.ContentLength)
+                        {
+                            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(CacheRoot))!);
+                            if (drive.IsReady && drive.AvailableFreeSpace < length + MinimumFreeDiskBytes)
+                                throw new IOException("Replay cache needs additional free space; cloud history is retained.");
+                        }
+                        // An ETag failure can leave a partial file. Recreate it before retrying.
+                        await using (var output = new FileStream(pending, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                            await blob.DownloadToAsync(output, new BlobDownloadToOptions
+                            {
+                                Conditions = new BlobRequestConditions { IfMatch = etag },
+                                TransferOptions = new Azure.Storage.StorageTransferOptions { MaximumConcurrency = 1 }
+                            }, ct);
+                        if (new FileInfo(pending).Length != length)
+                            throw new InvalidDataException("Replay cloud artifact size mismatch.");
+                        await using var input = File.OpenRead(pending);
+                        if (Convert.ToHexString(await SHA256.HashDataAsync(input, ct)) != checksum)
                             throw new InvalidDataException("Replay cloud artifact checksum mismatch.");
+                    }, token);
                     File.Move(pending, path, overwrite: true);
                     File.SetLastAccessTimeUtc(path, clock.GetUtcNow().UtcDateTime);
                 }
                 finally { if (File.Exists(pending)) File.Delete(pending); }
             }
         }
+        catch (OperationCanceledException)
+        {
+            HydrationInterrupted(logger, category, date, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
+            throw;
+        }
         finally { hydrateGate.Release(); }
+    }
+
+    internal static async Task ReadStableBlobAsync(Func<bool, CancellationToken, Task> read, CancellationToken token)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            try { await read(attempt > 0, token); return; }
+            catch (RequestFailedException error) when (error.Status == 412 && attempt < 2) { }
+        }
     }
 
     public override void Dispose() { hydrateGate.Dispose(); base.Dispose(); }

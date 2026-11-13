@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Text.Json;
 using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
@@ -11,20 +13,32 @@ namespace TradingSystem.Infrastructure.Execution;
 // Read-only historical input assembly. It never falls back to the original
 // day's decisions or orders when a required market series is absent.
 internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHistoricalQuoteArchive? quoteArchive = null,
-    FileHistoricalFeedManifestReader? feedManifests = null)
+    FileHistoricalFeedManifestReader? feedManifests = null, ILogger<EfHistoricalReplayArchiveReader>? logger = null)
     : IHistoricalReplayArchiveReader
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
+    private static readonly Action<ILogger, DateOnly, string, string, long, Exception?> ReadStage =
+        LoggerMessage.Define<DateOnly, string, string, long>(LogLevel.Information, new EventId(6765, "ReplayArchiveStage"),
+            "Replay input {Date} {Market}: {Stage} after {ElapsedMs} ms.");
 
     public Task<HistoricalReplayArchiveSlice> ReadAsync(DateOnly tradingDate, string market,
-        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, false, cancellationToken);
+        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, false, false, cancellationToken);
+
+    public Task<HistoricalReplayArchiveSlice> ReadStrictAsync(DateOnly tradingDate, string market,
+        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, false, true, cancellationToken);
 
     public Task<HistoricalReplayArchiveSlice> ReadGapAwareAsync(DateOnly tradingDate, string market,
-        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, true, cancellationToken);
+        CancellationToken cancellationToken) => ReadCoreAsync(tradingDate, market, true, false, cancellationToken);
 
     private async Task<HistoricalReplayArchiveSlice> ReadCoreAsync(DateOnly tradingDate, string market,
-        bool gapAware, CancellationToken cancellationToken)
+        bool gapAware, bool strict, CancellationToken cancellationToken)
     {
+        var readingSince = Stopwatch.GetTimestamp();
+        void Stage(string stage)
+        {
+            if (logger is not null)
+                ReadStage(logger, tradingDate, market, stage, (long)Stopwatch.GetElapsedTime(readingSince).TotalMilliseconds, null);
+        }
         var (exchange, underlying) = market switch
         {
             "nifty" => ("NSE", "NIFTY"),
@@ -41,6 +55,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             await feedManifests.ReadEvidenceAsync(tradingDate, start, end, cancellationToken);
         var feedWindowComplete = feedManifest is not null &&
             HistoricalFeedCaptureEvidence.CoversWindow(feedManifest, tradingDate, start, end);
+        Stage("capture-manifest");
         var datedMaster = await db.HistoricalInstrumentMasterSnapshots.AsNoTracking()
             .Where(value => value.SessionDate == tradingDate &&
                 value.Source == "GrowwInstrumentMasterV1" &&
@@ -236,9 +251,14 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         if (gapAware && feedManifest is not null)
             foreach (var instrument in feedManifest.Instruments.Where(value => value.Market == underlying))
                 replayQuoteSymbols.TryAdd(instrument.TradingSymbol, instrument.TradingSymbol);
-        var quoteDay = quoteArchive is null ? new HistoricalReplayQuoteArchiveDay([], true) :
+        // A known incomplete recorder manifest already rules out a strict run.
+        // Keep the database coverage and receipt evidence, but don't hydrate or
+        // transcode millions of quotes that the eligibility gate cannot use.
+        Stage(strict && !feedWindowComplete ? "quote-load-skipped-incomplete-manifest" : "quote-load-start");
+        var quoteDay = quoteArchive is null || strict && !feedWindowComplete ? new HistoricalReplayQuoteArchiveDay([], true) :
             await quoteArchive.ReadReplayAsync(tradingDate, underlying, exchange, replayQuoteSymbols, start, end, cancellationToken,
                 streamingOnly: gapAware || feedManifest is not null, tolerateUnreadableShards: gapAware);
+        Stage("quote-load-end");
         var observedQuotes = quoteDay.Quotes;
         var proxyQuotes = HistoricalArchivePathCanonicalizer.Quotes(
             candles.Where(value => names.ContainsKey(value.InstrumentId))
