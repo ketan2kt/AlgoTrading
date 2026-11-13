@@ -268,7 +268,9 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 streamingOnly: gapAware || feedManifest is not null, tolerateUnreadableShards: gapAware);
         Stage("quote-load-end");
         var observedQuotes = quoteDay.Quotes;
-        var proxyQuotes = HistoricalArchivePathCanonicalizer.Quotes(
+        // No synthetic option marks or chain LTP proxies enter the gap-aware
+        // executable quote path. Don't eagerly parse and sort them for this mode.
+        var proxyQuotes = gapAware ? [] : HistoricalArchivePathCanonicalizer.Quotes(
             candles.Where(value => names.ContainsKey(value.InstrumentId))
             .Select(value => new HistoricalReplayQuote(names[value.InstrumentId],
                 value.OpenTimeUtc.AddMinutes(1), value.Close)
@@ -293,7 +295,9 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                     value.GrowwSymbol ?? "", value.Type, value.ExpiryDate,
                     value.StrikePrice, value.LotSize, value.TickSize)).ToArray(),
                 exchange, underlying, tradingDate).ToArray();
-        var streamingUniverse = feedManifest is not null && feedWindowComplete && !quoteDay.HasCaptureGaps &&
+        // Gap-aware certifies its own windows. Running the strict whole-session
+        // gate here would make multiple extra passes over the disk-backed path.
+        var streamingUniverse = !gapAware && feedManifest is not null && feedWindowComplete && !quoteDay.HasCaptureGaps &&
             datedMaster is not null && HistoricalFeedCaptureEvidence.CoversNormalUniverse(feedManifest, underlying, contracts, tradingDate, bars,
                 feedManifest.PolicyReceipt?.Settings.NiftySelection);
         if (gapAware || streamingUniverse)

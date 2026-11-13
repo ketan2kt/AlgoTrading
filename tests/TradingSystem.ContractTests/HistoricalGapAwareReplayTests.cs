@@ -51,6 +51,45 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void ExpiredExitDoesNotKeepGhostPositionOrCreditTheFlatRestart()
+    {
+        var quotes = Enumerable.Range(0, 361).Select(second =>
+            Book(Start.AddSeconds(second), second is >= 65 and < 180 ? 80m : second is >= 250 and < 255 ? 120m : 100m)
+                with { BidQuantity = second is >= 65 and <= 155 ? 1 : 100 }).ToArray();
+        var stages = new List<HistoricalReplayTimingSample>();
+        var report = HistoricalGapAwareReplay.Run(Slice("NIFTY", quotes, Start.AddMinutes(6)),
+            () => new Policy(60, 240), timing: new(stages.Add));
+
+        Assert.Empty(report.Gaps);
+        Assert.Equal(2, report.Windows.Count);
+        var opening = report.Windows[0];
+        Assert.True(opening.StoppedOnExecutionUncertainty);
+        Assert.Equal(Start.AddSeconds(156), opening.EndUtc);
+        Assert.Equal(Start.AddSeconds(61), opening.ExecutionUncertainSinceUtc);
+        Assert.Equal(1, opening.UnresolvedExecutions);
+        Assert.Contains(opening.EntryEvidence, item => item.Stage == "Exit unsupported" && item.AtUtc == opening.EndUtc);
+        Assert.Empty(opening.Fills);
+        Assert.Null(report.VerifiedNetPnl);
+        var later = report.Windows[1];
+        Assert.True(later.IndependentFlatRestart);
+        Assert.True(later.IndependentScenarioNetPnl > 0m);
+        Assert.Null(later.VerifiedNetPnl);
+        Assert.Contains(stages, step => step.Stage == "execution-uncertain");
+        Assert.Contains(stages, step => step.Stage == "market-complete" && step.Totals.Contains("quote-execution", StringComparison.Ordinal));
+        var paper = new RecordedPaperSession([
+            new("NIFTYCE", [new("Entry", Start.AddSeconds(62), 10, 100), new("Exit", Start.AddSeconds(80), 10, 80)]),
+            new("NIFTYCE", [new("Entry", Start.AddSeconds(125), 10, 100), new("Exit", Start.AddSeconds(145), 10, 80)])
+                { DecisionBarCloseUtc = Start.AddSeconds(120) }
+        ], ["EngineEvidence.sensex.regular: unrelated engine gap."]);
+        var comparison = HistoricalGapAwareReplayService.CompareOpeningWindows([report], paper);
+        Assert.NotNull(comparison);
+        Assert.Empty(comparison.Gaps);
+        var row = Assert.Single(comparison.Rows);
+        Assert.Equal("Exit unsupported", row.EntryEvidence?.Stage);
+        Assert.Null(row.Replay);
+    }
+
+    [Fact]
     public void RecordedPersistenceGapSeparatesReplayEvenWhenAvailableQuotesLookContinuous()
     {
         var quotes = Enumerable.Range(0, 241).Select(s => Book(Start.AddSeconds(s), 100m)).ToArray();

@@ -133,6 +133,8 @@ public static class HistoricalPortfolioReplay
         IReadOnlyDictionary<string, string>? contractExchanges = null,
         IReadOnlyList<HistoricalReplayControlEvent>? sourceControls = null,
         Action<HistoricalReplayEntryEvidence>? entryEvidence = null,
+        HistoricalReplayTiming? timing = null,
+        bool stopOnExecutionUncertainty = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sourceBars);
@@ -155,7 +157,8 @@ public static class HistoricalPortfolioReplay
         if (string.IsNullOrWhiteSpace(policy.CodeVersion) ||
             sessionStartUtc >= sessionEndUtc)
             throw new ArgumentException("A versioned policy and valid session are required.");
-        ValidateInputs(sourceBars, sourceQuotes, sourceChains ?? [], cancellationToken);
+        using (timing?.Measure("input-validation"))
+            ValidateInputs(sourceBars, sourceQuotes, sourceChains ?? [], cancellationToken);
         var controls = HistoricalReplayControls.Validate(sourceControls ?? []);
         var consumedBook = new Dictionary<(string Symbol, bool Buy), (DateTimeOffset At, long Units)>();
         bool CanFill(HistoricalReplayQuote quote, int units, bool buy)
@@ -196,6 +199,8 @@ public static class HistoricalPortfolioReplay
         var completedBars = new List<HistoricalReplayBar>();
         var latest = new Dictionary<string, HistoricalReplayQuote>(StringComparer.Ordinal);
         var closed = new List<HistoricalReplayFill>();
+        HistoricalReplayFill[] frameFills = [];
+        IReadOnlyList<HistoricalReplayFill> frameClosedPositions = [];
         var pendingEntries = new Dictionary<string, HistoricalReplayCandidate>(
             StringComparer.Ordinal);
         var pendingPartials = new Dictionary<string, HistoricalReplayPartialExit>(
@@ -211,10 +216,12 @@ public static class HistoricalPortfolioReplay
         var missingExit = 0;
         var stale = 0;
         DateTimeOffset? firstUncertainty = null;
+        DateTimeOffset? stoppedAt = null;
         void FlagUncertainty(DateTimeOffset at) =>
             firstUncertainty = firstUncertainty is not { } previous || at < previous ? at : previous;
         var barIndex = 0;
         var quoteIndex = 0;
+        var eventIndex = 0;
         var chainIndex = 0;
         var controlIndex = 0;
         var activeControls = HistoricalReplayControlState.Empty;
@@ -231,6 +238,7 @@ public static class HistoricalPortfolioReplay
 
         HistoricalReplayPortfolioFrame Snapshot(DateTimeOffset atUtc)
         {
+            using var measure = timing?.Measure("frame-construction");
             var visibleQuotes = latest.Where(value =>
                     value.Value.IsFreshAsOf(atUtc, MaximumQuoteAge))
                 .ToDictionary(value => value.Key, value => value.Value,
@@ -275,16 +283,19 @@ public static class HistoricalPortfolioReplay
                     HighestObservedPrice = value.HighestObservedPrice,
                     HighestDecisionPrice = value.HighestDecisionPrice
                 }).ToArray();
-            var closedPositions = HistoricalReplayTradeAggregation
-                .CompletedPositions(closed);
+            if (frameFills.Length != closed.Count)
+            {
+                frameFills = closed.ToArray();
+                frameClosedPositions = HistoricalReplayTradeAggregation.CompletedPositions(frameFills);
+            }
             return new HistoricalReplayPortfolioFrame(market,
-                positionViews.FirstOrDefault(), closedPositions)
+                positionViews.FirstOrDefault(), frameClosedPositions)
             {
                 OpenPositions = positionViews,
                 Controls = activeControls,
-                CompletedFills = closed.ToArray(),
+                CompletedFills = frameFills,
                 PortfolioOpenPositions = positionViews,
-                PortfolioClosedTrades = closedPositions,
+                PortfolioClosedTrades = frameClosedPositions,
                 // Legacy single-market views are deliberately absent when
                 // multiple underlyings are visible; a composite policy must
                 // select its own market-keyed OI frame.
@@ -300,11 +311,23 @@ public static class HistoricalPortfolioReplay
             };
         }
 
+        T Policy<T>(string operation, Func<HistoricalReplayPortfolioFrame, T> evaluate, HistoricalReplayPortfolioFrame frame)
+        {
+            using var measure = timing?.Measure(operation);
+            return evaluate(frame);
+        }
+
+        bool ExtendTarget(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
+        {
+            using var measure = timing?.Measure("policy-target");
+            return policy.ShouldExtendTarget(frame, position);
+        }
+
         bool ApplyStopUpdates(HistoricalReplayPortfolioFrame snapshot, bool recomputeBeforeQuotes = false)
         {
             var atUtc = snapshot.Market.AvailableAtUtc;
             var stopChanged = false;
-            var stopUpdates = policy.EvaluateStopUpdates(snapshot);
+            var stopUpdates = Policy("policy-stop", policy.EvaluateStopUpdates, snapshot);
             if (stopUpdates.Select(value => value.Symbol).Distinct(
                     StringComparer.Ordinal).Count() != stopUpdates.Count ||
                 stopUpdates.Any(value => value.DecidedAtUtc != atUtc ||
@@ -352,7 +375,7 @@ public static class HistoricalPortfolioReplay
             IReadOnlySet<string> filledAddOnsThisTime)
         {
             var atUtc = snapshot.Market.AvailableAtUtc;
-            var partials = policy.EvaluatePartialExits(snapshot);
+            var partials = Policy("policy-partial", policy.EvaluatePartialExits, snapshot);
             if (partials.Select(value => value.Symbol).Distinct(
                     StringComparer.Ordinal).Count() != partials.Count)
                 throw new InvalidOperationException(
@@ -406,7 +429,7 @@ public static class HistoricalPortfolioReplay
         void QueueAddOns(HistoricalReplayPortfolioFrame snapshot)
         {
             var atUtc = snapshot.Market.AvailableAtUtc;
-            var addOns = policy.EvaluateAddOns(snapshot);
+            var addOns = Policy("policy-add-on", policy.EvaluateAddOns, snapshot);
             if (addOns.Select(value => value.Symbol).Distinct(
                     StringComparer.Ordinal).Count() != addOns.Count)
                 throw new InvalidOperationException(
@@ -435,7 +458,7 @@ public static class HistoricalPortfolioReplay
         void QueuePolicyExits(HistoricalReplayPortfolioFrame snapshot)
         {
             var atUtc = snapshot.Market.AvailableAtUtc;
-            var exits = policy.EvaluateExits(snapshot);
+            var exits = Policy("policy-exit", policy.EvaluateExits, snapshot);
             if (exits.Select(value => value.Symbol).Distinct(
                     StringComparer.Ordinal).Count() != exits.Count)
                 throw new InvalidOperationException(
@@ -472,6 +495,25 @@ public static class HistoricalPortfolioReplay
                 ? times[timeIndex] : quoteCursor.Current.AvailableAtUtc;
             while (timeIndex < times.Length && times[timeIndex] == time) timeIndex++;
             cancellationToken.ThrowIfCancellationRequested();
+            if (timing is not null && (++eventIndex & 255) == 0)
+                timing.Progress(time, quoteIndex, openPositions.Count);
+            if (stopOnExecutionUncertainty)
+            {
+                // Once the full execution window has passed, a later quote
+                // cannot satisfy this exit. Do not run the rest of the session
+                // with a ghost position, or assume that it closed.
+                foreach (var position in openPositions.Values)
+                {
+                    var due = position.ExitTriggeredAtUtc ?? position.DeadlineUtc;
+                    var reason = time - due > MaximumQuoteAge
+                        ? FormattableString.Invariant($"No executable bid for all {position.RemainingQuantity} units within 90 seconds of {position.ExitReason} at {due:O}.")
+                        : time - position.LastQuoteAtUtc > MaximumQuoteAge ? "The held contract stopped providing fresh quotes." : null;
+                    if (reason is null) continue;
+                    FlagUncertainty(position.EntryAtUtc);
+                    RecordEntry(position.Candidate, time, "Exit unsupported", reason);
+                }
+                if (firstUncertainty is not null) { stoppedAt = time; break; }
+            }
             var previousControlIndex = controlIndex;
             while (controlIndex < controls.Length && controls[controlIndex].AvailableAtUtc <= time) controlIndex++;
             if (controlIndex != previousControlIndex)
@@ -544,6 +586,7 @@ public static class HistoricalPortfolioReplay
                         FlagUncertainty(unresolved.EntryAtUtc);
                 }
             }
+            if (stopOnExecutionUncertainty && firstUncertainty is not null) { stoppedAt = time; break; }
             if (barIndex != firstBarIndex && time >= sessionStartUtc &&
                 time < sessionEndUtc)
             {
@@ -557,12 +600,12 @@ public static class HistoricalPortfolioReplay
                         open.ExitTriggeredAtUtc is not null) continue;
                     var view = snapshot.OpenPositions.Single(value =>
                         value.Symbol == symbol);
-                    if (policy.ShouldExtendTarget(snapshot, view)) continue;
+                    if (ExtendTarget(snapshot, view)) continue;
                     open.ExitTriggeredAtUtc = time;
                     open.ExitReason = "ObservedBarTarget";
                     pendingAddOns.Remove(symbol);
                 }
-                var decisions = policy.Evaluate(snapshot).Where(value =>
+                var decisions = Policy("policy-entry", policy.Evaluate, snapshot).Where(value =>
                     !controlState.BlocksNiftyEntries || !value.Symbol.StartsWith("NIFTY", StringComparison.Ordinal)).ToArray();
                 if (decisions.Any(value => value.DecidedAtUtc != time))
                     throw new InvalidOperationException(
@@ -596,6 +639,7 @@ public static class HistoricalPortfolioReplay
             }
             var firstQuoteIndex = quoteIndex;
             var quoteBatch = new List<HistoricalReplayQuote>();
+            using (timing?.Measure("quote-batch-read"))
             while (hasQuote && quoteCursor.Current.AvailableAtUtc == time)
             {
                 var quote = quoteCursor.Current;
@@ -609,6 +653,7 @@ public static class HistoricalPortfolioReplay
             }
             if (quoteBatch.Count > 0 && openPositions.Values.Any(value => value.Candidate.RecomputesProtectionFromInitialRisk))
                 ApplyStopUpdates(Snapshot(time), recomputeBeforeQuotes: true);
+            using (timing?.Measure("quote-execution"))
             foreach (var quote in quoteBatch)
             {
                 // A recorded withdrawn/one-sided book must invalidate the latest
@@ -821,6 +866,7 @@ public static class HistoricalPortfolioReplay
                     pendingEntries.Remove(quote.Symbol);
                 }
             }
+            if (stopOnExecutionUncertainty && firstUncertainty is not null) { stoppedAt = time; break; }
             if (quoteAdmissions.Count > 0)
             {
                 var snapshot = Snapshot(time);
@@ -838,8 +884,9 @@ public static class HistoricalPortfolioReplay
                         FlagUncertainty(pending.StrategyDecisionAtUtc ?? pending.DecidedAtUtc);
                         continue;
                     }
-                    var admitted = policy.AssessDeferredEntry(snapshot, pending,
-                        latest[symbol]);
+                    HistoricalReplayCandidate? admitted;
+                    using (timing?.Measure("policy-admission"))
+                        admitted = policy.AssessDeferredEntry(snapshot, pending, latest[symbol]);
                     pendingEntries.Remove(symbol);
                     if (admitted is null)
                     {
@@ -859,6 +906,7 @@ public static class HistoricalPortfolioReplay
                     RecordEntry(admitted, time, "Admitted");
                 }
             }
+            if (stopOnExecutionUncertainty && firstUncertainty is not null) { stoppedAt = time; break; }
             // A protective policy may react to a newly observed option quote
             // without waiting for another completed index bar. The quote is
             // visible only after its entire timestamp batch is processed; a
@@ -874,7 +922,7 @@ public static class HistoricalPortfolioReplay
                         open.ExitTriggeredAtUtc is not null) continue;
                     var view = snapshot.OpenPositions.Single(value =>
                         value.Symbol == symbol);
-                    if (policy.ShouldExtendTarget(snapshot, view)) continue;
+                    if (ExtendTarget(snapshot, view)) continue;
                     open.ExitTriggeredAtUtc = time;
                     open.ExitReason = "ObservedTarget";
                     pendingAddOns.Remove(symbol);
@@ -907,11 +955,12 @@ public static class HistoricalPortfolioReplay
                 markToMarketDrawdown = Math.Max(markToMarketDrawdown,
                     equityPeak - markedEquity);
             }
+            if (stopOnExecutionUncertainty && firstUncertainty is not null) { stoppedAt = time; break; }
         }
         missingEntry += pendingEntries.Count;
         missingAddOn += pendingAddOns.Count;
         missingExit += openPositions.Count;
-        if (entryEvidence is not null)
+        if (entryEvidence is not null && stoppedAt is null)
         {
             foreach (var entry in pendingEntries.Values)
                 RecordEntry(entry, sessionEndUtc, "Entry unresolved", "The window ended before the entry could fill.");
@@ -941,7 +990,8 @@ public static class HistoricalPortfolioReplay
             PeakConcurrentPositions = peakConcurrentPositions,
             MissingAddOnQuoteCount = missingAddOn,
             UnsupportedPartialCount = unsupportedPartials.Count,
-            FirstExecutionUncertaintyAtUtc = firstUncertainty
+            FirstExecutionUncertaintyAtUtc = firstUncertainty,
+            StoppedOnUncertaintyAtUtc = stoppedAt
         };
     }
 

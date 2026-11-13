@@ -69,6 +69,8 @@ export interface HistoricalGapAwareReport {
       candidates:number;unresolvedExecutions:number;verifiedNetPnl:number|null;independentScenarioNetPnl:number|null;
       entryEvidence?:{symbol:string;decisionAtUtc:string;atUtc:string;stage:string;quantity:number;reason:string|null}[];
       entryEvidenceTruncated?:boolean;
+      executionUncertainSinceUtc?:string|null;
+      stoppedOnExecutionUncertainty?:boolean;
       fills:{fill:HistoricalReplayFill;exclusionReason:string|null}[]}[];
   }[];
 }

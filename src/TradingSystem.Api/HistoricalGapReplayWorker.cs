@@ -50,6 +50,8 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
             bool limitedByTrading = false;
             job = job with { Status = "Running", Attempts = job.Attempts + 1 };
             await jobs.SaveAsync(job, stoppingToken);
+            var timing = new HistoricalReplayTiming(sample => ReplayProgress(logger, job.Id, job.Date, market ?? "paper ledger",
+                sample.Stage, sample.MarketTimeUtc, sample.QuotesProcessed, sample.OpenPositions, sample.ElapsedMs, sample.Totals));
             using var budget = new CancellationTokenSource();
             using var execution = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, budget.Token);
             using var timer = clock.CreateTimer(_ =>
@@ -60,32 +62,37 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
             try
             {
                 StartPhase(phase, phaseLimit);
+                timing.Checkpoint("worker-start");
                 await using var scope = scopes.CreateAsyncScope();
                 if (market is not null)
                 {
                     var replay = scope.ServiceProvider.GetRequiredService<HistoricalGapAwareReplayService>();
                     var result = await replay.RunAsync(job.Date, execution.Token, market, comparePaper: false,
-                        inputsLoaded: () => StartPhase("simulation", SimulationBudget));
+                        inputsLoaded: () => StartPhase("simulation", SimulationBudget), timing: timing);
                     execution.Token.ThrowIfCancellationRequested();
                     completed.Add(result.Markets.Single());
                     await jobs.SaveAsync(job with { Status = "Queued", Attempts = 0, CompletedMarkets = completed }, stoppingToken);
+                    timing.Checkpoint("market-saved");
                     return;
                 }
                 var report = new HistoricalGapAwareReport(job.Date, completed);
                 if (completed.Any(m => m.Windows.Any(w => w.Simulated && !w.IndependentFlatRestart)))
                 {
                     var ledger = scope.ServiceProvider.GetRequiredService<IRecordedPaperSessionReader>();
+                    using var measure = timing.Measure("paper-ledger");
                     report = report with { OpeningWindowFidelity = HistoricalGapAwareReplayService.CompareOpeningWindows(
                         completed, await ledger.ReadTradesAsync(job.Date, execution.Token)) };
                 }
                 execution.Token.ThrowIfCancellationRequested();
                 await jobs.SaveAsync(job with { Status = "Completed", CompletedMarkets = null, Report = report }, stoppingToken);
+                timing.Checkpoint("report-saved");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException) when (budget.IsCancellationRequested && limitedByTrading)
             { await jobs.SaveAsync(job with { Status = "Queued", Attempts = job.Attempts - 1 }, stoppingToken); }
             catch (OperationCanceledException exception) when (budget.IsCancellationRequested)
             {
+                timing.Checkpoint("time-limit");
                 JobError(logger, job.Id, market ?? "paper ledger", phase, exception);
                 if (phase != "archive inputs" || job.Attempts >= HistoricalGapReplayJobs.MaximumAttempts)
                     await FinishUnavailableAsync(job, completed, remaining.FirstOrDefault().Label,
@@ -94,6 +101,7 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
             }
             catch (Exception exception)
             {
+                timing.Checkpoint("worker-error");
                 JobError(logger, job.Id, market ?? "paper ledger", phase, exception);
                 if (job.Attempts >= HistoricalGapReplayJobs.MaximumAttempts)
                     await FinishUnavailableAsync(job, completed, remaining.FirstOrDefault().Label,
@@ -137,4 +145,8 @@ public sealed partial class HistoricalGapReplayWorker(HistoricalGapReplayJobs jo
 
     [LoggerMessage(EventId = 6781, Level = LogLevel.Error, Message = "Historical replay queue could not be read.")]
     private static partial void WorkerError(ILogger logger, Exception error);
+
+    [LoggerMessage(EventId = 6782, Level = LogLevel.Information, Message = "Replay job {JobId} {Date} {Market}: {Stage} after {ElapsedMs} ms; market clock {MarketTimeUtc}, quotes {Quotes}, open {Open}; phase totals {Totals}.")]
+    private static partial void ReplayProgress(ILogger logger, Guid jobId, DateOnly date, string market,
+        string stage, DateTimeOffset? marketTimeUtc, int quotes, int open, long elapsedMs, string totals);
 }

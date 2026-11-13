@@ -142,7 +142,8 @@
                       <div class="daily-analysis-table"><table><thead><tr><th>Window · IST</th><th>Evidence</th><th>Excluded or unresolved</th><th>Verified net</th><th>Separate scenario net</th></tr></thead><tbody>
                         @for(window of market.windows;track window.startUtc){
                           <tr><td>{{window.startUtc|date:'HH:mm:ss':'+0530'}} – {{window.endUtc|date:'HH:mm:ss':'+0530'}}</td>
-                            <td>{{!window.simulated?'Coverage only':window.independentFlatRestart?'Independent flat restart':'Session opening state'}}</td>
+                            <td>{{!window.simulated?'Coverage only':window.independentFlatRestart?'Independent flat restart':'Session opening state'}}
+                              @if(window.stoppedOnExecutionUncertainty){<br><small>Stopped: execution unverified since {{window.executionUncertainSinceUtc|date:'HH:mm:ss':'+0530'}} IST.</small>}</td>
                             <td>{{window.simulated?window.unresolvedExecutions:'—'}}</td>
                             <td>{{window.verifiedNetPnl===null?'—':'₹'+(window.verifiedNetPnl|number:'1.2-2')}}</td>
                             <td>{{window.independentScenarioNetPnl===null?'—':'₹'+(window.independentScenarioNetPnl|number:'1.2-2')}}</td></tr>
