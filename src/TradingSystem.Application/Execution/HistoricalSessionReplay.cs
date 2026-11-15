@@ -102,6 +102,8 @@ public sealed record HistoricalReplayParameters(decimal StopPercent, decimal Tar
     // Portfolio replay can wait for recorded top-of-book liquidity instead of
     // assuming the displayed price is executable for the entire order.
     public bool RequireDisplayedFillSize { get; init; }
+    // Only set by the separately labeled Upstox-assisted scenario.
+    internal bool AllowObservedBackupBooks { get; init; }
     public static HistoricalReplayParameters Default { get; } =
         new(0.10m, 0.15m, 0.0025m, 0.0025m, 45, 5);
 

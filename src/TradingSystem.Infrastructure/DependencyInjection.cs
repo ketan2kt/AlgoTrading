@@ -177,6 +177,17 @@ public static class DependencyInjection
                 "Historical feed must fit 1000 price/depth subjects (at most 500 instruments) and use a 1–2 second sample cadence.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
+        if (ReplayRecorderHosting.IsRecorder(configuration))
+        {
+            services.AddHttpClient(UpstoxReplayBackupCapture.ClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(12);
+                client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+            })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+                .RedactLoggedHeaders(static _ => true);
+            services.AddSingleton<UpstoxReplayBackupCapture>();
+        }
         services.AddSingleton<ResearchCapturePulse>();
         services.AddHostedService<GrowwHistoricalFeedCaptureService>();
         services.AddHostedService<GrowwReplayReceiptFallback>();

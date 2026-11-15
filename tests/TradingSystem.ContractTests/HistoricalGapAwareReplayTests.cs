@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TradingSystem.Application.Broker;
 using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Execution;
@@ -11,6 +12,38 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
 {
     private static readonly DateOnly Date = new(2026, 11, 11);
     private static readonly DateTimeOffset Start = new(2026, 11, 11, 9, 15, 0, TimeSpan.FromHours(5.5));
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
+    public void UpstoxBridgesModeledOutageWithoutChangingVerifiedPnl(string market)
+    {
+        var end = Start.AddMinutes(2);
+        var outage = new HistoricalReplayGap(Start.AddSeconds(45), Start.AddSeconds(90), "primary outage");
+        var quotes = Enumerable.Range(0, 121).Select(second =>
+        {
+            var book = Book(Start.AddSeconds(second), second >= 70 ? 120m : 100m) with { Symbol = market + "CE" };
+            return second is >= 45 and < 90 ? book with { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null } : book;
+        }).ToArray();
+        var slice = Slice(market, quotes, end) with { MonitoredDepthGaps = [outage] };
+        var session = slice.Session;
+        if (market == "SENSEX") session = session with { ExchangeCode = "BSE" };
+        slice = slice with { Session = session };
+        IHistoricalReplayPortfolioPolicy Create() => new BackupPolicy(market + "CE");
+        var verified = HistoricalGapAwareReplay.Run(slice, Create);
+        Assert.NotEmpty(verified.Gaps);
+        Assert.Null(verified.VerifiedNetPnl);
+        var modeled = Assert.IsType<HistoricalBackupReplayScenario>(HistoricalGapAwareReplay.RunWithBackup(slice, Create));
+        Assert.True(modeled.SupplementalBooks > 30);
+        Assert.Empty(modeled.RemainingGaps);
+        Assert.True(Assert.Single(modeled.Windows).ModeledNetPnl > 0m);
+
+        // One broker sample inside the outage can't claim a continuous path.
+        var thin = slice with { Session = session with { Quotes = quotes.Where(q =>
+            q.Source != HistoricalQuoteObservation.UpstoxSnapshot || q.AvailableAtUtc == Start.AddSeconds(60)).ToArray() } };
+        Assert.NotEmpty(HistoricalGapAwareReplay.RunWithBackup(thin, Create)!.RemainingGaps);
+    }
 
     [Fact]
     public void GapRestartsFlatAndOnlyScoresCompletedSupportedFills()
@@ -327,6 +360,14 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
             return seconds.Contains((int)(at - Start).TotalSeconds)
                 ? [new("NIFTYCE", at, CodeVersion, .8m, 10) { LotSize = 1 }] : [];
         }
+    }
+
+    private sealed class BackupPolicy(string symbol) : IHistoricalReplayPortfolioPolicy
+    {
+        public string CodeVersion => "upstox-gap-test";
+        public IReadOnlyList<HistoricalReplayCandidate> Evaluate(HistoricalReplayPortfolioFrame frame) =>
+            frame.Market.AvailableAtUtc == Start.AddMinutes(1)
+                ? [new(symbol, frame.Market.AvailableAtUtc, CodeVersion, .8m, 10) { LotSize = 1 }] : [];
     }
 
     private sealed class ReplayArchive(HistoricalReplayArchiveSlice slice) : IHistoricalReplayArchiveReader

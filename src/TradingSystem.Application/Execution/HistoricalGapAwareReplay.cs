@@ -1,4 +1,5 @@
 using TradingSystem.Domain.Trading;
+using TradingSystem.Application.Broker;
 
 namespace TradingSystem.Application.Execution;
 
@@ -20,7 +21,13 @@ public sealed record HistoricalGapAwareMarket(string Market, int ContractsWithFr
 {
     public IReadOnlyList<string> ContractsWithoutFreshBooks { get; init; } = [];
     public string? RunError { get; init; }
+    public HistoricalBackupReplayScenario? UpstoxScenario { get; init; }
+    internal int SupplementalBooks { get; init; }
 }
+public sealed record HistoricalBackupReplayWindow(DateTimeOffset StartUtc, DateTimeOffset EndUtc,
+    bool IndependentFlatRestart, int UnresolvedExecutions, decimal? ModeledNetPnl);
+public sealed record HistoricalBackupReplayScenario(int SupplementalBooks, IReadOnlyList<HistoricalReplayGap> RemainingGaps,
+    IReadOnlyList<HistoricalBackupReplayWindow> Windows);
 public sealed record HistoricalGapAwareReport(DateOnly Date, IReadOnlyList<HistoricalGapAwareMarket> Markets)
 {
     public PaperSessionFidelity? OpeningWindowFidelity { get; init; }
@@ -100,9 +107,22 @@ public sealed class HistoricalGapAwareReplayService(IHistoricalReplayArchiveRead
                     {
                         var captured = slice.RecordedContractUniverse!.Instruments.Where(value => value.Market == label)
                             .Select(value => value.TradingSymbol).ToHashSet(StringComparer.Ordinal);
-                        markets.Add(HistoricalGapAwareReplay.Run(slice,
-                            () => new HistoricalContractCoveragePolicy(module.Create(receipt.Settings, slice), label, date, captured),
-                            notes, timing, cancellationToken: token));
+                        IHistoricalReplayPortfolioPolicy Policy() => new HistoricalContractCoveragePolicy(
+                            module.Create(receipt.Settings, slice), label, date, captured);
+                        var verified = HistoricalGapAwareReplay.Run(slice, Policy, notes, timing, cancellationToken: token);
+                        if (slice.BackupSamples > 0)
+                        {
+                            try
+                            {
+                                using var backupTiming = timing?.Measure("upstox-assisted-simulation");
+                                verified = verified with { UpstoxScenario = HistoricalGapAwareReplay.RunWithBackup(slice, Policy, token) };
+                            }
+                            catch (Exception error) when (error is InvalidDataException or InvalidOperationException or ArgumentException)
+                            {
+                                verified = verified with { Limitations = [.. verified.Limitations, "Upstox-assisted scenario was unavailable; verified results are unchanged."] };
+                            }
+                        }
+                        markets.Add(verified);
                         continue;
                     }
                     else if (receipt.Settings.WeeklyCarryForwardEnabled) notes.Add("Overnight carry is not supported in this research mode.");
@@ -264,7 +284,21 @@ public static class HistoricalGapAwareReplay
     public static HistoricalGapAwareMarket Run(HistoricalReplayArchiveSlice slice,
         Func<IHistoricalReplayPortfolioPolicy>? createPolicy,
         IReadOnlyList<string>? limitations = null, HistoricalReplayTiming? timing = null,
-        HistoricalReplayParameters? execution = null, CancellationToken cancellationToken = default)
+        HistoricalReplayParameters? execution = null, CancellationToken cancellationToken = default) =>
+        RunCore(slice, createPolicy, limitations, timing, execution, false, cancellationToken);
+
+    public static HistoricalBackupReplayScenario? RunWithBackup(HistoricalReplayArchiveSlice slice,
+        Func<IHistoricalReplayPortfolioPolicy> createPolicy, CancellationToken cancellationToken = default)
+    {
+        var result = RunCore(slice, createPolicy, null, null, null, true, cancellationToken);
+        return result.SupplementalBooks == 0 ? null : new(result.SupplementalBooks, result.Gaps,
+            result.Windows.Select(window => new HistoricalBackupReplayWindow(window.StartUtc, window.EndUtc,
+                window.IndependentFlatRestart, window.UnresolvedExecutions, window.VerifiedNetPnl ?? window.IndependentScenarioNetPnl)).ToArray());
+    }
+
+    private static HistoricalGapAwareMarket RunCore(HistoricalReplayArchiveSlice slice,
+        Func<IHistoricalReplayPortfolioPolicy>? createPolicy, IReadOnlyList<string>? limitations, HistoricalReplayTiming? timing,
+        HistoricalReplayParameters? execution, bool useBackup, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(slice);
         var session = slice.Session;
@@ -285,18 +319,34 @@ public static class HistoricalGapAwareReplay
         var coveredContracts = new HashSet<string>(StringComparer.Ordinal);
         var sampling = TimeSpan.FromSeconds(3 * Math.Clamp(slice.CaptureSampleSeconds, 1, 5));
         var observed = new List<DateTimeOffset>();
+        var supplementalTimes = new List<DateTimeOffset>();
+        var freshPrimary = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var supplementalBooks = 0;
         var count = 0;
         timing?.Checkpoint("coverage-start");
         using (timing?.Measure("coverage-scan"))
         foreach (var quote in HistoricalQuotePaths.Ordered(session.Quotes))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (quote.Source != "GrowwFeedSample" || quote.AvailableAtUtc < session.StartUtc ||
+            var backup = useBackup && quote.Source == HistoricalQuoteObservation.UpstoxSnapshot;
+            if ((!backup && quote.Source != "GrowwFeedSample") || quote.AvailableAtUtc < session.StartUtc ||
                 quote.AvailableAtUtc > session.EndUtc || !IsFresh(quote.SourceAtUtc, quote.AvailableAtUtc))
                 continue;
             if (eligible.Contains(quote.Symbol))
             {
-                if (!IsFresh(quote.DepthSourceAtUtc, quote.AvailableAtUtc) || !quote.HasRecordedBookEvidence()) continue;
+                if (backup)
+                {
+                    if (!HasPositiveDepth(quote) || freshPrimary.TryGetValue(quote.Symbol, out var primaryAt) &&
+                        quote.AvailableAtUtc - primaryAt <= TimeSpan.FromSeconds(Math.Clamp(slice.CaptureSampleSeconds, 1, 5))) continue;
+                    supplementalBooks++;
+                    if (supplementalTimes.Count == 0 || supplementalTimes[^1] != quote.AvailableAtUtc)
+                        supplementalTimes.Add(quote.AvailableAtUtc);
+                }
+                else
+                {
+                    if (!IsFresh(quote.DepthSourceAtUtc, quote.AvailableAtUtc) || !quote.HasRecordedBookEvidence()) continue;
+                    if (useBackup) freshPrimary[quote.Symbol] = quote.AvailableAtUtc;
+                }
                 if (HasPositiveDepth(quote))
                 {
                     if (observed.Count == 0 || observed[^1] != quote.AvailableAtUtc) observed.Add(quote.AvailableAtUtc);
@@ -313,7 +363,7 @@ public static class HistoricalGapAwareReplay
             else if (createPolicy is not null && quote.Symbol == session.IndexSymbol) source.Add(quote);
         }
 
-        var gaps = slice.UnreadableQuoteIntervals.Concat(slice.MonitoredDepthGaps).ToList();
+        var gaps = slice.UnreadableQuoteIntervals.Concat(useBackup ? slice.MonitoredDepthGaps.Where(gap => !Bridged(gap)) : slice.MonitoredDepthGaps).ToList();
         var previous = session.StartUtc;
         foreach (var next in observed.Append(session.EndUtc))
         {
@@ -335,7 +385,8 @@ public static class HistoricalGapAwareReplay
         notes.Add("If an execution cannot be verified, the continuous run stops. Any later flat-start scenario does not assume the previous position closed.");
         if (slice.ArchiveReportedCaptureGaps)
             notes.Add("The archive reported capture loss; displayed intervals come from this market's recorded quote timestamps and known unreadable files.");
-        var parameters = (execution ?? SessionPolicyReceipt.ComparisonExecution) with { RequireDisplayedFillSize = true };
+        var parameters = (execution ?? SessionPolicyReceipt.ComparisonExecution) with
+            { RequireDisplayedFillSize = true, AllowObservedBackupBooks = useBackup };
         var from = session.StartUtc;
         var quoteEnd = 0;
         var decisionCloses = session.Bars.Where(bar => bar.IntervalSeconds > 0)
@@ -421,9 +472,25 @@ public static class HistoricalGapAwareReplay
         return new(session.IndexSymbol, coveredContracts.Count, count, slice.ArchiveReportedCaptureGaps, mergedGaps, windows,
             verified.Length == 0 ? null : verified.Sum(value => value.VerifiedNetPnl), notes)
         {
+            SupplementalBooks = supplementalBooks,
             ContractsWithoutFreshBooks = eligible.Except(coveredContracts, StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal).ToArray()
         };
+
+        bool Bridged(HistoricalReplayGap gap)
+        {
+            // Do not erase an outage just because the backup reported one tick.
+            var index = supplementalTimes.BinarySearch(gap.StartUtc);
+            if (index < 0) index = ~index;
+            if (index == supplementalTimes.Count || supplementalTimes[index] >= gap.EndUtc) return false;
+            var prior = gap.StartUtc;
+            for (; index < supplementalTimes.Count && supplementalTimes[index] < gap.EndUtc; index++)
+            {
+                if (supplementalTimes[index] - prior > sampling) return false;
+                prior = supplementalTimes[index];
+            }
+            return gap.EndUtc - prior <= sampling;
+        }
 
         void AddMissingBars(string symbol)
         {

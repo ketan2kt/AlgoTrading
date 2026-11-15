@@ -8,6 +8,24 @@ internal sealed class GrowwHistoricalFeedAccumulator(IHistoricalQuoteArchive arc
     private readonly Dictionary<string, State> states = new(StringComparer.Ordinal);
     private readonly object gate = new();
 
+    public bool NeedsBackup(HistoricalFeedInstrument instrument, DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            var key = instrument.Exchange + ":" + instrument.Segment + ":" + instrument.ExchangeToken;
+            // A timestamped empty primary book is known market state, not missing depth.
+            return !states.TryGetValue(key, out var state) || state.Price?.Last is not > 0m ||
+                !Fresh(state.Price) || !Fresh(state.Depth) || state.PriceReceived > now || state.DepthReceived > now;
+        }
+        bool Fresh(GrowwFeedPoint? point) => point is not null && point.SourceAtUtc <= now &&
+            now - point.SourceAtUtc <= UpstoxReplayBackupCapture.MaximumAge;
+    }
+
+    public void Reset()
+    {
+        lock (gate) states.Clear();
+    }
+
     public void Invalidate(HistoricalFeedInstrument instrument, string kind, DateTimeOffset received)
     {
         lock (gate)

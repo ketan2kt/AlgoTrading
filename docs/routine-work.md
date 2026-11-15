@@ -17,6 +17,30 @@ in `.tools` when present; otherwise they must be on PATH. .NET follows `global.j
 PostgreSQL integration tests require Docker and `RUN_POSTGRES_TESTS=true`.
 CI retains its full checks and dependency audits; the helper does not replace CI.
 
+## Replay-only Upstox backup
+
+The independent recorder can use its existing dated plan to request Upstox
+snapshots for options whose Groww trade or book is missing or over 30 seconds old.
+It never connects Upstox to order execution. The private quote archive tags the
+broker, trade time and receipt time. Since the Upstox snapshot timestamp is not
+an exchange book timestamp, only the separate **Upstox-assisted replay** result
+uses these quotes. Strict replay, paper matches and live trading remain unchanged.
+
+An authorized website-and-recorder rollout must use the checked main package.
+To configure the recorder's credential from the current user's encrypted Windows
+store, first dry-run, then activate only when capture is idle:
+
+```powershell
+./scripts/set-upstox-replay-backup.ps1 -Activate -WhatIf
+./scripts/set-upstox-replay-backup.ps1 -Activate
+```
+
+The second command updates only the recorder application settings; App Service
+may restart it. The token must never go into Git, command-line arguments, the
+website configuration, or diagnostic output. During a live session, validate
+the recorder's persisted `lastUpstoxOptionWrittenAtByMarket` on a real Groww
+gap. An empty backup dictionary on a healthy primary stream is expected.
+
 ## Daily production analysis
 
 After the diagnostics-capable build has been deployed, query production directly

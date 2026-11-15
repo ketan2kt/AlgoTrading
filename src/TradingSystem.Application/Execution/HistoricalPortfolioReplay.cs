@@ -161,11 +161,13 @@ public static class HistoricalPortfolioReplay
             ValidateInputs(sourceBars, sourceQuotes, sourceChains ?? [], cancellationToken);
         var controls = HistoricalReplayControls.Validate(sourceControls ?? []);
         var consumedBook = new Dictionary<(string Symbol, bool Buy), (DateTimeOffset At, long Units)>();
+        DateTimeOffset? BookClock(HistoricalReplayQuote quote) => quote.Source == "GrowwFeedSample" ? quote.DepthSourceAtUtc :
+            parameters.AllowObservedBackupBooks && quote.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot
+                ? quote.AvailableAtUtc : null;
         bool CanFill(HistoricalReplayQuote quote, int units, bool buy)
         {
             if (!parameters.RequireDisplayedFillSize) return true;
-            if (quote.Source != "GrowwFeedSample" || !quote.HasExecutableBook() ||
-                quote.DepthSourceAtUtc is not { } depthAt || depthAt > quote.AvailableAtUtc ||
+            if (!quote.HasExecutableBook() || BookClock(quote) is not { } depthAt || depthAt > quote.AvailableAtUtc ||
                 quote.AvailableAtUtc - depthAt > MaximumBookAge) return false;
             var consumed = consumedBook.GetValueOrDefault((quote.Symbol, buy));
             return depthAt >= consumed.At &&
@@ -173,7 +175,7 @@ public static class HistoricalPortfolioReplay
         }
         void Consume(HistoricalReplayQuote quote, int units, bool buy)
         {
-            if (!parameters.RequireDisplayedFillSize || quote.DepthSourceAtUtc is not { } depthAt) return;
+            if (!parameters.RequireDisplayedFillSize || BookClock(quote) is not { } depthAt) return;
             var key = (quote.Symbol, buy);
             var prior = consumedBook.GetValueOrDefault(key);
             consumedBook[key] = (depthAt, (prior.At == depthAt ? prior.Units : 0) + units);

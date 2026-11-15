@@ -22,6 +22,7 @@ public sealed record HistoricalReplayArchiveSlice(HistoricalReplaySessionData Se
     public bool ArchiveReportedCaptureGaps { get; init; }
     public bool GapAwarePolicyInputsReady { get; init; }
     public int CaptureSampleSeconds { get; init; } = 2;
+    public int BackupSamples { get; init; }
 }
 
 public interface IHistoricalReplayArchiveReader

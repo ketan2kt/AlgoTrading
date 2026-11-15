@@ -8,6 +8,28 @@ namespace TradingSystem.ContractTests;
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
     [Fact]
+    public async Task SupplementalQuotesNeverEnterStrictReplayOrPaperTimeline()
+    {
+        using var archive = Archive();
+        var observation = Observation();
+        Assert.True(archive.TryRecordBackup(observation with { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = At }));
+        Assert.False(archive.TryRecordBackup(observation with { Id = Guid.NewGuid(), Source = HistoricalQuoteObservation.UpstoxSnapshot,
+            BrokerObservedAtUtc = At.AddSeconds(1) })); // future timestamps never enter the archive
+        await archive.FlushBatchAsync(CancellationToken.None);
+        var symbols = new Dictionary<string, string> { [observation.Request.TradingSymbol] = observation.Request.TradingSymbol };
+        var strict = await archive.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddSeconds(2), CancellationToken.None, streamingOnly: true);
+        Assert.Empty(strict.Quotes);
+        var modeled = await archive.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddSeconds(2), CancellationToken.None, streamingOnly: true, includeBackup: true);
+        Assert.Equal(1, modeled.BackupSamples);
+        Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, Assert.Single(modeled.Quotes).Source);
+        Assert.Null(modeled.Quotes[0].DepthSourceAtUtc);
+        Assert.Equal(At, archive.ReadHealth(Date).LastUpstoxOptionWrittenAtByMarket["NIFTY"]);
+        Assert.Empty(archive.ReadHealth(Date).LastOptionWrittenAtByMarket);
+        Assert.Empty((await archive.ReadAsync(Date, CancellationToken.None)).Observations);
+        Assert.Empty((await archive.HeldMarksAsync(Date,
+            [(Guid.NewGuid(), "NSE", observation.Request.TradingSymbol, At, At.AddSeconds(2))], CancellationToken.None)).Marks);
+    }
+    [Fact]
     public async Task GapAwareReadMarksCorruptMinuteAndKeepsLaterQuotesWithoutRelaxingStrictRead()
     {
         using var archive = Archive();

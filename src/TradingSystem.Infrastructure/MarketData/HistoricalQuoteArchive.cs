@@ -31,6 +31,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private readonly ConcurrentDictionary<DateOnly, DateTimeOffset> persisted = new();
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionWritten = new();
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionSource = new();
+    private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> backupWritten = new();
     private string? failure;
     private readonly List<HistoricalQuoteObservation> pending = [];
     private DateTimeOffset storageCheckedAt = DateTimeOffset.MinValue;
@@ -66,6 +67,19 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         knownGaps[tradingDate] = true;
     }
 
+    public bool TryRecordBackup(HistoricalQuoteObservation observation)
+    {
+        if (!HistoricalQuoteProjection.IsValidBackup(observation) ||
+            observation.Request.Exchange is not ("NSE" or "BSE") || !SupportedSymbol(observation.Request.TradingSymbol) ||
+            queue.Reader.Count >= Math.Max(1, capacity / 4) ||
+            Interlocked.Read(ref archiveBytes) >= maximumArchiveBytes - maximumArchiveBytes / 10) return false;
+        var date = LocalDate(observation.ReceivedAtUtc);
+        buffered.AddOrUpdate(date, 1, static (_, count) => count + 1);
+        if (queue.Writer.TryWrite(observation)) return true;
+        CompleteObservations(date, 1);
+        return false; // Supplemental pressure never marks a primary recording gap.
+    }
+
     public HistoricalQuoteArchiveHealth ReadHealth(DateOnly tradingDate) => new(
         buffered.GetValueOrDefault(tradingDate), knownGaps.GetValueOrDefault(tradingDate),
         persisted.TryGetValue(tradingDate, out var at) ? at : null, Volatile.Read(ref failure))
@@ -75,6 +89,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         LastOptionWrittenAtByMarket = optionWritten.Where(value => value.Key.Date == tradingDate)
             .ToDictionary(value => value.Key.Market, value => value.Value),
         LastOptionSourceAtByMarket = optionSource.Where(value => value.Key.Date == tradingDate)
+            .ToDictionary(value => value.Key.Market, value => value.Value),
+        LastUpstoxOptionWrittenAtByMarket = backupWritten.Where(value => value.Key.Date == tradingDate)
             .ToDictionary(value => value.Key.Market, value => value.Value)
     };
 
@@ -180,11 +196,16 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private void RecordOptionProgress(DateOnly date, HistoricalQuoteObservation value)
     {
         var symbol = value.Request.TradingSymbol;
-        if (value.Source != "GrowwFeedSample" ||
-            !(symbol.EndsWith("CE", StringComparison.Ordinal) || symbol.EndsWith("PE", StringComparison.Ordinal))) return;
+        if (!(symbol.EndsWith("CE", StringComparison.Ordinal) || symbol.EndsWith("PE", StringComparison.Ordinal))) return;
         var market = symbol.StartsWith("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :
             symbol.StartsWith("SENSEX", StringComparison.Ordinal) ? "SENSEX" : "NIFTY";
         var key = (date, market);
+        if (value.Source == HistoricalQuoteObservation.UpstoxSnapshot)
+        {
+            backupWritten.AddOrUpdate(key, value.ReceivedAtUtc, (_, previous) => value.ReceivedAtUtc > previous ? value.ReceivedAtUtc : previous);
+            return;
+        }
+        if (value.Source != "GrowwFeedSample") return;
         var priceAt = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds);
         if (priceAt is { } price && value.DepthSourceAtUtc is { } depth &&
             price <= value.ReceivedAtUtc && depth <= value.ReceivedAtUtc &&
@@ -241,7 +262,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
 
     public async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly date, string market, string exchange,
         IReadOnlyDictionary<string, string> symbols, DateTimeOffset start, DateTimeOffset end, CancellationToken token,
-        bool streamingOnly = false, bool tolerateUnreadableShards = false)
+        bool streamingOnly = false, bool tolerateUnreadableShards = false, bool includeBackup = false)
     {
         if (market is not ("NIFTY" or "SENSEX" or "BANKNIFTY") || exchange is not ("NSE" or "BSE"))
             throw new ArgumentException("Unsupported research market.");
@@ -254,12 +275,13 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             {
                 using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
                 return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token,
-                    streamingOnly: true, tolerateUnreadableShards: tolerateUnreadableShards);
+                    streamingOnly: true, tolerateUnreadableShards: tolerateUnreadableShards, includeBackup: includeBackup);
             }
             // Cloud configuration alone must not hide pre-cutover local history.
         }
         if (!Directory.Exists(root)) return new([], true);
         var gaps = false;
+        var backupSamples = 0;
         var unreadable = new HashSet<HistoricalReplayGap>();
         var pathRoot = Path.Combine(root, "replay-paths");
         var partitioned = streamingOnly && Directory.EnumerateFiles(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
@@ -270,7 +292,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         var result = partitioned
             ? await FileHistoricalReplayQuotePath.BuildOrderedAsync(pathRoot, OrderMinuteShardsAsync(token), token)
             : await FileHistoricalReplayQuotePath.BuildAsync(pathRoot, ProjectAsync(token), token);
-        return new(result, gaps) { UnreadableIntervals = unreadable.OrderBy(value => value.StartUtc).ToArray() };
+        return new(result, gaps) { UnreadableIntervals = unreadable.OrderBy(value => value.StartUtc).ToArray(), BackupSamples = backupSamples };
 
         async IAsyncEnumerable<HistoricalReplayQuote> OrderMinuteShardsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -300,9 +322,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
             await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly,
                 includeWebsite: !streamingOnly, unreadableShard: tolerateUnreadableShards ? MarkUnreadable : null)){
                 if (value.Source == HistoricalQuoteObservation.GrowwRestFallback) continue;
-                if (streamingOnly && value.Source != "GrowwFeedSample") continue;
+                if (value.Source == HistoricalQuoteObservation.UpstoxSnapshot ? !includeBackup : streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||
                     value.ReceivedAtUtc < start || value.ReceivedAtUtc > end || !symbols.TryGetValue(value.Request.TradingSymbol, out var symbol)) continue;
+                if (value.Source == HistoricalQuoteObservation.UpstoxSnapshot)
+                {
+                    if (!HistoricalQuoteProjection.IsValidBackup(value)) continue;
+                    backupSamples++;
+                }
                 if (value.Source == HistoricalQuoteObservation.GrowwQuoteReceipt && !receiptsSeen.Add(value.Id)) continue;
                 yield return HistoricalQuoteProjection.ToReplay(value, symbol);
             }
@@ -332,7 +359,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         int count=0;
         var seen = new HashSet<(Guid Window, Guid Observation)>();
         await foreach(var v in StreamDay(date,()=>gaps=true,token)){
-            if(v.Request.Segment!="FNO")continue;
+            if(v.Request.Segment!="FNO" || v.Source == HistoricalQuoteObservation.UpstoxSnapshot)continue;
             foreach(var w in byContract[(v.Request.Exchange,v.Request.TradingSymbol)]){
                 if(v.ReceivedAtUtc<w.From || v.ReceivedAtUtc>=w.To)continue;
                 if (!seen.Add((w.Id, v.Id))) continue;
@@ -429,6 +456,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         var gaps = false;
         await foreach (var value in StreamDay(tradingDate, () => gaps = true, cancellationToken))
         {
+                if (value.Source == HistoricalQuoteObservation.UpstoxSnapshot) continue;
                 if (market is not null && !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal)) continue;
                 if (!observations.ContainsKey(value.Id) && observations.Count >= maximumReadObservations)
                     throw new InvalidDataException("This research market/day exceeds the in-memory replay budget; shorten or partition the input, not silently truncate it.");

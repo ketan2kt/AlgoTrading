@@ -167,6 +167,21 @@
                     @if(market.runError){<p class="historical-replay-warning" role="status">{{market.runError}}</p>}
                     @else{<p>{{market.contractsWithFreshBooks}} contracts with fresh depth · {{market.freshBookSamples|number}} observations.
                       Verified simulated net: {{market.verifiedNetPnl===null?'Not available':'₹'+(market.verifiedNetPnl|number:'1.2-2')}}.</p>
+                    @if(market.upstoxScenario;as backup){
+                      <details><summary>Upstox-assisted replay · modeled only · {{backup.remainingGaps.length}} gaps remaining</summary>
+                        <p>{{backup.supplementalBooks | number}} Upstox books supplement missing Groww quotes. Upstox does not provide an exchange timestamp for depth. These results are separate from verified P&amp;L and the paper comparison.</p>
+                        @if(backup.remainingGaps.length){<ul>@for(gap of backup.remainingGaps;track gap.startUtc){
+                          <li>{{gap.startUtc|date:'HH:mm:ss.SSS':'+0530'}} – {{gap.endUtc|date:'HH:mm:ss.SSS':'+0530'}} · {{gap.reason}}</li>
+                        }</ul>}
+                        <div class="daily-analysis-table"><table><thead><tr><th>Window · IST</th><th>Starting state</th><th>Unresolved</th><th>Modeled net</th></tr></thead><tbody>
+                          @for(window of backup.windows;track window.startUtc){<tr>
+                            <td>{{window.startUtc|date:'HH:mm:ss':'+0530'}} – {{window.endUtc|date:'HH:mm:ss':'+0530'}}</td>
+                            <td>{{window.independentFlatRestart?'Independent flat restart':'Session opening state'}}</td><td>{{window.unresolvedExecutions}}</td>
+                            <td>{{window.modeledNetPnl===null?'—':'₹'+(window.modeledNetPnl|number:'1.2-2')}}</td>
+                          </tr>}
+                        </tbody></table></div>
+                      </details>
+                    }
                     @if(market.contractsWithoutFreshBooks.length){
                       <details><summary>{{market.contractsWithoutFreshBooks.length}} planned contracts without a fresh two-sided book</summary>
                         <p>{{market.contractsWithoutFreshBooks.join(', ')}}</p>

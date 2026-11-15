@@ -265,7 +265,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         Stage(strict && !feedWindowComplete ? "quote-load-skipped-incomplete-manifest" : "quote-load-start");
         var quoteDay = quoteArchive is null || strict && !feedWindowComplete ? new HistoricalReplayQuoteArchiveDay([], true) :
             await quoteArchive.ReadReplayAsync(tradingDate, underlying, exchange, replayQuoteSymbols, start, end, cancellationToken,
-                streamingOnly: gapAware || feedManifest is not null, tolerateUnreadableShards: gapAware);
+                streamingOnly: gapAware || feedManifest is not null, tolerateUnreadableShards: gapAware, includeBackup: gapAware);
         Stage("quote-load-end");
         var observedQuotes = quoteDay.Quotes;
         // No synthetic option marks or chain LTP proxies enter the gap-aware
@@ -391,6 +391,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             SessionPolicyFingerprint = feedManifest?.PolicyReceipt?.Fingerprint,
             CapturedSessionPolicy = gapAware ? feedManifest?.PolicyReceipt : null,
             CaptureSampleSeconds = feedManifest?.SampleSeconds ?? 2,
+            BackupSamples = quoteDay.BackupSamples,
             UnreadableQuoteIntervals = gapAware ? quoteDay.UnreadableIntervals : [],
             MonitoredDepthGaps = gapAware && feedManifest?.OptionDepthAudit.FirstOrDefault(value => value.Market == underlying) is { } audit
                 ? audit.Gaps.Select(gap => new HistoricalReplayGap(gap.StartUtc, gap.EndUtc,

@@ -31,7 +31,7 @@ public sealed class HistoricalFeedCaptureOptions
 internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory scopes,
     IGrowwHistoricalFeedTransport transport, IHistoricalQuoteArchive archive,
     IOptions<HistoricalFeedCaptureOptions> options, TimeProvider clock, ResearchCapturePulse pulse,
-    ILogger<GrowwHistoricalFeedCaptureService> logger) : BackgroundService
+    ILogger<GrowwHistoricalFeedCaptureService> logger, UpstoxReplayBackupCapture? backup = null) : BackgroundService
 {
     private static readonly TimeSpan India = TimeSpan.FromHours(5.5);
     private static readonly Action<ILogger, string, Exception?> CaptureFailed = LoggerMessage.Define<string>(
@@ -124,7 +124,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         var observedRanges = new ConcurrentDictionary<string, (decimal Low, decimal High)>(StringComparer.Ordinal);
         DateTimeOffset? subscribedAt = null;
         pulse.Stage("Broker authorization / subscription");
-        var consume = transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
+        Task ConsumePrimaryAsync() => transport.ConsumeAsync(plan, (instrument, kind, point, received) =>
             {
                 accumulator.Observe(instrument, kind, point, received);
                 if ((kind == "depth" || point.Last is > 0m) && point.SourceAtUtc <= received &&
@@ -148,7 +148,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 var gapObserved = RecordGap(clock.GetUtcNow());
                 pulse.Failed("Transport disconnected or dropped messages", gapObserved);
             },
-            at => { subscribedAt = at; pulse.Subscribed(at, plan.Count, plan
+            at => { subscribedAt ??= at; pulse.Subscribed(at, plan.Count, plan
                 .Where(value => value.Type is InstrumentType.CallOption or InstrumentType.PutOption)
                 .Select(value => value.Market).Distinct(StringComparer.Ordinal).ToArray()); pulse.Stage("Recording"); },
             (instrument, kind, at) =>
@@ -160,6 +160,8 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 var gapObserved = RecordGap(at);
                 pulse.RejectedFrame(new(at, instrument.Market, instrument.TradingSymbol, kind), gapObserved);
             }, lifetime.Token);
+        var consume = backup?.Enabled == true ? RetryPrimaryAsync() : ConsumePrimaryAsync();
+        var supplement = backup?.RunAsync(plan, accumulator, open, open.AddHours(6.25), lifetime.Token) ?? Task.CompletedTask;
         var sampling = SampleAsync(date, accumulator, at =>
         {
             if (depthMonitor is null) return;
@@ -196,6 +198,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 HasGaps = manifest.HasGaps || Volatile.Read(ref captureGap) != 0 || subscribedAt is null ||
                     subscribedAt > open };
         }
+
         catch (Exception exception)
         {
             manifest = manifest with { SubscribedAtUtc = subscribedAt, HasGaps = true,
@@ -207,6 +210,9 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         finally
         {
             await lifetime.CancelAsync();
+            try { await supplement; }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            catch (Exception error) { CaptureFailed(logger, "Supplemental provider: " + error.GetType().Name, null); }
             try { await consume; }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception) when (consume.IsFaulted) { /* Already observed by the main await; retain the failure manifest. */ }
@@ -223,6 +229,26 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
                 OptionDepthAudit = pulse.Read(date, true).OptionDepthAudit };
             UpdateCoverage(manifest.PolicyReceipt);
             await WriteManifestAsync(path, manifest, CancellationToken.None);
+        }
+
+        async Task RetryPrimaryAsync()
+        {
+            var failures = 0;
+            while (!lifetime.IsCancellationRequested)
+            {
+                var started = clock.GetUtcNow();
+                try { await ConsumePrimaryAsync(); }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+                catch (Exception exception) { CaptureFailed(logger, "Primary feed: " + exception.GetType().Name, null); }
+                if (lifetime.IsCancellationRequested) return;
+                var disconnected = clock.GetUtcNow();
+                accumulator.Reset();
+                var gapObserved = RecordGap(disconnected);
+                pulse.Failed("Primary transport disconnected; reconnecting while backup runs separately", gapObserved);
+                failures = disconnected - started >= TimeSpan.FromMinutes(1) ? 1 : Math.Min(6, failures + 1);
+                try { await Task.Delay(RecoveryDelay(failures), clock, lifetime.Token); }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+            }
         }
 
         async Task CheckpointAsync()

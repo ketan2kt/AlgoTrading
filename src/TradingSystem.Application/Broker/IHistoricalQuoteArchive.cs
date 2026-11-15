@@ -7,8 +7,10 @@ public sealed record HistoricalQuoteObservation(Guid Id, DateTimeOffset Received
 {
     public const string GrowwQuoteReceipt = "GrowwQuoteReceipt";
     public const string GrowwRestFallback = "GrowwRestFallback";
+    public const string UpstoxSnapshot = "UpstoxSnapshot";
     public string Source { get; init; } = GrowwQuoteReceipt;
     public DateTimeOffset? DepthSourceAtUtc { get; init; }
+    public DateTimeOffset? BrokerObservedAtUtc { get; init; }
 }
 
 public sealed record HistoricalQuoteArchiveDay(IReadOnlyList<HistoricalQuoteObservation> Observations,
@@ -17,6 +19,7 @@ public sealed record HistoricalQuoteArchiveDay(IReadOnlyList<HistoricalQuoteObse
 public sealed record HistoricalReplayQuoteArchiveDay(IReadOnlyList<HistoricalReplayQuote> Quotes, bool HasCaptureGaps)
 {
     public IReadOnlyList<HistoricalReplayGap> UnreadableIntervals { get; init; } = [];
+    public int BackupSamples { get; init; }
 }
 public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserved,
     DateTimeOffset? LastPersistedAtUtc, string? Failure)
@@ -26,10 +29,19 @@ public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserve
     public long? DiskFreeBytes { get; init; }
     public IReadOnlyDictionary<string, DateTimeOffset> LastOptionWrittenAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
     public IReadOnlyDictionary<string, DateTimeOffset> LastOptionSourceAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
+    public IReadOnlyDictionary<string, DateTimeOffset> LastUpstoxOptionWrittenAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
 }
 
 public static class HistoricalQuoteProjection
 {
+    public static bool IsValidBackup(HistoricalQuoteObservation value) => value.Source == HistoricalQuoteObservation.UpstoxSnapshot &&
+        value.DepthSourceAtUtc is null && value.BrokerObservedAtUtc is { } brokerAt && brokerAt <= value.ReceivedAtUtc &&
+        value.ReceivedAtUtc - brokerAt <= TimeSpan.FromSeconds(30) &&
+        GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds) is { } lastTrade && lastTrade <= brokerAt &&
+        value.ReceivedAtUtc - lastTrade <= TimeSpan.FromSeconds(30) && value.Quote.LastPrice > 0m &&
+        value.Quote.BidPrice > 0m && value.Quote.OfferPrice >= value.Quote.BidPrice &&
+        value.Quote.BidQuantity > 0 && value.Quote.OfferQuantity > 0;
+
     public static HistoricalReplayQuote ToReplay(HistoricalQuoteObservation value, string symbol) => new(symbol,
         value.ReceivedAtUtc, value.Quote.LastPrice)
     {
@@ -47,6 +59,7 @@ public interface IHistoricalQuoteArchive
     // Nonblocking observation of a response already obtained by the trading feed.
     // This must not request quotes or throw into the live quote path.
     void TryRecord(HistoricalQuoteObservation observation);
+    bool TryRecordBackup(HistoricalQuoteObservation observation) => false;
     void MarkCaptureGap(DateOnly tradingDate);
     HistoricalQuoteArchiveHealth? ReadHealth(DateOnly tradingDate) => null;
     Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken);
@@ -58,11 +71,13 @@ public interface IHistoricalQuoteArchive
     }
     async Task<HistoricalReplayQuoteArchiveDay> ReadReplayAsync(DateOnly tradingDate, string market, string exchange,
         IReadOnlyDictionary<string, string> symbols, DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken token,
-        bool streamingOnly = false, bool tolerateUnreadableShards = false)
+        bool streamingOnly = false, bool tolerateUnreadableShards = false, bool includeBackup = false)
     {
         var day = await ReadMarketAsync(tradingDate, market, token);
-        return new(day.Observations.Where(value => (!streamingOnly || value.Source == "GrowwFeedSample") && value.Request.Exchange == exchange &&
+        var quotes = day.Observations.Where(value => (value.Source == HistoricalQuoteObservation.UpstoxSnapshot ? includeBackup && HistoricalQuoteProjection.IsValidBackup(value) :
+            !streamingOnly || value.Source == "GrowwFeedSample") && value.Request.Exchange == exchange &&
             value.ReceivedAtUtc >= startUtc && value.ReceivedAtUtc <= endUtc && symbols.ContainsKey(value.Request.TradingSymbol))
-            .Select(value => HistoricalQuoteProjection.ToReplay(value, symbols[value.Request.TradingSymbol])).ToArray(), day.HasCaptureGaps);
+            .Select(value => HistoricalQuoteProjection.ToReplay(value, symbols[value.Request.TradingSymbol])).ToArray();
+        return new(quotes, day.HasCaptureGaps) { BackupSamples = quotes.Count(value => value.Source == HistoricalQuoteObservation.UpstoxSnapshot) };
     }
 }
