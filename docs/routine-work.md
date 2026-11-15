@@ -87,7 +87,16 @@ The recorder-only command updates only the recorder application settings; App Se
 may restart it. The token must never go into Git, command-line arguments, the
 unapproved hosts, or diagnostic output. During a live session, validate
 the recorder's persisted `lastUpstoxOptionWrittenAtByMarket` on a real Groww
-gap. An empty backup dictionary on a healthy primary stream is expected.
+gap. An empty backup dictionary on a healthy primary stream is expected only in
+the legacy recorder-only warm-buffer mode. In independent website mode, every
+planned market should persist fresh backup snapshots during the session even
+while Groww is healthy; inspect website backup storage separately from recorder storage.
+
+## Backup/restore verification
+
+See [the recovery runbook](backup-restore.md) for current Azure backup evidence,
+isolation requirements and the no-cost synthetic database/key-ring drill.
+It must never target a production database or start trading hosted services.
 
 ## Daily production analysis
 

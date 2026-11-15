@@ -3,13 +3,13 @@
   "project": "Sarthi Trading",
   "repository": "ketan2kt/AlgoTrading",
   "productionUrl": "https://sarthico.com",
-  "markets": ["nifty", "sensex"],
+  "markets": ["nifty", "sensex", "banknifty"],
   "executionMode": "paper-with-controlled-live-capability",
   "authoritativeContext": [
-    "AGENTS.md",
     "docs/handover.md",
     "docs/routine-work.md",
-    "docs/observation-review.md"
+    "docs/development-roadmap.md",
+    "docs/strategy-observation-2026-11-16.md"
   ],
   "routineCommands": {
     "compactContext": "./scripts/tasks.ps1 context",

@@ -4,6 +4,8 @@ public sealed class IntradayExpansionPairOptions
 {
     public const string SectionName = "PaperTrading:IntradayExpansionPair";
     public bool Enabled { get; init; } = true;
+    // Hold discovery only; Enabled must stay true to manage already-open pairs.
+    public bool NewEntriesEnabled { get; init; }
     // A market-specific hold must not disable management of already-open legs.
     public bool NiftyEntryEnabled { get; init; }
     public int ScanIntervalSeconds { get; init; } = 30;
@@ -26,6 +28,7 @@ public sealed class IntradayExpansionPairOptions
     public int NearbyContractsPerSide { get; init; } = 10;
 
     public bool AllowsNewEntry(string marketCode) =>
-        !string.Equals(marketCode, "nifty", StringComparison.OrdinalIgnoreCase) ||
-        NiftyEntryEnabled;
+        NewEntriesEnabled &&
+        (!string.Equals(marketCode, "nifty", StringComparison.OrdinalIgnoreCase) ||
+         NiftyEntryEnabled);
 }

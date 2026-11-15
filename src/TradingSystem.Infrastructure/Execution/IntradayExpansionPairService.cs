@@ -91,13 +91,12 @@ internal sealed partial class IntradayExpansionPairService(
             return;
         }
 
-        // Hold only new Nifty pairs. Keep Sensex entries and existing pair
-        // management unchanged while the Nifty basket strategy is reviewed.
+        // Entry-only hold comes AFTER management: existing legs remain protected.
         if (!options.Value.AllowsNewEntry(market.Code))
         {
             await evidenceRecorder.RecordAsync(market.Code, "expansion-pair", "EntryControl", "Held",
-                "New Nifty expansion-pair entries are held for strategy review; existing legs remain managed.",
-                now, new { options.Value.NiftyEntryEnabled }, cancellationToken);
+                "New expansion-pair entries are held for strategy review; existing legs remain managed.",
+                now, new { options.Value.NewEntriesEnabled, options.Value.NiftyEntryEnabled }, cancellationToken);
             return;
         }
 

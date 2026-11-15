@@ -8,6 +8,68 @@ namespace TradingSystem.ContractTests;
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
     [Fact]
+    public async Task RestoredArchivePreservesAllMarketsSourcesDepthAndKnownGaps()
+    {
+        var expected = new List<HistoricalQuoteObservation>();
+        using (var writer = Archive(capacity: 100))
+        {
+            foreach (var (exchange, market, strike) in new[]
+                     { ("NSE", "NIFTY", 25000), ("BSE", "SENSEX", 82000), ("NSE", "BANKNIFTY", 61000) })
+            foreach (var side in new[] { "CE", "PE" })
+            {
+                var primary = Observation() with
+                {
+                    Request = new(exchange, "FNO", $"{market}26NOV{strike}{side}"),
+                    Source = "GrowwFeedSample", DepthSourceAtUtc = At
+                };
+                var backup = primary with
+                {
+                    Id = Guid.NewGuid(), Source = HistoricalQuoteObservation.UpstoxSnapshot,
+                    DepthSourceAtUtc = null, BrokerObservedAtUtc = At, BackupLiquidityAtUtc = At
+                };
+                writer.TryRecord(primary);
+                Assert.True(writer.TryRecordBackup(backup));
+                expected.AddRange([primary, backup]);
+            }
+            writer.MarkCaptureGap(Date);
+            await writer.FlushBatchAsync(CancellationToken.None);
+        }
+        var savedFiles = Directory.GetFiles(directory);
+        var restoredRoot = Directory.CreateDirectory(Path.Combine(directory, "isolated-restore")).FullName;
+        foreach (var file in savedFiles)
+        {
+            var restoredFile = Path.Combine(restoredRoot, Path.GetFileName(file));
+            File.Copy(file, restoredFile);
+            Assert.Equal(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(file)),
+                System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(restoredFile)));
+        }
+        using var restored = new HistoricalQuoteArchive(TimeProvider.System,
+            NullLogger<HistoricalQuoteArchive>.Instance, restoredRoot);
+        var recovered = await restored.ReadAsync(Date, CancellationToken.None);
+        Assert.Equal(expected.Where(row => row.Source == "GrowwFeedSample").OrderBy(row => row.Id),
+            recovered.Observations.OrderBy(row => row.Id));
+        Assert.True(recovered.HasCaptureGaps);
+        foreach (var (exchange, market) in new[] { ("NSE", "NIFTY"), ("BSE", "SENSEX"), ("NSE", "BANKNIFTY") })
+        {
+            var symbols = expected.Where(row => row.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal))
+                .Select(row => row.Request.TradingSymbol).Distinct().ToDictionary(symbol => symbol);
+            var strict = await restored.ReadReplayAsync(Date, market, exchange, symbols, At, At.AddMinutes(1),
+                CancellationToken.None, streamingOnly: true);
+            var assisted = await restored.ReadReplayAsync(Date, market, exchange, symbols, At, At.AddMinutes(1),
+                CancellationToken.None, streamingOnly: true, includeBackup: true);
+            Assert.Equal(2, strict.Quotes.Count);
+            Assert.All(strict.Quotes, row => Assert.Equal("GrowwFeedSample", row.Source));
+            Assert.Equal(4, assisted.Quotes.Count);
+            Assert.True(assisted.HasCaptureGaps);
+            Assert.Equal(expected.Where(row => symbols.ContainsKey(row.Request.TradingSymbol))
+                    .Select(row => HistoricalQuoteProjection.ToReplay(row, row.Request.TradingSymbol))
+                    .OrderBy(row => row.Symbol).ThenBy(row => row.Source),
+                assisted.Quotes.OrderBy(row => row.Symbol).ThenBy(row => row.Source));
+            Assert.All(assisted.Quotes, row => { Assert.Equal(100L, row.BidQuantity); Assert.Equal(100L, row.OfferQuantity); });
+        }
+    }
+
+    [Fact]
     public async Task IndependentWebsiteBackupIsReadableWithoutAnyRecorderShard()
     {
         using var writer = Archive();
