@@ -191,6 +191,11 @@ public sealed class PostgreSqlPersistenceTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddTradingSystemInfrastructure(configuration);
+        // These database-only tests deliberately omit the optional archive. A real
+        // web host supplies its configuration/environment; this fixture does not.
+        foreach (var descriptor in services.Where(d => d.ServiceType.FullName ==
+            "TradingSystem.Infrastructure.MarketData.HistoricalQuoteArchive").ToArray())
+            services.Remove(descriptor);
         return services.BuildServiceProvider();
     }
 }
