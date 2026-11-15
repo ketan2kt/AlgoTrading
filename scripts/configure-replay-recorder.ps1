@@ -17,8 +17,23 @@ if ($LASTEXITCODE -ne 0) { throw 'Azure authentication failed' }
 $headers = @{ Authorization = "Bearer $managementToken" }
 try {
     if ($ExpectedAssemblyHash) {
-        $verified = Invoke-WebRequest -Method Get -Uri "https://$website.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Application.dll" `
-            -Headers $headers -TimeoutSec 30
+        $verified = $null
+        for ($identityAttempt = 1; $identityAttempt -le 5; $identityAttempt++) {
+            try {
+                $verified = Invoke-WebRequest -Method Get -Uri "https://$website.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Application.dll" `
+                    -Headers $headers -TimeoutSec 20
+                break
+            } catch {
+                $status = $_.Exception.Response.StatusCode
+                if ($status -and [int]$status -notin @(408, 429, 500, 502, 503, 504)) {
+                    throw 'Website package verification was refused; capture settings were not changed.'
+                }
+                if ($identityAttempt -eq 5) {
+                    throw 'Website package verification remained unavailable after bounded retries; capture settings were not changed.'
+                }
+                Start-Sleep -Seconds 5
+            }
+        }
         $actualHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([byte[]]$verified.Content))
         if ($actualHash -ne $ExpectedAssemblyHash) {
             throw 'Website policy assembly does not match the checked recorder release; deploy the website package first.'

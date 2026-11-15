@@ -23,6 +23,10 @@ function Invoke-RestMethod {
 function Invoke-WebRequest {
     param($Uri, $TimeoutSec, $Method, $Headers)
     if ($Uri -eq 'https://sarthitradingweb5amvyarepxaci.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Application.dll') {
+        if ($global:recorderIdentityFailures -gt 0) {
+            $global:recorderIdentityFailures--
+            throw [TimeoutException]::new('Synthetic identity timeout')
+        }
         return [pscustomobject]@{ Content = [Text.Encoding]::UTF8.GetBytes('synthetic-checked-application') }
     }
     if ($Uri -ne 'https://sarthirecorder5amvyarepxaci.azurewebsites.net/health/recorder-active') {
@@ -88,3 +92,21 @@ catch {
 }
 if (-not $rejected -or $global:recorderTestWrites.Count -ne 0) { throw 'Wrong website build changed capture settings.' }
 Write-Output 'PASS: website-identity-mismatch-preserves-capture'
+
+$global:recorderTestWrites.Clear()
+$global:recorderIdentityFailures = 2
+& "$PSScriptRoot/configure-replay-recorder.ps1" -ExpectedAssemblyHash $applicationHash
+if ($global:recorderIdentityFailures -ne 0) { throw 'Transient identity failure was not retried.' }
+Write-Output 'PASS: website-identity-timeout-recovery'
+$global:recorderTestWrites.Clear()
+$global:recorderIdentityFailures = 8
+$unavailable = $false
+try { & "$PSScriptRoot/configure-replay-recorder.ps1" -ExpectedAssemblyHash $applicationHash }
+catch {
+    if ($_.Exception.Message -notlike 'Website package verification remained unavailable*') { throw }
+    $unavailable = $true
+}
+if (-not $unavailable -or $global:recorderIdentityFailures -ne 3 -or $global:recorderTestWrites.Count -ne 0) {
+    throw 'Unverified website changed capture settings or exceeded its retry budget.'
+}
+Write-Output 'PASS: exhausted-identity-retries-preserve-capture'
