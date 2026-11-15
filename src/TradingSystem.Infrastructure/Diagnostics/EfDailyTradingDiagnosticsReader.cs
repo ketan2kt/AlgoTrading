@@ -383,6 +383,51 @@ internal sealed class EfDailyTradingDiagnosticsReader(
                 Pnl = LiveFillPnl.Calculate(intent,economics[source],paper)
             };
         }).ToArray();
+        // Reuse the daily ledger/audits; no broker queries or archive scans on report load.
+        var entryEvidence = audits.Where(a => a.Outcome == "PaperPositionOpened")
+            .Select(a => new { Id = DailyProfitReviewBuilder.PositionId(a.ReasonsJson), a.CandleTimeUtc, a.ReasonsJson })
+            .Where(a => a.Id.HasValue).GroupBy(a => a.Id!.Value)
+            .ToDictionary(g => g.Key, g => new DailyEntryReceipt(g.First().CandleTimeUtc, g.First().ReasonsJson));
+        var signalKeys = signalIds.Select(id => id.ToString("N")).ToArray();
+        var niftyEntryEvidence = await db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == "NiftyTradeReasoning" && signalKeys.Contains(a.EntityId))
+            .Select(a => new { a.EntityId, a.OccurredAtUtc, a.AfterJson }).ToListAsync(cancellationToken);
+        var savedFollowUps = await db.PaperExitFollowUps.AsNoTracking()
+            .Where(f => signalIds.Contains(f.SignalId))
+            .Select(f => new { f.TradeResultId, f.HorizonMinutes, f.ObservedAtUtc, f.ObservedOptionPrice })
+            .ToListAsync(cancellationToken);
+        var postExit = savedFollowUps.GroupBy(f => f.TradeResultId).ToDictionary(g => g.Key,
+            g => (IReadOnlyList<DailyFollowUpPrice>)g.Select(f => new DailyFollowUpPrice(
+                f.HorizonMinutes, f.ObservedAtUtc, f.ObservedOptionPrice)).ToArray());
+        foreach (var group in audits.Where(a => a.Outcome.StartsWith("PostExit", StringComparison.Ordinal))
+            .Select(a => new { Id = DailyProfitReviewBuilder.PositionId(a.ReasonsJson), Price = DailyProfitReviewBuilder.FollowUp(a.ReasonsJson) })
+            .Where(a => a.Id.HasValue && a.Price is not null).GroupBy(a => a.Id!.Value))
+            postExit[group.Key] = group.Select(a => a.Price!).ToArray();
+        var finalUnits = new Dictionary<Guid, int>();
+        var incomparablePeaks = new HashSet<Guid>();
+        foreach (var trade in trades)
+        {
+            if (positionMap.TryGetValue(trade.TradeId, out var position))
+            {
+                finalUnits[trade.TradeId] = position.Quantity - position.PartialExitQuantity;
+                if (position.ExcursionBasisVersion != 1 || position.ExcursionSampleCount <= 1)
+                    incomparablePeaks.Add(trade.TradeId);
+            }
+            else if (trade.SignalId is { } signalId)
+            {
+                var evidence = niftyEntryEvidence.Where(a => a.EntityId == signalId.ToString("N"))
+                    .OrderBy(a => a.OccurredAtUtc).FirstOrDefault();
+                if (evidence is not null) entryEvidence[trade.TradeId] = new(evidence.OccurredAtUtc, evidence.AfterJson);
+                var finalLeg = LiveFillPnl.ReadPaperLeg(journal.GetValueOrDefault($"{signalId:N}-EXIT"));
+                if (finalLeg is not null) finalUnits[trade.TradeId] = finalLeg.Qty;
+                // The legacy Nifty peak is a full-original-quantity price path. Do not
+                // compare it with realised P&L after a partial/add-on or unknown fills.
+                if (finalLeg is null || finalLeg.Qty != trade.Quantity ||
+                    journal.ContainsKey($"{signalId:N}-PARTIAL") || journal.ContainsKey($"{signalId:N}-ADDON"))
+                    incomparablePeaks.Add(trade.TradeId);
+            }
+        }
+        var profitReview = DailyProfitReviewBuilder.Build(trades, entryEvidence, postExit, finalUnits, incomparablePeaks);
         PaperSessionTimeline? timeline = null;
         if (withTimeline)
         {
@@ -483,6 +528,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             EngineEvidenceCoverage = engineCoverage,
             Timeline = timeline,
             ExecutionReview = reviews,
+            ProfitReview = profitReview,
             LivePnl = LiveFillPnl.Summarize(reviews.Select(r=>r.Pnl!)),
             ExpansionPairObservations = audits
                 .Where(value => value.Outcome == "ExpansionPair:Observation")

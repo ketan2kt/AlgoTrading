@@ -21,6 +21,7 @@ import { DailyDiagnostics, PaperPnlSummary, PaperReportService, PaperTradingRepo
 import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { ReplayPanelComponent } from './replay-panel.component';
 import { SessionTimelineComponent } from './session-timeline.component';
+import { DailyProfitReviewComponent } from './daily-profit-review.component';
 import { LiveProtectionMonitorComponent } from './live-protection-monitor.component';
 import { MarketControlsComponent } from './market-controls.component';
 import { ResearchCaptureHealthComponent } from './research-capture-health.component';
@@ -35,7 +36,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
   styleUrls: ['./app.scss', './trading-desk.scss'],
 })
@@ -520,6 +521,7 @@ export class App implements OnInit, OnDestroy {
       `Closed legs: ${p.summary.completedTradeCount}; wins ${p.summary.wins}; losses ${p.summary.losses}; gross ₹${p.summary.grossPnl.toFixed(2)}; charges ₹${p.summary.costs.toFixed(2)}; net ₹${p.summary.netRealisedPnl.toFixed(2)}. Decisions ${p.summary.decisionCount} (${p.summary.acceptedDecisionCount} accepted, ${p.summary.rejectedDecisionCount} rejected).\n`+
       p.trades.map(t => `${t.market} ${t.symbol} ${t.openedAtUtc}→${t.closedAtUtc ?? 'open'}: ${t.exitReason ?? 'open'}, net ₹${t.netRealisedPnl.toFixed(2)}; peak ₹${t.maximumFavourableExcursion ?? 'unavailable'} at ${t.maximumFavourableExcursionAtUtc ?? 'time unavailable'}, adverse ₹${t.maximumAdverseExcursion ?? 'unavailable'} at ${t.maximumAdverseExcursionAtUtc ?? 'time unavailable'}; ${t.excursionCoverage ?? 'coverage unavailable'} (${t.excursionSampleCount ?? 0} observations) [${t.tradeId}]`).join('\n')+
       `\nDecision outcomes: ${JSON.stringify(p.summary.outcomes)}\n`+
+      `\nOutcome attribution (gross peaks are diagnostic; follow-ups are not simulated fills): ${JSON.stringify(p.profitReview ?? null)}\n`+
       `\n\nTelemetry limitations: ${p.telemetryWarnings.join(' | ') || 'none reported'}`;
   }
   protected dailyAnalysisFlags(a: DailyDiagnostics): string[] {

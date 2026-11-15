@@ -13,6 +13,52 @@ namespace TradingSystem.IntegrationTests;
 
 public sealed class PostgreSqlPersistenceTests
 {
+    private static readonly string[] AcceptedEntryReasons = ["Accepted breakout"];
+    [DockerFact]
+    public async Task DailyProfitReviewReadsAllThreeMarketsWithoutTradingOrArchiveCalls()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        await using var provider = CreatePaperProvider(container.GetConnectionString());
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        await db.Database.MigrateAsync(CancellationToken.None);
+        var at = new DateTimeOffset(2026, 11, 13, 4, 0, 0, TimeSpan.Zero);
+        foreach (var market in new[] { "nifty", "sensex", "bank-nifty" })
+        {
+            var symbol = market.Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
+            var underlying = new Instrument(Guid.NewGuid(), "NSE", symbol, InstrumentSegment.Cash, InstrumentType.Index, at);
+            var option = new Instrument(Guid.NewGuid(), "NSE", symbol + "26NOV100CE", InstrumentSegment.FuturesAndOptions, InstrumentType.CallOption, at);
+            db.Instruments.AddRange(underlying, option);
+            var position = new MarketPaperPosition(Guid.NewGuid(), market, underlying.Id, option.Id,
+                "Core", Direction.Buy, 100, 100, 90, 120, at);
+            position.Mark(110, 90, at.AddMinutes(5));
+            position.TakePartial(108, 40, 20, at.AddMinutes(6));
+            position.Close(104, 30, "FailedSetupExit", at.AddMinutes(10));
+            db.MarketPaperPositions.Add(position);
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at, "PaperPositionOpened", 1,
+                System.Text.Json.JsonSerializer.Serialize(new { positionId = position.Id, reasons = AcceptedEntryReasons,
+                    location = "Prior resistance reclaimed", paperEntryRecordedAtUtc = at.AddSeconds(2) })));
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at.AddMinutes(15), $"PostExit5:{position.Id:N}", 0,
+                System.Text.Json.JsonSerializer.Serialize(new { positionId = position.Id, horizonMinutes = 5,
+                    observedPrice = 110, observedAtUtc = at.AddMinutes(15) })));
+        }
+        await db.SaveChangesAsync(CancellationToken.None);
+        var before = await db.MarketStrategyAudits.CountAsync();
+        var reader = scope.ServiceProvider.GetRequiredService<TradingSystem.Application.Diagnostics.IDailyTradingDiagnosticsReader>();
+        var report = await reader.ReadAsync(new(2026, 11, 13), "all", CancellationToken.None);
+        Assert.NotNull(report.ProfitReview);
+        Assert.Equal(3, report.ProfitReview.Markets.Count);
+        Assert.All(report.ProfitReview.Markets, m => { Assert.Equal(510m, m.NetPnl); Assert.Equal(440m, m.GrossGivebackSubtotal); });
+        Assert.All(report.ProfitReview.Trades, t => {
+            Assert.Equal(60, t.FinalExitUnits); Assert.Equal(360m, Assert.Single(t.FollowUps).GrossDifference);
+            Assert.Contains("Prior resistance reclaimed", t.Entry.Reasons);
+            Assert.Equal(at.AddSeconds(2), t.Entry.RecordedAtUtc);
+        });
+        Assert.Equal(before, await db.MarketStrategyAudits.CountAsync());
+        Assert.Empty(await db.LiveExecutionIntents.ToArrayAsync());
+    }
+
     [DockerFact]
     public async Task MigrationAndAuditPersistenceWorkAgainstPostgreSql()
     {

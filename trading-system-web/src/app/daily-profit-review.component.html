@@ -1,0 +1,41 @@
+<section aria-label="Profit retention and entry exit review">
+  <header><div><span>OUTCOME ATTRIBUTION</span><h3>Where did the profit go?</h3></div>
+    <button type="button" (click)="replay.emit(report().tradingDate)">Compare in replay</button></header>
+  @if (report().profitReview; as review) {
+    <div class="markets">
+      @for (m of review.markets; track m.market) {
+        <article><h4>{{m.market === 'BANKNIFTY' ? 'Bank Nifty' : m.market === 'SENSEX' ? 'Sensex' : 'Nifty'}}</h4>
+          <strong class="net" [class.positive]="m.netPnl>0" [class.negative]="m.netPnl<0">₹{{m.netPnl|number:'1.2-2'}}</strong>
+          <p>{{m.closedTrades}} closed · {{m.openTrades}} open · ₹{{m.costs|number:'1.2-2'}} charges</p>
+          <dl><dt>Observed gross peaks</dt><dd>{{m.observedPeakSubtotal === null ? '—' : '₹'+(m.observedPeakSubtotal|number:'1.2-2')}}</dd>
+            <dt>Gross profit given back</dt><dd>{{m.grossGivebackSubtotal === null ? '—' : '₹'+(m.grossGivebackSubtotal|number:'1.2-2')}}</dd>
+            <dt>Positive peak → net loss</dt><dd>{{m.positivePeakToNetLossTrades ?? '—'}}</dd></dl>
+          <small>Peak comparison: {{m.comparablePeakTrades}} / {{m.closedTrades}} closed trades.</small>
+        </article>
+      }
+    </div>
+    <p class="note">Peak totals sum separate trade observations—not a simultaneous portfolio peak or attainable profit. Giveback = observed gross peak minus realised gross. Charges are separate. Missing or incompatible evidence is excluded, not counted as zero.</p>
+    <div class="table-wrap"><table><thead><tr><th>Trade</th><th>Profit retained</th><th>Entry evidence</th><th>After exit</th></tr></thead><tbody>
+      @for (row of rows(); track row.review.tradeId) { @if (row.trade; as t) {
+        <tr><td><strong>{{t.market}} · {{t.symbol}}</strong><small>{{t.openedAtUtc|date:'HH:mm:ss':'+0530'}} · {{t.exitReason ?? 'Open'}}</small></td>
+          <td><strong>{{row.review.retainedPercent === null ? '—' : (row.review.retainedPercent|number:'1.1-1')+'% gross retained'}}</strong>
+            <small>Giveback {{row.review.grossGiveback === null ? '—' : '₹'+(row.review.grossGiveback|number:'1.2-2')}}</small>
+            <details><summary>Peak basis</summary><p>{{row.review.profitEvidence}}</p><p>{{t.excursionCoverage}}</p></details></td>
+          <td><details><summary>{{row.review.entry.status}}</summary>
+            @if(row.review.entry.recordedAtUtc){<small>Receipt {{row.review.entry.recordedAtUtc|date:'HH:mm:ss':'+0530'}} IST</small>}
+            @if(row.review.entry.extensionAtr !== null){<p>Extension {{row.review.entry.extensionAtr|number:'1.2-2'}} ATR</p>}
+            @if(row.review.entry.roomAtr !== null){<p>Observed room {{row.review.entry.roomAtr|number:'1.2-2'}} ATR</p>}
+            @if(row.review.entry.candleAgeSeconds !== null){<p>Completed candle age {{row.review.entry.candleAgeSeconds|number:'1.1-1'}} s</p>}
+            <ul>@for(reason of row.review.entry.reasons;track $index){<li>{{reason}}</li>}</ul>
+          </details></td>
+          <td><details><summary>{{row.review.exitAssessment}}</summary>
+            @if(row.review.followUps.length){<p>Change versus actual final exit on {{row.review.finalExitUnits}} units; prior partial bookings stay fixed.</p>
+              <ul>@for(f of row.review.followUps;track f.horizonMinutes){<li>+{{f.horizonMinutes}}m · {{f.observedAtUtc|date:'HH:mm:ss':'+0530'}} · price ₹{{f.price|number:'1.2-2'}} · gross difference {{f.grossDifference>0?'+':''}}₹{{f.grossDifference|number:'1.2-2'}}</li>}</ul>
+            } @else {<p>No usable in-session follow-up with known final exit size.</p>}
+            <p>Sampled prices only; bid/LTP provenance and intervening stops are not verified. These are not alternative fills, savings or after-cost replay results.</p>
+          </details></td></tr>
+      }} @empty {<tr><td colspan="4">No trades recorded for this session.</td></tr>}
+    </tbody></table></div>
+    <p class="note">Use the existing paper-vs-live section for fill differences and charges. Compare in replay opens this date in Historical Replay: use the same data, costs and coverage for both strategies, and inspect missed winners as well as avoided losses. No comparison runs automatically.</p>
+  } @else { <p>Outcome attribution is unavailable for this report. Existing trade and execution evidence remains below.</p> }
+</section>
