@@ -34,7 +34,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     private readonly HistoricalReplayBarProjection barProjection = new(spotSymbol, settings.CandleIntervalSeconds, false);
     private HistoricalReplayFrame? invalidationFrame;
-    private (DateTimeOffset Decision, Direction? Direction) invalidationPosition;
+    private (DateTimeOffset Decision, Direction? Direction, HistoricalReplayQuote? Underlying) invalidationPosition;
     private UnderlyingTrendInvalidationResult? invalidationResult;
     public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v12/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
@@ -223,7 +223,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     private UnderlyingTrendInvalidationResult Invalidation(
         HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
     {
-        var key = (position.DecisionAtUtc, position.UnderlyingDirection);
+        var key = (position.DecisionAtUtc, position.UnderlyingDirection, frame.Market.LatestQuotes.GetValueOrDefault(spotSymbol));
         if (ReferenceEquals(invalidationFrame, frame.Market) && invalidationPosition == key && invalidationResult is not null)
             return invalidationResult;
         invalidationFrame = frame.Market;

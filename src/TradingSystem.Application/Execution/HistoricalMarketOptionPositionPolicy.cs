@@ -27,7 +27,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private BankNiftyTrailState bankTrail = new();
     private readonly HistoricalReplayBarProjection barProjection = new(underlyingSymbol, settings.CandleIntervalSeconds, true);
     private HistoricalReplayFrame? invalidationFrame;
-    private (DateTimeOffset Entry, Direction? Direction) invalidationPosition;
+    private (DateTimeOffset Entry, Direction? Direction, HistoricalReplayQuote? Underlying) invalidationPosition;
     private UnderlyingTrendInvalidationResult? invalidationResult;
     public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
@@ -181,7 +181,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private UnderlyingTrendInvalidationResult Invalidation(HistoricalReplayPortfolioFrame frame,
         HistoricalReplayOpenPosition position)
     {
-        var key = (position.EntryAtUtc, position.UnderlyingDirection);
+        var key = (position.EntryAtUtc, position.UnderlyingDirection, frame.Market.LatestQuotes.GetValueOrDefault(underlyingSymbol));
         if (ReferenceEquals(invalidationFrame, frame.Market) && invalidationPosition == key && invalidationResult is not null)
             return invalidationResult;
         invalidationFrame = frame.Market;

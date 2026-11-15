@@ -42,5 +42,5 @@
       "removed": false
     }
   ],
-  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability."
+  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability. Reused unchanged ledger evidence for the replay-only cache freshness correction; no live entry path is removed."
 }
