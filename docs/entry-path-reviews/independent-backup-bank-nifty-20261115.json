@@ -1,0 +1,14 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-15T06:38:30.0538702+00:00",
+  "market": "bank-nifty",
+  "from": "2026-11-12",
+  "to": "2026-11-13",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 15,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 15,
+  "sessions": [{"Date":"2026-11-12","RegularEntries":10},{"Date":"2026-11-13","RegularEntries":5}],
+  "strategyBreakdown": [{"strategy":"Bank index directional breakout","count":15,"removed":false}],
+  "limitation": "Reused unchanged ledger evidence from upstox-five-gap-bank-nifty-20261115.json. Independent backup and research-only candle repairs change replay evidence availability, not live entry rules or orders. No path removed. This ledger review does not establish fill parity or profitability; strict exclusion and modeled-source tests are separate."
+}

@@ -1,0 +1,19 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-15T06:38:30.1504289+00:00",
+  "market": "sensex",
+  "from": "2026-11-12",
+  "to": "2026-11-13",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 10,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 10,
+  "sessions": [{"Date":"2026-11-12","RegularEntries":6},{"Date":"2026-11-13","RegularEntries":4}],
+  "strategyBreakdown": [
+    {"strategy":"Sensex directional pullback participation","count":5,"removed":false},
+    {"strategy":"Sensex persistent directional thesis","count":3,"removed":false},
+    {"strategy":"Sensex controlled early pullback","count":1,"removed":false},
+    {"strategy":"Sensex range-edge rejection","count":1,"removed":false}
+  ],
+  "limitation": "Reused unchanged ledger evidence from upstox-five-gap-sensex-20261115.json. Independent backup and research-only candle repairs change replay evidence availability, not live entry rules or orders. No path removed. This ledger review does not establish fill parity or profitability; strict exclusion and modeled-source tests are separate."
+}
