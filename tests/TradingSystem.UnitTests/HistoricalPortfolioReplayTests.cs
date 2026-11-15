@@ -1,4 +1,5 @@
 using TradingSystem.Application.Execution;
+using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.UnitTests;
 
@@ -244,6 +245,45 @@ public sealed class HistoricalPortfolioReplayTests
         Assert.Equal(Start.AddSeconds(78), fill.ExitAtUtc);
         Assert.Equal(101m, fill.EntryPrice);
         Assert.Equal(118m, fill.ExitPrice);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BackupObservationsAndRecorderRestartDoNotReplenishUnchangedLiquidity(bool restarted)
+    {
+        var quotes = Enumerable.Range(0, 80).Select(second => new HistoricalReplayQuote("NIFTY22000CE", Start.AddSeconds(second), 100m)
+        {
+            Source = "UpstoxSnapshot", SourceAtUtc = Start.AddSeconds(second),
+            BackupLiquidityAtUtc = Start.AddSeconds(restarted ? second : second >= 70 ? 70 : 0),
+            BidPrice = 100m, OfferPrice = 100m, BidQuantity = second >= 70 ? 100 : 60, OfferQuantity = 100
+        }).ToArray();
+        var slice = new HistoricalReplayArchiveSlice(new(new(2026, 10, 29), "NIFTY", [Bar(0)], quotes,
+            Start, Start.AddSeconds(80)), 100m, null, [], [])
+        {
+            BackupSamples = quotes.Length,
+            RecordedContractUniverse = new("test", [new("NIFTY", "NSE", "FNO", "1", "NIFTY22000CE",
+                InstrumentType.CallOption, new(2026, 11, 3), 22000, 1, .05m)])
+        };
+        var result = HistoricalGapAwareReplay.RunPair(slice, () => new BackupPartialPolicy(), execution: Parameters);
+        var fills = Assert.Single(result.Assisted!.Windows).Fills;
+        Assert.Equal(2, fills.Count);
+        Assert.Equal(Start.AddSeconds(62), fills[0].Fill.ExitAtUtc);
+        Assert.Equal(25, fills[0].Fill.Quantity);
+        Assert.Equal(Start.AddSeconds(70), fills[1].Fill.ExitAtUtc);
+        Assert.Equal(50, fills[1].Fill.Quantity);
+    }
+
+    private sealed class BackupPartialPolicy : IHistoricalReplayPortfolioPolicy
+    {
+        public string CodeVersion => "backup-size-test";
+        public IReadOnlyList<HistoricalReplayCandidate> Evaluate(HistoricalReplayPortfolioFrame frame) =>
+            frame.Market.AvailableAtUtc == Start.AddMinutes(1)
+                ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, CodeVersion, .8m, 75) { LotSize = 1 }] : [];
+        public IReadOnlyList<HistoricalReplayPartialExit> EvaluatePartialExits(HistoricalReplayPortfolioFrame frame) =>
+            frame.OpenPosition?.Quantity == 75 ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, 25, "partial")] : [];
+        public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame) =>
+            frame.OpenPosition?.Quantity == 50 ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, "exit")] : [];
     }
 
     [Fact]

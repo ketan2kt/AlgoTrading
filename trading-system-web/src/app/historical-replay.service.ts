@@ -141,6 +141,8 @@ export interface GapReplayJob {
 export interface HistoricalGapComparisonReport {
   date:string;baselineBuildId:string;proposalBuildId:string;
   markets:{market:string;dataFingerprint?:string|null;gaps:{startUtc:string;endUtc:string;reason:string}[];limitations:string[];
+    upstoxComparison?:{gaps:{startUtc:string;endUtc:string;reason:string}[];limitations:string[];
+      windows:HistoricalGapComparisonReport['markets'][number]['windows']}|null;
     windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;baselineTrades:number;proposalTrades:number;
       baselineNet:number;proposalNet:number;baselineCosts:number;proposalCosts:number;netDifference:number;
       baselineRealizedDrawdown:number;proposalRealizedDrawdown:number;

@@ -34,8 +34,40 @@ public sealed class HistoricalPolicyModule
                 ?? throw new ArgumentException("An as-of frame is required.", nameof(frameJson));
             previousFrameJson = frameJson;
         }
-        var frame = previousFrame!;
-        return operation switch
+        return Dispatch(operation, previousFrame!, subjectJson);
+    }
+
+    // Optional extension of protocol 1. The host sends the exact completed-bar
+    // snapshot once per candle change, not inside every quote/position frame.
+    // Older frozen modules continue to use Query with the complete JSON frame.
+    public string QueryWithBars(string operation, string frameJson, string? subjectJson, string barsJson)
+    {
+        if (!ReferenceEquals(compactBarsJson, barsJson))
+        {
+            compactBars = JsonSerializer.Deserialize<HistoricalReplayBar[]>(barsJson)
+                ?? throw new ArgumentException("Completed bars are required.", nameof(barsJson));
+            compactBarsEnd = compactBars.Select(bar => bar.AvailableAtUtc).DefaultIfEmpty(DateTimeOffset.MinValue).Max();
+            compactBarsJson = barsJson;
+        }
+        if (!ReferenceEquals(compactFrameJson, frameJson) || !ReferenceEquals(compactFrame?.Market.CompletedBars, compactBars))
+        {
+            var input = JsonSerializer.Deserialize<HistoricalReplayPortfolioFrame>(frameJson)
+                ?? throw new ArgumentException("An as-of frame is required.", nameof(frameJson));
+            if (input.Market.CompletedBars.Count != 0 || compactBarsEnd > input.Market.AvailableAtUtc)
+                throw new ArgumentException("Compact frames require only as-of completed bars.", nameof(frameJson));
+            compactFrame = input with { Market = input.Market with { CompletedBars = compactBars } };
+            compactFrameJson = frameJson;
+        }
+        return Dispatch(operation, compactFrame!, subjectJson);
+    }
+
+    private string? compactBarsJson;
+    private HistoricalReplayBar[] compactBars = [];
+    private DateTimeOffset compactBarsEnd;
+    private string? compactFrameJson;
+    private HistoricalReplayPortfolioFrame? compactFrame;
+
+    private string Dispatch(string operation, HistoricalReplayPortfolioFrame frame, string? subjectJson) => operation switch
         {
             "entries" => JsonSerializer.Serialize(policy.Evaluate(frame)),
             "stops" => JsonSerializer.Serialize(policy.EvaluateStopUpdates(frame)),
@@ -48,7 +80,6 @@ public sealed class HistoricalPolicyModule
             "admit" => Admit(frame, subjectJson),
             _ => throw new ArgumentException("Unknown replay policy operation.", nameof(operation))
         };
-    }
 
     private string? previousFrameJson;
     private HistoricalReplayPortfolioFrame? previousFrame;

@@ -12,7 +12,11 @@ public sealed class HistoricalQuoteArchiveContractTests : IDisposable
     {
         using var archive = Archive();
         var observation = Observation();
-        Assert.True(archive.TryRecordBackup(observation with { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = At }));
+        Assert.True(archive.TryRecordBackup(observation with { Source = HistoricalQuoteObservation.UpstoxSnapshot,
+            BrokerObservedAtUtc = At, BackupLiquidityAtUtc = At.AddSeconds(-5) }));
+        archive.SetBackupCoverage(Date, new Dictionary<string, HistoricalBackupMarketCoverage>
+            { ["NIFTY"] = new(2, 1, ["NIFTYMISSINGPE"]) });
+        archive.SetBackupFailure(Date, "SENSEX", "HTTP 429: broker retry delay");
         Assert.False(archive.TryRecordBackup(observation with { Id = Guid.NewGuid(), Source = HistoricalQuoteObservation.UpstoxSnapshot,
             BrokerObservedAtUtc = At.AddSeconds(1) })); // future timestamps never enter the archive
         await archive.FlushBatchAsync(CancellationToken.None);
@@ -23,6 +27,11 @@ public sealed class HistoricalQuoteArchiveContractTests : IDisposable
         Assert.Equal(1, modeled.BackupSamples);
         Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, Assert.Single(modeled.Quotes).Source);
         Assert.Null(modeled.Quotes[0].DepthSourceAtUtc);
+        Assert.Equal(At.AddSeconds(-5), modeled.Quotes[0].BackupLiquidityAtUtc);
+        var published = System.Text.Json.JsonSerializer.Deserialize<HistoricalQuoteArchiveHealth>(
+            System.Text.Json.JsonSerializer.Serialize(archive.ReadHealth(Date)))!;
+        Assert.Equal("NIFTYMISSINGPE", Assert.Single(published.UpstoxCoverage["NIFTY"].MissingContracts));
+        Assert.Equal("HTTP 429: broker retry delay", published.UpstoxFailures["SENSEX"]);
         Assert.Equal(At, archive.ReadHealth(Date).LastUpstoxOptionWrittenAtByMarket["NIFTY"]);
         Assert.Empty(archive.ReadHealth(Date).LastOptionWrittenAtByMarket);
         Assert.Empty((await archive.ReadAsync(Date, CancellationToken.None)).Observations);

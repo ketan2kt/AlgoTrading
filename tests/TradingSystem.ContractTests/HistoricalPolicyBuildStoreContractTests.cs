@@ -7,9 +7,110 @@ using TradingSystem.Infrastructure.Execution;
 
 namespace TradingSystem.ContractTests;
 
-public sealed class HistoricalPolicyBuildStoreContractTests : IDisposable
+public sealed class HistoricalPolicyBuildStoreContractTests(Xunit.Abstractions.ITestOutputHelper output) : IDisposable
 {
     private readonly string directory = Directory.CreateTempSubdirectory("sarthi-policy-build-").FullName;
+
+    [Fact]
+    public void LegacyModuleWithoutCompactExtensionStillReceivesCompleteFrames()
+    {
+        var legacy = new LegacyModule();
+        var adapter = typeof(FileHistoricalPolicyBuildStore).GetNestedType("JsonPolicy", System.Reflection.BindingFlags.NonPublic)!;
+        var policy = (IHistoricalReplayPortfolioPolicy)Activator.CreateInstance(adapter, typeof(LegacyModule), legacy)!;
+        var at = new DateTimeOffset(2026, 11, 16, 10, 0, 0, TimeSpan.FromHours(5.5));
+        var frame = new HistoricalReplayPortfolioFrame(new(at,
+            new HistoricalReplayBar[] { new(at.AddMinutes(-1), 60, 100, 101, 99, 100) { Symbol = "NIFTY" } },
+            new Dictionary<string, HistoricalReplayQuote>()), null, []);
+        Assert.Empty(policy.Evaluate(frame));
+        Assert.Empty(policy.EvaluateStopUpdates(frame));
+        Assert.Equal(2, legacy.Calls);
+    }
+
+    public sealed class LegacyModule
+    {
+        public int Calls { get; private set; }
+        public string Query(string operation, string json, string? subject)
+        {
+            Calls++;
+            Assert.Single(JsonSerializer.Deserialize<HistoricalReplayPortfolioFrame>(json)!.Market.CompletedBars);
+            return "[]";
+        }
+    }
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
+    public void CompactPolicyTransportMatchesFullFramesAndRejectsFutureBars(string market)
+    {
+        var start = new DateTimeOffset(2026, 11, 16, 9, 15, 0, TimeSpan.FromHours(5.5));
+        var at = start.AddMinutes(350);
+        var symbol = market + "CE";
+        var slice = new HistoricalReplayArchiveSlice(new(new(2026, 11, 16), market, [], [], start, start.AddMinutes(375)),
+            55000, market + "FUT", [new(Guid.NewGuid(), symbol, InstrumentType.CallOption, new(2026, 11, 23), 55000, 30, .05m)], [])
+            { UnderlyingInstrumentId = Guid.NewGuid() };
+        HistoricalPolicyModule Create() => new(JsonSerializer.Serialize(Configuration()), JsonSerializer.Serialize(slice));
+        var bars = Enumerable.Range(-375, 725).Select(i => new HistoricalReplayBar(start.AddMinutes(i), 60,
+            55000 + i, 55002 + i, 54999 + i, 55001 + i) { Symbol = market }).ToArray();
+        var position = new HistoricalReplayOpenPosition(symbol, "Index momentum breakout", start.AddMinutes(320),
+            100, 107, 150, 90, 120) { UnderlyingDirection = Direction.Buy, DecisionAtUtc = start.AddMinutes(320),
+                InitialStopPrice = 90, InitialTargetPrice = 120, OriginalQuantity = 150, LotSize = 30,
+                SignalConfidence = .8m, SignalRegime = MarketRegime.StrongBullishTrend, HighestDecisionPrice = 107 };
+        var frames = Enumerable.Range(0, 1200).Select(i =>
+        {
+            var now = at.AddMilliseconds(i * 100);
+            return new HistoricalReplayPortfolioFrame(new(now, bars, new Dictionary<string, HistoricalReplayQuote>
+                { [market] = new(market, now, 55350), [symbol] = new(symbol, now, 107) }), position, [])
+                { OpenPositions = [position] };
+        }).ToArray();
+        string[] Run(bool compact, out double ms, out long bytes)
+        {
+            var module = Create();
+            var results = new List<string>();
+            var barJson = JsonSerializer.Serialize(bars);
+            var positionJson = JsonSerializer.Serialize(position);
+            // Use the actual host encoder in both arms. The legacy arm already
+            // caches encoded bars; do not benchmark against an artificial slow path.
+            var converterType = typeof(FileHistoricalPolicyBuildStore).GetNestedType("CompletedBarFrameConverter",
+                System.Reflection.BindingFlags.NonPublic)!;
+            var converter = (System.Text.Json.Serialization.JsonConverter)Activator.CreateInstance(converterType, new object[] { compact })!;
+            var options = new JsonSerializerOptions { Converters = { converter } };
+            var warm = JsonSerializer.Serialize(frames[0], options);
+            if (compact) module.QueryWithBars("stops", warm, positionJson, barJson);
+            else module.Query("stops", warm, positionJson);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            foreach (var frame in frames)
+            {
+                var json = JsonSerializer.Serialize(frame, options);
+                foreach (var operation in new[] { "stops", "exits", "partials", "addons", "extend" })
+                    results.Add(compact ? module.QueryWithBars(operation, json, positionJson, barJson)
+                        : module.Query(operation, json, positionJson));
+            }
+            ms = watch.Elapsed.TotalMilliseconds;
+            bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            return results.ToArray();
+        }
+        var full = Run(false, out var fullMs, out var fullBytes);
+        var compact = Run(true, out var compactMs, out var compactBytes);
+        Assert.Equal(full, compact);
+        Assert.True(compactBytes < fullBytes / 2);
+        output.WriteLine($"{market}: 1,200 real policy frames / 6,000 queries: full JSON {fullMs:F0} ms / {fullBytes / 1_000_000d:F1} MB; compact {compactMs:F0} ms / {compactBytes / 1_000_000d:F1} MB; identical decisions.");
+
+        var test = Create();
+        var input = JsonSerializer.Serialize(frames[0] with { Market = frames[0].Market with { CompletedBars = Array.Empty<HistoricalReplayBar>() } });
+        Assert.Throws<ArgumentException>(() => test.QueryWithBars("stops", input, null,
+            JsonSerializer.Serialize(bars.Append(new HistoricalReplayBar(at, 60, 100, 101, 99, 100) { Symbol = market }))));
+        Assert.Throws<ArgumentException>(() => test.QueryWithBars("stops", JsonSerializer.Serialize(frames[0]), null, JsonSerializer.Serialize(bars)));
+        // The same quote frame must observe a different completed-bar snapshot,
+        // and legacy callers still work on the same module without state leakage.
+        var reduced = bars.SkipLast(10).ToArray();
+        Assert.Equal(Create().Query("stops", JsonSerializer.Serialize(frames[0] with
+            { Market = frames[0].Market with { CompletedBars = reduced } }), null),
+            test.QueryWithBars("stops", input, null, JsonSerializer.Serialize(reduced)));
+        Assert.Equal(Create().Query("stops", JsonSerializer.Serialize(frames[0]), null),
+            test.Query("stops", JsonSerializer.Serialize(frames[0]), null));
+    }
 
     [Fact]
     public void ArchivedConstructorRejectsFutureSessionDataRatherThanExposeItToStrategyCode()

@@ -17,6 +17,162 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
     [InlineData("NIFTY")]
     [InlineData("SENSEX")]
     [InlineData("BANKNIFTY")]
+    public void CombinedSourceReplayReadsArchiveOnceAndMatchesSeparateRuns(string market)
+    {
+        var quotes = Enumerable.Range(0, 121).Select(second =>
+        {
+            var quote = Book(Start.AddSeconds(second), second >= 70 ? 120 : 100) with { Symbol = market + "CE" };
+            return second is >= 45 and < 90 ? quote with
+                { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null } : quote;
+        }).ToArray();
+        var path = new CountedPath(quotes);
+        var slice = Slice(market, path, Start.AddMinutes(2)) with { BackupSamples = 45,
+            MonitoredDepthGaps = [new(Start.AddSeconds(45), Start.AddSeconds(90), "primary outage")] };
+        IHistoricalReplayPortfolioPolicy Create() => new BackupPolicy(market + "CE");
+        var primary = HistoricalGapAwareReplay.Run(slice, Create);
+        var backup = HistoricalGapAwareReplay.RunWithBackup(slice, Create);
+        path.Reads = 0;
+        var progress = new List<HistoricalReplayTimingSample>();
+        var combined = HistoricalGapAwareReplay.RunIncludingBackup(slice, Create, timing: new(progress.Add));
+        Assert.Equal(1, path.Reads);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(primary),
+            System.Text.Json.JsonSerializer.Serialize(combined with { UpstoxScenario = null }));
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(backup), System.Text.Json.JsonSerializer.Serialize(combined.UpstoxScenario));
+        Assert.Contains(progress, item => item.Stage == "upstox-assisted-start");
+        Assert.Contains(progress, item => item.Stage == "upstox-assisted-complete");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => HistoricalGapAwareReplay.RunIncludingBackup(slice, Create, cancellationToken: cancelled.Token));
+    }
+
+    private sealed class CountedPath(IReadOnlyList<HistoricalReplayQuote> rows) : IHistoricalChronologicalQuotePath
+    {
+        public int Reads { get; set; }
+        public int Count => rows.Count;
+        public HistoricalReplayQuote this[int index] => rows[index];
+        public IEnumerator<HistoricalReplayQuote> GetEnumerator() { Reads++; return rows.GetEnumerator(); }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Fact]
+    public void LongPrimaryDepthOutageDoesNotCountStaleRowsAgainstFreshReplayMemoryBudget()
+    {
+        var quotes = Enumerable.Range(0, 121).Select(second => Book(Start.AddSeconds(second), second >= 70 ? 120 : 100)
+            with { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null }).ToArray();
+        var path = new StalePrefixPath(quotes);
+        var slice = Slice("NIFTY", path, Start.AddMinutes(2)) with { BackupSamples = quotes.Length };
+        var report = HistoricalGapAwareReplay.RunIncludingBackup(slice, () => new BackupPolicy("NIFTYCE"));
+        Assert.Equal(1, path.Reads);
+        Assert.Equal(0, report.FreshBookSamples);
+        Assert.True(Assert.Single(report.UpstoxScenario!.Windows).ModeledNetPnl > 0);
+    }
+
+    private sealed class StalePrefixPath(IReadOnlyList<HistoricalReplayQuote> fresh) : IHistoricalChronologicalQuotePath
+    {
+        private const int StaleCount = 2_000_001;
+        public int Reads { get; private set; }
+        public int Count => StaleCount + fresh.Count;
+        public HistoricalReplayQuote this[int index] => throw new NotSupportedException();
+        public IEnumerator<HistoricalReplayQuote> GetEnumerator()
+        {
+            Reads++;
+            // Price is current but depth is stale: this is the harder case.
+            var stale = Book(Start, 100) with { DepthSourceAtUtc = Start.AddSeconds(-31) };
+            for (var index = 0; index < StaleCount; index++) yield return stale;
+            foreach (var quote in fresh) yield return quote;
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
+    public async Task FullDayDualSourceArchiveHasIdenticalResultsWithOneDecode(string market)
+    {
+        var directory = Directory.CreateTempSubdirectory("replay-dual-source-load-").FullName;
+        try
+        {
+            var symbols = Enumerable.Range(0, 16).Select(i => market + (i == 0 ? "CE" : $"CE{i:D2}"))
+                .Order(StringComparer.Ordinal).ToArray();
+            async IAsyncEnumerable<HistoricalReplayQuote> Rows()
+            {
+                for (var second = 0; second <= 22500; second += 3)
+                    foreach (var symbol in symbols)
+                    {
+                        var quote = Book(Start.AddSeconds(second), second >= 70 ? 120m : 100m) with { Symbol = symbol };
+                        yield return second % 1800 is >= 45 and < 90 ? quote with
+                            { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null } : quote;
+                    }
+                await Task.CompletedTask;
+            }
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var path = await FileHistoricalReplayQuotePath.BuildOrderedAsync(directory, Rows(), CancellationToken.None);
+            var preparationMs = clock.Elapsed.TotalMilliseconds;
+            var counted = new CountedPath(path);
+            var slice = Slice(market, counted, Start.AddMinutes(375)) with { BackupSamples = 13 * 15 * symbols.Length };
+            slice = slice with { RecordedContractUniverse = new("test", symbols.Select(symbol =>
+                slice.RecordedContractUniverse!.Instruments[0] with { TradingSymbol = symbol }).ToArray()) };
+            IHistoricalReplayPortfolioPolicy Create() => new BackupPolicy(market + "CE");
+            clock.Restart();
+            var primary = HistoricalGapAwareReplay.Run(slice, Create);
+            var assisted = HistoricalGapAwareReplay.RunWithBackup(slice, Create);
+            var separateMs = clock.Elapsed.TotalMilliseconds;
+            Assert.Equal(2, counted.Reads);
+            counted.Reads = 0;
+            var stages = new List<HistoricalReplayTimingSample>();
+            clock.Restart();
+            var combined = HistoricalGapAwareReplay.RunIncludingBackup(slice, Create, timing: new(stages.Add));
+            var combinedMs = clock.Elapsed.TotalMilliseconds;
+            Assert.Equal(1, counted.Reads);
+            Assert.Equal(System.Text.Json.JsonSerializer.Serialize(primary),
+                System.Text.Json.JsonSerializer.Serialize(combined with { UpstoxScenario = null }));
+            Assert.Equal(System.Text.Json.JsonSerializer.Serialize(assisted), System.Text.Json.JsonSerializer.Serialize(combined.UpstoxScenario));
+            Assert.True(Assert.Single(combined.UpstoxScenario!.Windows).ModeledNetPnl > 0);
+            Assert.Equal(16, combined.ContractsWithFreshBooks);
+            output.WriteLine($"{market}: {path.Count:N0} persisted quotes / full 375 minutes; archive preparation {preparationMs:F0} ms; separate replay {separateMs:F0} ms; shared replay {combinedMs:F0} ms; fills, costs and gaps identical.");
+            output.WriteLine(stages.Last().Totals);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
+    public async Task SimultaneousRecoveryKeepsBothSourcesAndPrefersPrimary(string market)
+    {
+        var directory = Directory.CreateTempSubdirectory("replay-source-collision-").FullName;
+        try
+        {
+            // A contradictory backup mark must not replace the fresh Groww
+            // observation or make freezing the complete session fail.
+            var quotes = Enumerable.Range(0, 121).Select(second =>
+                Book(Start.AddSeconds(second), second >= 70 ? 120 : 100) with { Symbol = market + "CE" }).ToArray();
+            async IAsyncEnumerable<HistoricalReplayQuote> Rows()
+            {
+                foreach (var quote in quotes)
+                {
+                    yield return quote;
+                    yield return quote with { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null,
+                        LastPrice = 10, BidPrice = 9, OfferPrice = 11 };
+                }
+                await Task.CompletedTask;
+            }
+            var path = await FileHistoricalReplayQuotePath.BuildOrderedAsync(directory, Rows(), CancellationToken.None);
+            Assert.Equal(242, path.Count);
+            var slice = Slice(market, path, Start.AddMinutes(2)) with { BackupSamples = 121 };
+            var combined = HistoricalGapAwareReplay.RunIncludingBackup(slice, () => new BackupPolicy(market + "CE"));
+            Assert.Null(combined.UpstoxScenario); // All backup observations are redundant.
+            Assert.True(combined.VerifiedNetPnl > 0);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
     public void UpstoxBridgesModeledOutageWithoutChangingVerifiedPnl(string market)
     {
         var end = Start.AddMinutes(2);
@@ -43,6 +199,15 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         var thin = slice with { Session = session with { Quotes = quotes.Where(q =>
             q.Source != HistoricalQuoteObservation.UpstoxSnapshot || q.AvailableAtUtc == Start.AddSeconds(60)).ToArray() } };
         Assert.NotEmpty(HistoricalGapAwareReplay.RunWithBackup(thin, Create)!.RemainingGaps);
+
+        // A completely missing mapped contract cannot be hidden by the
+        // healthy backup for another contract in the same index.
+        var incomplete = slice with { RecordedContractUniverse = slice.RecordedContractUniverse! with
+        {
+            Instruments = [.. slice.RecordedContractUniverse!.Instruments,
+                slice.RecordedContractUniverse.Instruments[0] with { TradingSymbol = market + "PE", Type = InstrumentType.PutOption }]
+        } };
+        Assert.NotEmpty(HistoricalGapAwareReplay.RunWithBackup(incomplete, Create)!.RemainingGaps);
     }
 
     [Fact]
@@ -214,17 +379,22 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         Assert.Equal(7, window.NetDifference);
     }
 
-    [Fact]
-    public async Task ComparisonResumesBaselineOnlyWhenInputAndPolicyFingerprintsStillMatch()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ComparisonResumesBaselineOnlyWhenInputAndPolicyFingerprintsStillMatch(bool backup)
     {
         var contracts = new[] { InstrumentType.CallOption, InstrumentType.PutOption }.Select((type, index) =>
             new NiftyOptionContractCandidate(Guid.Empty, index == 0 ? "NIFTYCE" : "NIFTYPE", type,
                 Date.AddDays(7), 100, 1, .05m)).ToArray();
         var quotes = Enumerable.Range(0, 121).Select(second =>
-            Book(Start.AddSeconds(second), second is >= 70 and <= 75 ? 120 : 100)).ToArray();
+            Book(Start.AddSeconds(second), second is >= 70 and <= 75 ? 120 : 100)).Select(quote =>
+                backup && quote.AvailableAtUtc >= Start.AddSeconds(45) && quote.AvailableAtUtc < Start.AddSeconds(90)
+                    ? quote with { Source = HistoricalQuoteObservation.UpstoxSnapshot, DepthSourceAtUtc = null } : quote).ToArray();
         var initial = Slice("NIFTY", quotes, Start.AddMinutes(2)) with
         {
             GapAwarePolicyInputsReady = true,
+            BackupSamples = backup ? 45 : 0,
             OptionContracts = contracts,
             RecordedContractUniverse = new(RegularOptionContractSelector.Version, contracts.Select((contract, index) =>
                 new HistoricalFeedInstrument("NIFTY", "NSE", "FNO", index.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -252,11 +422,16 @@ public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
         await Assert.ThrowsAsync<OperationCanceledException>(() => service.CompareAsync(request, "nifty", Interrupt, default, Read, Save));
         Assert.NotNull(checkpoint);
         Assert.Equal(["base"], builds.Created);
+        Assert.Equal(backup, checkpoint.AssistedResult is not null);
         var resumed = await service.CompareAsync(request, "nifty", Continue, default, Read, Save);
         Assert.Equal(["base", "proposal"], builds.Created);
-        var window = Assert.Single(Assert.Single(resumed.Markets).Windows);
+        var market = Assert.Single(resumed.Markets);
+        var window = Assert.Single(backup ? market.UpstoxComparison!.Windows : market.Windows);
         Assert.Equal(1, window.BaselineTrades);
         Assert.Equal(window.BaselinePositions, window.ProposalPositions);
+        Assert.Equal(0m, window.NetDifference);
+        Assert.True(window.BaselineCosts > 0);
+        if (backup) Assert.DoesNotContain(market.Windows, value => value.BaselineTrades > 0);
 
         builds.Created.Clear();
         archive.Slice = initial with { Session = initial.Session with { Quotes = quotes.Select(quote => quote with { BidQuantity = 120 }).ToArray() } };

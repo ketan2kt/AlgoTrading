@@ -90,6 +90,21 @@
                       }</ul></details>
                     }
                     @if(market.dataFingerprint){<small>Input fingerprint: {{market.dataFingerprint}}</small>}
+                    @if(market.upstoxComparison;as assisted){
+                      <details><summary>Upstox-assisted strategy comparison · modeled only · {{assisted.gaps.length}} gaps</summary>
+                        <p>Both strategies use the same backup observations. These results do not enter verified P&amp;L or paper matching.</p>
+                        @for(note of assisted.limitations;track $index){<small>{{note}} </small>}
+                        <div class="daily-analysis-table"><table><thead><tr><th>Common window · IST</th><th>State</th><th>Trades · base / proposal</th><th>Baseline net</th><th>Proposal net</th><th>Difference</th><th>Costs · base / proposal</th><th>Drawdown · base / proposal</th></tr></thead><tbody>
+                          @for(window of assisted.windows;track window.startUtc){
+                            <tr><td>{{window.startUtc|date:'HH:mm:ss':'+0530'}} – {{window.endUtc|date:'HH:mm:ss':'+0530'}}</td><td>{{window.independentFlatRestart?'Separate flat start':'From open'}}</td>
+                              <td>{{window.baselineTrades}} / {{window.proposalTrades}}</td><td>₹{{window.baselineNet|number:'1.2-2'}}</td><td>₹{{window.proposalNet|number:'1.2-2'}}</td>
+                              <td [class.good]="window.netDifference>0" [class.bad]="window.netDifference<0">₹{{window.netDifference|number:'1.2-2'}}</td>
+                              <td>{{window.baselineCosts|number:'1.2-2'}} / {{window.proposalCosts|number:'1.2-2'}}</td><td>{{window.baselineRealizedDrawdown|number:'1.2-2'}} / {{window.proposalRealizedDrawdown|number:'1.2-2'}}</td></tr>
+                          }
+                        </tbody></table></div>
+                        @for(gap of assisted.gaps;track $index){<p>{{gap.startUtc|date:'HH:mm:ss':'+0530'}} – {{gap.endUtc|date:'HH:mm:ss':'+0530'}} · {{gap.reason}}</p>}
+                      </details>
+                    }
                   }
                   <small>Baseline code: {{result.baselineBuildId}} · Proposal code: {{result.proposalBuildId}}</small>
                 </section>

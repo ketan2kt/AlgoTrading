@@ -64,7 +64,7 @@ public sealed class UpstoxReplayBackupTests
     }
 
     [Fact]
-    public async Task CaptureRequestsOnlyMissingPlannedContractsAndPersistsASeparateSource()
+    public async Task CaptureWarmsAllPlannedContractsAndPersistsOnlyMissingPrimary()
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var healthy = Instrument with { ExchangeToken = "56789", TradingSymbol = "SENSEXALTCE" };
@@ -83,7 +83,7 @@ public sealed class UpstoxReplayBackupTests
         var observation = await recorded.Task.WaitAsync(cancellation.Token);
         await cancellation.CancelAsync();
         await task;
-        Assert.Equal("BSE_FO|12345", handler.RequestedKey);
+        Assert.Equal("BSE_FO|12345,BSE_FO|56789", handler.RequestedKey);
         Assert.False(handler.CatalogHadAuthorization);
         Assert.Equal(Instrument.TradingSymbol, observation.Request.TradingSymbol);
         Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, observation.Source);

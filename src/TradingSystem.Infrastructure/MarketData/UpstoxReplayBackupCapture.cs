@@ -26,55 +26,132 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         DateTimeOffset open, DateTimeOffset close, CancellationToken token)
     {
         if (!Enabled) return;
+        var date = DateOnly.FromDateTime(open.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        if (plan.Count > 500 || plan.Any(item => item.Market is not ("NIFTY" or "SENSEX" or "BANKNIFTY")))
+            throw new InvalidDataException("Backup plan exceeds the supported three-market budget.");
         Dictionary<string, HistoricalFeedInstrument>? mapped = null;
-        var recorded = new Dictionary<string, (decimal Bid, long BidSize, decimal Ask, long AskSize)>(StringComparer.Ordinal);
+        PublishCoverage(new Dictionary<string, HistoricalFeedInstrument>());
         using var client = clients.CreateClient(ClientName);
-        while (!token.IsCancellationRequested && clock.GetUtcNow() < close)
+        while (mapped is null && !token.IsCancellationRequested && clock.GetUtcNow() < close)
         {
             try
             {
-                mapped ??= await LoadPlanAsync(client, plan, token);
-                if (clock.GetUtcNow() < open) await Task.Delay(open - clock.GetUtcNow() > TimeSpan.Zero ? open - clock.GetUtcNow() : TimeSpan.Zero, clock, token);
-                var at = clock.GetUtcNow();
-                if (at >= close) return;
-                var missing = new List<string>();
-                foreach (var pair in mapped)
-                    if (primary.NeedsBackup(pair.Value, at)) missing.Add(pair.Key);
-                    else recorded.Remove(pair.Key);
-                foreach (var batch in missing.Chunk(100))
+                mapped = await LoadPlanAsync(client, plan, token);
+                PublishCoverage(mapped);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+            catch (Exception error)
+            {
+                foreach (var market in plan.Select(item => item.Market).Distinct()) Report(market, "Instrument catalog: " + error.GetType().Name);
+                await Task.Delay(TimeSpan.FromSeconds(15), clock, token);
+            }
+        }
+        if (mapped is null) return;
+        if (clock.GetUtcNow() < open) await Task.Delay(open - clock.GetUtcNow(), clock, token);
+        // Warm, independent per-market capture. At most three requests every
+        // three seconds (1,800/30 minutes), each <=500 keys. No order API calls.
+        // One slow/failed market never serializes the other market's samples.
+        await Task.WhenAll(mapped.GroupBy(pair => pair.Value.Market)
+            .Select(group => CaptureMarketAsync(group.Key, group.ToDictionary(pair => pair.Key, pair => pair.Value))));
+
+        void PublishCoverage(IReadOnlyDictionary<string, HistoricalFeedInstrument> matches) => archive.SetBackupCoverage(date,
+            plan.Where(item => item.Type is InstrumentType.CallOption or InstrumentType.PutOption).GroupBy(item => item.Market)
+                .ToDictionary(group => group.Key, group =>
+                {
+                    var missing = group.Where(item => !matches.ContainsKey(item.Exchange + "_FO|" + item.ExchangeToken))
+                        .Select(item => item.TradingSymbol).Order(StringComparer.Ordinal).ToArray();
+                    return new HistoricalBackupMarketCoverage(group.Count(), group.Count() - missing.Length, missing);
+                }));
+
+        void Report(string market, string reason)
+        {
+            archive.SetBackupFailure(date, market, reason);
+            Unavailable(logger, market + ": " + reason, null);
+        }
+
+        async Task CaptureMarketAsync(string market, Dictionary<string, HistoricalFeedInstrument> instruments)
+        {
+            var recorded = new Dictionary<string, ((decimal Bid, long BidSize, decimal Ask, long AskSize) Depth,
+                DateTimeOffset LiquidityAt, DateTimeOffset ObservedAt)>(StringComparer.Ordinal);
+            // Keep a bounded warm window while primary capture is healthy. On
+            // a silent failure, persist the already observed lead-in as well,
+            // rather than begin recording only after the 30-second detector.
+            var warm = instruments.Keys.ToDictionary(key => key, _ => new Queue<HistoricalQuoteObservation>(), StringComparer.Ordinal);
+            var recovering = new HashSet<string>(StringComparer.Ordinal);
+            var batch = instruments.Keys.Order(StringComparer.Ordinal).ToArray();
+            while (!token.IsCancellationRequested && clock.GetUtcNow() < close)
+            {
+                var delay = TimeSpan.FromSeconds(3);
+                try
                 {
                     var uri = "https://api.upstox.com/v3/market-quote/quotes?instrument_key=" + Uri.EscapeDataString(string.Join(',', batch));
                     using var request = new HttpRequestMessage(HttpMethod.Get, uri);
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential);
                     using var response = await client.SendAsync(request, token);
+                    if ((int)response.StatusCode == 429)
+                    {
+                        delay = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - clock.GetUtcNow()) ?? TimeSpan.FromSeconds(15);
+                        if (delay < TimeSpan.FromSeconds(3)) delay = TimeSpan.FromSeconds(3);
+                        Report(market, "HTTP 429: broker retry delay");
+                        await Task.Delay(delay, clock, token);
+                        continue;
+                    }
+                    if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+                        delay = TimeSpan.FromMinutes(1);
                     response.EnsureSuccessStatusCode();
                     using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(token));
                     var received = clock.GetUtcNow();
                     if (received >= close) return;
                     if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
                         throw new InvalidDataException("Upstox quote response omitted data.");
-                    var requested = batch.ToHashSet(StringComparer.Ordinal);
+                    var accepted = new HashSet<string>(StringComparer.Ordinal);
+                    var refused = false;
                     foreach (var element in data.EnumerateObject())
                     {
-                        if (!TryRead(element.Value, received, out var key, out var quote, out var observedAt) || !requested.Contains(key)) continue;
-                        var instrument = mapped[key];
-                        if (!primary.NeedsBackup(instrument, received)) continue;
+                        if (!TryRead(element.Value, received, out var key, out var quote, out var observedAt) || !instruments.TryGetValue(key, out var instrument)) continue;
+                        accepted.Add(key);
                         var depth = (quote.BidPrice!.Value, quote.BidQuantity!.Value, quote.OfferPrice!.Value, quote.OfferQuantity!.Value);
-                        // A new response timestamp does not mean unchanged displayed liquidity refilled.
-                        if (recorded.TryGetValue(key, out var prior) && prior == depth) continue;
-                        if (archive.TryRecordBackup(new(Guid.NewGuid(), received,
+                        var hasPrior = recorded.TryGetValue(key, out var prior);
+                        if (hasPrior && observedAt <= prior.ObservedAt) continue;
+                        var liquidityAt = hasPrior && prior.Depth == depth ? prior.LiquidityAt : observedAt;
+                        // Keep every fresh observation (including changed LTP on
+                        // an unchanged book), but do not invent replenished size.
+                        warm[key].Enqueue(new(Guid.NewGuid(), received,
                                 new(instrument.Exchange, instrument.Segment, instrument.TradingSymbol), quote)
-                            { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = observedAt })) recorded[key] = depth;
+                            { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = observedAt,
+                                BackupLiquidityAtUtc = liquidityAt });
+                        recorded[key] = (depth, liquidityAt, observedAt);
                     }
+                    foreach (var key in batch)
+                    {
+                        var buffer = warm[key];
+                        if (primary.NeedsBackup(instruments[key], received)) recovering.Add(key);
+                        if (recovering.Contains(key))
+                        {
+                            while (buffer.TryPeek(out var sample))
+                            {
+                                if (!archive.TryRecordBackup(sample)) { refused = true; break; }
+                                buffer.Dequeue();
+                            }
+                            if (buffer.Count == 0) recovering.Remove(key);
+                        }
+                        while (buffer.TryPeek(out var old) && (received - old.ReceivedAtUtc > TimeSpan.FromSeconds(45) || buffer.Count > 20))
+                        {
+                            buffer.Dequeue();
+                            if (recovering.Contains(key)) refused = true;
+                        }
+                    }
+                    archive.SetBackupFailure(date, market, refused ? "Backup archive rejected observations" :
+                        accepted.Count != batch.Length ? "Fresh quotes missing: " + string.Join(", ", batch.Except(accepted).Select(key => instruments[key].TradingSymbol)) : null);
                 }
-                await Task.Delay(TimeSpan.FromSeconds(2), clock, token);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
-            catch (Exception error)
-            {
-                // Do not log broker URLs, exceptions, headers, or response bodies.
-                Unavailable(logger, error is HttpRequestException { StatusCode: { } status } ? "HTTP " + (int)status : error.GetType().Name, null);
-                await Task.Delay(TimeSpan.FromSeconds(15), clock, token);
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch (Exception error)
+                {
+                    Report(market, error is HttpRequestException { StatusCode: { } status } ? "HTTP " + (int)status : error.GetType().Name);
+                    if (delay < TimeSpan.FromSeconds(15)) delay = TimeSpan.FromSeconds(15);
+                }
+                try { await Task.Delay(delay, clock, token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
             }
         }
     }
@@ -109,7 +186,6 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                 !Matches(instrument, row.Underlying, row.Side, strike, lot, expiry)) continue;
             mapped.Add(identity, instrument);
         }
-        if (mapped.Count == 0) throw new InvalidDataException("No eligible Upstox option contracts matched.");
         return mapped;
     }
 

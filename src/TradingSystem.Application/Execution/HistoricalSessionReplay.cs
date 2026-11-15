@@ -19,6 +19,7 @@ public sealed record HistoricalReplayQuote(string Symbol, DateTimeOffset Availab
     public decimal? OpenInterest { get; init; }
     public DateTimeOffset? SourceAtUtc { get; init; }
     public DateTimeOffset? DepthSourceAtUtc { get; init; }
+    public DateTimeOffset? BackupLiquidityAtUtc { get; init; }
 
     public bool HasExecutableBook() => BidPrice is > 0m && OfferPrice is > 0m && BidPrice <= OfferPrice;
     // A received empty book explicitly records unavailable liquidity. It is

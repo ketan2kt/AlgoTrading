@@ -10,8 +10,10 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
     private static readonly NiftyOptionContractCandidate Contract = new(Guid.Empty,
         Symbol, InstrumentType.CallOption, new DateOnly(2026, 11, 24), 55000m, 30, .05m);
 
-    [Fact]
-    public void RecordedBankTrailUsesLaterBidsAndLeavesExistingStopAuthoritative()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RecordedBankTrailUsesLaterBidsAndLeavesExistingStopAuthoritative(bool backup)
     {
         var policy = Policy();
         var position = Position();
@@ -22,7 +24,8 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
             return new(new(at, [], new Dictionary<string, HistoricalReplayQuote>
             {
                 [Symbol] = new(Symbol, at, bid) { BidPrice = bid, OfferPrice = bid + .05m,
-                    BidQuantity = 150, OfferQuantity = 150, SourceAtUtc = at, DepthSourceAtUtc = at },
+                    BidQuantity = 150, OfferQuantity = 150, SourceAtUtc = at, DepthSourceAtUtc = backup ? null : at,
+                    Source = backup ? TradingSystem.Application.Broker.HistoricalQuoteObservation.UpstoxSnapshot : "GrowwFeedSample" },
                 ["BANKNIFTY"] = new("BANKNIFTY", at, spot) { SourceAtUtc = at }
             }), open, []) { OpenPositions = [open] };
         }

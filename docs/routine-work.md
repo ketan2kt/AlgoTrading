@@ -19,12 +19,31 @@ CI retains its full checks and dependency audits; the helper does not replace CI
 
 ## Replay-only Upstox backup
 
-The independent recorder can use its existing dated plan to request Upstox
-snapshots for options whose Groww trade or book is missing or over 30 seconds old.
+The independent recorder continuously requests Upstox snapshots for mapped
+options in its existing dated plan. Each index has its own request/retry loop;
+one slow index cannot delay the other two. A bounded 45-second warm buffer is
+persisted when a Groww trade or book is missing or over 30 seconds old, including
+the already-observed lead-in. Healthy-primary backup samples are not duplicated
+into the full-day archive. Coverage health explicitly lists unmapped contracts
+and per-market request/storage failures. A fresh observation with unchanged
+depth is retained without treating its displayed quantity as replenished.
+
 It never connects Upstox to order execution. The private quote archive tags the
-broker, trade time and receipt time. Since the Upstox snapshot timestamp is not
-an exchange book timestamp, only the separate **Upstox-assisted replay** result
-uses these quotes. Strict replay, paper matches and live trading remain unchanged.
+broker, trade time, receipt time and unchanged-liquidity identity. Since the
+Upstox snapshot timestamp is not an exchange book timestamp, only separate
+**Upstox-assisted replay/strategy-comparison** results use these quotes. Both
+comparison arms use the same observations, costs and execution settings; their
+checkpoint survives a worker restart. Strict replay, paper matches and live
+trading remain unchanged. A monitored gap is bridged only with a continuous
+per-contract path, not just a healthy sample from another contract.
+
+Maximum supported plan: 500 instruments across the three indexes; at most three
+quote requests every three seconds (1,800 per 30 minutes before request latency
+and backoff). HTTP 429 honors the broker's retry delay; authentication errors
+back off for a minute. This budget assumes this recorder is the sole Upstox
+standard-API consumer using the account token. Official limits:
+[full quotes](https://upstox.com/developer/api-documentation/get-full-market-quote-v3/),
+[rate limits](https://upstox.com/developer/api-documentation/rate-limiting/).
 
 An authorized website-and-recorder rollout must use the checked main package.
 To configure the recorder's credential from the current user's encrypted Windows

@@ -1,0 +1,217 @@
+using System.Collections.Concurrent;
+using System.IO.Compression;
+using System.Net;
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using TradingSystem.Application.Broker;
+using TradingSystem.Application.Execution;
+using TradingSystem.Infrastructure.MarketData;
+using TradingSystem.Domain.Trading;
+
+namespace TradingSystem.ContractTests;
+
+public sealed class UpstoxReplayResilienceTests
+{
+    private static readonly DateTimeOffset Start = new(2026, 11, 16, 9, 15, 0, TimeSpan.FromHours(5.5));
+    private static readonly string[] Markets = ["NIFTY", "SENSEX", "BANKNIFTY"];
+    private static HistoricalFeedInstrument Instrument(string market, int index = 1) => new(market,
+        market == "SENSEX" ? "BSE" : "NSE", "FNO", index.ToString(System.Globalization.CultureInfo.InvariantCulture), market + index + "CE",
+        InstrumentType.CallOption, new(2026, 11, 23), 55000, 30, .05m);
+    private static string Key(HistoricalFeedInstrument instrument) => instrument.Exchange + "_FO|" + instrument.ExchangeToken;
+
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("SENSEX")]
+    [InlineData("BANKNIFTY")]
+    public async Task WarmWindowPreservesLeadInAndLtpChangesOnAnUnchangedBook(string market)
+    {
+        var instrument = Instrument(market);
+        var clock = new FastClock();
+        var archive = new Archive();
+        var primary = new GrowwHistoricalFeedAccumulator(archive);
+        primary.Observe(instrument, "price", new(Start, 100, null, null, null, null, null, null), Start);
+        primary.Observe(instrument, "depth", new(Start, null, null, null, 99, 300, 101, 300), Start);
+        var calls = 0;
+        using var api = new Api([instrument], (_, _) =>
+        {
+            var at = clock.GetUtcNow();
+            clock.Advance(TimeSpan.FromSeconds(3));
+            return Task.FromResult(Quotes(instrument, at, 100 + ++calls));
+        });
+        using var token = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Capture(api, archive, clock).RunAsync([instrument], primary, Start, Start.AddSeconds(40), token.Token);
+        var saved = archive.Rows.ToArray();
+        Assert.True(calls >= 13);
+        Assert.True(saved.Length >= 11);
+        Assert.Equal(Start.AddSeconds(3), saved[0].ReceivedAtUtc); // Before the 30s detector fired.
+        Assert.Equal(saved.Length, saved.Select(row => row.Quote.LastPrice).Distinct().Count());
+        Assert.Single(saved.Select(row => row.BackupLiquidityAtUtc).Distinct());
+        Assert.All(saved, row => Assert.True(HistoricalQuoteProjection.IsValidBackup(row)));
+        Assert.Equal(1, archive.Coverage![market].Mapped);
+        Assert.Empty(archive.Coverage[market].MissingContracts);
+    }
+
+    [Theory]
+    [InlineData(503)]
+    [InlineData(429)]
+    [InlineData(401)]
+    [InlineData(0)]
+    public async Task BrokenMarketDoesNotBlockOtherIndexesAndBackoffIsHonored(int failure)
+    {
+        var plan = Markets.Select((market, i) => Instrument(market, i + 1)).ToArray();
+        var clock = new FastClock();
+        var archive = new Archive();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var api = new Api(plan, async (request, token) =>
+        {
+            var key = Uri.UnescapeDataString(request.RequestUri!.Query.Split('=').Last());
+            var item = plan.Single(value => Key(value) == key);
+            if (item.Market != "SENSEX") return Quotes(item, Start, 100);
+            if (failure == 0) await Task.Delay(Timeout.Infinite, token);
+            var response = new HttpResponseMessage((HttpStatusCode)failure);
+            if (failure == 429) response.Headers.RetryAfter = new(TimeSpan.FromSeconds(12));
+            return response;
+        });
+        var task = Capture(api, archive, clock).RunAsync(plan, new(archive), Start, Start.AddMinutes(1), cancellation.Token);
+        await archive.TwoMarkets.Task.WaitAsync(cancellation.Token);
+        // Allow the failing task to record its status/backoff independently.
+        if (failure != 0)
+        {
+            await archive.Failed.Task.WaitAsync(cancellation.Token);
+            await clock.BackoffScheduled.Task.WaitAsync(cancellation.Token);
+        }
+        await cancellation.CancelAsync();
+        await task;
+        Assert.Contains(archive.Rows, row => row.Request.TradingSymbol.StartsWith("NIFTY", StringComparison.Ordinal));
+        Assert.Contains(archive.Rows, row => row.Request.TradingSymbol.StartsWith("BANKNIFTY", StringComparison.Ordinal));
+        Assert.DoesNotContain(archive.Rows, row => row.Request.TradingSymbol.StartsWith("SENSEX", StringComparison.Ordinal));
+        if (failure == 429) Assert.Contains(TimeSpan.FromSeconds(12), clock.Delays);
+        if (failure == 401) Assert.Contains(TimeSpan.FromMinutes(1), clock.Delays);
+    }
+
+    [Fact]
+    public async Task PartialCatalogReportsEveryMissingContractAndKeepsSupportedCapture()
+    {
+        var supported = Instrument("NIFTY");
+        var missing = Instrument("SENSEX", 2);
+        var archive = new Archive();
+        var clock = new FastClock();
+        using var token = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var api = new Api([supported], (_, _) =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(3));
+            return Task.FromResult(Quotes(supported, clock.GetUtcNow(), 100));
+        });
+        await Capture(api, archive, clock).RunAsync([supported, missing], new(archive), Start, Start.AddSeconds(5), token.Token);
+        Assert.NotEmpty(archive.Rows);
+        Assert.Equal(0, archive.Coverage!["SENSEX"].Mapped);
+        Assert.Equal([missing.TradingSymbol], archive.Coverage["SENSEX"].MissingContracts);
+    }
+
+    [Fact]
+    public async Task FullPlanUsesAtMostThreeRequestsPerCycleAndNeverExceedsKeyLimit()
+    {
+        var plan = Enumerable.Range(1, 500).Select(i => Instrument(Markets[i % 3], i)).ToArray();
+        var archive = new Archive();
+        var clock = new FastClock();
+        var requested = new ConcurrentBag<int>();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var api = new Api(plan, (request, _) =>
+        {
+            var keys = Uri.UnescapeDataString(request.RequestUri!.Query.Split('=').Last()).Split(',');
+            requested.Add(keys.Length);
+            if (requested.Count >= 3) cancellation.Cancel();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"data\":{}}") });
+        });
+        await Capture(api, archive, clock).RunAsync(plan, new(archive), Start, Start.AddMinutes(1), cancellation.Token);
+        Assert.Equal(500, archive.Coverage!.Values.Sum(value => value.Mapped));
+        Assert.Equal(500, requested.Sum());
+        Assert.All(requested, count => Assert.InRange(count, 1, 500));
+    }
+
+    [Fact]
+    public async Task TemporaryArchivePressureRetriesOriginalObservationsWithoutDuplicates()
+    {
+        var item = Instrument("NIFTY");
+        var clock = new FastClock();
+        var archive = new Archive { RejectRemaining = 1 };
+        using var token = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var api = new Api([item], (_, _) =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(3));
+            return Task.FromResult(Quotes(item, clock.GetUtcNow(), 100));
+        });
+        await Capture(api, archive, clock).RunAsync([item], new(archive), Start, Start.AddSeconds(8), token.Token);
+        Assert.Equal([Start.AddSeconds(3), Start.AddSeconds(6)], archive.Rows.Select(row => row.ReceivedAtUtc));
+        Assert.Equal(2, archive.Rows.Select(row => row.Id).Distinct().Count());
+    }
+
+    private static UpstoxReplayBackupCapture Capture(HttpMessageHandler api, IHistoricalQuoteArchive archive, TimeProvider clock) =>
+        new(new Clients(api), new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["ReplayBackup:UpstoxAnalyticsToken"] = "test-only" }).Build(), archive, clock, NullLogger<UpstoxReplayBackupCapture>.Instance);
+
+    private sealed class Clients(HttpMessageHandler handler) : IHttpClientFactory
+    { public HttpClient CreateClient(string name) => new(handler, disposeHandler: false); }
+
+    private sealed class FastClock : TimeProvider
+    {
+        private long ticks = Start.UtcTicks;
+        public ConcurrentBag<TimeSpan> Delays { get; } = [];
+        public TaskCompletionSource BackoffScheduled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+        public void Advance(TimeSpan time) => Interlocked.Add(ref ticks, time.Ticks);
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Delays.Add(dueTime);
+            if (dueTime >= TimeSpan.FromSeconds(12)) BackoffScheduled.TrySetResult();
+            return System.CreateTimer(callback, state, TimeSpan.FromMilliseconds(5), Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private sealed class Archive : IHistoricalQuoteArchive
+    {
+        public ConcurrentQueue<HistoricalQuoteObservation> Rows { get; } = new();
+        public int RejectRemaining { get; set; }
+        public IReadOnlyDictionary<string, HistoricalBackupMarketCoverage>? Coverage { get; private set; }
+        public TaskCompletionSource TwoMarkets { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Failed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void TryRecord(HistoricalQuoteObservation observation) => throw new NotSupportedException();
+        public bool TryRecordBackup(HistoricalQuoteObservation observation)
+        {
+            if (RejectRemaining > 0) { RejectRemaining--; return false; }
+            Rows.Enqueue(observation);
+            if (Rows.Select(row => row.Request.TradingSymbol).Distinct().Count() >= 2) TwoMarkets.TrySetResult();
+            return true;
+        }
+        public void SetBackupCoverage(DateOnly tradingDate, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage> coverage) => Coverage = coverage;
+        public void SetBackupFailure(DateOnly tradingDate, string market, string? failure) { if (failure is not null) Failed.TrySetResult(); }
+        public void MarkCaptureGap(DateOnly tradingDate) => throw new NotSupportedException();
+        public Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class Api(IReadOnlyList<HistoricalFeedInstrument> catalog,
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> quotes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host != "assets.upstox.com") return quotes(request, cancellationToken);
+            var rows = catalog.Select(item => new { segment = item.Exchange + "_FO", exchange_token = item.ExchangeToken,
+                instrument_key = Key(item), underlying_symbol = item.Market, instrument_type = "CE", strike_price = item.StrikePrice,
+                lot_size = item.LotSize, expiry = new DateTimeOffset(item.ExpiryDate!.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(5.5)).ToUnixTimeMilliseconds() });
+            using var stream = new MemoryStream();
+            using (var gzip = new GZipStream(stream, CompressionMode.Compress, leaveOpen: true)) gzip.Write(JsonSerializer.SerializeToUtf8Bytes(rows));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(stream.ToArray()) });
+        }
+    }
+
+    private static HttpResponseMessage Quotes(HistoricalFeedInstrument item, DateTimeOffset at, decimal price) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(JsonSerializer.Serialize(new { data = new Dictionary<string, object>
+        {
+            [Key(item)] = new { instrument_token = Key(item), timestamp = at,
+                last_trade_time = at.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture), last_price = price,
+                depth = new { buy = new[] { new { price = 99m, quantity = 300 } }, sell = new[] { new { price = 101m, quantity = 300 } } } }
+        } }))
+    };
+}

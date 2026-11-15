@@ -17,7 +17,14 @@ public sealed class HistoricalQuoteOrderComparer : IComparer<HistoricalReplayQuo
         if (x is null) return -1;
         if (y is null) return 1;
         var time = x.AvailableAtUtc.CompareTo(y.AvailableAtUtc);
-        return time != 0 ? time : StringComparer.Ordinal.Compare(x.Symbol, y.Symbol);
+        if (time != 0) return time;
+        var symbol = StringComparer.Ordinal.Compare(x.Symbol, y.Symbol);
+        if (symbol != 0) return symbol;
+        // Independent sources may arrive at the same timestamp. Keep both in
+        // the immutable archive; source selection runs before simulation and
+        // must see Groww first. Conflicting observations from one source still fail.
+        return (x.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot ? 1 : 0)
+            .CompareTo(y.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot ? 1 : 0);
     }
 }
 

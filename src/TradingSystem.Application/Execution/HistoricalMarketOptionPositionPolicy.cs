@@ -25,6 +25,10 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private (string Symbol, DateTimeOffset EntryAt)? bankPosition;
     private BankNiftyTrailSpot? bankEntrySpot;
     private BankNiftyTrailState bankTrail = new();
+    private readonly HistoricalReplayBarProjection barProjection = new(underlyingSymbol, settings.CandleIntervalSeconds, true);
+    private HistoricalReplayFrame? invalidationFrame;
+    private (DateTimeOffset Entry, Direction? Direction) invalidationPosition;
+    private UnderlyingTrendInvalidationResult? invalidationResult;
     public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
@@ -102,7 +106,10 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         }
         var quote = frame.Market.LatestQuotes[position.Symbol];
         if (quote.AvailableAtUtc != at) return false;
-        var source = quote.DepthSourceAtUtc ?? (quote.Source == "GrowwQuoteReceipt" ? quote.SourceAtUtc : null);
+        // The assisted scenario uses the saved snapshot's observation clock,
+        // consistently with its execution model; it is not exchange depth time.
+        var source = quote.DepthSourceAtUtc ?? (quote.Source == "GrowwQuoteReceipt" ? quote.SourceAtUtc :
+            quote.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot ? quote.AvailableAtUtc : (DateTimeOffset?)null);
         var book = source is { } stamp && quote.SourceAtUtc is { } priceStamp && priceStamp <= at &&
             at - priceStamp <= TimeSpan.FromSeconds(30) && quote.OfferQuantity > 0 &&
             quote.BidPrice is { } bid && quote.OfferPrice is { } ask
@@ -172,12 +179,20 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     }
 
     private UnderlyingTrendInvalidationResult Invalidation(HistoricalReplayPortfolioFrame frame,
-        HistoricalReplayOpenPosition position) => settings.InvalidationEnabled && TryUnderlying(frame, out _)
+        HistoricalReplayOpenPosition position)
+    {
+        var key = (position.EntryAtUtc, position.UnderlyingDirection);
+        if (ReferenceEquals(invalidationFrame, frame.Market) && invalidationPosition == key && invalidationResult is not null)
+            return invalidationResult;
+        invalidationFrame = frame.Market;
+        invalidationPosition = key;
+        return invalidationResult = settings.InvalidationEnabled && TryUnderlying(frame, out _)
             ? MarketOptionPositionPolicy.Invalidation(Bars(frame, true),
                 position.UnderlyingDirection!.Value, position.EntryAtUtc, frame.Market.AvailableAtUtc,
                 settings.CandleIntervalSeconds, settings.MaximumUnderlyingAgeSeconds,
                 settings.MinimumReversalStrength, settings.RequiredReversalEvidence)
             : new UnderlyingTrendInvalidationResult(false, 0m, []);
+    }
 
     private IEnumerable<HistoricalReplayOpenPosition> Positions(HistoricalReplayPortfolioFrame frame) =>
         frame.OpenPositions.Where(value => value.Symbol.StartsWith(underlyingSymbol, StringComparison.Ordinal) &&
@@ -188,17 +203,8 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             !value.Strategy.StartsWith("Expansion Pair|", StringComparison.Ordinal) &&
             contracts.Any(contract => contract.TradingSymbol == value.Symbol && contract.TickSize > 0m));
 
-    private StrategyPriceBar[] Bars(HistoricalReplayPortfolioFrame frame, bool currentSession)
-    {
-        var date = DateOnly.FromDateTime(frame.Market.AvailableAtUtc.ToOffset(IndiaOffset).DateTime);
-        return frame.Market.CompletedBars.Where(value => value.Symbol == underlyingSymbol &&
-                value.IntervalSeconds == settings.CandleIntervalSeconds &&
-                value.AvailableAtUtc <= frame.Market.AvailableAtUtc &&
-                value.OpenTimeUtc.AddSeconds(value.IntervalSeconds) <= frame.Market.AvailableAtUtc &&
-                (!currentSession || DateOnly.FromDateTime(value.OpenTimeUtc.ToOffset(IndiaOffset).DateTime) == date))
-            .OrderBy(value => value.OpenTimeUtc).Select(value => new StrategyPriceBar(value.OpenTimeUtc,
-                value.Open, value.High, value.Low, value.Close)).ToArray();
-    }
+    private StrategyPriceBar[] Bars(HistoricalReplayPortfolioFrame frame, bool currentSession) =>
+        barProjection.Get(frame.Market, currentSession);
 
     private bool TryMark(HistoricalReplayPortfolioFrame frame,
         HistoricalReplayOpenPosition position, out decimal price)

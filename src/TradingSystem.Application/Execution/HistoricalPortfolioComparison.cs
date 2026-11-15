@@ -368,7 +368,7 @@ public static class HistoricalPortfolioComparison
             foreach (var quote in HistoricalQuotePaths.Ordered(session.Quotes))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                text.Write(FormattableString.Invariant($"Q|{quote.Symbol}|{quote.AvailableAtUtc.ToUniversalTime():O}|{quote.LastPrice}|{quote.BidPrice}|{quote.OfferPrice}|{quote.BidQuantity}|{quote.OfferQuantity}|{quote.Volume}|{quote.OpenInterest}|{quote.Source}|{quote.SourceAtUtc:O}|{quote.DepthSourceAtUtc:O}\n"));
+                text.Write(FormattableString.Invariant($"Q|{quote.Symbol}|{quote.AvailableAtUtc.ToUniversalTime():O}|{quote.LastPrice}|{quote.BidPrice}|{quote.OfferPrice}|{quote.BidQuantity}|{quote.OfferQuantity}|{quote.Volume}|{quote.OpenInterest}|{quote.Source}|{quote.SourceAtUtc:O}|{quote.DepthSourceAtUtc:O}|{quote.BackupLiquidityAtUtc:O}\n"));
             }
             foreach (var chain in session.OptionChains.OrderBy(value =>
                          value.AvailableAtUtc).ThenBy(value => value.ExpiryDate))

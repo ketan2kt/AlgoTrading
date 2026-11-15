@@ -32,6 +32,10 @@ public sealed class HistoricalNiftyPositionPolicy(
     string spotSymbol = "NIFTY", IReadOnlyDictionary<string, decimal>? ticks = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
+    private readonly HistoricalReplayBarProjection barProjection = new(spotSymbol, settings.CandleIntervalSeconds, false);
+    private HistoricalReplayFrame? invalidationFrame;
+    private (DateTimeOffset Decision, Direction? Direction) invalidationPosition;
+    private UnderlyingTrendInvalidationResult? invalidationResult;
     public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v12/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
@@ -219,6 +223,17 @@ public sealed class HistoricalNiftyPositionPolicy(
     private UnderlyingTrendInvalidationResult Invalidation(
         HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
     {
+        var key = (position.DecisionAtUtc, position.UnderlyingDirection);
+        if (ReferenceEquals(invalidationFrame, frame.Market) && invalidationPosition == key && invalidationResult is not null)
+            return invalidationResult;
+        invalidationFrame = frame.Market;
+        invalidationPosition = key;
+        return invalidationResult = ComputeInvalidation(frame, position);
+    }
+
+    private UnderlyingTrendInvalidationResult ComputeInvalidation(
+        HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
+    {
         if (!settings.UnderlyingTrendInvalidationEnabled ||
             position.UnderlyingDirection is not { } direction ||
             !TryUnderlyingMark(frame, out _))
@@ -237,20 +252,7 @@ public sealed class HistoricalNiftyPositionPolicy(
             settings.RequiredReversalEvidenceCount);
     }
 
-    private StrategyPriceBar[] SessionBars(HistoricalReplayPortfolioFrame frame)
-    {
-        var date = DateOnly.FromDateTime(
-            frame.Market.AvailableAtUtc.ToOffset(IndiaOffset).DateTime);
-        return frame.Market.CompletedBars.Where(value =>
-                value.Symbol == spotSymbol &&
-                value.IntervalSeconds == settings.CandleIntervalSeconds &&
-                value.OpenTimeUtc.AddSeconds(settings.CandleIntervalSeconds) <= frame.Market.AvailableAtUtc &&
-                DateOnly.FromDateTime(value.OpenTimeUtc.ToOffset(
-                    IndiaOffset).DateTime) == date)
-            .OrderBy(value => value.OpenTimeUtc)
-            .Select(value => new StrategyPriceBar(value.OpenTimeUtc,
-                value.Open, value.High, value.Low, value.Close)).ToArray();
-    }
+    private StrategyPriceBar[] SessionBars(HistoricalReplayPortfolioFrame frame) => barProjection.Get(frame.Market, true);
 
     private static ProfessionalExitPlan ExitPlan(HistoricalReplayOpenPosition position) =>
         NiftySignalRecoveryPolicy.ExitPlan(position.SignalRegime);

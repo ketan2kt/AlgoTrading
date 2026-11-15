@@ -32,6 +32,14 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionWritten = new();
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> optionSource = new();
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> backupWritten = new();
+    private readonly ConcurrentDictionary<DateOnly, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage>> backupCoverage = new();
+    private readonly ConcurrentDictionary<(DateOnly Date, string Market), string> backupFailures = new();
+    public void SetBackupCoverage(DateOnly date, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage> coverage) => backupCoverage[date] = coverage;
+    public void SetBackupFailure(DateOnly date, string market, string? error)
+    {
+        if (error is null) backupFailures.TryRemove((date, market), out _);
+        else backupFailures[(date, market)] = error;
+    }
     private string? failure;
     private readonly List<HistoricalQuoteObservation> pending = [];
     private DateTimeOffset storageCheckedAt = DateTimeOffset.MinValue;
@@ -91,7 +99,9 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         LastOptionSourceAtByMarket = optionSource.Where(value => value.Key.Date == tradingDate)
             .ToDictionary(value => value.Key.Market, value => value.Value),
         LastUpstoxOptionWrittenAtByMarket = backupWritten.Where(value => value.Key.Date == tradingDate)
-            .ToDictionary(value => value.Key.Market, value => value.Value)
+            .ToDictionary(value => value.Key.Market, value => value.Value),
+        UpstoxCoverage = backupCoverage.GetValueOrDefault(tradingDate) ?? new Dictionary<string, HistoricalBackupMarketCoverage>(),
+        UpstoxFailures = backupFailures.Where(value => value.Key.Date == tradingDate).ToDictionary(value => value.Key.Market, value => value.Value)
     };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

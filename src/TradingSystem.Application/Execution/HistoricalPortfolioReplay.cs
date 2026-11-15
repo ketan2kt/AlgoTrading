@@ -161,14 +161,17 @@ public static class HistoricalPortfolioReplay
             ValidateInputs(sourceBars, sourceQuotes, sourceChains ?? [], cancellationToken);
         var controls = HistoricalReplayControls.Validate(sourceControls ?? []);
         var consumedBook = new Dictionary<(string Symbol, bool Buy), (DateTimeOffset At, long Units)>();
+        var backupBooks = new Dictionary<string, HistoricalReplayQuote>(StringComparer.Ordinal);
         DateTimeOffset? BookClock(HistoricalReplayQuote quote) => quote.Source == "GrowwFeedSample" ? quote.DepthSourceAtUtc :
             parameters.AllowObservedBackupBooks && quote.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot
-                ? quote.AvailableAtUtc : null;
+                ? quote.BackupLiquidityAtUtc ?? quote.AvailableAtUtc : null;
         bool CanFill(HistoricalReplayQuote quote, int units, bool buy)
         {
             if (!parameters.RequireDisplayedFillSize) return true;
             if (!quote.HasExecutableBook() || BookClock(quote) is not { } depthAt || depthAt > quote.AvailableAtUtc ||
-                quote.AvailableAtUtc - depthAt > MaximumBookAge) return false;
+                (quote.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot
+                    ? quote.SourceAtUtc is not { } priceAt || priceAt > quote.AvailableAtUtc || quote.AvailableAtUtc - priceAt > MaximumBookAge
+                    : quote.AvailableAtUtc - depthAt > MaximumBookAge)) return false;
             var consumed = consumedBook.GetValueOrDefault((quote.Symbol, buy));
             return depthAt >= consumed.At &&
                 (buy ? quote.OfferQuantity : quote.BidQuantity) - (depthAt == consumed.At ? consumed.Units : 0) >= units;
@@ -661,6 +664,18 @@ public static class HistoricalPortfolioReplay
                 // Require an as-of receipt and reject future source timestamps;
                 // last-trade age is not itself the age of a current order book.
                 if (!quote.IsFreshAsOf(time, MaximumQuoteAge)) continue;
+                if (parameters.AllowObservedBackupBooks && quote.Source == Broker.HistoricalQuoteObservation.UpstoxSnapshot)
+                {
+                    // A recorder restart must not replenish identical displayed
+                    // liquidity merely by assigning a new observation clock.
+                    var liquidityAt = quote.BackupLiquidityAtUtc ?? quote.AvailableAtUtc;
+                    if (backupBooks.TryGetValue(quote.Symbol, out var priorBook) &&
+                        quote.BidPrice == priorBook.BidPrice && quote.OfferPrice == priorBook.OfferPrice &&
+                        quote.BidQuantity == priorBook.BidQuantity && quote.OfferQuantity == priorBook.OfferQuantity)
+                        liquidityAt = priorBook.BackupLiquidityAtUtc!.Value;
+                    quote = quote with { BackupLiquidityAtUtc = liquidityAt };
+                    backupBooks[quote.Symbol] = quote;
+                }
                 latest[quote.Symbol] = quote;
                 quoteBatch.Add(quote);
             }

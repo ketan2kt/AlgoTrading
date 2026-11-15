@@ -193,9 +193,12 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
     private sealed class JsonPolicy(Type type, object instance) : IHistoricalReplayPortfolioPolicy
     {
         private readonly MethodInfo query = type.GetMethod("Query") ?? throw new InvalidDataException("Policy query is missing.");
-        private readonly JsonSerializerOptions frameOptions = new() { Converters = { new CompletedBarFrameConverter() } };
+        private readonly MethodInfo? compactQuery = type.GetMethod("QueryWithBars");
+        private readonly JsonSerializerOptions frameOptions = new() { Converters = { new CompletedBarFrameConverter(type.GetMethod("QueryWithBars") is not null) } };
         private HistoricalReplayPortfolioFrame? lastFrame;
         private string lastFrameJson = string.Empty;
+        private HistoricalReplayBar[]? lastBars;
+        private string lastBarsJson = string.Empty;
         public string CodeVersion => (string)type.GetProperty("CodeVersion")!.GetValue(instance)!;
         public string ConfigurationManifest => (string)type.GetProperty("ConfigurationManifest")!.GetValue(instance)!;
         public bool ProductionPolicyParityVerified => (bool)type.GetProperty("ProductionPolicyParityVerified")!.GetValue(instance)!;
@@ -214,13 +217,24 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
                 : throw new InvalidDataException("An archived policy returned an empty result.");
         private string Invoke(string operation, HistoricalReplayPortfolioFrame frame, object? subject)
         {
+            if (compactQuery is not null && (frame.Market.CompletedBars is not HistoricalReplayBar[] array ||
+                !ReferenceEquals(lastBars, array)))
+            {
+                lastBarsJson = JsonSerializer.Serialize(frame.Market.CompletedBars);
+                lastBars = frame.Market.CompletedBars as HistoricalReplayBar[];
+            }
             if (!ReferenceEquals(lastFrame, frame))
             {
                 lastFrame = frame;
                 lastFrameJson = JsonSerializer.Serialize(frame, frameOptions);
             }
-            try { return (string)query.Invoke(instance, [operation, lastFrameJson,
-                subject is null ? null : JsonSerializer.Serialize(subject)])!; }
+            try
+            {
+                var subjectJson = subject is null ? null : JsonSerializer.Serialize(subject);
+                return compactQuery is null
+                    ? (string)query.Invoke(instance, [operation, lastFrameJson, subjectJson])!
+                    : (string)compactQuery.Invoke(instance, [operation, lastFrameJson, subjectJson, lastBarsJson])!;
+            }
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
             {
                 ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
@@ -232,7 +246,7 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
     // The portfolio runner publishes a new completed-bar array only when a bar
     // closes. Between closes, preserve the exact archived JSON protocol without
     // serializing the entire current and prior sessions on every option tick.
-    private sealed class CompletedBarFrameConverter : JsonConverter<IReadOnlyList<HistoricalReplayBar>>
+    private sealed class CompletedBarFrameConverter(bool separateBars) : JsonConverter<IReadOnlyList<HistoricalReplayBar>>
     {
         private HistoricalReplayBar[]? prior;
         private byte[]? encoded;
@@ -242,6 +256,12 @@ internal sealed class FileHistoricalPolicyBuildStore(TimeProvider clock, string?
 
         public override void Write(Utf8JsonWriter writer, IReadOnlyList<HistoricalReplayBar> value, JsonSerializerOptions options)
         {
+            if (separateBars)
+            {
+                writer.WriteStartArray();
+                writer.WriteEndArray();
+                return;
+            }
             if (value is not HistoricalReplayBar[] bars)
             {
                 JsonSerializer.Serialize(writer, value);
