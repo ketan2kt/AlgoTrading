@@ -139,8 +139,9 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
         Stage("recorded-bars-loaded");
         var unmappedPaths = await db.HistoricalResearchCandles.AsNoTracking()
             .Where(value => value.Exchange == exchange &&
-                value.Underlying == underlying && (value.Source == "GrowwHistoricalApiV1" || value.Source == GrowwHistoricalResearchImporter.IndexSource) &&
-                (!gapAware || value.Source == GrowwHistoricalResearchImporter.IndexSource || value.GrowwSymbol.EndsWith("-FUT")) &&
+                value.Underlying == underlying && (value.Source == "GrowwHistoricalApiV1" || value.Source == GrowwHistoricalResearchImporter.IndexSource ||
+                    value.Source == UpstoxHistoricalCandleBackup.IndexSource || value.Source == UpstoxHistoricalCandleBackup.FutureSource) &&
+                (!gapAware || value.Source == GrowwHistoricalResearchImporter.IndexSource || value.Source == UpstoxHistoricalCandleBackup.IndexSource || value.GrowwSymbol.EndsWith("-FUT")) &&
                 value.IntervalSeconds == 60 && value.OpenTimeUtc >= start &&
                 value.OpenTimeUtc < end)
             .Select(value => new { value.GrowwSymbol, value.ExpiryDate, value.Source,
@@ -148,6 +149,10 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 value.Close, value.Volume, value.OpenInterest })
             .ToArrayAsync(cancellationToken);
         Stage("research-bars-loaded");
+        var primaryRepairKeys = unmappedPaths.Where(value => !value.Source.StartsWith("Upstox", StringComparison.Ordinal))
+            .Select(value => (value.GrowwSymbol, value.OpenTimeUtc)).ToHashSet();
+        unmappedPaths = unmappedPaths.Where(value => !value.Source.StartsWith("Upstox", StringComparison.Ordinal) ||
+            !primaryRepairKeys.Contains((value.GrowwSymbol, value.OpenTimeUtc))).ToArray();
         var rawFront = unmappedPaths.Where(value =>
                 value.GrowwSymbol.EndsWith("-FUT", StringComparison.Ordinal) &&
                 value.ExpiryDate >= tradingDate &&
@@ -178,11 +183,13 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             .ToArrayAsync(cancellationToken);
         var repairedPrior = await db.HistoricalResearchCandles.AsNoTracking().Where(value =>
                 value.Exchange == exchange && value.Underlying == underlying &&
-                value.Source == GrowwHistoricalResearchImporter.IndexSource &&
+                (value.Source == GrowwHistoricalResearchImporter.IndexSource || value.Source == UpstoxHistoricalCandleBackup.IndexSource) &&
                 value.GrowwSymbol == index.GrowwSymbol && value.IntervalSeconds == 60 &&
                 value.OpenTimeUtc >= priorStart && value.OpenTimeUtc < start)
+            .OrderBy(value => value.Source == UpstoxHistoricalCandleBackup.IndexSource)
             .Select(value => new { value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close, value.Volume, value.OpenInterest })
             .ToArrayAsync(cancellationToken);
+        repairedPrior = repairedPrior.GroupBy(value => value.OpenTimeUtc).Select(group => group.First()).ToArray();
         var recordedPriorTimes = prior.Select(value => value.OpenTimeUtc).ToHashSet();
         prior = prior.Concat(repairedPrior.Where(value => !recordedPriorTimes.Contains(value.OpenTimeUtc)))
             .OrderBy(value => value.OpenTimeUtc).ToArray();
@@ -216,16 +223,17 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
                 OpenInterest = value.OpenInterest
             });
         var rawFutureBars = unmappedPaths.Where(value =>
-                value.Source == "GrowwHistoricalApiV1" &&
+                (value.Source == "GrowwHistoricalApiV1" || value.Source == UpstoxHistoricalCandleBackup.FutureSource) &&
                 value.GrowwSymbol == (useRawFuture ? frontFutureSymbol : future?.GrowwSymbol))
             .Select(value => new HistoricalReplayBar(value.OpenTimeUtc, 60,
                 value.Open, value.High, value.Low, value.Close)
             { Symbol = frontFutureSymbol!, Volume = value.Volume,
-                OpenInterest = value.OpenInterest, Source = "OfficialHistoricalRepair" });
-        var repairedIndexBars = unmappedPaths.Where(value => value.Source == GrowwHistoricalResearchImporter.IndexSource &&
+                OpenInterest = value.OpenInterest, Source = value.Source == UpstoxHistoricalCandleBackup.FutureSource ? "UpstoxHistoricalRepair" : "OfficialHistoricalRepair" });
+        var repairedIndexBars = unmappedPaths.Where(value => (value.Source == GrowwHistoricalResearchImporter.IndexSource || value.Source == UpstoxHistoricalCandleBackup.IndexSource) &&
                 value.GrowwSymbol == index.GrowwSymbol)
             .Select(value => new HistoricalReplayBar(value.OpenTimeUtc, 60, value.Open, value.High, value.Low, value.Close)
-            { Symbol = index.TradingSymbol, Volume = value.Volume, OpenInterest = value.OpenInterest, Source = "OfficialHistoricalRepair" });
+            { Symbol = index.TradingSymbol, Volume = value.Volume, OpenInterest = value.OpenInterest,
+                Source = value.Source == UpstoxHistoricalCandleBackup.IndexSource ? "UpstoxHistoricalRepair" : "OfficialHistoricalRepair" });
         var optionBars = candles.Where(value => names.ContainsKey(value.InstrumentId))
             .Select(value => new HistoricalReplayBar(value.OpenTimeUtc, 60,
                 value.Open, value.High, value.Low, value.Close)
@@ -324,6 +332,7 @@ internal sealed class EfHistoricalReplayArchiveReader(TradingDbContext db, IHist
             "|sensexPriorThesisCaptured=" + feedManifest?.SensexPriorThesisStateCaptured +
             "|priorSensexThesis=" + JsonSerializer.Serialize(feedManifest?.PriorSensexThesis) +
             "|barTiming=CompletionTimeModel;recorded-bars-preferred;missing-only-research-repairs" +
+            "|upstoxCandleRepairs=" + unmappedPaths.Count(value => value.Source.StartsWith("Upstox", StringComparison.Ordinal)).ToString(System.Globalization.CultureInfo.InvariantCulture) +
             "|previousClose=" + previousClose?.ToString(
                 System.Globalization.CultureInfo.InvariantCulture) + "|future=" +
             frontFutureSymbol + "|contracts=" + string.Join(';', contracts

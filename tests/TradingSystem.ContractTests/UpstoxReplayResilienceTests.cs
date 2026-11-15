@@ -20,6 +20,94 @@ public sealed class UpstoxReplayResilienceTests
         InstrumentType.CallOption, new(2026, 11, 23), 55000, 30, .05m);
     private static string Key(HistoricalFeedInstrument instrument) => instrument.Exchange + "_FO|" + instrument.ExchangeToken;
 
+    [Fact]
+    public void ExpiryMetadataIsAdvisoryAndMalformedOrOpaqueTokensStaySupported()
+    {
+        var payload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"exp\":1794826800}"));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1794826800), UpstoxReplayBackupCapture.CredentialExpiry("x." + payload + ".y"));
+        Assert.Null(UpstoxReplayBackupCapture.CredentialExpiry("opaque-token"));
+        Assert.Null(UpstoxReplayBackupCapture.CredentialExpiry("x.%%%.y"));
+    }
+
+    [Fact]
+    public async Task LostBackupLeaseCancelsCaptureAndReleasesOwnership()
+    {
+        var stopped = false;
+        var released = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ReplayBlobStorage.RunOwnedBackupAsync(async token =>
+        {
+            try { await Task.Delay(Timeout.Infinite, token); }
+            finally { stopped = true; }
+        }, _ => throw new InvalidOperationException("Lease lost"), _ =>
+        {
+            Assert.True(stopped);
+            released = true;
+            return Task.CompletedTask;
+        }, new FastClock(), CancellationToken.None));
+        Assert.True(released);
+    }
+
+    [Fact]
+    public async Task IndependentCollectorPersistsHealthyPrimaryOnAllMarkets()
+    {
+        foreach (var market in Markets)
+        {
+            var item = Instrument(market);
+            var clock = new FastClock();
+            var archive = new Archive();
+            var primary = new GrowwHistoricalFeedAccumulator(archive);
+            primary.Observe(item, "price", new(Start, 100, null, null, null, null, null, null), Start);
+            primary.Observe(item, "depth", new(Start, null, null, null, 99, 300, 101, 300), Start);
+            using var api = new Api([item], (_, _) =>
+            {
+                clock.Advance(TimeSpan.FromSeconds(3));
+                return Task.FromResult(Quotes(item, clock.GetUtcNow(), 100));
+            });
+            using var token = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await Capture(api, archive, clock).RunAsync([item], primary, Start, Start.AddSeconds(8), token.Token, persistAll: true);
+            Assert.Equal(2, archive.Rows.Count);
+            Assert.All(archive.Rows, row => Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, row.Source));
+        }
+    }
+
+    [Fact]
+    public async Task PreOpenChecksCredentialsAndDoesNotArchiveYesterdayQuotes()
+    {
+        var item = Instrument("SENSEX");
+        var clock = new FastClock();
+        clock.Advance(TimeSpan.FromMinutes(-2));
+        var archive = new Archive();
+        var calls = 0;
+        using var token = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var api = new Api([item], (_, _) =>
+        {
+            calls++;
+            clock.Advance(TimeSpan.FromSeconds(10));
+            if (calls == 2) token.Cancel();
+            return Task.FromResult(calls == 1 ? new HttpResponseMessage(HttpStatusCode.Unauthorized) : Quotes(item, Start.AddDays(-1), 100));
+        });
+        await Capture(api, archive, clock).RunAsync([item], new(archive), Start, Start.AddMinutes(1), token.Token, persistAll: true);
+        Assert.True(archive.Failed.Task.IsCompleted);
+        Assert.Equal(2, calls);
+        Assert.Empty(archive.Rows);
+        Assert.Contains(TimeSpan.FromMinutes(1), clock.Delays);
+    }
+
+    [Theory]
+    [InlineData("ReplayRecorder", false)]
+    [InlineData("Website", true)]
+    public void SingleBackupHostIsEnforced(string role, bool enabled)
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ApplicationRole"] = role, ["ReplayBackup:Host"] = "Website", ["ReplayBackup:UpstoxAnalyticsToken"] = "test-only"
+        }).Build();
+        Assert.Equal(enabled, UpstoxIndependentCaptureService.Enabled(config));
+        using var api = new Api([], (_, _) => throw new NotSupportedException());
+        var capture = new UpstoxReplayBackupCapture(new Clients(api), config, new Archive(), new FastClock(), NullLogger<UpstoxReplayBackupCapture>.Instance);
+        Assert.Equal(enabled, capture.Enabled);
+    }
+
     [Theory]
     [InlineData("NIFTY")]
     [InlineData("SENSEX")]

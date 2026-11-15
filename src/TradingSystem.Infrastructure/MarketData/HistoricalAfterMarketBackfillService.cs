@@ -16,7 +16,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 // not another daytime quote poller or a new trading strategy.
 internal sealed class HistoricalAfterMarketBackfillService(IServiceScopeFactory scopes,
     IGrowwReadOnlyGateway gateway, IOptions<HistoricalFeedCaptureOptions> options,
-    TimeProvider clock, ILogger<HistoricalAfterMarketBackfillService> logger) : BackgroundService
+    TimeProvider clock, ILogger<HistoricalAfterMarketBackfillService> logger, UpstoxHistoricalCandleBackup? backup = null) : BackgroundService
 {
     private static readonly string[] Markets = ["NIFTY", "SENSEX", "BANKNIFTY"];
     private static readonly Action<ILogger, string, Exception?> Failed = LoggerMessage.Define<string>(
@@ -83,12 +83,31 @@ internal sealed class HistoricalAfterMarketBackfillService(IServiceScopeFactory 
                     var coverage = HistoricalSessionCoverageEvaluator.Evaluate(date, recorded.Concat(repairs));
                     if (!coverage.IsComplete)
                     {
-                        var history = await gateway.GetHistoricalCandlesAsync(new(exchange,
-                            instrument.Type == InstrumentType.Index ? "CASH" : "FNO", instrument.GrowwSymbol,
-                            start, end, "1minute"), token);
-                        await importer.ImportMappedAsync(instrument, market, date, history, start, end, clock.GetUtcNow(), token);
-                        coverage = HistoricalSessionCoverageEvaluator.Evaluate(date, recorded.Concat(repairs).Concat(history.Candles.Select(value =>
-                            GrowwHistoricalCandleImporter.ParseIndiaTimestamp(value.SourceTimestamp))));
+                        GrowwHistoricalCandles? primaryHistory = null;
+                        try
+                        {
+                            primaryHistory = await gateway.GetHistoricalCandlesAsync(new(exchange,
+                                instrument.Type == InstrumentType.Index ? "CASH" : "FNO", instrument.GrowwSymbol,
+                                start, end, "1minute"), token);
+                        }
+                        catch (Exception error) when (!token.IsCancellationRequested && backup?.Enabled == true)
+                        { Failed(logger, "Primary candles: " + error.GetType().Name, null); }
+                        if (primaryHistory is not null)
+                        {
+                            await importer.ImportMappedAsync(instrument, market, date, primaryHistory, start, end, clock.GetUtcNow(), token);
+                            repairs = repairs.Concat(primaryHistory.Candles.Select(value => GrowwHistoricalCandleImporter.ParseIndiaTimestamp(value.SourceTimestamp))).ToArray();
+                        }
+                        coverage = HistoricalSessionCoverageEvaluator.Evaluate(date, recorded.Concat(repairs));
+                        if (!coverage.IsComplete && backup?.Enabled == true)
+                        {
+                            var history = await backup.ReadAsync(instrument, market, date, token);
+                            var present = recorded.Concat(repairs).ToHashSet();
+                            history = history with { Candles = history.Candles.Where(value => !present.Contains(
+                                GrowwHistoricalCandleImporter.ParseIndiaTimestamp(value.SourceTimestamp))).ToArray() };
+                            await importer.ImportBackupAsync(instrument, market, date, history, start, end, clock.GetUtcNow(), token);
+                            coverage = HistoricalSessionCoverageEvaluator.Evaluate(date, present.Concat(history.Candles.Select(value =>
+                                GrowwHistoricalCandleImporter.ParseIndiaTimestamp(value.SourceTimestamp))));
+                        }
                     }
                     db.SystemEvents.Add(new(Guid.NewGuid(), coverage.IsComplete ? "Information" : "Warning",
                         key + (coverage.IsComplete ? ":Complete" : ":Failed"), "Research-only after-market candle coverage check.", clock.GetUtcNow(),

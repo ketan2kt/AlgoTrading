@@ -2,6 +2,7 @@ using Azure;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -36,6 +37,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             "Replay archive hydration for {Category} on {Date} stopped after {ElapsedMs} ms.");
     private readonly BlobContainerClient? container;
     private readonly bool recorder;
+    private readonly bool independentBackup;
     private readonly TimeProvider clock;
     private readonly ILogger<ReplayBlobStorage> logger;
     private readonly IServiceProvider services;
@@ -50,6 +52,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
     internal readonly string Root;
     public string CacheRoot { get; }
     public bool Enabled => container is not null;
+    public bool IndependentBackupEnabled => independentBackup;
     public string? LastFailure { get; private set; }
     public DateTimeOffset? LastUploadAtUtc { get; private set; }
     public async Task VerifyPublishedKeysAsync(CancellationToken token)
@@ -93,6 +96,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         quoteCache = new ReplayQuoteCacheBudget(Path.Combine(CacheRoot, "quotes"),
             configuration.GetValue<long?>("ReplayStorage:MaximumQuoteCacheBytes") ?? 3L * 1024 * 1024 * 1024);
         recorder = configuration["ApplicationRole"] == "ReplayRecorder";
+        independentBackup = UpstoxIndependentCaptureService.Enabled(configuration);
         var endpoint = configuration["ReplayStorage:ContainerUri"];
         if (!string.IsNullOrWhiteSpace(endpoint))
         {
@@ -146,6 +150,16 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                     await container.GetBlobClient("recorder-health.json").UploadAsync(
                         BinaryData.FromObjectAsJson(status), overwrite: true, stoppingToken);
                 }
+                if (independentBackup)
+                {
+                    var at = clock.GetUtcNow();
+                    var date = DateOnly.FromDateTime(at.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+                    await container.GetBlobClient("upstox-backup-health.json").UploadAsync(BinaryData.FromObjectAsJson(new
+                    {
+                        date, atUtc = at, host = "Website", storage = services.GetRequiredService<IHistoricalQuoteArchive>().ReadHealth(date),
+                        lastUploadAtUtc = LastUploadAtUtc
+                    }), overwrite: true, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception)
@@ -154,6 +168,60 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
                 Failed(logger, LastFailure, null);
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    // One backup owner even during overlapping website workers/scale-out.
+    // Losing the lease cancels polling before another worker may acquire it.
+    internal async Task RunBackupOwnerAsync(Func<CancellationToken, Task> capture, CancellationToken token)
+    {
+        if (container is null || !independentBackup) throw new InvalidOperationException("Independent backup requires private storage.");
+        var blob = container.GetBlobClient("upstox-backup-owner.json");
+        try { await blob.UploadAsync(BinaryData.FromString("{}"), overwrite: false, token); }
+        catch (RequestFailedException error) when (error.Status is 409 or 412) { }
+        var lease = blob.GetBlobLeaseClient();
+        try { await lease.AcquireAsync(TimeSpan.FromSeconds(60), cancellationToken: token); }
+        catch (RequestFailedException error) when (error.Status == 409) { return; }
+        await RunOwnedBackupAsync(capture, async renewalToken => { await lease.RenewAsync(cancellationToken: renewalToken); },
+            async releaseToken => { await lease.ReleaseAsync(cancellationToken: releaseToken); }, clock, token);
+    }
+
+    internal static async Task RunOwnedBackupAsync(Func<CancellationToken, Task> capture,
+        Func<CancellationToken, Task> renew, Func<CancellationToken, Task> release, TimeProvider clock, CancellationToken token)
+    {
+        using var owner = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var work = capture(owner.Token);
+        var renewal = RenewAsync();
+        try
+        {
+            var completed = await Task.WhenAny(work, renewal);
+            await completed;
+        }
+        finally
+        {
+            await owner.CancelAsync();
+            try
+            {
+                try { await work; } catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
+                try { await renewal; } catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
+            }
+            finally
+            {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try { await release(cleanup.Token); }
+                catch (Exception error) when (error is RequestFailedException or OperationCanceledException) { }
+            }
+        }
+
+        async Task RenewAsync()
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15), clock);
+            while (await timer.WaitForNextTickAsync(owner.Token))
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(owner.Token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(10));
+                await renew(deadline.Token);
+            }
+        }
     }
 
     private async Task PublishPolicyReceiptAsync(CancellationToken token)

@@ -10,6 +10,18 @@ namespace TradingSystem.ContractTests;
 
 public sealed class HistoricalGapAwareReplayTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void IndexOnlyBackupIsReportedWithoutInventingOptionBooks()
+    {
+        var rows = Enumerable.Range(0, 61).Select(second => Book(Start.AddSeconds(second), 100)).ToList();
+        rows.AddRange(Enumerable.Range(0, 61).Select(second => new HistoricalReplayQuote("NIFTY", Start.AddSeconds(second), 24000)
+            { Source = HistoricalQuoteObservation.UpstoxSnapshot, SourceAtUtc = Start.AddSeconds(second) }));
+        var slice = Slice("NIFTY", rows.OrderBy(row => row.AvailableAtUtc).ToArray(), Start.AddMinutes(1)) with { BackupSamples = 61 };
+        var report = HistoricalGapAwareReplay.RunIncludingBackup(slice, () => new BackupPolicy("NIFTYCE"));
+        Assert.NotNull(report.UpstoxScenario);
+        Assert.Equal(0, report.UpstoxScenario.SupplementalBooks);
+        Assert.Equal(61, report.UpstoxScenario.SupplementalIndexSamples);
+    }
     private static readonly DateOnly Date = new(2026, 11, 11);
     private static readonly DateTimeOffset Start = new(2026, 11, 11, 9, 15, 0, TimeSpan.FromHours(5.5));
 

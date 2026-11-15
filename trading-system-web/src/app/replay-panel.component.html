@@ -184,7 +184,7 @@
                       Verified simulated net: {{market.verifiedNetPnl===null?'Not available':'₹'+(market.verifiedNetPnl|number:'1.2-2')}}.</p>
                     @if(market.upstoxScenario;as backup){
                       <details><summary>Upstox-assisted replay · modeled only · {{backup.remainingGaps.length}} gaps remaining</summary>
-                        <p>{{backup.supplementalBooks | number}} Upstox books supplement missing Groww quotes. Upstox does not provide an exchange timestamp for depth. These results are separate from verified P&amp;L and the paper comparison.</p>
+                        <p>{{backup.supplementalBooks | number}} option books · {{backup.supplementalIndexSamples ?? 0 | number}} index snapshots from Upstox. These use broker observation times, not exchange depth timestamps. Results stay separate from verified P&amp;L and the paper comparison.</p>
                         @if(backup.remainingGaps.length){<ul>@for(gap of backup.remainingGaps;track gap.startUtc){
                           <li>{{gap.startUtc|date:'HH:mm:ss.SSS':'+0530'}} – {{gap.endUtc|date:'HH:mm:ss.SSS':'+0530'}} · {{gap.reason}}</li>
                         }</ul>}

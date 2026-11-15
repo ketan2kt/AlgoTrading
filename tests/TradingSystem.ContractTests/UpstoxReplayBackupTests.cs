@@ -14,6 +14,24 @@ namespace TradingSystem.ContractTests;
 
 public sealed class UpstoxReplayBackupTests
 {
+    [Theory]
+    [InlineData("NIFTY", "NSE")]
+    [InlineData("SENSEX", "BSE")]
+    [InlineData("BANKNIFTY", "NSE")]
+    public void IndexSnapshotRetainsObservationClockWithoutInventingTradeOrDepth(string market, string exchange)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { timestamp = At.AddSeconds(-1), last_price = 24000m }));
+        Assert.True(UpstoxReplayBackupCapture.TryReadIndex(document.RootElement, At, out var quote, out var observed));
+        Assert.Null(quote.LastTradeTimeEpochMilliseconds);
+        var row = new HistoricalQuoteObservation(Guid.NewGuid(), At, new(exchange, "CASH", market), quote)
+            { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = observed };
+        Assert.True(HistoricalQuoteProjection.IsValidBackup(row));
+        Assert.Null(HistoricalQuoteProjection.ToReplay(row, market).DepthSourceAtUtc);
+        Assert.Equal(observed, HistoricalQuoteProjection.ToReplay(row, market).SourceAtUtc);
+        Assert.False(HistoricalQuoteProjection.IsValidBackup(row with { Request = new(exchange, "FNO", market + "CE") }));
+        Assert.False(UpstoxReplayBackupCapture.TryReadIndex(document.RootElement, At.AddSeconds(31), out _, out _));
+    }
+
     private static readonly DateTimeOffset At = new(2026, 11, 16, 9, 30, 0, TimeSpan.FromHours(5.5));
     private static readonly HistoricalFeedInstrument Instrument = new("SENSEX", "BSE", "FNO", "12345", "SENSEXCE",
         InstrumentType.CallOption, new(2026, 11, 19), 82000m, 20, .05m);

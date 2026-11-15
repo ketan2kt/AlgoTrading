@@ -35,18 +35,22 @@ public sealed record HistoricalQuoteArchiveHealth(long Buffered, bool GapObserve
     public IReadOnlyDictionary<string, DateTimeOffset> LastUpstoxOptionWrittenAtByMarket { get; init; } = new Dictionary<string, DateTimeOffset>();
     public IReadOnlyDictionary<string, HistoricalBackupMarketCoverage> UpstoxCoverage { get; init; } = new Dictionary<string, HistoricalBackupMarketCoverage>();
     public IReadOnlyDictionary<string, string> UpstoxFailures { get; init; } = new Dictionary<string, string>();
+    public DateTimeOffset? UpstoxCredentialExpiresAtUtc { get; init; }
 }
 
 public static class HistoricalQuoteProjection
 {
+    public static bool IsBackupIndex(HistoricalQuoteObservation value) => value.Request.Segment == "CASH" &&
+        value.Request.TradingSymbol is "NIFTY" or "SENSEX" or "BANKNIFTY";
     public static bool IsValidBackup(HistoricalQuoteObservation value) => value.Source == HistoricalQuoteObservation.UpstoxSnapshot &&
         value.DepthSourceAtUtc is null && value.BrokerObservedAtUtc is { } brokerAt && brokerAt <= value.ReceivedAtUtc &&
         value.ReceivedAtUtc - brokerAt <= TimeSpan.FromSeconds(30) &&
         (value.BackupLiquidityAtUtc is null || value.BackupLiquidityAtUtc <= brokerAt) &&
+        value.Quote.LastPrice > 0m && (IsBackupIndex(value) ||
         GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds) is { } lastTrade && lastTrade <= brokerAt &&
         value.ReceivedAtUtc - lastTrade <= TimeSpan.FromSeconds(30) && value.Quote.LastPrice > 0m &&
         value.Quote.BidPrice > 0m && value.Quote.OfferPrice >= value.Quote.BidPrice &&
-        value.Quote.BidQuantity > 0 && value.Quote.OfferQuantity > 0;
+        value.Quote.BidQuantity > 0 && value.Quote.OfferQuantity > 0);
 
     public static HistoricalReplayQuote ToReplay(HistoricalQuoteObservation value, string symbol) => new(symbol,
         value.ReceivedAtUtc, value.Quote.LastPrice)
@@ -54,7 +58,8 @@ public static class HistoricalQuoteProjection
         Source = value.Source, BidPrice = value.Quote.BidPrice, OfferPrice = value.Quote.OfferPrice,
         Volume = value.Quote.Volume is >= 0m and <= long.MaxValue ? (long)value.Quote.Volume.Value : null,
         OpenInterest = value.Quote.OpenInterest,
-        SourceAtUtc = GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds),
+        SourceAtUtc = value.Source == HistoricalQuoteObservation.UpstoxSnapshot && IsBackupIndex(value)
+            ? value.BrokerObservedAtUtc : GrowwQuoteTimestamp.ToUtc(value.Quote.LastTradeTimeEpochMilliseconds),
         BidQuantity = value.Quote.BidQuantity, OfferQuantity = value.Quote.OfferQuantity,
         DepthSourceAtUtc = value.DepthSourceAtUtc, BackupLiquidityAtUtc = value.BackupLiquidityAtUtc
     };
@@ -68,6 +73,7 @@ public interface IHistoricalQuoteArchive
     bool TryRecordBackup(HistoricalQuoteObservation observation) => false;
     void SetBackupCoverage(DateOnly tradingDate, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage> coverage) { }
     void SetBackupFailure(DateOnly tradingDate, string market, string? failure) { }
+    void SetBackupCredentialExpiry(DateOnly tradingDate, DateTimeOffset? expiry) { }
     void MarkCaptureGap(DateOnly tradingDate);
     HistoricalQuoteArchiveHealth? ReadHealth(DateOnly tradingDate) => null;
     Task<HistoricalQuoteArchiveDay> ReadAsync(DateOnly tradingDate, CancellationToken cancellationToken);

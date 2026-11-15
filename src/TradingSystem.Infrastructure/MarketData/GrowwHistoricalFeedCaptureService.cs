@@ -372,7 +372,7 @@ internal sealed class GrowwHistoricalFeedCaptureService(IServiceScopeFactory sco
         }
     }
 
-    private async Task<(IReadOnlyList<HistoricalFeedInstrument> Plan, ReplayContractCoverageInput Coverage)> LoadPlanAsync(
+    internal async Task<(IReadOnlyList<HistoricalFeedInstrument> Plan, ReplayContractCoverageInput Coverage)> LoadPlanAsync(
         DateOnly date, NiftyOptionSelectionOptions? selection, CancellationToken token)
     {
         await using var scope = scopes.CreateAsyncScope();

@@ -64,7 +64,7 @@ export interface HistoricalGapAwareReport {
     market:string; contractsWithFreshBooks:number; contractsWithoutFreshBooks:string[];
     freshBookSamples:number; archiveReportedCaptureGaps:boolean;
     verifiedNetPnl:number|null; limitations:string[]; runError?:string|null;
-    upstoxScenario?:{supplementalBooks:number;remainingGaps:{startUtc:string;endUtc:string;reason:string}[];
+    upstoxScenario?:{supplementalBooks:number;supplementalIndexSamples?:number;remainingGaps:{startUtc:string;endUtc:string;reason:string}[];
       windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;unresolvedExecutions:number;modeledNetPnl:number|null}[]}|null;
     gaps:{startUtc:string;endUtc:string;reason:string}[];
     windows:{startUtc:string;endUtc:string;independentFlatRestart:boolean;simulated:boolean;

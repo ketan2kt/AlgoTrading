@@ -8,6 +8,22 @@ namespace TradingSystem.ContractTests;
 public sealed class HistoricalQuoteArchiveContractTests : IDisposable
 {
     [Fact]
+    public async Task IndependentWebsiteBackupIsReadableWithoutAnyRecorderShard()
+    {
+        using var writer = Archive();
+        var observation = Observation() with { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = At };
+        Assert.True(writer.TryRecordBackup(observation));
+        await writer.FlushBatchAsync(CancellationToken.None);
+        var shard = Assert.Single(Directory.GetFiles(directory, "*.ndjson.gz"));
+        File.Move(shard, Path.Combine(directory, Path.GetFileName(ReplayBlobStorage.WebsiteQuotePath("quotes/" + Path.GetFileName(shard)))));
+        var symbols = new Dictionary<string, string> { [observation.Request.TradingSymbol] = observation.Request.TradingSymbol };
+        var strict = await writer.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddMinutes(1), CancellationToken.None, streamingOnly: true);
+        Assert.Empty(strict.Quotes);
+        var assisted = await writer.ReadReplayAsync(Date, "NIFTY", "NSE", symbols, At, At.AddMinutes(1), CancellationToken.None, streamingOnly: true, includeBackup: true);
+        Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, Assert.Single(assisted.Quotes).Source);
+    }
+
+    [Fact]
     public async Task SupplementalQuotesNeverEnterStrictReplayOrPaperTimeline()
     {
         using var archive = Archive();

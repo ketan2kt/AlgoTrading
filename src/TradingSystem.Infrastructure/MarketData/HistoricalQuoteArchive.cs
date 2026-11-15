@@ -34,6 +34,12 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), DateTimeOffset> backupWritten = new();
     private readonly ConcurrentDictionary<DateOnly, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage>> backupCoverage = new();
     private readonly ConcurrentDictionary<(DateOnly Date, string Market), string> backupFailures = new();
+    private readonly ConcurrentDictionary<DateOnly, DateTimeOffset> backupExpiry = new();
+    public void SetBackupCredentialExpiry(DateOnly date, DateTimeOffset? expiry)
+    {
+        if (expiry is { } at) backupExpiry[date] = at;
+        else backupExpiry.TryRemove(date, out _);
+    }
     public void SetBackupCoverage(DateOnly date, IReadOnlyDictionary<string, HistoricalBackupMarketCoverage> coverage) => backupCoverage[date] = coverage;
     public void SetBackupFailure(DateOnly date, string market, string? error)
     {
@@ -101,7 +107,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         LastUpstoxOptionWrittenAtByMarket = backupWritten.Where(value => value.Key.Date == tradingDate)
             .ToDictionary(value => value.Key.Market, value => value.Value),
         UpstoxCoverage = backupCoverage.GetValueOrDefault(tradingDate) ?? new Dictionary<string, HistoricalBackupMarketCoverage>(),
-        UpstoxFailures = backupFailures.Where(value => value.Key.Date == tradingDate).ToDictionary(value => value.Key.Market, value => value.Value)
+        UpstoxFailures = backupFailures.Where(value => value.Key.Date == tradingDate).ToDictionary(value => value.Key.Market, value => value.Value),
+        UpstoxCredentialExpiresAtUtc = backupExpiry.TryGetValue(tradingDate, out var expiry) ? expiry : null
     };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -279,9 +286,10 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         using var pinned = cloud?.Pin(date);
         if (streamingOnly && cloud?.Enabled == true)
         {
-            await cloud.HydrateStreamingQuotesAsync(date, token);
+            if (includeBackup) await cloud.HydrateAsync("quotes", date, token);
+            else await cloud.HydrateStreamingQuotesAsync(date, token);
             var remoteRoot = Path.Combine(cloud.CacheRoot, "quotes");
-            if (HasDateFiles(remoteRoot, date, includeWebsite: false))
+            if (HasDateFiles(remoteRoot, date, includeWebsite: includeBackup))
             {
                 using var remote = new HistoricalQuoteArchive(clock, logger, remoteRoot);
                 return await remote.ReadReplayAsync(date, market, exchange, symbols, start, end, token,
@@ -295,8 +303,8 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         var unreadable = new HashSet<HistoricalReplayGap>();
         var pathRoot = Path.Combine(root, "replay-paths");
         var partitioned = streamingOnly && Directory.EnumerateFiles(root, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "*.ndjson*")
-            .Where(path => !ReplayBlobStorage.IsWebsiteQuotePath(path))
-            .All(path => Path.GetFileName(path) is { } name && (name.EndsWith("-gaps.ndjson.gz", StringComparison.Ordinal) ||
+            .Where(path => includeBackup || !ReplayBlobStorage.IsWebsiteQuotePath(path))
+            .All(path => Path.GetFileName(path).Replace("-website.ndjson.gz", ".ndjson.gz", StringComparison.Ordinal) is { } name && (name.EndsWith("-gaps.ndjson.gz", StringComparison.Ordinal) ||
                 name.Length == 26 && name.EndsWith(".ndjson.gz", StringComparison.Ordinal) &&
                 TimeOnly.TryParseExact(name.AsSpan(11, 5), "HH-mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)));
         var result = partitioned
@@ -330,7 +338,7 @@ internal sealed class HistoricalQuoteArchive(TimeProvider clock, ILogger<Histori
         {
             var receiptsSeen = new HashSet<Guid>();
             await foreach(var value in StreamDay(date,()=>gaps=true,cancellationToken, includeCloud: !streamingOnly,
-                includeWebsite: !streamingOnly, unreadableShard: tolerateUnreadableShards ? MarkUnreadable : null)){
+                includeWebsite: !streamingOnly || includeBackup, unreadableShard: tolerateUnreadableShards ? MarkUnreadable : null)){
                 if (value.Source == HistoricalQuoteObservation.GrowwRestFallback) continue;
                 if (value.Source == HistoricalQuoteObservation.UpstoxSnapshot ? !includeBackup : streamingOnly && value.Source != "GrowwFeedSample") continue;
                 if (value.Request.Exchange != exchange || !value.Request.TradingSymbol.StartsWith(market, StringComparison.Ordinal) ||

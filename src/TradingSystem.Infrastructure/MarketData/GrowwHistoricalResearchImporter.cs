@@ -12,6 +12,16 @@ public sealed class GrowwHistoricalResearchImporter(TradingDbContext db)
     private const string Source = "GrowwHistoricalApiV1";
     internal const string IndexSource = "GrowwHistoricalIndexApiV1";
 
+    internal Task<int> ImportBackupAsync(Instrument instrument, string underlying, DateOnly date,
+        GrowwHistoricalCandles history, DateTimeOffset start, DateTimeOffset end, DateTimeOffset now, CancellationToken token)
+    {
+        if (instrument.Type is not (InstrumentType.Index or InstrumentType.Future) || string.IsNullOrWhiteSpace(instrument.GrowwSymbol))
+            throw new ArgumentException("Mapped index/future required.");
+        return ImportCoreAsync(instrument.Exchange, underlying, instrument.GrowwSymbol, instrument.ExpiryDate ?? date,
+            history, start, end, now, instrument.Type == InstrumentType.Index ? UpstoxHistoricalCandleBackup.IndexSource :
+                UpstoxHistoricalCandleBackup.FutureSource, token);
+    }
+
     public Task<int> ImportAsync(string exchange, string underlying,
         string growwSymbol, DateOnly expiryDate, GrowwHistoricalCandles history,
         DateTimeOffset startUtc, DateTimeOffset endUtc, DateTimeOffset nowUtc,
@@ -40,7 +50,7 @@ public sealed class GrowwHistoricalResearchImporter(TradingDbContext db)
         ArgumentNullException.ThrowIfNull(history);
         if (string.IsNullOrWhiteSpace(exchange) ||
             string.IsNullOrWhiteSpace(underlying) ||
-            (source != IndexSource && !growwSymbol.StartsWith(exchange + "-" + underlying + "-",
+            (source != IndexSource && source != UpstoxHistoricalCandleBackup.IndexSource && !growwSymbol.StartsWith(exchange + "-" + underlying + "-",
                 StringComparison.Ordinal)) ||
             history.IntervalInMinutes != 1 || startUtc >= endUtc)
             throw new ArgumentException("Verified one-minute contract metadata and range are required.");

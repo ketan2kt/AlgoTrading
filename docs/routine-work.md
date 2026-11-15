@@ -19,12 +19,14 @@ CI retains its full checks and dependency audits; the helper does not replace CI
 
 ## Replay-only Upstox backup
 
-The independent recorder continuously requests Upstox snapshots for mapped
-options in its existing dated plan. Each index has its own request/retry loop;
-one slow index cannot delay the other two. A bounded 45-second warm buffer is
-persisted when a Groww trade or book is missing or over 30 seconds old, including
-the already-observed lead-in. Healthy-primary backup samples are not duplicated
-into the full-day archive. Coverage health explicitly lists unmapped contracts
+With `ReplayBackup:Host=Website`, the website continuously records read-only
+Upstox snapshots independently from the Groww recorder. It uses the shared
+contract planner and private archive, with a renewable blob lease preventing
+duplicate backup owners during worker overlap. Each index has its own request/retry loop;
+one slow index cannot delay the other two. Independent mode archives every fresh
+backup snapshot without depending on Groww or the recorder heartbeat. The legacy
+recorder-only mode retains its bounded 45-second warm buffer and flushes it when
+primary data is missing/stale. Coverage health explicitly lists unmapped contracts
 and per-market request/storage failures. A fresh observation with unchanged
 depth is retained without treating its displayed quantity as replenished.
 
@@ -40,8 +42,11 @@ per-contract path, not just a healthy sample from another contract.
 Maximum supported plan: 500 instruments across the three indexes; at most three
 quote requests every three seconds (1,800 per 30 minutes before request latency
 and backoff). HTTP 429 honors the broker's retry delay; authentication errors
-back off for a minute. This budget assumes this recorder is the sole Upstox
-standard-API consumer using the account token. Official limits:
+back off for a minute. This budget assumes the leased backup collector is the sole Upstox
+standard-API consumer using the account token. Pre-open calls check authorization
+and contract availability without treating yesterday's quotes as fresh. Credential
+expiry metadata generates a seven-day warning; actual broker responses remain
+the authentication check. Official limits:
 [full quotes](https://upstox.com/developer/api-documentation/get-full-market-quote-v3/),
 [rate limits](https://upstox.com/developer/api-documentation/rate-limiting/).
 
@@ -54,9 +59,33 @@ store, first dry-run, then activate only when capture is idle:
 ./scripts/set-upstox-replay-backup.ps1 -Activate
 ```
 
-The second command updates only the recorder application settings; App Service
+After BOTH hosts have deployed the new checked package, transfer backup ownership
+outside capture, using its exact Infrastructure DLL SHA256:
+
+```powershell
+./scripts/set-upstox-replay-backup.ps1 -Activate -IndependentWebsite -ExpectedInfrastructureHash <checked-package-sha256>
+```
+
+This verifies both package identities, disables the recorder's Upstox polling,
+then configures the read-only token on the website. Groww capture and trading
+settings are unchanged. The token remains on the recorder for after-hours
+missing-minute candle repair. Do not activate this mode on older binaries.
+Independent mode archives all fresh Upstox option samples; only the assisted
+replay path reads website backup shards. Strict fills cannot use these books.
+Health includes separate primary/backup storage and per-market missing-contract,
+authorization, persistence and expiry warnings. Private `upstox-backup-health.json`
+is separate from `recorder-health.json`; neither heartbeat alone proves depth.
+
+After-hours candle repair tries Groww first, then Upstox for still-missing index
+and confirmation-futures minutes. Exact catalog identity, expiry and lot checks
+are required. Upstox research candles have separate provenance and never overwrite
+recorded trading candles. Replay prefers Groww repairs and labels backup minutes.
+Official [historical API](https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/)
+and [read-only Analytics Token](https://upstox.com/developer/api-documentation/analytics-token/).
+
+The recorder-only command updates only the recorder application settings; App Service
 may restart it. The token must never go into Git, command-line arguments, the
-website configuration, or diagnostic output. During a live session, validate
+unapproved hosts, or diagnostic output. During a live session, validate
 the recorder's persisted `lastUpstoxOptionWrittenAtByMarket` on a real Groww
 gap. An empty backup dictionary on a healthy primary stream is expected.
 

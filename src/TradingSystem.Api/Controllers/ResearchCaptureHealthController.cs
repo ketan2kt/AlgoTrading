@@ -30,6 +30,7 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             .MinAsync(x => (DateTimeOffset?)x.CapturedAtUtc, token);
         var feed = pulse.Read(date, options.Value.Enabled);
         var storage = archive.ReadHealth(date);
+        var backupStorage = storage;
         ReplayRecorderSnapshot? remote = null;
         string? remoteError = null;
         // Staging cloud storage does not transfer capture ownership. Failed
@@ -41,6 +42,7 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             catch (Exception exception) when (exception is not OperationCanceledException) { remoteError = exception.GetType().Name; }
             if (remote?.Date == date) { feed = remote.Feed; storage = remote.Storage; }
         }
+        if (!cloud.IndependentBackupEnabled) backupStorage = storage;
         var observedAt = remote?.Date == date ? remote.AtUtc : now;
         var expectedNow = now.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) &&
             now >= open.AddMinutes(-10) && now < open.AddHours(6.25);
@@ -71,6 +73,25 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
             issues.AddRange(feed.ContractCoverageIssues);
             if (storage?.Failure is { } failure) issues.Add(failure);
             if (storage?.GapObserved == true) issues.Add("Quote recording gap detected");
+            foreach (var backupFailure in (backupStorage?.UpstoxFailures ?? new Dictionary<string, string>()))
+                issues.Add(backupFailure.Key + " backup: " + backupFailure.Value);
+            foreach (var coverage in (backupStorage?.UpstoxCoverage ?? new Dictionary<string, HistoricalBackupMarketCoverage>()))
+                if (coverage.Value.Mapped != coverage.Value.Planned)
+                    issues.Add(coverage.Key + " backup contracts missing: " + coverage.Value.MissingContracts.Count);
+            if (backupStorage?.UpstoxCredentialExpiresAtUtc is { } expiry && expiry <= now.AddDays(7))
+                issues.Add(expiry <= now ? "Upstox backup credential expired" : "Upstox backup credential expires within 7 days");
+            if (cloud.IndependentBackupEnabled)
+            {
+                if (backupStorage?.Failure is { } backupWriteFailure) issues.Add("Backup storage: " + backupWriteFailure);
+                foreach (var market in new[] { "NIFTY", "SENSEX", "BANKNIFTY" })
+                {
+                    if (backupStorage?.UpstoxCoverage.ContainsKey(market) != true) issues.Add(market + " backup preflight pending");
+                    if (quotesExpected && (backupStorage is null ||
+                        !backupStorage.LastUpstoxOptionWrittenAtByMarket.TryGetValue(market, out var backupAt) ||
+                        backupAt > now || now - backupAt > TimeSpan.FromSeconds(30)))
+                        issues.Add(market + " backup recording missing or stale");
+                }
+            }
             if (quotesExpected)
                 foreach (var market in new[] { "NIFTY", "SENSEX", "BANKNIFTY" })
                     if (storage is null || !storage.LastOptionWrittenAtByMarket.TryGetValue(market, out var optionAt) ||
@@ -86,6 +107,6 @@ public sealed class ResearchCaptureHealthController(ResearchCapturePulse pulse, 
                 issues.Add("No quote write confirmed in the last 30 seconds");
         }
         return Ok(new { date, checkedAt = now, master, preOpenMaster = master <= open,
-            expectedNow, issues, feed, storage, recorderObservedAt = remote?.AtUtc, cloudUploadAt = remote?.LastUploadAtUtc });
+            expectedNow, issues, feed, storage, backupStorage, recorderObservedAt = remote?.AtUtc, cloudUploadAt = remote?.LastUploadAtUtc });
     }
 }

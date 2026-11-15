@@ -20,13 +20,15 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
     private static readonly Action<ILogger, string, Exception?> Unavailable = LoggerMessage.Define<string>(
         LogLevel.Warning, new EventId(6755, "UpstoxReplayBackupUnavailable"), "Upstox replay backup unavailable ({FailureType}). Primary capture is unaffected.");
     private readonly string? credential = configuration["ReplayBackup:UpstoxAnalyticsToken"];
-    public bool Enabled => !string.IsNullOrWhiteSpace(credential);
+    public bool Enabled => !string.IsNullOrWhiteSpace(credential) &&
+        (configuration["ReplayBackup:Host"] != "Website" || !ReplayRecorderHosting.IsRecorder(configuration));
 
     public async Task RunAsync(IReadOnlyList<HistoricalFeedInstrument> plan, GrowwHistoricalFeedAccumulator primary,
-        DateTimeOffset open, DateTimeOffset close, CancellationToken token)
+        DateTimeOffset open, DateTimeOffset close, CancellationToken token, bool persistAll = false)
     {
         if (!Enabled) return;
         var date = DateOnly.FromDateTime(open.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        archive.SetBackupCredentialExpiry(date, CredentialExpiry(credential));
         if (plan.Count > 500 || plan.Any(item => item.Market is not ("NIFTY" or "SENSEX" or "BANKNIFTY")))
             throw new InvalidDataException("Backup plan exceeds the supported three-market budget.");
         Dictionary<string, HistoricalFeedInstrument>? mapped = null;
@@ -47,7 +49,6 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             }
         }
         if (mapped is null) return;
-        if (clock.GetUtcNow() < open) await Task.Delay(open - clock.GetUtcNow(), clock, token);
         // Warm, independent per-market capture. At most three requests every
         // three seconds (1,800/30 minutes), each <=500 keys. No order API calls.
         // One slow/failed market never serializes the other market's samples.
@@ -55,10 +56,10 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             .Select(group => CaptureMarketAsync(group.Key, group.ToDictionary(pair => pair.Key, pair => pair.Value))));
 
         void PublishCoverage(IReadOnlyDictionary<string, HistoricalFeedInstrument> matches) => archive.SetBackupCoverage(date,
-            plan.Where(item => item.Type is InstrumentType.CallOption or InstrumentType.PutOption).GroupBy(item => item.Market)
+            plan.Where(item => item.Type is InstrumentType.Index or InstrumentType.CallOption or InstrumentType.PutOption).GroupBy(item => item.Market)
                 .ToDictionary(group => group.Key, group =>
                 {
-                    var missing = group.Where(item => !matches.ContainsKey(item.Exchange + "_FO|" + item.ExchangeToken))
+                    var missing = group.Where(item => !matches.ContainsKey(item.Type == InstrumentType.Index ? IndexKey(item.Market) ?? "" : item.Exchange + "_FO|" + item.ExchangeToken))
                         .Select(item => item.TradingSymbol).Order(StringComparer.Ordinal).ToArray();
                     return new HistoricalBackupMarketCoverage(group.Count(), group.Count() - missing.Length, missing);
                 }));
@@ -82,6 +83,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             while (!token.IsCancellationRequested && clock.GetUtcNow() < close)
             {
                 var delay = TimeSpan.FromSeconds(3);
+                var preOpen = clock.GetUtcNow() < open;
                 try
                 {
                     var uri = "https://api.upstox.com/v3/market-quote/quotes?instrument_key=" + Uri.EscapeDataString(string.Join(',', batch));
@@ -104,11 +106,33 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                     if (received >= close) return;
                     if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
                         throw new InvalidDataException("Upstox quote response omitted data.");
+                    if (preOpen && received < open)
+                    {
+                        // Verify authorization and contract availability before
+                        // opening, without calling yesterday's books fresh.
+                        var available = data.EnumerateObject().Select(item => String(item.Value, "instrument_token"))
+                            .Where(key => key is not null).ToHashSet(StringComparer.Ordinal);
+                        archive.SetBackupFailure(date, market, batch.All(available.Contains) ? null : "Pre-open quote contracts missing");
+                        await Task.Delay(TimeSpan.FromTicks(Math.Min(TimeSpan.FromMinutes(1).Ticks, (open - received).Ticks)), clock, token);
+                        continue;
+                    }
                     var accepted = new HashSet<string>(StringComparer.Ordinal);
                     var refused = false;
                     foreach (var element in data.EnumerateObject())
                     {
-                        if (!TryRead(element.Value, received, out var key, out var quote, out var observedAt) || !instruments.TryGetValue(key, out var instrument)) continue;
+                        var identity = String(element.Value, "instrument_token");
+                        if (identity is null || !instruments.TryGetValue(identity, out var instrument)) continue;
+                        if (instrument.Type == InstrumentType.Index)
+                        {
+                            if (!TryReadIndex(element.Value, received, out var indexQuote, out var indexAt)) continue;
+                            accepted.Add(identity);
+                            if (persistAll || primary.NeedsBackup(instrument, received))
+                                if (!archive.TryRecordBackup(new(Guid.NewGuid(), received,
+                                    new(instrument.Exchange, instrument.Segment, instrument.TradingSymbol), indexQuote)
+                                    { Source = HistoricalQuoteObservation.UpstoxSnapshot, BrokerObservedAtUtc = indexAt })) refused = true;
+                            continue;
+                        }
+                        if (!TryRead(element.Value, received, out var key, out var quote, out var observedAt)) continue;
                         accepted.Add(key);
                         var depth = (quote.BidPrice!.Value, quote.BidQuantity!.Value, quote.OfferPrice!.Value, quote.OfferQuantity!.Value);
                         var hasPrior = recorded.TryGetValue(key, out var prior);
@@ -125,7 +149,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                     foreach (var key in batch)
                     {
                         var buffer = warm[key];
-                        if (primary.NeedsBackup(instruments[key], received)) recovering.Add(key);
+                        if (persistAll || primary.NeedsBackup(instruments[key], received)) recovering.Add(key);
                         if (recovering.Contains(key))
                         {
                             while (buffer.TryPeek(out var sample))
@@ -156,6 +180,24 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         }
     }
 
+    // Metadata is advisory only: the actual quote request remains the auth check.
+    // Never expose or persist the token/payload. Opaque tokens remain supported.
+    internal static DateTimeOffset? CredentialExpiry(string? token)
+    {
+        if (string.IsNullOrEmpty(token) || token.Length > 16384) return null;
+        try
+        {
+            var parts = token.Split('.');
+            if (parts.Length != 3) return null;
+            var encoded = parts[1].Replace('-', '+').Replace('_', '/');
+            encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
+            using var payload = JsonDocument.Parse(Convert.FromBase64String(encoded));
+            return payload.RootElement.TryGetProperty("exp", out var expiry) && expiry.TryGetInt64(out var seconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
+        }
+        catch (Exception error) when (error is FormatException or JsonException or ArgumentOutOfRangeException) { return null; }
+    }
+
     private static async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
         IReadOnlyList<HistoricalFeedInstrument> plan, CancellationToken token)
     {
@@ -171,6 +213,17 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
         await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<Instrument>(gzip, cancellationToken: deadline.Token))
         {
+            if (row?.Side == "INDEX")
+            {
+                var match = plan.SingleOrDefault(item => item.Type == InstrumentType.Index && IndexKey(item.Market) == row.Key &&
+                    row.Segment == item.Exchange + "_INDEX");
+                if (match is not null && row.Key is { } indexKey)
+                {
+                    if (!seen.Add(indexKey)) mapped.Remove(indexKey);
+                    else mapped.Add(indexKey, match);
+                }
+                continue;
+            }
             if (row?.Segment is not ("NSE_FO" or "BSE_FO")) continue;
             var exchangeToken = row.ExchangeToken.ValueKind switch
             {
@@ -187,6 +240,21 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             mapped.Add(identity, instrument);
         }
         return mapped;
+    }
+
+    internal static string? IndexKey(string market) => market switch
+    { "NIFTY" => "NSE_INDEX|Nifty 50", "BANKNIFTY" => "NSE_INDEX|Nifty Bank", "SENSEX" => "BSE_INDEX|SENSEX", _ => null };
+
+    internal static bool TryReadIndex(JsonElement value, DateTimeOffset received, out GrowwQuote quote, out DateTimeOffset observedAt)
+    {
+        quote = null!; observedAt = default;
+        if (value.ValueKind != JsonValueKind.Object ||
+            !DateTimeOffset.TryParse(String(value, "timestamp"), CultureInfo.InvariantCulture, DateTimeStyles.None, out observedAt) ||
+            observedAt > received || received - observedAt > MaximumAge || Number(value, "last_price") is not > 0m) return false;
+        // Indices do not trade and have no executable book. Preserve the broker
+        // observation clock separately; never fabricate exchange trade/depth time.
+        quote = new(Number(value, "last_price")!.Value, null, null, null, null, null, null, null, null);
+        return true;
     }
 
     internal static bool Matches(HistoricalFeedInstrument plan, string? underlying, string? side, decimal strike, int lot, long expiry) =>
