@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -20,6 +21,8 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
     internal static readonly TimeSpan MaximumAge = TimeSpan.FromSeconds(30);
     private static readonly Action<ILogger, string, Exception?> Unavailable = LoggerMessage.Define<string>(
         LogLevel.Warning, new EventId(6755, "UpstoxReplayBackupUnavailable"), "Upstox replay backup unavailable ({FailureType}). Primary capture is unaffected.");
+    private static readonly Action<ILogger, string, double, int, Exception?> CatalogStage = LoggerMessage.Define<string, double, int>(
+        LogLevel.Information, new EventId(6756, "UpstoxCatalogStage"), "Upstox catalog {Stage}: {ElapsedMilliseconds} ms, {Rows} rows.");
     private readonly string? credential = configuration["ReplayBackup:UpstoxAnalyticsToken"];
     public bool Enabled => !string.IsNullOrWhiteSpace(credential) &&
         (configuration["ReplayBackup:Host"] != "Website" || !ReplayRecorderHosting.IsRecorder(configuration));
@@ -210,23 +213,31 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         _ => error.GetType().Name
     };
 
-    private static async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
+    private async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
         IReadOnlyList<HistoricalFeedInstrument> plan, CancellationToken token)
     {
         var byToken = plan.Where(item => item.Type is InstrumentType.CallOption or InstrumentType.PutOption)
             .ToDictionary(instrument => instrument.Exchange + "_FO|" + instrument.ExchangeToken, StringComparer.Ordinal);
         var mapped = new Dictionary<string, HistoricalFeedInstrument>(StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var timer = Stopwatch.StartNew();
+        // Buffer the bounded compressed document before parsing. Streaming tiny
+        // decompressor reads directly from the CDN ties metadata parsing to the
+        // network connection and makes startup/restart recovery unpredictable.
         using var response = await client.GetAsync("https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz",
-            HttpCompletionOption.ResponseHeadersRead, token);
+            HttpCompletionOption.ResponseContentRead, token);
         response.EnsureSuccessStatusCode();
+        CatalogStage(logger, "downloaded", timer.Elapsed.TotalMilliseconds, 0, null);
+        timer.Restart();
         using var gzip = new GZipStream(await response.Content.ReadAsStreamAsync(token), CompressionMode.Decompress);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         // Daily metadata is much larger than a quote response. Keep a bounded
         // processing budget without relaxing quote freshness or quote timeouts.
         deadline.CancelAfter(TimeSpan.FromMinutes(2));
+        var rows = 0;
         await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<Instrument>(gzip, cancellationToken: deadline.Token))
         {
+            rows++;
             if (row?.Side == "INDEX")
             {
                 var match = plan.SingleOrDefault(item => item.Type == InstrumentType.Index && IndexKey(item.Market) == row.Key &&
@@ -253,6 +264,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                 !Matches(instrument, row.Underlying, row.Side, strike, lot, expiry)) continue;
             mapped.Add(identity, instrument);
         }
+        CatalogStage(logger, "mapped", timer.Elapsed.TotalMilliseconds, rows, null);
         return mapped;
     }
 

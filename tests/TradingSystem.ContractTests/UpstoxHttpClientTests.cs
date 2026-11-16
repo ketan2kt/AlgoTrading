@@ -31,6 +31,8 @@ public sealed class UpstoxHttpClientTests
         using var response = await client.GetAsync("https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(timeout), client.Timeout);
+        Assert.Equal((name == UpstoxReplayBackupCapture.CatalogClientName ? 8L : 4L) * 1024 * 1024,
+            client.MaxResponseContentBufferSize);
     }
 
     [Fact]
