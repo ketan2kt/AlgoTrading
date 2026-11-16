@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Authorization;
 using TradingSystem.Api.Controllers;
 using TradingSystem.Api.Hubs;
@@ -12,7 +13,7 @@ using TradingSystem.Application.Broker;
 namespace TradingSystem.IntegrationTests;
 
 public sealed class SystemStatusEndpointTests :
-    IClassFixture<WebApplicationFactory<Program>>
+    IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly HttpClient _client;
 
@@ -26,6 +27,14 @@ public sealed class SystemStatusEndpointTests :
                 "Host=localhost;Database=trading_system_tests;Username=trading_tests");
             builder.ConfigureTestServices(services =>
             {
+                // These tests exercise the real HTTP/auth/antiforgery pipeline,
+                // not market workers. Each child host previously started its own
+                // archive/replay writers against the same filesystem, racing on
+                // shutdown. Keep the web server but isolate application workers.
+                foreach (var worker in services.Where(s => s.ServiceType == typeof(IHostedService) &&
+                    (s.ImplementationFactory is not null ||
+                     s.ImplementationType?.Namespace?.StartsWith("TradingSystem.", StringComparison.Ordinal) == true)).ToArray())
+                    services.Remove(worker);
                 services.RemoveAll<IPaperBrokerJournal>();
                 services.AddSingleton<IPaperBrokerJournal>(new TestPaperBrokerJournal());
             });
@@ -36,6 +45,8 @@ public sealed class SystemStatusEndpointTests :
                 BaseAddress = new Uri("https://localhost")
             });
     }
+
+    public void Dispose() => _client.Dispose();
 
     [Fact]
     public async Task StatusIsAnonymousAndFailClosed()
