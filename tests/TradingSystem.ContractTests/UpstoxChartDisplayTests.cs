@@ -48,6 +48,45 @@ public sealed class UpstoxChartDisplayTests
     }
 
     [Fact]
+    public void CompletedMinuteUsesCloseTimeAndKeepsQuoteAndCandleFreshnessSeparate()
+    {
+        foreach (var (market, code) in new[] { ("NIFTY", "nifty"), ("SENSEX", "sensex"), ("BANKNIFTY", "bank-nifty") })
+        {
+            // Reproduce production: 12:40 bar returned at 12:41:32 (92 seconds
+            // from open, but only 32 seconds since the minute completed).
+            var clock = new Clock { Now = At.AddSeconds(22) };
+            var cache = new WorkspaceChartCache(clock);
+            var original = View(code);
+            cache.Store(code, new(2026, 11, 16), [Bar(At.AddSeconds(-70))]);
+            cache.Observe(market, 105, clock.Now);
+            var result = cache.Apply(original);
+            Assert.True(result.ChartDisplay!.IsFresh);
+            Assert.True(result.ChartDisplay.QuoteIsFresh);
+            Assert.True(result.ChartDisplay.CandlesAreFresh);
+            Assert.Equal(At.AddSeconds(-10), result.ChartDisplay.LatestCandleEndUtc);
+            Assert.Equal(clock.Now, result.ChartDisplay.EvaluatedAtUtc);
+            Assert.Equal(original.ObservedAtUtc, result.ObservedAtUtc);
+            Assert.Same(original.PaperAutomation, result.PaperAutomation);
+            Assert.False(result.IsFresh);
+
+            clock.Now = At.AddSeconds(52); // Quote exactly 30s old remains valid.
+            Assert.True(cache.Apply(original).ChartDisplay!.IsFresh);
+            clock.Now = clock.Now.AddSeconds(1);
+            Assert.False(cache.Apply(original).ChartDisplay!.QuoteIsFresh);
+            Assert.False(cache.Apply(original).ChartDisplay!.IsFresh);
+
+            clock.Now = At.AddSeconds(81); // Frozen candle >90s past its close.
+            cache.Observe(market, 106, clock.Now);
+            var delayed = cache.Apply(original).ChartDisplay!;
+            Assert.True(delayed.QuoteIsFresh);
+            Assert.False(delayed.CandlesAreFresh);
+            Assert.False(delayed.IsFresh);
+            cache.Store(code, new(2026, 11, 16), [Bar(At.AddSeconds(50)) with { IsClosed = false }]);
+            Assert.True(cache.Apply(original).ChartDisplay!.IsFresh);
+        }
+    }
+
+    [Fact]
     public void InvalidQuotesAndPrimaryRecoveryCannotMislabelTheChart()
     {
         var clock = new Clock(); var cache = new WorkspaceChartCache(clock); var original = View("nifty");

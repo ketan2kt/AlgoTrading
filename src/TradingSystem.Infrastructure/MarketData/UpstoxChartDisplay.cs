@@ -42,12 +42,18 @@ internal sealed class WorkspaceChartCache(TimeProvider clock)
         quotes.TryGetValue(code, out var quote);
         var candles = value.Candles.Where(c => c.OpenTimeUtc <= now).ToArray();
         if (candles.Length == 0) return snapshot;
-        var fresh = quote is not null && quote.At <= now && now - quote.At <= TimeSpan.FromSeconds(30) &&
-            now - candles[^1].OpenTimeUtc <= TimeSpan.FromSeconds(90);
+        var quoteFresh = quote is not null && quote.At <= now && now - quote.At <= TimeSpan.FromSeconds(30);
+        // Upstox timestamps identify the START of the minute, not when its
+        // closing price became available. Measure publication lag from the end.
+        // Quote freshness remains an independent, unchanged 30-second check.
+        var latest = candles[^1];
+        var candleEnd = latest.OpenTimeUtc.AddSeconds(latest.IntervalSeconds);
+        var candlesFresh = latest.IntervalSeconds == 60 && now - candleEnd <= TimeSpan.FromSeconds(90);
         return snapshot with
         {
             Candles = candles, FuturesVolume = [],
-            ChartDisplay = new("Upstox", fresh, quote?.At, quote?.Price)
+            ChartDisplay = new("Upstox", quoteFresh && candlesFresh, quote?.At, quote?.Price,
+                quoteFresh, candlesFresh, now, candleEnd)
         };
     }
 }

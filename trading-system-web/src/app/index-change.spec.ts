@@ -10,6 +10,19 @@ function view(price = 10474, previous = 10000): TradingWorkspaceSnapshot {
 }
 
 describe('index day change', () => {
+  it.each(['nifty','sensex','bank-nifty'])('uses %s display evaluation time without changing trading freshness', marketCode => {
+    const snapshot: TradingWorkspaceSnapshot = {...view(), marketCode, isLive:false, isFresh:false,
+      chartDisplay:{source:'Upstox',isFresh:false,quoteIsFresh:true,candlesAreFresh:false,
+        evaluatedAtUtc:'2026-11-05T04:01:12Z',timestampUtc:'2026-11-05T04:01:10Z',lastPrice:10500}};
+    expect(indexChange(snapshot)?.price).toBe(10500);
+    expect(indexChange(snapshot)?.fresh).toBe(true); // Fresh quote, delayed candles reported separately.
+    expect(snapshot.isFresh).toBe(false);
+    expect(snapshot.observedAtUtc).toBe('2026-11-05T04:01:02Z');
+    snapshot.chartDisplay!.timestampUtc='2026-11-05T04:00:41Z';
+    expect(indexChange(snapshot)?.fresh).toBe(false);
+    snapshot.chartDisplay!.timestampUtc='2026-11-05T04:01:13Z';
+    expect(indexChange(snapshot)?.fresh).toBe(false);
+  });
   it('shows backup prices without claiming that the trading feed recovered', () => {
     const snapshot = {...view(), isLive:false, isFresh:false,
       chartDisplay:{source:'Upstox',isFresh:true,timestampUtc:'2026-11-05T04:01:01Z',lastPrice:10500}};

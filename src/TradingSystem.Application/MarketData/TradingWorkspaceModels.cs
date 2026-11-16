@@ -115,7 +115,9 @@ public sealed record TradingWorkspaceSnapshot(
     IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null,
     WorkspaceChartDisplay? ChartDisplay = null);
 
-public sealed record WorkspaceChartDisplay(string Source, bool IsFresh, DateTimeOffset? TimestampUtc, decimal? LastPrice);
+public sealed record WorkspaceChartDisplay(string Source, bool IsFresh, DateTimeOffset? TimestampUtc, decimal? LastPrice,
+    bool? QuoteIsFresh = null, bool? CandlesAreFresh = null, DateTimeOffset? EvaluatedAtUtc = null,
+    DateTimeOffset? LatestCandleEndUtc = null);
 
 public sealed record WorkspacePreviousClose(decimal Price, DateOnly SessionDate);
 

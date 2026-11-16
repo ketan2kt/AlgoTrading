@@ -296,7 +296,7 @@
         }
         <section class="chart-panel chart-panel--compact workspace-priority-chart">
           @if (view.chartDisplay; as chart) {
-            <div class="feed-notice" role="status">Upstox · chart only · {{chart.isFresh ? 'Live' : 'Stale'}}. Trading still uses Groww. Futures volume/VWAP unavailable.</div>
+            <div class="feed-notice" role="status">Upstox · chart only · Price {{(chart.quoteIsFresh ?? chart.isFresh) ? 'Live' : 'Stale'}} · Candles {{(chart.candlesAreFresh ?? chart.isFresh) ? 'current' : 'delayed'}}@if (chart.latestCandleEndUtc; as candleEnd) { ({{candleEnd | date:'HH:mm:ss':'Asia/Kolkata'}})}. Trading still uses Groww. Futures volume/VWAP unavailable.</div>
           }
           <div class="desk-chart-toolbar desk-quote-header">
             <div class="desk-index-quote">

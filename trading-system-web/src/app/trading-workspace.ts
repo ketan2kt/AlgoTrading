@@ -62,7 +62,9 @@ export interface WorkspaceChartEntry {
 }
 
 export interface TradingWorkspaceSnapshot {
-  chartDisplay?: { source: string; isFresh: boolean; timestampUtc: string | null; lastPrice: number | null } | null;
+  chartDisplay?: { source: string; isFresh: boolean; timestampUtc: string | null; lastPrice: number | null;
+    quoteIsFresh?: boolean | null; candlesAreFresh?: boolean | null; evaluatedAtUtc?: string | null;
+    latestCandleEndUtc?: string | null } | null;
   previousSessionClose?: { price: number; sessionDate: string } | null;
   marketCode?: string;
   engineRead?: { candleTimeUtc:string; outcome:string; reason:string|null; indexConfirmationLevel?:number|null } | null;
