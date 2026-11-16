@@ -160,6 +160,11 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(groww.TimeoutSeconds);
         }).AddStandardResilienceHandler();
         services.AddSingleton<IGrowwReadOnlyGateway, GrowwReadOnlyGateway>();
+        services.AddSingleton<PaperDataSource>();
+        services.AddSingleton<UpstoxPaperQuoteCache>();
+        services.AddSingleton<UpstoxPaperDataClient>();
+        services.AddSingleton<PaperMarketDataGateway>();
+        services.AddHostedService<PaperDataContinuityService>();
         services.AddSingleton<ReplayBlobStorage>();
         services.AddSingleton<IReplayArchiveCache>(provider => provider.GetRequiredService<ReplayBlobStorage>());
         services.AddHostedService(provider => provider.GetRequiredService<ReplayBlobStorage>());
@@ -178,7 +183,8 @@ public static class DependencyInjection
                 "Historical feed must fit 1000 price/depth subjects (at most 500 instruments) and use a 1–2 second sample cadence.")
             .ValidateOnStart();
         services.AddSingleton<IGrowwHistoricalFeedTransport, GrowwHistoricalFeedTransport>();
-        if (ReplayRecorderHosting.IsRecorder(configuration) || UpstoxIndependentCaptureService.Enabled(configuration))
+        if (ReplayRecorderHosting.IsRecorder(configuration) || UpstoxIndependentCaptureService.Enabled(configuration) ||
+            !string.IsNullOrWhiteSpace(configuration["ReplayBackup:UpstoxAnalyticsToken"]))
         {
             foreach (var name in new[] { UpstoxReplayBackupCapture.ClientName, UpstoxReplayBackupCapture.CatalogClientName })
             services.AddHttpClient(name, client =>
@@ -273,8 +279,8 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(OperationalAutomationOptions.SectionName));
         services.AddHostedService<OperationalAutomationService>();
         services.TryAddSingleton<ILiveMarketDataPublisher, NullLiveMarketDataPublisher>();
-        services.AddHostedService<GrowwNiftyLiveMarketDataService>();
-        services.AddHostedService<GrowwAdditionalMarketDataService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<GrowwNiftyLiveMarketDataService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<GrowwAdditionalMarketDataService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddOptions<OptionResearchCaptureOptions>()
             .Bind(configuration.GetSection(OptionResearchCaptureOptions.SectionName))
             .Validate(value => value.IntervalSeconds is >= 60 and <= 900 &&
@@ -283,11 +289,11 @@ public static class DependencyInjection
                                TimeOnly.TryParseExact(value.SessionEnd, "HH:mm", out _),
                 "Option research capture settings are invalid.")
             .ValidateOnStart();
-        services.AddHostedService<GrowwOptionResearchCaptureService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<GrowwOptionResearchCaptureService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddScoped<GrowwHistoricalCandleImporter>();
         services.AddScoped<GrowwHistoricalResearchImporter>();
-        services.AddHostedService<GrowwNiftyFuturesMarketDataService>();
-        services.AddHostedService<GrowwSensexFuturesMarketDataService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<GrowwNiftyFuturesMarketDataService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<GrowwSensexFuturesMarketDataService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddOptions<HeroZeroOptions>()
             .Bind(configuration.GetSection(HeroZeroOptions.SectionName))
             .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&
@@ -311,7 +317,7 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<TradingEngineEvidenceRecorder>();
         services.AddHostedService(provider => provider.GetRequiredService<TradingEngineEvidenceRecorder>());
-        services.AddHostedService<HeroZeroPaperTradingService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<HeroZeroPaperTradingService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddOptions<IntradayExpansionPairOptions>()
             .Bind(configuration.GetSection(IntradayExpansionPairOptions.SectionName))
             .Validate(value => value.ScanIntervalSeconds is >= 15 and <= 300 &&
@@ -329,7 +335,7 @@ public static class DependencyInjection
                                value.CooldownMinutes is >= 30 and <= 180,
                 "Intraday expansion-pair settings are invalid.")
             .ValidateOnStart();
-        services.AddHostedService<IntradayExpansionPairService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<IntradayExpansionPairService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddOptions<MarketRegimeOptions>()
             .Bind(configuration.GetSection(MarketRegimeOptions.SectionName))
             .Validate(options => options.MinimumDataQuality is >= 0 and <= 1 &&
@@ -425,7 +431,7 @@ public static class DependencyInjection
         services.AddSingleton<IPaperAutomationReader>(provider =>
             provider.GetRequiredService<PaperAutomationState>());
         services.AddHostedService<AutomatedPaperTradingService>();
-        services.AddHostedService<MultiMarketPaperTradingService>();
+        services.AddHostedService(provider => ActivatorUtilities.CreateInstance<MultiMarketPaperTradingService>(provider, provider.GetRequiredService<PaperMarketDataGateway>()));
         services.AddHostedService<SelfImprovementResearchService>();
         services.AddHostedService<DailyResearchPipelineV2Service>();
 

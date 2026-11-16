@@ -6,7 +6,7 @@ namespace TradingSystem.Application.MarketData;
 public sealed class GrowwQuoteNormalizer
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromMinutes(330);
-    private readonly ConcurrentDictionary<Guid, VolumeState> cumulativeVolumes = new();
+    private readonly ConcurrentDictionary<(Guid, string), VolumeState> cumulativeVolumes = new();
 
     public MarketObservation Normalize(
         Guid instrumentId,
@@ -20,7 +20,7 @@ public sealed class GrowwQuoteNormalizer
             throw new ArgumentException("Groww cumulative volume is invalid.", nameof(quote));
         var sessionDate = DateOnly.FromDateTime(receivedAtUtc.ToOffset(IndiaOffset).DateTime);
         long delta = 0;
-        cumulativeVolumes.AddOrUpdate(instrumentId,
+        cumulativeVolumes.AddOrUpdate((instrumentId, quote.Source),
             _ => new VolumeState(sessionDate, currentVolume),
             (_, previous) =>
         {
@@ -42,8 +42,8 @@ public sealed class GrowwQuoteNormalizer
 
         return new MarketObservation(
             instrumentId,
-            "Groww",
-            GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) ?? receivedAtUtc.ToUniversalTime(),
+            quote.Source,
+            GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) ?? quote.ObservedAtUtc ?? receivedAtUtc.ToUniversalTime(),
             receivedAtUtc.ToUniversalTime(),
             quote.LastPrice,
             delta,

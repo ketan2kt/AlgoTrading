@@ -15,7 +15,7 @@ namespace TradingSystem.Infrastructure.MarketData;
 // Recorder only. It uses the exact dated Groww contract plan and never touches live quote or order services.
 internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, IConfiguration configuration,
     IHistoricalQuoteArchive archive, TimeProvider clock, ILogger<UpstoxReplayBackupCapture> logger,
-    WorkspaceChartCache? chartCache = null)
+    WorkspaceChartCache? chartCache = null, UpstoxPaperQuoteCache? paperQuotes = null)
 {
     internal const string ClientName = "UpstoxReplayBackup";
     internal const string CatalogClientName = "UpstoxReplayCatalog";
@@ -90,7 +90,8 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             var batch = instruments.Keys.Order(StringComparer.Ordinal).ToArray();
             while (!token.IsCancellationRequested && clock.GetUtcNow() < close)
             {
-                var delay = TimeSpan.FromSeconds(3);
+                // Leave a bounded quote budget for paper confirmation futures.
+                var delay = TimeSpan.FromSeconds(paperQuotes is null ? 3 : 4);
                 var preOpen = clock.GetUtcNow() < open;
                 try
                 {
@@ -134,6 +135,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                         {
                             if (!TryReadIndex(element.Value, received, out var indexQuote, out var indexAt)) continue;
                             chartCache?.Observe(market, indexQuote.LastPrice, indexAt);
+                            paperQuotes?.Observe(identity, indexQuote, indexAt);
                             accepted.Add(identity);
                             if (persistAll || primary.NeedsBackup(instrument, received))
                                 if (!archive.TryRecordBackup(new(Guid.NewGuid(), received,
@@ -142,6 +144,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                             continue;
                         }
                         if (!TryRead(element.Value, received, out var key, out var quote, out var observedAt)) continue;
+                        paperQuotes?.Observe(key, quote, observedAt);
                         accepted.Add(key);
                         var depth = (quote.BidPrice!.Value, quote.BidQuantity!.Value, quote.OfferPrice!.Value, quote.OfferQuantity!.Value);
                         var hasPrior = recorded.TryGetValue(key, out var prior);

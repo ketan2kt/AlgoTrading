@@ -132,7 +132,7 @@ internal sealed partial class IntradayExpansionPairService(
 
         var completedBefore = now.AddSeconds(-marketData.Value.CandleIntervalSeconds);
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
-                value.IntervalSeconds == marketData.Value.CandleIntervalSeconds && value.Source == "Groww" &&
+                value.IntervalSeconds == marketData.Value.CandleIntervalSeconds && value.Source == PaperDataSource.Of(gateway, market.Code) &&
                 value.OpenTimeUtc >= dayStart && value.OpenTimeUtc <= completedBefore)
             .OrderByDescending(value => value.OpenTimeUtc).Take(90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);

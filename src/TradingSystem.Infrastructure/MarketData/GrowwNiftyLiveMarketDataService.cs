@@ -50,7 +50,7 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
                     await RestoreProjectionAsync(cycleTimeout.Token);
                     restored = true;
                 }
-                if (!await HasAccessTokenAsync(cycleTimeout.Token))
+                if (gateway is not PaperMarketDataGateway && !await HasAccessTokenAsync(cycleTimeout.Token))
                 {
                     feedState.RecordStatus("CredentialsRequired", "Groww access token is not configured on the server.");
                     delay = TimeSpan.FromSeconds(5);
@@ -167,8 +167,9 @@ internal sealed partial class GrowwNiftyLiveMarketDataService(
         var observation = normalizer.Normalize(instrument.Id, quote, timeProvider.GetUtcNow());
         feedState.RecordStage("Validating and persisting the received quote.");
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
-        var result = await processor.ProcessAsync(observation, cancellationToken);
-        if (result.Validation.Accepted)
+        var result = await processor.ProcessAsync(observation, cancellationToken,
+            aggregateCandles: quote.Source == "Groww");
+        if (result.Validation.Accepted || quote.Source == "Upstox" && result.Validation.Reason == MarketDataRejectionReason.Duplicate)
         {
             feedState.RecordSuccess(observation.SourceTimestampUtc, observation.ReceivedAtUtc);
         }

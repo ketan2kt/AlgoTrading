@@ -29,8 +29,10 @@ internal sealed partial class AutomatedPaperTradingService(
     IOptions<MarketDataOptions> marketOptions,
     TimeProvider timeProvider,
     TradingEngineEvidenceRecorder evidenceRecorder,
-    ILogger<AutomatedPaperTradingService> logger) : BackgroundService
+    ILogger<AutomatedPaperTradingService> logger,
+    PaperDataSource? paperDataSource = null) : BackgroundService
 {
+    private string DataSource => paperDataSource?.Source ?? "Groww";
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private DateTimeOffset? lastEvaluatedCandleUtc;
     private string cyclePhase = "Startup";
@@ -176,7 +178,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var latest = await db.MarketObservations.AsNoTracking()
-            .Where(value => value.InstrumentId == instrument.Id && value.Source == "Groww")
+            .Where(value => value.InstrumentId == instrument.Id && value.Source == DataSource)
             .OrderByDescending(value => value.SourceTimestampUtc).FirstOrDefaultAsync(cancellationToken);
         var fresh = latest is not null && now - latest.ReceivedAtUtc <=
             TimeSpan.FromSeconds(marketOptions.Value.MaximumAgeSeconds);
@@ -220,7 +222,7 @@ internal sealed partial class AutomatedPaperTradingService(
                 GrowwQuote optionQuote;
                 try
                 {
-                    var groww = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
+                    var groww = PaperMarketDataGateway.Resolve(scope.ServiceProvider);
                     optionQuote = await groww.GetQuoteAsync(new GrowwQuoteRequest(
                         optionInstrument.Exchange, "FNO", optionInstrument.TradingSymbol), cancellationToken);
                 }
@@ -296,7 +298,7 @@ internal sealed partial class AutomatedPaperTradingService(
         }
 
         var candles = await db.Candles.AsNoTracking().Where(value =>
-                value.InstrumentId == instrument.Id && value.Source == "Groww" &&
+                value.InstrumentId == instrument.Id && value.Source == DataSource &&
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -328,7 +330,7 @@ internal sealed partial class AutomatedPaperTradingService(
         cycleInputs["futureSymbol"] = confirmationFuture.TradingSymbol;
         cycleInputs["futureInstrumentId"] = confirmationFuture.Id;
         var confirmationCandles = await db.Candles.AsNoTracking().Where(value =>
-                value.InstrumentId == confirmationFuture.Id && value.Source == "Groww" &&
+                value.InstrumentId == confirmationFuture.Id && value.Source == DataSource &&
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc < sessionEnd)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -362,7 +364,7 @@ internal sealed partial class AutomatedPaperTradingService(
 
         cyclePhase = "PreviousSessionAndAlignedFeatures";
         var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
-                value.InstrumentId == instrument.Id && value.Source == "Groww" &&
+                value.InstrumentId == instrument.Id && value.Source == DataSource &&
                 value.IntervalSeconds == marketOptions.Value.CandleIntervalSeconds &&
                 value.OpenTimeUtc < sessionStart)
             .OrderByDescending(value => value.OpenTimeUtc).Take(2500)
@@ -747,9 +749,14 @@ internal sealed partial class AutomatedPaperTradingService(
             return;
         }
 
-        var growwGateway = scope.ServiceProvider.GetRequiredService<IGrowwReadOnlyGateway>();
+        var growwGateway = PaperMarketDataGateway.Resolve(scope.ServiceProvider);
         var quote = await growwGateway.GetQuoteAsync(new GrowwQuoteRequest(
             "NSE", "FNO", selectedOption.TradingSymbol), cancellationToken);
+        if (DataSource != latestCandle.Source)
+        {
+            lastEvaluatedCandleUtc = null;
+            throw new GrowwApiException("Paper provider changed; refresh the setup from the new candle stream.", "PAPER_SOURCE_CHANGED");
+        }
         var tradingDate = DateOnly.FromDateTime(indiaNow.Date);
         var hasCorrelatedSensexExposure = await (from openPosition in db.MarketPaperPositions.AsNoTracking()
             join openInstrument in db.Instruments.AsNoTracking()
@@ -1085,11 +1092,11 @@ internal sealed partial class AutomatedPaperTradingService(
                 timeProvider.GetUtcNow()))
         {
             var latestUnderlying = await researchDb.MarketObservations.AsNoTracking()
-                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == DataSource)
                 .OrderByDescending(value => value.ReceivedAtUtc).FirstOrDefaultAsync(cancellationToken);
             var intervalSeconds = marketOptions.Value.CandleIntervalSeconds;
             var underlyingBars = await researchDb.Candles.AsNoTracking()
-                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww" &&
+                .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == DataSource &&
                                 value.IntervalSeconds == intervalSeconds && value.OpenTimeUtc >= sessionStart &&
                                 value.OpenTimeUtc < sessionEnd)
                 .OrderByDescending(value => value.OpenTimeUtc).Take(30)
@@ -1262,7 +1269,7 @@ internal sealed partial class AutomatedPaperTradingService(
         var evaluatedAt = timeProvider.GetUtcNow();
         var completedBefore = evaluatedAt.AddSeconds(-interval);
         var candles = await db.Candles.AsNoTracking().Where(value =>
-                value.InstrumentId == underlyingInstrumentId && value.Source == "Groww" &&
+                value.InstrumentId == underlyingInstrumentId && value.Source == DataSource &&
                 value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
                 value.OpenTimeUtc < sessionEnd && value.OpenTimeUtc <= completedBefore)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -1295,7 +1302,7 @@ internal sealed partial class AutomatedPaperTradingService(
             .ToListAsync(cancellationToken);
         if (trades.Count == 0) return;
 
-        var gateway = services.GetRequiredService<IGrowwReadOnlyGateway>();
+        var gateway = PaperMarketDataGateway.Resolve(services);
         foreach (var trade in trades)
         {
             foreach (var horizon in PaperResearchCadence.PostExitHorizonMinutes)
@@ -1543,7 +1550,7 @@ internal sealed partial class AutomatedPaperTradingService(
     {
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var indexCount = await db.Candles.AsNoTracking().CountAsync(value =>
-            value.InstrumentId == indexInstrumentId && value.Source == "Groww" &&
+            value.InstrumentId == indexInstrumentId && value.Source == DataSource &&
             value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
             value.OpenTimeUtc < sessionEnd, cancellationToken);
         var priorClose = await db.Candles.AsNoTracking().AnyAsync(value =>
@@ -1556,11 +1563,11 @@ internal sealed partial class AutomatedPaperTradingService(
                 value.ExpiryDate >= date)
             .OrderBy(value => value.ExpiryDate).FirstOrDefaultAsync(cancellationToken);
         var futureCount = future is null ? 0 : await db.Candles.AsNoTracking().CountAsync(value =>
-            value.InstrumentId == future.Id && value.Source == "Groww" &&
+            value.InstrumentId == future.Id && value.Source == DataSource &&
             value.IntervalSeconds == interval && value.OpenTimeUtc >= sessionStart &&
             value.OpenTimeUtc < sessionEnd, cancellationToken);
         var latestReceived = await db.MarketObservations.AsNoTracking().Where(value =>
-                value.InstrumentId == indexInstrumentId && value.Source == "Groww")
+                value.InstrumentId == indexInstrumentId && value.Source == DataSource)
             .OrderByDescending(value => value.ReceivedAtUtc)
             .Select(value => (DateTimeOffset?)value.ReceivedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);

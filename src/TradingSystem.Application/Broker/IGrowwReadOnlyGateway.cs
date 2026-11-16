@@ -51,7 +51,11 @@ public sealed record GrowwQuote(
     long? OfferQuantity,
     decimal? Volume,
     decimal? OpenInterest,
-    decimal? OpenInterestDayChange);
+    decimal? OpenInterestDayChange)
+{
+    public string Source { get; init; } = "Groww";
+    public DateTimeOffset? ObservedAtUtc { get; init; }
+}
 
 public sealed record GrowwHistoricalCandleRequest(
     string Exchange,
@@ -73,7 +77,10 @@ public sealed record GrowwHistoricalCandle(
 public sealed record GrowwHistoricalCandles(
     IReadOnlyList<GrowwHistoricalCandle> Candles,
     decimal ClosingPrice,
-    int IntervalInMinutes);
+    int IntervalInMinutes)
+{
+    public string Source { get; init; } = "Groww";
+}
 
 public sealed record GrowwOptionChainRequest(
     string Exchange,
@@ -82,7 +89,10 @@ public sealed record GrowwOptionChainRequest(
 
 public sealed record GrowwOptionChain(
     decimal UnderlyingLastPrice,
-    IReadOnlyList<GrowwOptionStrike> Strikes);
+    IReadOnlyList<GrowwOptionStrike> Strikes)
+{
+    public string Source { get; init; } = "Groww";
+}
 
 public sealed record GrowwOptionStrike(
     decimal StrikePrice,

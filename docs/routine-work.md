@@ -17,7 +17,27 @@ in `.tools` when present; otherwise they must be on PATH. .NET follows `global.j
 PostgreSQL integration tests require Docker and `RUN_POSTGRES_TESTS=true`.
 CI retains its full checks and dependency audits; the helper does not replace CI.
 
-## Replay-only Upstox backup
+## Upstox replay and paper-data backup
+
+The website's paper-data adapter uses the existing read-only analytics credential;
+HDFC remains pending and live broker execution remains Groww-only. Nifty, Sensex
+and Bank Nifty each persist their own preferred provider. Index/futures native
+minute histories are kept warm separately by provider, never spliced into fake
+candles. Quotes retain the 30-second source-age rule; derivative books require
+positive, uncrossed bid/ask prices and quantities.
+
+Groww failure switches paper inputs to valid Upstox data. The continuity worker
+checks streams every trading day and restores Groww after two successful readiness
+checks at least 15 seconds apart; if backup fails, a verified primary can resume
+immediately. Recovery checks current native candles, index/futures quotes and open
+option contracts, including Nifty's original paper ledger. Source changes retain
+order IDs, partial fills, position/risk state and entry idempotency. Both feeds
+unavailable means fail closed, not stale simulated fills.
+
+Backup-derived paper signals must not become live orders: a durable fallback-day
+marker blocks new live entries for the rest of that day, even after failback or
+restart. Existing live-position protection/recovery continues via Groww. This is
+intentionally conservative; no Upstox live-order route or arming is added.
 
 With `ReplayBackup:Host=Website`, the website continuously records read-only
 Upstox snapshots independently from the Groww recorder. It uses the shared
@@ -35,15 +55,18 @@ broker, trade time, receipt time and unchanged-liquidity identity. Since the
 Upstox snapshot timestamp is not an exchange book timestamp, only separate
 **Upstox-assisted replay/strategy-comparison** results use these quotes. Both
 comparison arms use the same observations, costs and execution settings; their
-checkpoint survives a worker restart. Strict replay, paper matches and live
-trading remain unchanged. A monitored gap is bridged only with a continuous
+checkpoint survives a worker restart. Strict replay and its evidence requirements
+remain unchanged. A monitored gap is bridged only with a continuous
 per-contract path, not just a healthy sample from another contract.
 
 Maximum supported plan: 500 instruments across the three indexes; at most three
-quote requests every three seconds (1,800 per 30 minutes before request latency
-and backoff). HTTP 429 honors the broker's retry delay; authentication errors
-back off for a minute. This budget assumes the leased backup collector is the sole Upstox
-standard-API consumer using the account token. Pre-open calls check authorization
+quote requests every four seconds with the paper quote cache (1,350 per 30
+minutes before latency/backoff). On-demand paper quotes batch up to 500 contracts
+at most once every three seconds (600 per 30 minutes), reusing warm collector
+quotes first. Combined quote budget is at most 1,950 per 30 minutes. History and
+chain endpoints have short shared caches. Limits are per API/user, so additional
+external consumers require a budget review. HTTP 429 honors the broker's retry
+delay; authentication errors back off for a minute. Pre-open calls check authorization
 and contract availability without treating yesterday's quotes as fresh. Credential
 expiry metadata generates a seven-day warning; actual broker responses remain
 the authentication check. Official limits:

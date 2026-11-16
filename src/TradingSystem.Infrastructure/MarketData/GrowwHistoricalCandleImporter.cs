@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using TradingSystem.Application.Broker;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
@@ -14,6 +15,12 @@ public sealed class GrowwHistoricalCandleImporter(TradingDbContext dbContext)
         DateTimeOffset nowUtc, CancellationToken cancellationToken,
         DateTimeOffset? notBeforeUtc = null, DateTimeOffset? beforeUtc = null,
         bool validateExisting = false)
+        => await ImportCoreAsync(instrument, history, nowUtc, notBeforeUtc,
+            beforeUtc, validateExisting, retryConcurrentInsert: true, cancellationToken);
+
+    private async Task<int> ImportCoreAsync(Instrument instrument, GrowwHistoricalCandles history,
+        DateTimeOffset nowUtc, DateTimeOffset? notBeforeUtc, DateTimeOffset? beforeUtc,
+        bool validateExisting, bool retryConcurrentInsert, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(instrument);
         ArgumentNullException.ThrowIfNull(history);
@@ -40,7 +47,7 @@ public sealed class GrowwHistoricalCandleImporter(TradingDbContext dbContext)
         var first = parsed.Min(value => value.OpenTimeUtc);
         var last = parsed.Max(value => value.OpenTimeUtc);
         var existingQuery = dbContext.Candles.AsNoTracking().Where(value =>
-                value.InstrumentId == instrument.Id && value.Source == "Groww" &&
+                value.InstrumentId == instrument.Id && value.Source == history.Source &&
                 value.IntervalSeconds == intervalSeconds && value.OpenTimeUtc >= first &&
                 value.OpenTimeUtc <= last);
         if (validateExisting)
@@ -61,16 +68,30 @@ public sealed class GrowwHistoricalCandleImporter(TradingDbContext dbContext)
         }
         var existing = await existingQuery.Select(value => value.OpenTimeUtc)
             .ToHashSetAsync(cancellationToken);
-        var inserted = 0;
+        var added = new List<Candle>();
         foreach (var value in parsed.Where(value => !existing.Contains(value.OpenTimeUtc)))
         {
-            dbContext.Candles.Add(new Candle(Guid.NewGuid(), instrument.Id, value.OpenTimeUtc,
+            var candle = new Candle(Guid.NewGuid(), instrument.Id, value.OpenTimeUtc,
                 intervalSeconds, value.Source.Open, value.Source.High, value.Source.Low,
-                value.Source.Close, value.Source.Volume, "Groww", value.Source.OpenInterest));
-            inserted++;
+                value.Source.Close, value.Source.Volume, history.Source, value.Source.OpenInterest);
+            dbContext.Candles.Add(candle);
+            added.Add(candle);
         }
-        if (inserted > 0) await dbContext.SaveChangesAsync(cancellationToken);
-        return inserted;
+        try
+        {
+            if (added.Count > 0) await dbContext.SaveChangesAsync(cancellationToken);
+            return added.Count;
+        }
+        catch (DbUpdateException error) when (retryConcurrentInsert && error.InnerException is PostgresException
+               { SqlState: PostgresErrorCodes.UniqueViolation,
+                 ConstraintName: "IX_candles_InstrumentId_OpenTimeUtc_IntervalSeconds_Source" })
+        {
+            // Native-history warming and ingestion can finish the same minute together.
+            // Re-read once, retaining both providers and never overwriting existing OHLC.
+            foreach (var candle in added) dbContext.Entry(candle).State = EntityState.Detached;
+            return await ImportCoreAsync(instrument, history, nowUtc,
+                notBeforeUtc, beforeUtc, validateExisting, retryConcurrentInsert: false, cancellationToken);
+        }
     }
 
     internal static DateTimeOffset ParseIndiaTimestamp(string value)

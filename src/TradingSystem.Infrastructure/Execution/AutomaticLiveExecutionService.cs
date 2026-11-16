@@ -96,6 +96,16 @@ internal sealed partial class AutomaticLiveExecutionService(
         var armedMarkets = arm.Markets.Where(value => value.Armed && value.ChangedAtUtc is not null)
             .Select(value => value.Market).ToArray();
         if (armedMarkets.Length == 0) return;
+        // Existing live orders were recovered/managed above. New backup-data
+        // paper signals are deliberately not mirrored to live execution.
+        var fallbackDay = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
+            .ToOffset(TimeSpan.FromHours(5.5)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+        if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
+                x.Key == PaperDataSource.SettingKey && x.ValueJson == fallbackDay, cancellationToken))
+        {
+            await NoteDeferredEntriesAsync(db, arm, "Paper is using backup data; new live entries remain Groww-only.", cancellationToken);
+            return;
+        }
         var pending = await db.LiveExecutionIntents.Where(value =>
             value.Status == "Pending" && armedMarkets.Contains(value.Market))
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
@@ -1130,6 +1140,15 @@ internal sealed partial class AutomaticLiveExecutionService(
             BrokerOrderSnapshot order;
             if (intent.Status == "Pending")
             {
+                var backupSession = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
+                    .ToOffset(TimeSpan.FromHours(5.5)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
+                    x.Key == PaperDataSource.SettingKey && x.ValueJson == backupSession, cancellationToken))
+                {
+                    intent.Reject("Backup-data paper signal is not authorized for live entry.", timeProvider.GetUtcNow());
+                    await db.SaveChangesAsync(cancellationToken);
+                    return;
+                }
                 if (intent.SourceType == "MARKET_POSITION")
                 {
                     var paperStillOpen = await db.MarketPaperPositions.AsNoTracking().AnyAsync(value =>

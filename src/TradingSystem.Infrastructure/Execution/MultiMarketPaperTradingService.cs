@@ -218,7 +218,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
-                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                value.IntervalSeconds == interval && value.Source == PaperDataSource.Of(gateway, market.Code) &&
                 (market.InstrumentType != InstrumentType.Index || value.OpenTimeUtc >= sessionStartUtc))
             .OrderByDescending(value => value.OpenTimeUtc).Take(market.InstrumentType == InstrumentType.Index ? 600 : 90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -288,7 +288,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 .FirstOrDefaultAsync(cancellationToken);
             var futureCandles = future is null ? [] : await db.Candles.AsNoTracking()
                 .Where(value => value.InstrumentId == future.Id && value.IntervalSeconds == interval &&
-                                value.Source == "Groww" && value.OpenTimeUtc >= sessionStartUtc &&
+                                value.Source == PaperDataSource.Of(gateway, market.Code) && value.OpenTimeUtc >= sessionStartUtc &&
                                 value.OpenTimeUtc <= latest.OpenTimeUtc)
                 .OrderByDescending(value => value.OpenTimeUtc).Take(40)
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -433,7 +433,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
             var previousCandidates = await db.Candles.AsNoTracking().Where(value =>
                     value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
-                    value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
+                    value.Source == PaperDataSource.Of(gateway, market.Code) && value.OpenTimeUtc < sessionStartUtc)
                 .OrderByDescending(value => value.OpenTimeUtc).Take(2500)
                 .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
             var previousSession = previousCandidates
@@ -658,6 +658,11 @@ internal sealed partial class MultiMarketPaperTradingService(
         entryPhases[market.Code] = "OptionQuote";
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
             execution.TradingSymbol), cancellationToken);
+        if (PaperDataSource.Of(gateway, market.Code) != latest.Source)
+        {
+            lastEvaluated.Remove(market.Code);
+            throw new GrowwApiException("Paper provider changed; refresh the setup from the new candle stream.", "PAPER_SOURCE_CHANGED");
+        }
         var quoteReceivedAt = timeProvider.GetUtcNow();
         var entry = market.ExecuteOptions ? quote.OfferPrice ?? quote.LastPrice : quote.LastPrice;
         if (entry <= 0)
@@ -905,7 +910,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var atr = AverageTrueRange(candles.TakeLast(15).ToArray());
         var previousCandles = await db.Candles.AsNoTracking().Where(value =>
                 value.InstrumentId == underlying.Id && value.IntervalSeconds == interval &&
-                value.Source == "Groww" && value.OpenTimeUtc < sessionStartUtc)
+                value.Source == PaperDataSource.Of(gateway, market.Code) && value.OpenTimeUtc < sessionStartUtc)
             .OrderByDescending(value => value.OpenTimeUtc).Take(390)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
         var priorDate = previousCandles.Count == 0 ? (DateOnly?)null :
@@ -1028,6 +1033,11 @@ internal sealed partial class MultiMarketPaperTradingService(
         entryPhases[market.Code] = "BankOptionQuoteAndAdmission";
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, market.ExecutionSegment,
             execution.TradingSymbol), cancellationToken);
+        if (PaperDataSource.Of(gateway, market.Code) != latest.Source)
+        {
+            lastEvaluated.Remove(market.Code);
+            throw new GrowwApiException("Paper provider changed; refresh the setup from the new candle stream.", "PAPER_SOURCE_CHANGED");
+        }
         var tick = execution.TickSize > 0m
             ? InstrumentPriceIncrement.FromGrowwInstrumentMaster(execution.TickSize) : .05m;
         var admission = BankIndexOptionAdmissionPolicy.Evaluate(quote.LastPrice,
@@ -1248,7 +1258,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 var latestUnderlying = await db.MarketObservations.AsNoTracking()
                     .Where(value => value.InstrumentId == position.UnderlyingInstrumentId &&
-                                    value.Source == "Groww")
+                                    value.Source == PaperDataSource.Of(gateway, market.Code))
                     .OrderByDescending(value => value.ReceivedAtUtc)
                     .FirstOrDefaultAsync(cancellationToken);
                 failedAssessment = failedAssessment with { Reasons = ["Fresh underlying observation unavailable."] };
@@ -1260,7 +1270,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     var sessionStart = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
                     var recentCandles = await db.Candles.AsNoTracking()
                         .Where(value => value.InstrumentId == position.UnderlyingInstrumentId &&
-                                        value.Source == "Groww" && value.IntervalSeconds == intervalSeconds &&
+                                        value.Source == PaperDataSource.Of(gateway, market.Code) && value.IntervalSeconds == intervalSeconds &&
                                         value.OpenTimeUtc >= sessionStart)
                         .OrderByDescending(value => value.OpenTimeUtc).Take(30)
                         .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -1393,7 +1403,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         {
             var lower = asOf - BankNiftyConfirmedTrail.MaximumSpotAge;
             return db.MarketObservations.AsNoTracking()
-                .Where(value => value.InstrumentId == position.UnderlyingInstrumentId && value.Source == "Groww" &&
+                .Where(value => value.InstrumentId == position.UnderlyingInstrumentId && value.Source == PaperDataSource.Of(gateway, position.Market) &&
                     value.ReceivedAtUtc >= lower && value.ReceivedAtUtc <= asOf && value.SourceTimestampUtc >= lower &&
                     value.SourceTimestampUtc <= value.ReceivedAtUtc)
                 .OrderByDescending(value => value.ReceivedAtUtc).ThenByDescending(value => value.SourceTimestampUtc)
@@ -1455,7 +1465,7 @@ internal sealed partial class MultiMarketPaperTradingService(
     {
         var observedAt = timeProvider.GetUtcNow();
         var latestUnderlyingAt = await db.MarketObservations.AsNoTracking()
-            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == PaperDataSource.Of(gateway, underlyingInstrumentId))
             .OrderByDescending(value => value.ReceivedAtUtc)
             .Select(value => (DateTimeOffset?)value.ReceivedAtUtc).FirstOrDefaultAsync(cancellationToken);
         var interval = marketOptions.Value.CandleIntervalSeconds;
@@ -1463,7 +1473,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var candles = await db.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == underlyingInstrumentId &&
                             value.IntervalSeconds == interval && value.OpenTimeUtc <= completedBefore &&
-                            value.Source == "Groww")
+                            value.Source == PaperDataSource.Of(gateway, underlyingInstrumentId))
             .OrderByDescending(value => value.OpenTimeUtc)
             .Take(21)
             .OrderBy(value => value.OpenTimeUtc)
@@ -1480,7 +1490,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         CancellationToken cancellationToken)
     {
         var latestUnderlyingAtUtc = await db.MarketObservations.AsNoTracking()
-            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == "Groww")
+            .Where(value => value.InstrumentId == underlyingInstrumentId && value.Source == PaperDataSource.Of(gateway, underlyingInstrumentId))
             .OrderByDescending(value => value.ReceivedAtUtc)
             .Select(value => (DateTimeOffset?)value.ReceivedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
@@ -1494,7 +1504,7 @@ internal sealed partial class MultiMarketPaperTradingService(
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
         var candles = await db.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == underlyingInstrumentId &&
-                            value.IntervalSeconds == interval && value.Source == "Groww" &&
+                            value.IntervalSeconds == interval && value.Source == PaperDataSource.Of(gateway, underlyingInstrumentId) &&
                             value.OpenTimeUtc >= sessionStartUtc &&
                             value.OpenTimeUtc <= observedAtUtc.AddSeconds(-interval))
             .OrderByDescending(value => value.OpenTimeUtc)

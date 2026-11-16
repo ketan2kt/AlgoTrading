@@ -23,7 +23,8 @@ internal sealed class EfTradingWorkspaceReader(
     IOptions<TradingModeOptions> tradingMode,
     IPaperAutomationReader paperAutomation,
     IOperationalAutomationReportReader operationalReportReader,
-    TimeProvider timeProvider, WorkspaceChartCache? chartCache = null) : ITradingWorkspaceReader
+    TimeProvider timeProvider, WorkspaceChartCache? chartCache = null,
+    PaperDataSource? paperDataSource = null) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private const int MaximumWorkspaceRequestCount = 7_000;
@@ -39,6 +40,7 @@ internal sealed class EfTradingWorkspaceReader(
         CancellationToken cancellationToken)
     {
         var options = liveOptions.Value;
+        var dataSource = paperDataSource?.GetSource(market) ?? "Groww";
         var definition = TradingMarketCatalog.Get(market);
         // The live engines keep their smaller configured working window, while an
         // explicit workspace request may load enough one-minute bars for seven
@@ -79,7 +81,7 @@ internal sealed class EfTradingWorkspaceReader(
         var closed = await dbContext.Candles.AsNoTracking()
             .Where(value => value.InstrumentId == instrument.Id &&
                             value.IntervalSeconds == marketDataOptions.Value.CandleIntervalSeconds &&
-                            value.Source == "Groww" &&
+                            value.Source == dataSource &&
                             value.OpenTimeUtc >= sessionStartUtc.AddDays(-14) &&
                             value.OpenTimeUtc < sessionEndUtc)
             .OrderByDescending(value => value.OpenTimeUtc)
@@ -111,7 +113,7 @@ internal sealed class EfTradingWorkspaceReader(
         var observations = IsTradableSessionTimestamp(now, definition.SessionStart, definition.SessionEnd)
             ? await dbContext.MarketObservations.AsNoTracking()
                 .Where(value => value.InstrumentId == instrument.Id &&
-                                value.Source == "Groww" &&
+                                value.Source == dataSource &&
                                 value.SourceTimestampUtc >= currentBucket)
                 .OrderBy(value => value.SourceTimestampUtc)
                 .ToListAsync(cancellationToken)
@@ -141,7 +143,7 @@ internal sealed class EfTradingWorkspaceReader(
             ? []
             : await dbContext.Candles.AsNoTracking()
                 .Where(value => value.InstrumentId == volumeInstrument.Id &&
-                                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                                value.IntervalSeconds == interval && value.Source == dataSource &&
                                 value.OpenTimeUtc >= sessionStartUtc.AddDays(-7) &&
                                 value.OpenTimeUtc < sessionEndUtc)
                 .OrderBy(value => value.OpenTimeUtc)
@@ -536,7 +538,8 @@ internal sealed class EfTradingWorkspaceReader(
             futuresVolume,
             research,
             operationalReports,
-            definition.Code, engineRead, previousSessionClose, chartEntries);
+            definition.Code, engineRead, previousSessionClose, chartEntries,
+            PaperMarketDataSource: dataSource);
         return chartCache?.Apply(snapshot) ?? snapshot;
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => WithChart(new(

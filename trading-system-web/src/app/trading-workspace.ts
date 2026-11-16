@@ -62,6 +62,7 @@ export interface WorkspaceChartEntry {
 }
 
 export interface TradingWorkspaceSnapshot {
+  paperMarketDataSource?: string;
   chartDisplay?: { source: string; isFresh: boolean; timestampUtc: string | null; lastPrice: number | null;
     quoteIsFresh?: boolean | null; candlesAreFresh?: boolean | null; evaluatedAtUtc?: string | null;
     latestCandleEndUtc?: string | null } | null;

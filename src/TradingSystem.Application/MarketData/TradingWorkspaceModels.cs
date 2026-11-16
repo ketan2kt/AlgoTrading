@@ -113,7 +113,8 @@ public sealed record TradingWorkspaceSnapshot(
     WorkspaceEngineRead? EngineRead = null,
     WorkspacePreviousClose? PreviousSessionClose = null,
     IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null,
-    WorkspaceChartDisplay? ChartDisplay = null);
+    WorkspaceChartDisplay? ChartDisplay = null,
+    string PaperMarketDataSource = "Groww");
 
 public sealed record WorkspaceChartDisplay(string Source, bool IsFresh, DateTimeOffset? TimestampUtc, decimal? LastPrice,
     bool? QuoteIsFresh = null, bool? CandlesAreFresh = null, DateTimeOffset? EvaluatedAtUtc = null,

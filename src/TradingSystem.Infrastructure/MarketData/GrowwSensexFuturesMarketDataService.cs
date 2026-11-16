@@ -90,7 +90,7 @@ internal sealed partial class GrowwSensexFuturesMarketDataService(
 
         var quote = await gateway.GetQuoteAsync(new(market.Exchange, "FNO", future.TradingSymbol),
             cancellationToken);
-        var observation = normalizer.Normalize(future.Id, quote, now);
+        var observation = normalizer.Normalize(future.Id, quote, timeProvider.GetUtcNow());
         await scope.ServiceProvider.GetRequiredService<MarketDataProcessor>()
             .ProcessAsync(observation, cancellationToken, aggregateCandles: false);
     }

@@ -84,7 +84,7 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
             lastFuturesHistoryRefreshUtc = now;
             historyRefreshed = true;
 
-            if (bootstrappedSession != session)
+            if (bootstrappedSession != session || PaperDataSource.Of(gateway) == "Upstox")
             {
                 var startIndia = indiaNow.Date.AddDays(-7).AddHours(9).AddMinutes(15);
                 var start = new DateTimeOffset(startIndia,
@@ -98,7 +98,7 @@ internal sealed partial class GrowwNiftyFuturesMarketDataService(
 
         var quote = await gateway.GetQuoteAsync(new("NSE", "FNO", future.TradingSymbol),
             cancellationToken);
-        var observation = normalizer.Normalize(future.Id, quote, now);
+        var observation = normalizer.Normalize(future.Id, quote, timeProvider.GetUtcNow());
         var processor = scope.ServiceProvider.GetRequiredService<MarketDataProcessor>();
         var result = await processor.ProcessAsync(observation, cancellationToken,
             aggregateCandles: false);

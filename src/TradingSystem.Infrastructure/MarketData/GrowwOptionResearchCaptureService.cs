@@ -18,7 +18,6 @@ internal sealed partial class GrowwOptionResearchCaptureService(
     TimeProvider timeProvider,
     ILogger<GrowwOptionResearchCaptureService> logger) : BackgroundService
 {
-    private const string Source = "GrowwOptionChainApiV1";
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Market[] Markets =
@@ -80,7 +79,8 @@ internal sealed partial class GrowwOptionResearchCaptureService(
         var minuteUtc = new DateTimeOffset(observedAtUtc.Year, observedAtUtc.Month, observedAtUtc.Day,
             observedAtUtc.Hour, observedAtUtc.Minute, 0, TimeSpan.Zero);
         if (await db.OptionChainSnapshots.AnyAsync(value => value.UnderlyingInstrumentId == underlying.Id &&
-                value.ExpiryDate == expiry && value.SourceTimestampUtc == minuteUtc && value.Source == Source,
+                value.ExpiryDate == expiry && value.SourceTimestampUtc == minuteUtc &&
+                value.Source == (PaperDataSource.Of(gateway, market.Underlying) == "Upstox" ? "UpstoxOptionChainApiV2" : "GrowwOptionChainApiV1"),
             cancellationToken)) return;
 
         var chain = await gateway.GetOptionChainAsync(
@@ -93,7 +93,7 @@ internal sealed partial class GrowwOptionResearchCaptureService(
             market.Underlying, market.Exchange, expiry.Value, chain.UnderlyingLastPrice,
             false, chain.Strikes.Count, nearest), JsonOptions);
         db.OptionChainSnapshots.Add(new OptionChainSnapshot(Guid.NewGuid(), underlying.Id, expiry.Value,
-            Source, minuteUtc, observedAtUtc, payload));
+            chain.Source == "Upstox" ? "UpstoxOptionChainApiV2" : "GrowwOptionChainApiV1", minuteUtc, observedAtUtc, payload));
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException exception) when (IsUniqueViolation(exception)) { }
     }

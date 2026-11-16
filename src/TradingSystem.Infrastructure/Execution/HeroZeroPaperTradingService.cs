@@ -479,7 +479,7 @@ internal sealed partial class HeroZeroPaperTradingService(
         var sessionStart = StartOfIndiaDay(now);
         var interval = marketData.Value.CandleIntervalSeconds;
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == instrumentId &&
-                value.IntervalSeconds == interval && value.Source == "Groww" &&
+                value.IntervalSeconds == interval && value.Source == PaperDataSource.Of(gateway, instrumentId) &&
                 value.OpenTimeUtc >= sessionStart && value.OpenTimeUtc <= now.AddSeconds(-interval))
             .OrderByDescending(value => value.OpenTimeUtc).Take(15).OrderBy(value => value.OpenTimeUtc)
             .ToListAsync(cancellationToken);

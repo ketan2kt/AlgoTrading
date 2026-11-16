@@ -98,8 +98,8 @@ internal sealed partial class GrowwAdditionalMarketDataService(
         var observation = normalizer.Normalize(instrument.Id, quote, timeProvider.GetUtcNow());
         feedState.RecordStage(market.Code, "Validating and persisting the received quote.");
         var processed = await scope.ServiceProvider.GetRequiredService<MarketDataProcessor>()
-            .ProcessAsync(observation, cancellationToken);
-        if (processed.Validation.Accepted)
+            .ProcessAsync(observation, cancellationToken, aggregateCandles: quote.Source == "Groww");
+        if (processed.Validation.Accepted || quote.Source == "Upstox" && processed.Validation.Reason == MarketDataRejectionReason.Duplicate)
             feedState.RecordSuccess(market.Code, observation.SourceTimestampUtc, observation.ReceivedAtUtc);
         else feedState.RecordStage(market.Code, $"Latest quote rejected: {processed.Validation.Reason}; awaiting a valid observation.");
     }
@@ -117,7 +117,8 @@ internal sealed partial class GrowwAdditionalMarketDataService(
                 // Preload before the open when possible; retry failures without stalling live quotes.
                 if (local.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) &&
                     TimeOnly.FromDateTime(local.DateTime) >= new TimeOnly(9, 5) &&
-                    TimeOnly.FromDateTime(local.DateTime) <= market.SessionEnd && completedSession != today)
+                    TimeOnly.FromDateTime(local.DateTime) <= market.SessionEnd &&
+                    (completedSession != today || PaperDataSource.Of(gateway, market.Code) == "Upstox"))
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     timeout.CancelAfter(TimeSpan.FromSeconds(60));
@@ -140,7 +141,7 @@ internal sealed partial class GrowwAdditionalMarketDataService(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception) { LogHistoryFailed(logger, market.Code, exception); }
-            await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(PaperDataSource.Of(gateway, market.Code) == "Upstox" ? 15 : 60), stoppingToken);
         }
     }
 
