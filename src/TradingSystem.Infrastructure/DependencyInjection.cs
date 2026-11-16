@@ -184,6 +184,9 @@ public static class DependencyInjection
             {
                 client.Timeout = TimeSpan.FromSeconds(12);
                 client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+                // Upstox's public catalog CDN rejects requests without a User-Agent.
+                // Identify our client honestly; never attach the quote credential here.
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Sarthico-Replay/1.0");
             })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
                 .RedactLoggedHeaders(static _ => true);

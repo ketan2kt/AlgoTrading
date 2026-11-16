@@ -44,7 +44,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
             catch (Exception error)
             {
-                foreach (var market in plan.Select(item => item.Market).Distinct()) Report(market, "Instrument catalog: " + error.GetType().Name);
+                foreach (var market in plan.Select(item => item.Market).Distinct()) Report(market, "Instrument catalog: " + FailureDescription(error));
                 await Task.Delay(TimeSpan.FromSeconds(15), clock, token);
             }
         }
@@ -171,7 +171,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
                 catch (Exception error)
                 {
-                    Report(market, error is HttpRequestException { StatusCode: { } status } ? "HTTP " + (int)status : error.GetType().Name);
+                    Report(market, FailureDescription(error));
                     if (delay < TimeSpan.FromSeconds(15)) delay = TimeSpan.FromSeconds(15);
                 }
                 try { await Task.Delay(delay, clock, token); }
@@ -197,6 +197,14 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         }
         catch (Exception error) when (error is FormatException or JsonException or ArgumentOutOfRangeException) { return null; }
     }
+
+    // Only structured error codes: never persist response bodies, credentials or URLs.
+    internal static string FailureDescription(Exception error) => error switch
+    {
+        HttpRequestException { StatusCode: { } status } => "HTTP " + (int)status,
+        HttpRequestException http => "Transport " + http.HttpRequestError,
+        _ => error.GetType().Name
+    };
 
     private static async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
         IReadOnlyList<HistoricalFeedInstrument> plan, CancellationToken token)
