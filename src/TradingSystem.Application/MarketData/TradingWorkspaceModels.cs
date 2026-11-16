@@ -112,7 +112,10 @@ public sealed record TradingWorkspaceSnapshot(
     string? MarketCode = null,
     WorkspaceEngineRead? EngineRead = null,
     WorkspacePreviousClose? PreviousSessionClose = null,
-    IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null);
+    IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null,
+    WorkspaceChartDisplay? ChartDisplay = null);
+
+public sealed record WorkspaceChartDisplay(string Source, bool IsFresh, DateTimeOffset? TimestampUtc, decimal? LastPrice);
 
 public sealed record WorkspacePreviousClose(decimal Price, DateOnly SessionDate);
 

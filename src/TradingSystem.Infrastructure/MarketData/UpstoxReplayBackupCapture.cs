@@ -14,7 +14,8 @@ namespace TradingSystem.Infrastructure.MarketData;
 
 // Recorder only. It uses the exact dated Groww contract plan and never touches live quote or order services.
 internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, IConfiguration configuration,
-    IHistoricalQuoteArchive archive, TimeProvider clock, ILogger<UpstoxReplayBackupCapture> logger)
+    IHistoricalQuoteArchive archive, TimeProvider clock, ILogger<UpstoxReplayBackupCapture> logger,
+    WorkspaceChartCache? chartCache = null)
 {
     internal const string ClientName = "UpstoxReplayBackup";
     internal const string CatalogClientName = "UpstoxReplayCatalog";
@@ -132,6 +133,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
                         if (instrument.Type == InstrumentType.Index)
                         {
                             if (!TryReadIndex(element.Value, received, out var indexQuote, out var indexAt)) continue;
+                            chartCache?.Observe(market, indexQuote.LastPrice, indexAt);
                             accepted.Add(identity);
                             if (persistAll || primary.NeedsBackup(instrument, received))
                                 if (!archive.TryRecordBackup(new(Guid.NewGuid(), received,

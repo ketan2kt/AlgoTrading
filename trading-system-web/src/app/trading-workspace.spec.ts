@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { mergeWorkspaceSnapshot, TradingWorkspaceSnapshot, WorkspaceCandle } from './trading-workspace';
 
 describe('mergeWorkspaceSnapshot', () => {
+  it('never carries candles or futures volume across provider switches', () => {
+    const groww = snapshot([candle('2026-08-28T03:50:00Z')]);
+    const backup = {...snapshot([candle('2026-08-28T03:49:00Z')]),
+      chartDisplay:{source:'Upstox',isFresh:true,timestampUtc:'2026-08-28T03:50:01Z',lastPrice:101}, futuresVolume:[]};
+    expect(mergeWorkspaceSnapshot(groww,backup)).toBe(backup);
+    expect(mergeWorkspaceSnapshot(backup,groww)).toBe(groww);
+  });
   it('does not let a stale realtime snapshot move the chart back to an older session', () => {
     const current = snapshot([
       candle('2026-08-28T03:45:00Z'),

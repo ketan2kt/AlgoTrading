@@ -23,7 +23,7 @@ internal sealed class EfTradingWorkspaceReader(
     IOptions<TradingModeOptions> tradingMode,
     IPaperAutomationReader paperAutomation,
     IOperationalAutomationReportReader operationalReportReader,
-    TimeProvider timeProvider) : ITradingWorkspaceReader
+    TimeProvider timeProvider, WorkspaceChartCache? chartCache = null) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private const int MaximumWorkspaceRequestCount = 7_000;
@@ -518,7 +518,7 @@ internal sealed class EfTradingWorkspaceReader(
                 sessionEndUtc, loadOlderEntries ? [] : overlays.Where(row => row.EntryTimeUtc.HasValue && row.FillPrice > 0)
                     .Select(row => row.SignalId).ToArray(), loadOlderEntries, cancellationToken)
             : null;
-        return new TradingWorkspaceSnapshot(
+        var snapshot = new TradingWorkspaceSnapshot(
             instrument.TradingSymbol,
             definition.Exchange,
             $"{interval / 60}m",
@@ -537,8 +537,9 @@ internal sealed class EfTradingWorkspaceReader(
             research,
             operationalReports,
             definition.Code, engineRead, previousSessionClose, chartEntries);
+        return chartCache?.Apply(snapshot) ?? snapshot;
 
-        TradingWorkspaceSnapshot Empty(string status, string detail) => new(
+        TradingWorkspaceSnapshot Empty(string status, string detail) => WithChart(new(
             definition.UnderlyingSymbol,
             definition.Exchange,
             $"{marketDataOptions.Value.CandleIntervalSeconds / 60}m",
@@ -555,7 +556,8 @@ internal sealed class EfTradingWorkspaceReader(
             market == TradingMarketCatalog.Nifty.Code
                 ? paperAutomation.GetCurrent()
                 : CreateUnavailableAutomation(definition, status, detail, now),
-            MarketCode: definition.Code);
+            MarketCode: definition.Code));
+        TradingWorkspaceSnapshot WithChart(TradingWorkspaceSnapshot value) => chartCache?.Apply(value) ?? value;
     }
 
     private async Task<IReadOnlyList<WorkspaceChartEntry>> ReadClosedChartEntriesAsync(

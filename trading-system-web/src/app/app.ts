@@ -169,7 +169,8 @@ export class App implements OnInit, OnDestroy {
   }
   private withHistory(view:TradingWorkspaceSnapshot):TradingWorkspaceSnapshot {
     const h=this.chartHistory;
-    if(!h || h.instrument!==view.instrument || h.exchange!==view.exchange || !view.candles.length)return view;
+    if(!h || h.instrument!==view.instrument || h.exchange!==view.exchange || !view.candles.length ||
+      view.chartDisplay || h.chartDisplay)return view;
     const prepend=<T extends {openTimeUtc:string}>(older:T[],live:T[])=>{
       if(!live.length)return older.slice(-7000);
       const first=Date.parse(live[0].openTimeUtc);

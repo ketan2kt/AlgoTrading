@@ -11,9 +11,14 @@ export function indexChange(view: TradingWorkspaceSnapshot) {
   const previous = view.previousSessionClose;
   const previousClose = previous && previous.sessionDate < today && Number.isFinite(previous.price) && previous.price > 0
     ? previous.price : null;
-  const price = candle?.close ?? null;
+  const backup = view.chartDisplay;
+  const backupAt = backup?.timestampUtc ? Date.parse(backup.timestampUtc) : NaN;
+  const validBackupPrice = Number.isFinite(backupAt) && backupAt <= observed &&
+    sessionKey(backup!.timestampUtc!) === today && backup?.lastPrice != null && backup.lastPrice > 0;
+  const price = validBackupPrice ? backup!.lastPrice : candle?.close ?? null;
   const points = price !== null && previousClose !== null ? price - previousClose : null;
   return { price, previousClose, previousDate: previous?.sessionDate, points,
     percent: points !== null && previousClose !== null ? points / previousClose * 100 : null,
-    fresh: view.isLive && view.isFresh && price !== null && !candle?.isClosed };
+    fresh: backup ? backup.isFresh && validBackupPrice && observed - backupAt <= 30_000 :
+      view.isLive && view.isFresh && price !== null && !candle?.isClosed };
 }

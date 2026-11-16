@@ -10,6 +10,15 @@ function view(price = 10474, previous = 10000): TradingWorkspaceSnapshot {
 }
 
 describe('index day change', () => {
+  it('shows backup prices without claiming that the trading feed recovered', () => {
+    const snapshot = {...view(), isLive:false, isFresh:false,
+      chartDisplay:{source:'Upstox',isFresh:true,timestampUtc:'2026-11-05T04:01:01Z',lastPrice:10500}};
+    expect(indexChange(snapshot)?.price).toBe(10500);
+    expect(indexChange(snapshot)?.fresh).toBe(true);
+    expect(snapshot.isFresh).toBe(false);
+    snapshot.chartDisplay.timestampUtc='2026-11-05T04:00:00Z';
+    expect(indexChange(snapshot)?.fresh).toBe(false);
+  });
   it.each(['nifty','sensex','bank-nifty'])('updates %s from its own snapshot', market => {
     const snapshot = {...view(),marketCode:market};
     expect(indexChange(snapshot)?.points).toBe(474);

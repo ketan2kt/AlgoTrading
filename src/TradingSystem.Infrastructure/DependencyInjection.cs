@@ -243,6 +243,8 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
+        services.AddSingleton<WorkspaceChartCache>();
+        services.AddHostedService<UpstoxChartDisplay>();
         services.AddSingleton<MultiMarketFeedState>();
         services.AddSingleton<MarketWorkspaceRefreshQueue>();
         services.AddHostedService<MarketWorkspaceRefreshService>();

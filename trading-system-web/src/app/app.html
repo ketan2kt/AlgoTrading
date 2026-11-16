@@ -295,6 +295,9 @@
           </section>
         }
         <section class="chart-panel chart-panel--compact workspace-priority-chart">
+          @if (view.chartDisplay; as chart) {
+            <div class="feed-notice" role="status">Upstox · chart only · {{chart.isFresh ? 'Live' : 'Stale'}}. Trading still uses Groww. Futures volume/VWAP unavailable.</div>
+          }
           <div class="desk-chart-toolbar desk-quote-header">
             <div class="desk-index-quote">
               <strong class="desk-chart-title">{{ preparedMarketName() }} <small>· {{chartTimeframeMinutes}}m</small></strong>
@@ -311,7 +314,7 @@
             </div>
             <div class="desk-session-summary">
               <span>Session P&amp;L <strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></span>
-              <span>Updated <time>{{view.lastMarketTimestampUtc ? (view.lastMarketTimestampUtc | date:'HH:mm:ss':'Asia/Kolkata') : '—'}} IST</time></span>
+              <span>Updated <time>{{(view.chartDisplay ? view.chartDisplay.timestampUtc : view.lastMarketTimestampUtc) | date:'HH:mm:ss':'Asia/Kolkata'}} IST</time></span>
             </div>
             <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
           </div>
@@ -319,7 +322,7 @@
           @if (chartHistoryMessage) { <small class="desk-history-message" role="status">{{ chartHistoryMessage }}</small> }
           <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
           <p class="chart-attribution">
-            Charts by TradingView Lightweight Charts™. Market data source: Groww.
+            Charts by TradingView Lightweight Charts™. Market data source: {{view.chartDisplay?.source || 'Groww'}}{{view.chartDisplay ? ' · display only' : ''}}.
           </p>
 
         </section>

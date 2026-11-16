@@ -63,7 +63,7 @@ import { chartEntryFills } from './chart-entry-fills';
           <button type="button" [class.active]="visibility.day" [attr.aria-pressed]="visibility.day" (click)="toggle('day')">Day H/L</button>
           <button type="button" [class.active]="visibility.previous" [attr.aria-pressed]="visibility.previous" (click)="toggle('previous')">Prev H/L/C</button>
           <button type="button" [class.active]="visibility.openingRange" [attr.aria-pressed]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
-          <button type="button" [class.active]="visibility.vwap" [attr.aria-pressed]="visibility.vwap" (click)="toggle('vwap')">VWAP</button>
+          <button type="button" [class.active]="visibility.vwap && !snapshot?.chartDisplay" [attr.aria-pressed]="visibility.vwap && !snapshot?.chartDisplay" [disabled]="!!snapshot?.chartDisplay" (click)="toggle('vwap')">VWAP</button>
           <button type="button" [class.active]="visibility.ema" [attr.aria-pressed]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
@@ -279,7 +279,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     }));
     this.emaFastSeries?.setData(lineData(ema(displayCandles,9)));
     this.emaSlowSeries?.setData(lineData(ema(displayCandles,21)));
-    this.vwapSeries?.setData(lineData(sessionVwap(displayCandles,volumeBars)));
+    this.vwapSeries?.setData(this.snapshot.chartDisplay ? [] : lineData(sessionVwap(displayCandles,volumeBars)));
     this.emaFastSeries?.applyOptions({visible:this.visibility.ema});
     this.emaSlowSeries?.applyOptions({visible:this.visibility.ema});
     this.vwapSeries?.applyOptions({visible:this.visibility.vwap});
@@ -320,7 +320,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
         }),
       );
     }
-    const decision = this.snapshot.engineRead;
+    const decision = this.snapshot.chartDisplay ? null : this.snapshot.engineRead;
     const when = decision ? Date.parse(decision.candleTimeUtc) : NaN;
     const index = displayCandles.findIndex(c=>{const start=Date.parse(c.openTimeUtc);return start<=when && when<start+c.intervalSeconds*1000;});
     const price = decision?.indexConfirmationLevel;

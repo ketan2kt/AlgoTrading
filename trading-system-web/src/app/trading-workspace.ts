@@ -62,6 +62,7 @@ export interface WorkspaceChartEntry {
 }
 
 export interface TradingWorkspaceSnapshot {
+  chartDisplay?: { source: string; isFresh: boolean; timestampUtc: string | null; lastPrice: number | null } | null;
   previousSessionClose?: { price: number; sessionDate: string } | null;
   marketCode?: string;
   engineRead?: { candleTimeUtc:string; outcome:string; reason:string|null; indexConfirmationLevel?:number|null } | null;
@@ -189,7 +190,8 @@ export function mergeWorkspaceSnapshot(
   current: TradingWorkspaceSnapshot | null,
   incoming: TradingWorkspaceSnapshot,
 ): TradingWorkspaceSnapshot {
-  if (!current || current.exchange !== incoming.exchange || current.instrument !== incoming.instrument) {
+  if (!current || current.exchange !== incoming.exchange || current.instrument !== incoming.instrument ||
+      current.chartDisplay?.source !== incoming.chartDisplay?.source) {
     return incoming;
   }
 
