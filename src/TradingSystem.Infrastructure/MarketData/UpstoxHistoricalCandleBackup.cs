@@ -28,12 +28,13 @@ internal sealed class UpstoxHistoricalCandleBackup(IHttpClientFactory clients, I
         {
             if (catalogDate != date)
             {
-                using var response = await client.GetAsync("https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz",
+                using var catalogClient = clients.CreateClient(UpstoxReplayBackupCapture.CatalogClientName);
+                using var response = await catalogClient.GetAsync("https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz",
                     HttpCompletionOption.ResponseHeadersRead, token);
                 response.EnsureSuccessStatusCode();
                 using var gzip = new GZipStream(await response.Content.ReadAsStreamAsync(token), CompressionMode.Decompress);
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-                deadline.CancelAfter(TimeSpan.FromSeconds(30));
+                deadline.CancelAfter(TimeSpan.FromMinutes(2));
                 var rows = new List<JsonElement>();
                 await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<JsonElement>(gzip, cancellationToken: deadline.Token))
                     if (Text(row, "instrument_type") is "INDEX" or "FUT" &&

@@ -9,9 +9,11 @@ namespace TradingSystem.ContractTests;
 public sealed class UpstoxHttpClientTests
 {
     [Theory]
-    [InlineData("Website")]
-    [InlineData("ReplayRecorder")]
-    public async Task ProductionClientIdentifiesItselfWithoutLeakingQuoteCredentialsToCatalog(string role)
+    [InlineData("Website", UpstoxReplayBackupCapture.ClientName, 12)]
+    [InlineData("ReplayRecorder", UpstoxReplayBackupCapture.ClientName, 12)]
+    [InlineData("Website", UpstoxReplayBackupCapture.CatalogClientName, 45)]
+    [InlineData("ReplayRecorder", UpstoxReplayBackupCapture.CatalogClientName, 45)]
+    public async Task ProductionClientIdentifiesItselfWithoutLeakingQuoteCredentialsToCatalog(string role, string name, int timeout)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -22,13 +24,13 @@ public sealed class UpstoxHttpClientTests
         }).Build();
         var services = new ServiceCollection();
         services.AddTradingSystemInfrastructure(configuration);
-        services.AddHttpClient(UpstoxReplayBackupCapture.ClientName)
+        services.AddHttpClient(name)
             .ConfigurePrimaryHttpMessageHandler(() => new CatalogHandler());
         await using var provider = services.BuildServiceProvider();
-        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(UpstoxReplayBackupCapture.ClientName);
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(name);
         using var response = await client.GetAsync("https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(TimeSpan.FromSeconds(12), client.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(timeout), client.Timeout);
     }
 
     [Fact]

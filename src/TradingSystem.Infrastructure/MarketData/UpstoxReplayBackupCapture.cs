@@ -16,6 +16,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
     IHistoricalQuoteArchive archive, TimeProvider clock, ILogger<UpstoxReplayBackupCapture> logger)
 {
     internal const string ClientName = "UpstoxReplayBackup";
+    internal const string CatalogClientName = "UpstoxReplayCatalog";
     internal static readonly TimeSpan MaximumAge = TimeSpan.FromSeconds(30);
     private static readonly Action<ILogger, string, Exception?> Unavailable = LoggerMessage.Define<string>(
         LogLevel.Warning, new EventId(6755, "UpstoxReplayBackupUnavailable"), "Upstox replay backup unavailable ({FailureType}). Primary capture is unaffected.");
@@ -26,7 +27,9 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
     public async Task RunAsync(IReadOnlyList<HistoricalFeedInstrument> plan, GrowwHistoricalFeedAccumulator primary,
         DateTimeOffset open, DateTimeOffset close, CancellationToken token, bool persistAll = false)
     {
-        if (!Enabled) return;
+        // Website fallback may run primary capture too. Its embedded supplement
+        // must not compete with the separately leased independent collector.
+        if (!Enabled || (!persistAll && configuration["ReplayBackup:Host"] == "Website")) return;
         var date = DateOnly.FromDateTime(open.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
         archive.SetBackupCredentialExpiry(date, CredentialExpiry(credential));
         if (plan.Count > 500 || plan.Any(item => item.Market is not ("NIFTY" or "SENSEX" or "BANKNIFTY")))
@@ -34,11 +37,12 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         Dictionary<string, HistoricalFeedInstrument>? mapped = null;
         PublishCoverage(new Dictionary<string, HistoricalFeedInstrument>());
         using var client = clients.CreateClient(ClientName);
+        using var catalogClient = clients.CreateClient(CatalogClientName);
         while (mapped is null && !token.IsCancellationRequested && clock.GetUtcNow() < close)
         {
             try
             {
-                mapped = await LoadPlanAsync(client, plan, token);
+                mapped = await LoadPlanAsync(catalogClient, plan, token);
                 PublishCoverage(mapped);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
@@ -218,7 +222,9 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         response.EnsureSuccessStatusCode();
         using var gzip = new GZipStream(await response.Content.ReadAsStreamAsync(token), CompressionMode.Decompress);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        // Daily metadata is much larger than a quote response. Keep a bounded
+        // processing budget without relaxing quote freshness or quote timeouts.
+        deadline.CancelAfter(TimeSpan.FromMinutes(2));
         await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<Instrument>(gzip, cancellationToken: deadline.Token))
         {
             if (row?.Side == "INDEX")

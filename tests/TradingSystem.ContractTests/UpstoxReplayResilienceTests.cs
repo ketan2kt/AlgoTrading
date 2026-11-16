@@ -108,6 +108,32 @@ public sealed class UpstoxReplayResilienceTests
         Assert.Equal(enabled, capture.Enabled);
     }
 
+    [Fact]
+    public async Task WebsitePrimaryFallbackCannotStartDuplicateBackupButIndependentOwnerRecordsAllThree()
+    {
+        var instruments = Markets.Select((market, index) => Instrument(market, index + 1)).ToArray();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ReplayBackup:Host"] = "Website", ["ReplayBackup:UpstoxAnalyticsToken"] = "test-only"
+        }).Build();
+        var clock = new FastClock();
+        var archive = new Archive();
+        using var api = new Api(instruments, (request, _) =>
+        {
+            var item = instruments.Single(item => Uri.UnescapeDataString(request.RequestUri!.Query).Contains(Key(item), StringComparison.Ordinal));
+            clock.Advance(TimeSpan.FromSeconds(3));
+            return Task.FromResult(Quotes(item, clock.GetUtcNow(), 100));
+        });
+        var capture = new UpstoxReplayBackupCapture(new Clients(api), config, archive, clock, NullLogger<UpstoxReplayBackupCapture>.Instance);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await capture.RunAsync(instruments, new(archive), Start, Start.AddSeconds(30), cancellation.Token);
+        Assert.Null(archive.Coverage); // Embedded path must not even load the catalog.
+        Assert.Empty(archive.Rows);
+        await capture.RunAsync(instruments, new(archive), Start, Start.AddSeconds(30), cancellation.Token, persistAll: true);
+        Assert.Equal(3, archive.Rows.Select(row => row.Request.TradingSymbol).Distinct().Count());
+        Assert.All(archive.Rows, row => Assert.Equal(HistoricalQuoteObservation.UpstoxSnapshot, row.Source));
+    }
+
     [Theory]
     [InlineData("NIFTY")]
     [InlineData("SENSEX")]
