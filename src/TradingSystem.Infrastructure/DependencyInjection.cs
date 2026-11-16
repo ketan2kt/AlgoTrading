@@ -114,6 +114,7 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<IGrowwAccessTokenProvider, EnvironmentGrowwAccessTokenProvider>();
         services.AddScoped<IGrowwTokenVault, EfGrowwTokenVault>();
+        services.AddScoped<IGrowwTokenRenewalGate, GrowwTokenRenewalGate>();
         services.AddHttpClient(GrowwReadOnlyGateway.ApiClientName, (provider, client) =>
         {
             var groww = provider.GetRequiredService<IOptions<GrowwOptions>>().Value;

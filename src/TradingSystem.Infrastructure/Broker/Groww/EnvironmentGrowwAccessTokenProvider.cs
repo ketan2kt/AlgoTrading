@@ -17,6 +17,8 @@ internal sealed class EnvironmentGrowwAccessTokenProvider(
 {
     internal const string AuthClientName = "GrowwAuthenticationApi";
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private DateTimeOffset retryAt;
+    private string retryReason = "Token renewal waiting";
 
     public async ValueTask<string> GetAccessTokenAsync(CancellationToken cancellationToken)
     {
@@ -57,6 +59,26 @@ internal sealed class EnvironmentGrowwAccessTokenProvider(
             if (!string.IsNullOrWhiteSpace(existing))
                 return existing;
 
+            if (timeProvider.GetUtcNow() < retryAt)
+                throw new InvalidOperationException($"{retryReason}; next automatic attempt {retryAt:O}.");
+            GrowwRenewalClaim claim;
+            await using (var reservationScope = scopeFactory.CreateAsyncScope())
+                claim = await reservationScope.ServiceProvider.GetRequiredService<IGrowwTokenRenewalGate>()
+                    .ClaimAsync(cancellationToken);
+            retryAt = claim.NextAttemptAtUtc;
+            retryReason = claim.Reason;
+            if (claim.Owner is not { } owner)
+                throw new InvalidOperationException($"{retryReason}; next automatic attempt {retryAt:O}.");
+
+            int? statusCode = null;
+            DateTimeOffset? retryAfter = null;
+            var success = false;
+            try
+            {
+            // Another host may have saved the shared token just before our reservation.
+            existing = await GetProtectedTokenAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(existing)) { success = true; return existing; }
+
             using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/token/api/access");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -66,6 +88,9 @@ internal sealed class EnvironmentGrowwAccessTokenProvider(
 
             using var response = await httpClientFactory.CreateClient(AuthClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            statusCode = (int)response.StatusCode;
+            retryAfter = response.Headers.RetryAfter?.Date ??
+                (response.Headers.RetryAfter?.Delta is { } delta ? timeProvider.GetUtcNow() + delta : null);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 throw new InvalidOperationException(
                     "Groww rejected TOTP authentication. Confirm today's approval on the Groww Cloud API Keys page.");
@@ -85,7 +110,21 @@ internal sealed class EnvironmentGrowwAccessTokenProvider(
             await using var scope = scopeFactory.CreateAsyncScope();
             var vault = scope.ServiceProvider.GetRequiredService<IGrowwTokenVault>();
             await vault.StoreAsync(token, "system:groww-totp", cancellationToken);
+            success = true;
             return token;
+            }
+            finally
+            {
+                var now = timeProvider.GetUtcNow();
+                var failure = GrowwTokenRenewalPolicy.Failed(new(retryAt, [], owner, 0, retryReason), now, statusCode, retryAfter);
+                retryAt = success ? now : failure.NextAttemptAtUtc;
+                retryReason = success ? "Token renewed" : failure.Reason;
+                // Persist backoff even when the calling quote cycle timed out.
+                using var completionTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await using var completionScope = scopeFactory.CreateAsyncScope();
+                await completionScope.ServiceProvider.GetRequiredService<IGrowwTokenRenewalGate>()
+                    .CompleteAsync(owner, success, statusCode, retryAfter, completionTimeout.Token);
+            }
         }
         finally
         {

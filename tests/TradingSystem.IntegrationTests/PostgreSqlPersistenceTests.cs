@@ -13,6 +13,39 @@ namespace TradingSystem.IntegrationTests;
 
 public sealed class PostgreSqlPersistenceTests
 {
+    [DockerFact]
+    public async Task GrowwTokenRenewalCoordinatesHostsAndRetainsBackoffAfterRestart()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        var options = new DbContextOptionsBuilder<TradingDbContext>()
+            .UseNpgsql(container.GetConnectionString(), pg => pg.EnableRetryOnFailure(3)).Options;
+        await using (var migrate = new TradingDbContext(options, TimeProvider.System))
+            await migrate.Database.MigrateAsync(CancellationToken.None);
+        async Task<TradingSystem.Infrastructure.Broker.Groww.GrowwRenewalClaim> Claim()
+        {
+            await using var db = new TradingDbContext(options, TimeProvider.System);
+            return await new TradingSystem.Infrastructure.Broker.Groww.GrowwTokenRenewalGate(db, TimeProvider.System)
+                .ClaimAsync(CancellationToken.None);
+        }
+        var hosts = await Task.WhenAll(Claim(), Claim());
+        var owner = Assert.Single(hosts, c => c.Owner.HasValue).Owner!.Value;
+        Assert.Single(hosts, c => !c.Owner.HasValue);
+        var retryAfter = DateTimeOffset.UtcNow.AddHours(1);
+        await using (var complete = new TradingDbContext(options, TimeProvider.System))
+            await new TradingSystem.Infrastructure.Broker.Groww.GrowwTokenRenewalGate(complete, TimeProvider.System)
+                .CompleteAsync(owner, false, 429, retryAfter, CancellationToken.None);
+        var restarted = await Claim();
+        Assert.Null(restarted.Owner);
+        Assert.Equal(retryAfter, restarted.NextAttemptAtUtc);
+        Assert.Contains("rate-limited", restarted.Reason, StringComparison.Ordinal);
+        // An old worker cannot erase a later owner's reservation/backoff.
+        await using (var stale = new TradingDbContext(options, TimeProvider.System))
+            await new TradingSystem.Infrastructure.Broker.Groww.GrowwTokenRenewalGate(stale, TimeProvider.System)
+                .CompleteAsync(Guid.NewGuid(), true, 200, null, CancellationToken.None);
+        Assert.Null((await Claim()).Owner);
+    }
+
     private static readonly string[] AcceptedEntryReasons = ["Accepted breakout"];
     [DockerFact]
     public async Task DailyProfitReviewReadsAllThreeMarketsWithoutTradingOrArchiveCalls()
