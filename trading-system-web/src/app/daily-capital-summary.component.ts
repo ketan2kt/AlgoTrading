@@ -17,7 +17,7 @@ export interface DailyCapitalSummary {
     <section aria-label="Paper capital and return" class="capital-summary">
       <article><span>Peak capital used</span>
         <strong>{{summary?.peakCapitalUsed == null ? '—' : '₹'+(summary!.peakCapitalUsed|number:'1.2-2')}}</strong>
-        <small>{{summary?.peakAtUtc ? (summary!.peakAtUtc|date:'HH:mm:ss':'Asia/Kolkata')+' IST' : summary?.status === 'NoTrades' ? 'No trades' : 'Fill evidence incomplete'}}</small>
+        <small>{{summary?.peakAtUtc ? (summary!.peakAtUtc|date:'HH:mm:ss':'+0530')+' IST' : summary?.status === 'NoTrades' ? 'No trades' : 'Fill evidence incomplete'}}</small>
       </article>
       <article><span>Return on peak capital</span>
         <strong [class.good]="(summary?.returnPercent ?? 0)>0" [class.bad]="(summary?.returnPercent ?? 0)<0">{{summary?.returnPercent == null ? '—' : (summary!.returnPercent|number:'1.2-2')+'%'}}</strong>
