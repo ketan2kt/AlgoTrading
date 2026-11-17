@@ -39,6 +39,7 @@ public sealed record DailyTradingDiagnosticsReport(
     public DailyLivePnlSummary? LivePnl { get; init; }
     public PaperSessionTimeline? Timeline { get; init; }
     public DailyProfitReview? ProfitReview { get; init; }
+    public DailyCapitalSummary? CapitalSummary { get; init; }
 }
 
 public sealed record PaperSessionTimeline(IReadOnlyList<PaperTimelineTrade> Trades, string? UnavailableReason = null, string? CoverageNote = null);

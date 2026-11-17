@@ -69,6 +69,8 @@ public sealed class PostgreSqlPersistenceTests
             position.TakePartial(108, 40, 20, at.AddMinutes(6));
             position.Close(104, 30, "FailedSetupExit", at.AddMinutes(10));
             db.MarketPaperPositions.Add(position);
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at.AddMinutes(6),
+                $"PartialProfit:{position.Id:N}", 1, """{"partialQuantity":40,"price":108}"""));
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at, "PaperPositionOpened", 1,
                 System.Text.Json.JsonSerializer.Serialize(new { positionId = position.Id, reasons = AcceptedEntryReasons,
                     location = "Prior resistance reclaimed", paperEntryRecordedAtUtc = at.AddSeconds(2) })));
@@ -81,6 +83,12 @@ public sealed class PostgreSqlPersistenceTests
         var reader = scope.ServiceProvider.GetRequiredService<TradingSystem.Application.Diagnostics.IDailyTradingDiagnosticsReader>();
         var report = await reader.ReadAsync(new(2026, 11, 13), "all", CancellationToken.None);
         Assert.NotNull(report.ProfitReview);
+        Assert.NotNull(report.CapitalSummary);
+        Assert.Equal("Verified", report.CapitalSummary.Status);
+        Assert.Equal(30000m, report.CapitalSummary.PeakCapitalUsed);
+        Assert.Equal(1530m, report.CapitalSummary.NetRealisedPnl);
+        Assert.Equal(5.1m, report.CapitalSummary.ReturnPercent);
+        Assert.Null(report.Timeline); // no quote-archive load needed for capital
         Assert.Equal(3, report.ProfitReview.Markets.Count);
         Assert.All(report.ProfitReview.Markets, m => { Assert.Equal(510m, m.NetPnl); Assert.Equal(440m, m.GrossGivebackSubtotal); });
         Assert.All(report.ProfitReview.Trades, t => {

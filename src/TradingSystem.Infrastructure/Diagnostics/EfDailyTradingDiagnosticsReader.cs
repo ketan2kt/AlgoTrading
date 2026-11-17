@@ -428,6 +428,50 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             }
         }
         var profitReview = DailyProfitReviewBuilder.Build(trades, entryEvidence, postExit, finalUnits, incomparablePeaks);
+        // Capital needs only durable fills, never quote archives or a replay job.
+        var capitalTrades = new List<DailyCapitalTrade>();
+        var capitalPartials = audits.Where(a => a.Outcome.StartsWith("PartialProfit:", StringComparison.Ordinal))
+            .ToLookup(a => a.Outcome);
+        foreach (var trade in trades)
+        {
+            var actions = new List<PaperTimelineEvent>();
+            var complete = true;
+            if (positionMap.TryGetValue(trade.TradeId, out var position))
+            {
+                complete = position.Direction == Direction.Buy;
+                actions.Add(new(position.OpenedAtUtc, "Entry", position.Quantity, position.EntryPrice));
+                foreach (var partial in capitalPartials[$"PartialProfit:{position.Id:N}"])
+                {
+                    var receipt = ReadPartial(partial.CandleTimeUtc, partial.ReasonsJson);
+                    if (receipt is null) complete = false; else actions.Add(receipt);
+                }
+                complete &= actions.Where(a => a.Kind == "Partial").Sum(a => a.Units) == position.PartialExitQuantity;
+                if (position.ClosedAtUtc is { } closed)
+                    actions.Add(new(closed, "Exit", position.Quantity - position.PartialExitQuantity, position.CurrentPrice));
+            }
+            else
+            {
+                foreach (var (_, suffix) in PaperLegReferences)
+                {
+                    var rows = fillRows.Where(r => r.ClientReference == $"{trade.SignalId:N}-{suffix}").ToArray();
+                    if (rows.Length == 0) continue;
+                    var row = rows.MaxBy(r => r.Sequence)!;
+                    var leg = LiveFillPnl.ReadPaperLeg(row.PayloadJson);
+                    complete &= rows.Length == 1 && leg is not null;
+                    if (leg is not null) actions.Add(new(row.OccurredAtUtc, suffix switch
+                    {
+                        "ENTRY" => "Entry", "ADDON" => "Add-on", "PARTIAL" => "Partial", _ => "Exit"
+                    }, leg.Qty, leg.Price));
+                }
+            }
+            capitalTrades.Add(new(trade, actions, complete));
+        }
+        var knownCapitalEntries = signalIds.Select(id => $"{id:N}-ENTRY").ToArray();
+        var missingCapitalEntries = selectedMarkets.Contains("NIFTY") &&
+            await db.PaperBrokerEvents.AsNoTracking().AnyAsync(e => e.EventType == "OrderFilled" &&
+                e.OccurredAtUtc >= startUtc && e.OccurredAtUtc < endUtc && e.ClientReference.EndsWith("-ENTRY") &&
+                !knownCapitalEntries.Contains(e.ClientReference), cancellationToken);
+        var capitalSummary = DailyCapitalSummaryBuilder.Build(capitalTrades, missingCapitalEntries);
         PaperSessionTimeline? timeline = null;
         if (withTimeline)
         {
@@ -529,6 +573,7 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             Timeline = timeline,
             ExecutionReview = reviews,
             ProfitReview = profitReview,
+            CapitalSummary = capitalSummary,
             LivePnl = LiveFillPnl.Summarize(reviews.Select(r=>r.Pnl!)),
             ExpansionPairObservations = audits
                 .Where(value => value.Outcome == "ExpansionPair:Observation")

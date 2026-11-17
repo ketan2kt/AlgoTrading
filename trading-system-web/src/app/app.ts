@@ -22,6 +22,7 @@ import { HeroZeroMonitor, HeroZeroService } from './hero-zero.service';
 import { ReplayPanelComponent } from './replay-panel.component';
 import { SessionTimelineComponent } from './session-timeline.component';
 import { DailyProfitReviewComponent } from './daily-profit-review.component';
+import { DailyCapitalSummaryComponent } from './daily-capital-summary.component';
 import { LiveProtectionMonitorComponent } from './live-protection-monitor.component';
 import { MarketControlsComponent } from './market-controls.component';
 import { ResearchCaptureHealthComponent } from './research-capture-health.component';
@@ -36,7 +37,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
   styleUrls: ['./app.scss', './trading-desk.scss'],
 })

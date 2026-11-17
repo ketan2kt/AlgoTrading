@@ -732,12 +732,13 @@
               <div class="daily-analysis-body">
                 <div class="daily-analysis-session"><div><span>SESSION</span><strong>{{a.tradingDate}}</strong></div><small>Updated {{a.generatedAtUtc | date:'HH:mm:ss':'Asia/Kolkata'}} IST</small></div>
                 <div class="daily-analysis-summary">
-                  <article><span>Net realised</span><strong [class.good]="a.summary.netRealisedPnl>0" [class.bad]="a.summary.netRealisedPnl<0">₹{{a.summary.netRealisedPnl|number:'1.0-0'}}</strong><small>After ₹{{a.summary.costs|number:'1.0-0'}} charges</small></article>
+                  <article><span>Total net profit · all 3</span><strong [class.good]="a.summary.netRealisedPnl>0" [class.bad]="a.summary.netRealisedPnl<0">₹{{a.summary.netRealisedPnl|number:'1.2-2'}}</strong><small>Includes Hero Zero · after ₹{{a.summary.costs|number:'1.2-2'}} charges</small></article>
                   <article><span>Closed trades</span><strong>{{a.summary.completedTradeCount}}</strong><small>{{a.summary.openTradeCount}} still open</small></article>
                   <article><span>Wins · losses</span><strong>{{a.summary.wins}} · {{a.summary.losses}}</strong><small>of {{a.summary.completedTradeCount}} closed</small></article>
                   <article><span>Gross P&amp;L</span><strong>₹{{a.summary.grossPnl|number:'1.0-0'}}</strong><small>Before charges</small></article>
                   <article><span>Decision funnel</span><strong>{{a.summary.acceptedDecisionCount}} · {{a.summary.rejectedDecisionCount}}</strong><small>Accepted · rejected</small></article>
                 </div>
+                <app-daily-capital-summary [summary]="a.capitalSummary" />
                 <app-session-timeline [report]="a" (replay)="openHistoricalReplay($event)" />
                 @if(a.executionReview?.length){
                   @if(a.livePnl;as total){
