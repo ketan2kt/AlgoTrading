@@ -33,8 +33,11 @@ public sealed class HistoricalMarketOptionPositionPolicyTests
         Assert.Empty(policy.EvaluateExits(At(2, 103m, 55010m)));
         Assert.Empty(policy.EvaluateExits(At(4, 104m, 55010m)));
         Assert.Empty(policy.EvaluateExits(At(6, 99m, 54990m)));
-        Assert.Equal(BankNiftyConfirmedTrail.ExitReason, Assert.Single(policy.EvaluateExits(At(10, 99m, 54980m))).Reason);
+        Assert.Empty(policy.EvaluateExits(At(10, 99m, 54980m))); // No completed setup-boundary failure.
         Assert.Equal("StopLossHit", Assert.Single(policy.EvaluateExits(At(12, 89m, 54970m))).Reason);
+        Assert.Empty(policy.EvaluateExits(At(14, 108m, 55020m)));
+        Assert.Empty(policy.EvaluateExits(At(16, 109m, 55030m)));
+        Assert.Equal(BankNiftyConfirmedTrail.ExitReason, Assert.Single(policy.EvaluateExits(At(18, 104m, 55025m))).Reason);
     }
 
     [Fact]

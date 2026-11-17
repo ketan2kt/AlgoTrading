@@ -1376,16 +1376,33 @@ internal sealed partial class MultiMarketPaperTradingService(
         var book = quote.BidPrice is { } bid && quote.OfferPrice is { } ask && quote.OfferQuantity > 0 &&
             GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) is { } sourceAt
             ? new BankNiftyTrailBook(bid, ask, quote.BidQuantity ?? 0, observedAt, sourceAt) : null;
-        BankNiftyTrailDecision Evaluate(BankNiftyTrailSpot? entry = null, BankNiftyTrailSpot? current = null) =>
+        BankNiftyTrailDecision Evaluate(BankNiftyTrailSpot? entry = null, BankNiftyTrailSpot? current = null,
+            IReadOnlyList<StrategyPriceBar>? bars = null) =>
             BankNiftyConfirmedTrail.Evaluate(state, position.OpenedAtUtc, observedAt, direction,
-                position.EntryPrice, initialRisk, lot, position.RemainingQuantity, position.RealisedPnl, book, entry, current);
+                position.EntryPrice, initialRisk, lot, position.RemainingQuantity, position.RealisedPnl, book, entry, current,
+                bars, marketOptions.Value.CandleIntervalSeconds);
 
         var result = Evaluate();
         if (result.NeedsSpot)
         {
             var entry = await ReadSpot(position.OpenedAtUtc);
             var current = entry is null ? null : await ReadSpot(observedAt);
-            result = Evaluate(entry, current);
+            var interval = marketOptions.Value.CandleIntervalSeconds;
+            var signalFrom = position.OpenedAtUtc.AddSeconds(-2 * interval);
+            var signalBefore = position.OpenedAtUtc.AddSeconds(-interval);
+            var recentFrom = observedAt.AddSeconds(-2 * interval);
+            var completedBefore = observedAt.AddSeconds(-interval);
+            // Read only the entry boundary and latest completed candles, not
+            // a growing per-tick session history. Keep provider provenance intact.
+            var bars = entry is null || current is null ? [] : await db.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == position.UnderlyingInstrumentId &&
+                    value.Source == PaperDataSource.Of(gateway, position.Market) && value.IntervalSeconds == interval &&
+                    value.OpenTimeUtc <= completedBefore &&
+                    ((value.OpenTimeUtc >= signalFrom && value.OpenTimeUtc <= signalBefore) || value.OpenTimeUtc >= recentFrom))
+                .OrderBy(value => value.OpenTimeUtc)
+                .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close))
+                .ToArrayAsync(token);
+            result = Evaluate(entry, current, bars);
         }
         bankTrailSamples[position.Id] = result.State with { Floor = null };
         var previousFloor = position.BankNiftyTrailFloorNet;
@@ -1396,7 +1413,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 observedAt, $"BankNiftyConfirmedTrail:{position.Id:N}", 0m,
                 JsonSerializer.Serialize(new { positionId = position.Id, bid = book?.Bid, bidSize = book?.Size,
                     quoteSourceAt = book?.SourceAt, previousFloor, floorNet = position.BankNiftyTrailFloorNet,
-                    triggered = result.Exit, position.RemainingQuantity })));
+                    triggered = result.Exit, policyVersion = BankNiftyConfirmedTrail.Version, position.RemainingQuantity })));
         return result;
 
         Task<BankNiftyTrailSpot?> ReadSpot(DateTimeOffset asOf)

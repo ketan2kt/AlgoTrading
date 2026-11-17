@@ -1,0 +1,14 @@
+{
+  "source": "read-only diagnostics",
+  "market": "bank-nifty",
+  "from": "2026-11-17",
+  "to": "2026-11-17",
+  "removeStrategies": ["__none_exit_confirmation_only__"],
+  "historicalRegularEntries": 8,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 8,
+  "strategyBreakdown": [
+    {"strategy": "Bank index directional breakout", "count": 8, "removed": false}
+  ],
+  "limitation": "No Bank Nifty entry path or entry threshold changes. Early zero-net confirmed-trail exit additionally requires a fully post-entry completed candle through the pre-entry signal boundary with a 10% signal-range buffer and a fresh spot beyond it. Positive 70% floor, hard SL, reversal and failed-setup exits remain authoritative. Shared paper/replay exit policy is updated; live terminal requests still use the existing reconciler, not direct broker calls. Observed 09:45 trade exited after102s at469.75 after473.15entry; chart boundary held. No executable after-cost counterfactual profit claimed. Broad swing-entry candidate rejected and removed because it would also block this valid emerging move."
+}

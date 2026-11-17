@@ -1,3 +1,4 @@
+using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Application.Execution;
@@ -14,6 +15,7 @@ public sealed record BankNiftyTrailDecision(BankNiftyTrailState State, bool Exit
 public static class BankNiftyConfirmedTrail
 {
     public const string ExitReason = "BankNiftyConfirmedTrail";
+    public const string Version = "bank-confirmed-trail-v2";
     private static readonly TimeSpan MaximumBookAge = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan MaximumSequenceGap = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ConfirmationTime = TimeSpan.FromSeconds(4);
@@ -25,7 +27,8 @@ public static class BankNiftyConfirmedTrail
     public static BankNiftyTrailDecision Evaluate(BankNiftyTrailState state, DateTimeOffset openedAt,
         DateTimeOffset now, Direction direction, decimal entry, decimal risk, int lot, int remaining,
         decimal bookedNet, BankNiftyTrailBook? book, BankNiftyTrailSpot? entrySpot = null,
-        BankNiftyTrailSpot? currentSpot = null)
+        BankNiftyTrailSpot? currentSpot = null,
+        IReadOnlyList<StrategyPriceBar>? completedBars = null, int intervalSeconds = 60)
     {
         if (book is null || book.Bid <= 0m || book.Ask < book.Bid || lot <= 0 || book.Size < lot ||
             remaining < lot || risk <= 0m || entry <= 0m || book.ReceivedAt < openedAt ||
@@ -61,11 +64,34 @@ public static class BankNiftyConfirmedTrail
             return new(next, NeedsSpot: true);
         var adverse = direction == Direction.Buy ? currentSpot.Price < entrySpot.Price : currentSpot.Price > entrySpot.Price;
         if (!adverse) return new(next);
+        // A small retracement through the entry quote is not a broken setup.
+        // Only the early zero-net floor needs a completed structural failure;
+        // the positive 70% floor above remains immediate and never loosens.
+        if (!HasClosedThroughEntryBoundary(completedBars, openedAt, now,
+                direction, currentSpot.Price, intervalSeconds)) return new(next);
 
         var first = continuous ? state.FirstBreach : null;
         return first is not null && book.ReceivedAt - first.ReceivedAt >= ConfirmationTime
             ? new(next, Exit: true)
             : new(next with { FirstBreach = first ?? book });
+    }
+
+    public static bool HasClosedThroughEntryBoundary(IReadOnlyList<StrategyPriceBar>? bars,
+        DateTimeOffset openedAt, DateTimeOffset now, Direction direction,
+        decimal currentSpot, int intervalSeconds)
+    {
+        if (bars is null || bars.Count < 2 || intervalSeconds is not (60 or 300)) return false;
+        var interval = TimeSpan.FromSeconds(intervalSeconds);
+        var signal = bars.LastOrDefault(b => b.OpenTimeUtc + interval <= openedAt);
+        var last = bars[^1];
+        if (signal is null || openedAt - (signal.OpenTimeUtc + interval) >= interval ||
+            last.OpenTimeUtc < openedAt || last.OpenTimeUtc + interval > now ||
+            now - (last.OpenTimeUtc + interval) >= interval || signal.High <= signal.Low)
+            return false;
+        var buffer = (signal.High - signal.Low) * .10m;
+        return direction == Direction.Buy
+            ? last.Close < signal.Low - buffer && currentSpot < signal.Low - buffer
+            : last.Close > signal.High + buffer && currentSpot > signal.High + buffer;
     }
 
     private static bool Fresh(DateTimeOffset receipt, DateTimeOffset source, DateTimeOffset asOf, TimeSpan maximumAge) =>

@@ -1,0 +1,16 @@
+{
+  "source": "read-only diagnostics",
+  "market": "sensex",
+  "from": "2026-11-17",
+  "to": "2026-11-17",
+  "removeStrategies": ["__none_paths_retained_timing_budget_only__"],
+  "historicalRegularEntries": 10,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 10,
+  "strategyBreakdown": [
+    {"strategy": "Sensex persistent directional thesis", "count": 5, "removed": false},
+    {"strategy": "Sensex directional pullback participation", "count": 3, "removed": false},
+    {"strategy": "Sensex controlled early pullback", "count": 2, "removed": false}
+  ],
+  "limitation": "Counts measure retained strategy paths, NOT entries surviving the new admission gate. Saved persistent-entry EMA9 extension receipts: 10:28 0.54ATR/net-5056.13; 10:53 0.93/+1465.96; 11:04 1.02/+2585.53; 12:03 1.78/-5283.37; 13:42 1.43/+5135.53. The 1.50ATR new-entry budget defers only the 12:03 receipt in this sample and leaves thesis/position management intact. This is receipt classification, not counterfactual fills or a verified net-P&L improvement. Blanket nearby-level/swing filters were rejected and removed because chart classification also suppressed winners. Display-only Upstox chart OHLC differs from the engine Groww receipt at 12:03; engine receipt is used for the extension comparison. No replay job run or engine coverage changes. Local shared policy tests and required CI apply."
+}

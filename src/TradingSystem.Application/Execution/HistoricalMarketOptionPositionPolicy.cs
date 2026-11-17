@@ -29,7 +29,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private HistoricalReplayFrame? invalidationFrame;
     private (DateTimeOffset Entry, Direction? Direction, HistoricalReplayQuote? Underlying) invalidationPosition;
     private UnderlyingTrendInvalidationResult? invalidationResult;
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version;
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version + "/" + BankNiftyConfirmedTrail.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,
@@ -119,7 +119,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             .Sum(value => value.NetPnl);
         var decision = BankNiftyConfirmedTrail.Evaluate(bankTrail, position.EntryAtUtc, at,
             position.UnderlyingDirection!.Value, position.EntryPrice, Risk(position), position.LotSize!.Value,
-            position.Quantity, booked, book, bankEntrySpot, spot);
+            position.Quantity, booked, book, bankEntrySpot, spot, Bars(frame, true), settings.CandleIntervalSeconds);
         bankTrail = decision.State;
         return decision.Exit;
     }

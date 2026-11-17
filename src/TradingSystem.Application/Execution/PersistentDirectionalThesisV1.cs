@@ -107,6 +107,16 @@ public static class PersistentDirectionalThesisAnalyzerV1
     public const string Status = "PaperEligible";
     public static readonly DateOnly PaperEligibleFrom = new(2026, 10, 16);
 
+    // Identical window/EMA seed/ATR to Analyze, so a market-specific admission
+    // check measures the same extension as the saved thesis receipt.
+    public static decimal? EntryExtensionAtr(IReadOnlyList<StrategyPriceBar> source)
+    {
+        if (source.Count < 15) return null;
+        var bars = source.TakeLast(30).ToArray();
+        var atr = Atr(bars.TakeLast(15).ToArray());
+        return atr <= 0m ? null : Math.Abs(bars[^1].Close - Ema(bars.Select(b => b.Close).ToArray(), 9)) / atr;
+    }
+
     public static PersistentDirectionalThesisV1 Analyze(
         IReadOnlyList<StrategyPriceBar> source,
         decimal vwap,

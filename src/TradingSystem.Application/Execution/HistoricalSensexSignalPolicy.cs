@@ -25,7 +25,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
     public string CodeVersion => "sensex-normal-entry-v8/" + SensexStalledTrendEntryPolicy.Version +
         "/" + SensexWeakRetryEntryPolicy.Version + "/" + SensexMaturePullbackConfirmationPolicy.Version +
-        "/" + OptionRiskBudgetPolicy.Version;
+        "/" + OptionRiskBudgetPolicy.Version + "/" + SensexEntrySelectionPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
     {
         underlyingInstrumentId, tradingDate, futuresSymbol, settings, priorSessionThesis,

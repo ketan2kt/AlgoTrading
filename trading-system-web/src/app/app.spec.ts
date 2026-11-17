@@ -126,6 +126,8 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Enable loud trade alerts');
     expect(fixture.nativeElement.textContent).not.toContain('Trade alerts on');
     expect(fixture.nativeElement.querySelector('.desk-reports button')?.textContent).toContain('Reports');
+    expect(fixture.nativeElement.querySelectorAll('app-research-capture-health')).toHaveLength(1);
+    expect(fixture.nativeElement.querySelector('.desk-mode-bar > app-research-capture-health')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('Add today’s token');
     http.verify();
   });
@@ -204,7 +206,7 @@ describe('App', () => {
     expect(desk.querySelector('.positions-heading')?.textContent).toContain('Positions & outcomes');
     expect(Array.from(desk.querySelectorAll('.market-tab-group .market-name')).map(item => item.textContent?.trim()))
       .toEqual(['Nifty', 'Bank Nifty', 'Sensex']);
-    expect(desk.querySelector('.desk-mode-bar')?.textContent).toContain('Live execution unavailable');
+    expect(desk.querySelector('.desk-mode-bar')?.textContent).toContain('Live unavailable');
     expect(desk.querySelector('.chart-panel--compact .chart-status-rail')).toBeNull();
     expect(desk.querySelector('.desk-chart-toolbar .legend')).toBeNull();
     expect(desk.querySelector('select[aria-label="Chart timeframe"]')).toBeNull();

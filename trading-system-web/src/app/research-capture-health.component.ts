@@ -14,18 +14,28 @@ interface CaptureHealth {
   section{border:1px solid #8aae94;border-radius:.55rem;padding:.55rem .7rem;background:#ecf5ea;color:#173e29}
   button{margin-inline-start:.6rem;border:1px solid #528264;border-radius:.35rem;background:#f5fbf2;color:#16492d;padding:.25rem .55rem;cursor:pointer}
   p{margin:.35rem 0}small{display:block}
-  .capture-warning{margin:.25rem .6rem;padding:.4rem .65rem;border:1px solid #b17d28;border-radius:.4rem;background:#fff1d2;color:#5d3905;font-size:.8rem}
-  .capture-warning summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .capture-warning ul{margin:.4rem 0 0;padding-inline-start:1.25rem}
+  :host{display:block;min-width:0}
+  .capture-warning{position:relative;margin:0;border:1px solid #b17d28;border-radius:.35rem;background:#fff1d2;color:#5d3905;font-size:.72rem}
+  .capture-warning summary{cursor:pointer;white-space:nowrap;padding:4px 8px}
+  .capture-warning summary:focus-visible{outline:2px solid #624710;outline-offset:2px}
+  .capture-warning[open] summary{background:#ffe7af;border-radius:.35rem}
+  .capture-warning__body{position:absolute;top:calc(100% + 6px);left:0;z-index:20;width:min(520px,calc(100vw - 32px));box-sizing:border-box;padding:12px;border:1px solid #b17d28;border-radius:.5rem;background:#fff8e9;box-shadow:0 8px 24px #173e2926;max-height:50vh;overflow:auto;overflow-wrap:anywhere;white-space:normal}
+  .capture-warning__body small{font-size:.7rem;color:#785926}
+  .capture-warning ul{margin:.5rem 0 0;padding-inline-start:1.25rem}
+  .capture-warning li+li{margin-top:.4rem}
+  @media(max-width:560px){.capture-warning{position:static}.capture-warning__body{left:8px;right:8px;top:calc(100% + 4px);width:auto}}
 `], template:`
   @if(compact){
     @if(snapshot();as s){@if(s.expectedNow && s.issues.length){
-      <details class="capture-warning">
-        <summary><span role="status"><strong>Replay</strong> · {{alertText(s.issues)}} · {{s.checkedAt|date:'HH:mm:ss':'+0530'}}</span></summary>
-        <ul>@for(issue of s.issues;track $index){<li>{{issue}}</li>}</ul>
+      <details class="capture-warning" #warning (keydown.escape)="warning.open=false">
+        <summary><span role="status"><strong>Replay</strong> · {{error() ? 'Status unavailable' : alertText(s.issues)}}</span></summary>
+        <div class="capture-warning__body">
+          <small>Checked {{s.checkedAt|date:'HH:mm:ss':'+0530'}} IST @if(error()){ · Retrying; last known issues below}</small>
+          <ul>@for(issue of s.issues;track $index){<li>{{issue}}</li>}</ul>
+        </div>
       </details>
     }}
-    @if(error() && snapshot()?.expectedNow){<div class="capture-warning" role="status"><strong>Replay</strong> · Status unavailable · Retrying</div>}
+    @if(error() && snapshot()?.expectedNow && !snapshot()?.issues?.length){<div class="capture-warning" role="status"><strong>Replay</strong> · Status unavailable · Retrying</div>}
   } @else {
   <section class="readiness-panel" aria-label="Replay capture">
     <strong>Replay capture · three markets</strong>

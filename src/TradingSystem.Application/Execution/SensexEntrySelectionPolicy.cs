@@ -16,6 +16,8 @@ public sealed record SensexEntrySelection(SensexEntryCandidate Candidate,
 
 public static class SensexEntrySelectionPolicy
 {
+    public const string Version = "sensex-entry-selection-v2";
+    public const decimal MaximumPersistentEntryExtensionAtr = 1.50m;
     public static SensexEntrySelection Evaluate(
         SensexEntryCandidate primary,
         IReadOnlyList<StrategyPriceBar> bars,
@@ -119,6 +121,17 @@ public static class SensexEntrySelectionPolicy
             };
             // Do not fall back to another candidate on this same candle after
             // rejecting its selected pullback. The reason reaches NoSignal audit.
+        }
+        // Retain the broader thesis through a strong move, but distinguish that
+        // from a safe new entry. Do not fall back to a different path on the same
+        // candle after rejecting the selected persistent entry for extension.
+        // This applies only to Sensex; Nifty and existing positions are unchanged.
+        if (persistent && candidate.Direction is not null)
+        {
+            var extension = PersistentDirectionalThesisAnalyzerV1.EntryExtensionAtr(bars);
+            if (extension is null || extension > MaximumPersistentEntryExtensionAtr)
+                candidate = candidate with { Direction = null, Reasons = [.. candidate.Reasons,
+                    $"Sensex persistent entry is {extension:F2} ATR from EMA9 (limit {MaximumPersistentEntryExtensionAtr:F2}). Retain the thesis and wait for a fresh pullback confirmation within the entry budget."] };
         }
         return new(candidate, supplemental, persistent,
             earlyCandidate, earlyAssessment);

@@ -1,11 +1,13 @@
 /* Trading workspace only. Explicit layout selectors avoid the generic panel/dialog rules. */
 :host .mode-banner.desk-mode-bar {
-  min-height: 38px; padding: 5px 14px; gap: 10px; background: #e0eddf;
+  min-height: 32px; padding: 3px 10px; gap: 8px; background: #e0eddf;
   border-bottom: 1px solid #afc9b3; color: #315a43; font-size: .72rem;
 }
 :host .desk-mode-bar .mode-banner__label { margin: 0; font-size: .65rem; letter-spacing: .08em; }
 :host .desk-mode-pill { padding: 3px 9px; border: 1px solid #95b39d; border-radius: 5px; background: #f1f7ed; }
 :host .desk-mode-bar .desk-total-pnl { margin-left: auto; padding: 4px 10px; border-color: #91b09b; border-radius: 6px; }
+:host .desk-mode-bar .desk-capture-status { min-width: 0; }
+:host .desk-mode-bar .desk-total-pnl { padding: 3px 8px; white-space: nowrap; }
 :host .desk-mode-bar.mode-banner--unavailable { border-bottom-color: #b66b59; background: #fff0e9; }
 
 :host .workspace-layout.desk-refined { grid-template-columns: 192px minmax(0, 1fr); gap: 10px; }
@@ -48,7 +50,7 @@
 
 :host .desk-refined .chart-panel > .desk-quote-header {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
-  padding: 10px 12px; min-height: 64px; border-bottom: 1px solid #b3cdb7;
+  padding: 5px 10px; min-height: 42px; border-bottom: 1px solid #b3cdb7;
   background: #e8f2e2; border-radius: 10px 10px 0 0;
 }
 :host .desk-refined .desk-quote-header > .desk-index-quote {
@@ -62,7 +64,7 @@
 :host .desk-refined .desk-quote-header .desk-previous-close { font-size: .72rem; color: #526d5a; white-space: nowrap; }
 :host .desk-refined .desk-quote-status { color: #79581a; font-size: .7rem; }
 :host .desk-refined .desk-quote-header > .desk-session-summary {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin: 0;
+  display: flex; flex-direction: row; align-items: center; gap: 12px; margin: 0;
   padding-left: 14px; border-left: 1px solid #b3cdb7; white-space: nowrap;
 }
 :host .desk-refined .desk-session-summary > span { font-size: .68rem; letter-spacing: 0; text-transform: none; color: #526d5a; }
@@ -99,9 +101,10 @@
   :host .desk-refined .workspace-nav-actions .desk-reports > button { height: 100%; }
 }
 @media(max-width: 560px) {
-  :host .mode-banner.desk-mode-bar { position: relative; flex-wrap: wrap; padding: 5px 8px; gap: 4px 8px; }
+  :host .mode-banner.desk-mode-bar { position: relative; flex-wrap: wrap; padding: 3px 8px; gap: 4px 8px; }
   :host .desk-mode-bar .mode-banner__label { display: none; }
   :host .desk-mode-bar .desk-total-pnl { margin-left: auto; font-size: .68rem; }
+  :host .desk-mode-bar .desk-capture-status { order: 1; }
   :host .desk-refined .chart-panel > .desk-quote-header { padding: 8px; gap: 8px; }
   :host .desk-refined .desk-quote-header > .desk-index-quote { gap: 4px 8px; }
   :host .desk-refined .desk-quote-header .desk-index-price { font-size: 1.15rem; }

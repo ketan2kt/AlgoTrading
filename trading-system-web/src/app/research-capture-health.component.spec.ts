@@ -23,8 +23,14 @@ describe('automatic replay capture warning',()=>{
     http.expectOne('/api/research/capture-health').flush(state(true,['Feed authorization failed']));
     fixture.detectChanges();
     const warning=fixture.nativeElement.querySelector('details.capture-warning');
-    expect(warning.querySelector('summary').textContent.trim()).toBe('Replay · Feed warning · 09:30:00');
+    expect(warning.querySelector('summary').textContent.trim()).toBe('Replay · Feed warning');
+    expect(warning.open).toBe(false);
+    expect(warning.querySelector('.capture-warning__body').textContent).toContain('09:30:00 IST');
     expect(warning.querySelector('li').textContent).toBe('Feed authorization failed');
+    warning.open=true;
+    warning.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    fixture.detectChanges();
+    expect(warning.open).toBe(false);
     fixture.destroy();await vi.advanceTimersByTimeAsync(31000);
     http.expectNone('/api/research/capture-health');http.verify();
   });

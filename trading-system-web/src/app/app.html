@@ -5,9 +5,9 @@
 } @else if (status$ | async; as status) {
   @if (user) {
     <header class="mode-banner desk-mode-bar" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
-      <span class="mode-banner__label">Trading workspace</span>
       <strong class="desk-mode-pill">{{ status.mode }}</strong>
-      <span class="desk-availability" [attr.title]="status.status">{{ status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live execution available · per-market switches apply' : 'Live execution unavailable' }}</span>
+      <span class="desk-availability" title="Live execution availability; each market retains its own execution switch.">{{ status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live available' : 'Live unavailable' }}</span>
+      <app-research-capture-health class="desk-capture-status" [compact]="true" />
       @if (portfolioSummary(); as portfolio) {
         <div class="desk-total-pnl" title="Paper strategy P&L: realised plus open P&L across Nifty, Sensex and Bank Nifty. Not broker-account P&L.">
           <span>All 3 · Paper P&amp;L</span>
@@ -17,7 +17,6 @@
         </div>
       }
     </header>
-    <app-research-capture-health [compact]="true" />
   }
 
   <main [class.market-theme--sensex]="selectedMarket === 'sensex'"
