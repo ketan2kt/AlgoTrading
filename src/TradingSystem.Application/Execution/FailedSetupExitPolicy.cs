@@ -18,7 +18,11 @@ public static class FailedSetupExitPolicy
     public static bool AllowsEntryReclaim(string market, string strategy)
     {
         if (RequiresConfirmedEntryFailure(market, strategy)) return true;
-        if (market != "nifty") return false;
+        return market == "nifty" && IsRegularNiftyStrategy(strategy);
+    }
+
+    private static bool IsRegularNiftyStrategy(string strategy)
+    {
         var normalStrategy = strategy.StartsWith("exploration-", StringComparison.Ordinal)
             ? strategy["exploration-".Length..] : strategy;
         return normalStrategy is "opening-range-breakout" or "opening-range-retest" or
@@ -27,7 +31,7 @@ public static class FailedSetupExitPolicy
     }
 
     private static bool RequiresConfirmedEntryFailure(string market, string strategy) =>
-        market is "nifty" or "sensex" or "bank-nifty" &&
+        (market == "nifty" ? IsRegularNiftyStrategy(strategy) : market is "sensex" or "bank-nifty") &&
         !strategy.StartsWith("Hero Zero|", StringComparison.OrdinalIgnoreCase) &&
         !strategy.StartsWith("Expansion Pair|", StringComparison.OrdinalIgnoreCase) &&
         !strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.OrdinalIgnoreCase);
