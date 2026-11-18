@@ -1,0 +1,24 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-18T12:40:00Z",
+  "market": "sensex",
+  "from": "2026-11-12",
+  "to": "2026-11-18",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 27,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 27,
+  "sessions": [
+    {"Date": "2026-11-12", "RegularEntries": 6},
+    {"Date": "2026-11-13", "RegularEntries": 4},
+    {"Date": "2026-11-17", "RegularEntries": 10},
+    {"Date": "2026-11-18", "RegularEntries": 7}
+  ],
+  "strategyBreakdown": [
+    {"strategy": "Sensex controlled early pullback", "count": 4, "removed": false},
+    {"strategy": "Sensex directional pullback participation", "count": 13, "removed": false},
+    {"strategy": "Sensex persistent directional thesis", "count": 9, "removed": false},
+    {"strategy": "Sensex range-edge rejection", "count": 1, "removed": false}
+  ],
+  "limitation": "Cached production-backed Daily Analysis exports; no strategy path is removed. Counts describe path retention, not individual signal acceptance. The revised persistent-thesis gate defers one additional entry (Nov17 10:28); Nov12 13:24 was already blocked by v1. All 13 actual winning entries remain eligible. See sensex-entry-review-2026-11-18.md for supported same-entry modeled comparisons, missing older exit paths and replacement-entry limitations."
+}

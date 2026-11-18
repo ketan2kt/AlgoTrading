@@ -11,7 +11,7 @@ public sealed record SensexStalledTrendDecision(bool Permitted, string? Rejectio
 // valid through a pause, but that alone does not justify a new entry.
 public static class SensexStalledTrendEntryPolicy
 {
-    public const string Version = "sensex-stalled-thesis-v1";
+    public const string Version = "sensex-stalled-thesis-v2";
     public static readonly TimeOnly CashSessionOpen = new(9, 15);
     public const string Stalled = "SensexStalledThesisDeferred";
     public const string Incomplete = "SensexStalledThesisDataIncomplete";
@@ -54,14 +54,17 @@ public static class SensexStalledTrendEntryPolicy
         var sign = direction == Direction.Buy ? 1m : -1m;
         var progress5 = sign * (close - tail[^(fiveMinuteSteps + 1)].Close);
         var progress60 = sign * (close - tail[0].Close);
-        var priorSwingBars = tail.SkipLast(1).TakeLast(3);
+        var priorSwingBars = tail.SkipLast(2).TakeLast(3);
         var swing = direction == Direction.Buy ? priorSwingBars.Max(b => b.High) : priorSwingBars.Min(b => b.Low);
-        if (progress5 >= atr || progress60 >= atr || sign * (close - swing) > 0m)
+        // An hour-old directional move sustains the thesis, not a fresh entry.
+        // Require recent progress or a newly cleared local swing to resume it.
+        var acceptedSwing = tail.TakeLast(2).All(bar => sign * (bar.Close - swing) > 0m);
+        if (progress5 >= atr || acceptedSwing)
             return Allowed;
 
         return new(false, Stalled,
             [string.Create(CultureInfo.InvariantCulture,
-                $"Sensex thesis stalled: favourable progress {progress5:F2} points over 5m and {progress60:F2} over 60m, below {atr:F2} ATR. Wait for a completed close {(direction == Direction.Buy ? "above" : "below")} the prior three-bar swing at {swing:F2}.")]);
+                $"Sensex thesis stalled: 5m progress {progress5:F2} is below {atr:F2} ATR; 60m progress {progress60:F2} is context only. Wait for 5m progress of one ATR or two completed closes {(direction == Direction.Buy ? "above" : "below")} the prior three-bar swing at {swing:F2}.")]);
     }
 
     private static SensexStalledTrendDecision RejectIncomplete(string reason) =>

@@ -30,7 +30,7 @@ public sealed class SensexStalledTrendEntryPolicyTests
     [InlineData(Direction.Sell, 60, 60)]
     [InlineData(Direction.Buy, 300, 60)]
     [InlineData(Direction.Sell, 300, 5)]
-    public void AnAtrOfDirectionalProgressInEitherTimeWindowIsEnough(
+    public void OnlyRecentProgressCanAdmitAnEntryWithoutSwingAcceptance(
         Direction direction, int intervalSeconds, int windowMinutes)
     {
         var bars = Flat(intervalSeconds);
@@ -40,8 +40,8 @@ public sealed class SensexStalledTrendEntryPolicyTests
             { Close = value, High = Math.Max(102m, value), Low = Math.Min(98m, value) };
         // The current close remains inside the local swing. Only the chosen
         // time window provides an ATR of progress.
-        Assert.True(Evaluate(bars, direction, bars[^1].OpenTimeUtc.AddSeconds(intervalSeconds),
-            intervalSeconds).Permitted);
+        Assert.Equal(windowMinutes == 5, Evaluate(bars, direction,
+            bars[^1].OpenTimeUtc.AddSeconds(intervalSeconds), intervalSeconds).Permitted);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class SensexStalledTrendEntryPolicyTests
     [Theory]
     [InlineData(Direction.Buy)]
     [InlineData(Direction.Sell)]
-    public void OnlyACompletedCloseBeyondTheSwingOverridesWeakProgress(Direction direction)
+    public void SwingResumptionNeedsTwoCompletedClosesNotOnePokeOrAFormingBar(Direction direction)
     {
         var bars = Flat(60);
         var at = bars[^1].OpenTimeUtc.AddMinutes(1);
@@ -68,9 +68,14 @@ public sealed class SensexStalledTrendEntryPolicyTests
         var extended = bars.Append(next).ToArray();
         Assert.Equal(SensexStalledTrendEntryPolicy.Stalled,
             Evaluate(extended, direction, at.AddSeconds(59)).Rejection);
-        // The prior equality bar's wick is also part of the next swing.
+        // One close beyond the boundary is not acceptance.
         next = next with { Close = direction == Direction.Buy ? 103.1m : 96.9m };
-        Assert.True(Evaluate(bars.Append(next).ToArray(), direction, at.AddMinutes(1)).Permitted);
+        Assert.False(Evaluate(bars.Append(next).ToArray(), direction, at.AddMinutes(1)).Permitted);
+        var second = next with { OpenTimeUtc = at.AddMinutes(1),
+            Close = direction == Direction.Buy ? 103.2m : 96.8m };
+        var confirmed = bars.Append(next).Append(second).ToArray();
+        Assert.False(Evaluate(confirmed, direction, at.AddMinutes(2).AddTicks(-1)).Permitted);
+        Assert.True(Evaluate(confirmed, direction, at.AddMinutes(2)).Permitted);
     }
 
     [Fact]
