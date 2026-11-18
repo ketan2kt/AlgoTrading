@@ -81,6 +81,40 @@ public sealed class HistoricalPortfolioAddOnTests
     private static HistoricalReplayBar Bar() => new(Start, 60,
         22000m, 22001m, 21999m, 22000m) { Symbol = "NIFTY" };
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PendingReductionPreventsNewAddOnWhileWaitingForTheNextOptionBook(bool terminal)
+    {
+        var result = HistoricalPortfolioReplay.Run([Bar()], [
+            Quote(2, 100m), Quote(3, 110m),
+            new HistoricalReplayQuote("NIFTY", Start.AddMinutes(3).AddSeconds(10), 22000m),
+            Quote(4, 111m), Quote(5, 89m), Quote(6, 88m)
+        ], new PendingReductionPolicy(terminal), Parameters, Start, Start.AddMinutes(9));
+
+        Assert.Equal(75, result.Trades.Sum(fill => fill.Quantity));
+        Assert.All(result.Trades, fill => Assert.Equal(0, fill.AddOnUnits));
+        Assert.Equal(terminal ? 1 : 2, result.Trades.Count);
+        Assert.Equal(terminal ? "ManualExit" : "PartialProfit", result.Trades[0].ExitReason);
+    }
+
+    private sealed class PendingReductionPolicy(bool terminal) : IHistoricalReplayPortfolioPolicy
+    {
+        public string CodeVersion => "pending-reduction-test";
+        public IReadOnlyList<HistoricalReplayCandidate> Evaluate(HistoricalReplayPortfolioFrame frame) =>
+            frame.Market.AvailableAtUtc == Start.AddMinutes(1)
+                ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, CodeVersion, .8m, 75) { LotSize = 25 }] : [];
+        public IReadOnlyList<HistoricalReplayPartialExit> EvaluatePartialExits(HistoricalReplayPortfolioFrame frame) =>
+            !terminal && frame.Market.AvailableAtUtc == Start.AddMinutes(3)
+                ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, 25, "PartialProfit")] : [];
+        public IReadOnlyList<HistoricalReplayExitRequest> EvaluateExits(HistoricalReplayPortfolioFrame frame) =>
+            terminal && frame.Market.AvailableAtUtc == Start.AddMinutes(3)
+                ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, "ManualExit")] : [];
+        public IReadOnlyList<HistoricalReplayAddOn> EvaluateAddOns(HistoricalReplayPortfolioFrame frame) =>
+            frame.Market.AvailableAtUtc == Start.AddMinutes(3).AddSeconds(10)
+                ? [new("NIFTY22000CE", frame.Market.AvailableAtUtc, 25, 1000m, "WinnerAddOn")] : [];
+    }
+
     private static HistoricalReplayQuote Quote(int minute, decimal price) =>
         new("NIFTY22000CE", Start.AddMinutes(minute), price);
 

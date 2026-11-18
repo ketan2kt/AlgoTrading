@@ -286,7 +286,9 @@ internal sealed class EfTradingWorkspaceReader(
                 excursion.MaximumProfit,
                 excursion.MaximumLoss,
                 StrategyPremiumStop: automation.ActiveSignalId == value.Id ? automation.StopLoss : null,
-                EntryEvidence: ReadEvidence(value.ReasonsJson, "supporting"));
+                EntryEvidence: ReadEvidence(value.ReasonsJson, "supporting"),
+                GrossRealisedPnl: result?.GrossPnl,
+                RealisedCosts: result?.EstimatedCosts);
         }).ToArray();
         var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
@@ -319,7 +321,9 @@ internal sealed class EfTradingWorkspaceReader(
                     ? Math.Max(0m, peak) : null,
                 value.MaximumAdversePnl is { } trough && value.ExcursionSampleCount > 1
                     ? Math.Max(0m, -trough) : null,
-                StrategyPremiumStop: isActive ? value.StopLoss : null);
+                StrategyPremiumStop: isActive ? value.StopLoss : null,
+                GrossRealisedPnl: isActive ? null : value.RealisedPnl + value.CostsPaid,
+                RealisedCosts: isActive ? null : value.CostsPaid);
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
@@ -645,7 +649,7 @@ internal sealed class EfTradingWorkspaceReader(
             ],
             ActivePositionMarks: []);
 
-    private static string FormatExitStatus(string exitReason) => exitReason switch
+    internal static string FormatExitStatus(string exitReason) => exitReason switch
     {
         "StopLoss" => "SL hit",
         "Target" => "Target hit",
@@ -653,6 +657,7 @@ internal sealed class EfTradingWorkspaceReader(
         "EmergencyKillSwitch" => "Emergency exit",
         "UnderlyingTrendInvalidated" => "Trend reversal exit",
         "ManualExit" => "Manual exit",
+        "FailedSetup" => "Failed setup exit",
         _ => "Closed"
     };
 

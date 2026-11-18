@@ -60,7 +60,9 @@ public sealed record WorkspaceTradeOverlay(
     decimal? MaximumAdverseLoss,
     decimal? StrategyPremiumStop = null,
     decimal? BrokerAcknowledgedStop = null,
-    IReadOnlyList<string>? EntryEvidence = null);
+    IReadOnlyList<string>? EntryEvidence = null,
+    decimal? GrossRealisedPnl = null,
+    decimal? RealisedCosts = null);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,

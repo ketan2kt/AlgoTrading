@@ -10,6 +10,14 @@ namespace TradingSystem.ContractTests;
 public sealed class TradingWorkspaceIsolationTests
 {
     [Theory]
+    [InlineData("FailedSetup", "Failed setup exit")]
+    [InlineData("StopLoss", "SL hit")]
+    [InlineData("ManualExit", "Manual exit")]
+    [InlineData("UnderlyingTrendInvalidated", "Trend reversal exit")]
+    public void NiftyLedgerPreservesTheActualExitReason(string reason, string label) =>
+        Assert.Equal(label, EfTradingWorkspaceReader.FormatExitStatus(reason));
+
+    [Theory]
     [InlineData("nifty", 1800, 650, 6)]
     [InlineData("sensex", 800, 450, 4)]
     [InlineData("bank-nifty", 800, 450, 4)]

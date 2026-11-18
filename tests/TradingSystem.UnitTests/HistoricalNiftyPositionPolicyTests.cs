@@ -67,8 +67,10 @@ public sealed class HistoricalNiftyPositionPolicyTests
             reused.EvaluateStopUpdates(Frame(105m)));
     }
 
-    [Fact]
-    public void FailedSetupReadsLatestCompletedUnderlyingCandle()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FailedSetupReadsLatestCompletedBoundaryBreakRatherThanOnlyEmaPullback(bool decisiveBreak)
     {
         var now = Start.AddMinutes(10);
         var bars = Enumerable.Range(0, 10).Select(index =>
@@ -78,6 +80,8 @@ public sealed class HistoricalNiftyPositionPolicyTests
                 open, open + 2m, open - 12m, open - 10m)
             { Symbol = "NIFTY" };
         }).ToArray();
+        if (decisiveBreak)
+            bars[^1] = bars[^1] with { Close = 21975m, Low = 21973m };
         var position = new HistoricalReplayOpenPosition("NIFTY22000CE",
             "momentum-expansion", Start.AddMinutes(7), 100m, 96m, 150,
             90m, 115m)
@@ -99,8 +103,11 @@ public sealed class HistoricalNiftyPositionPolicyTests
             new(new TimeOnly(15, 15), false, false, false,
                 false, .6m, false, .55m, 3, false, .8m, 5, 5, 60));
 
-        Assert.Equal("FailedSetup",
-            Assert.Single(policy.EvaluateExits(frame)).Reason);
+        // The existing EMA pullback has not decisively broken pre-entry structure.
+        // A completed candle below that boundary must still exit promptly.
+        var exits = policy.EvaluateExits(frame);
+        if (decisiveBreak) Assert.Equal("FailedSetup", Assert.Single(exits).Reason);
+        else Assert.Empty(exits);
     }
 
     [Fact]

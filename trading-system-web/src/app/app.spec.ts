@@ -246,6 +246,23 @@ describe('App', () => {
     fixture.componentInstance['acceptView']('sensex', {...sensex,observedAtUtc:new Date().toISOString()}, false);
     fixture.detectChanges();
     expect(desk.querySelector('.market-tab--positions')).toBeNull();
+    const nifty = fixture.componentInstance['marketViews'].get('nifty')!;
+    fixture.componentInstance['acceptView']('nifty', {...nifty,
+      observedAtUtc: new Date().toISOString(),
+      overlays: [{...active, signalId: 'failed-nifty', status: 'Filled', quantity: 650,
+        fillPrice: 208.15, lifecycleStatus: 'Failed setup exit', executionInstrument: 'NIFTY26NOV25300PE',
+        entryTimeUtc: '2026-11-18T05:07:04Z', exitTimeUtc: '2026-11-18T05:11:09Z',
+        realisedPnl: -7179.87, grossRealisedPnl: -6825, realisedCosts: 354.87,
+        maximumAdverseLoss: 6825, maximumFavourablePnl: 2730,
+      } as TradingWorkspaceSnapshot['overlays'][number]]}, false);
+    fixture.detectChanges();
+    const ledger = desk.querySelector('.workspace-priority-events')!.textContent!;
+    expect(ledger).toContain('Failed setup exit');
+    expect(ledger).toContain('Net realised P&L');
+    expect(ledger).toContain('-7,179.87');
+    expect(ledger).toContain('Gross P&L · costs');
+    expect(ledger).toContain('354.87');
+    expect(ledger).toContain('Max adverse loss (gross)');
   });
 
   it('opens the Sensex workspace while Natural Gas is hidden', async () => {

@@ -26,6 +26,7 @@ public sealed class FailedSetupExitPolicyTests
     [InlineData("sensex", "Sensex persistent directional thesis")]
     [InlineData("sensex", "Sensex controlled early pullback")]
     [InlineData("sensex", "Sensex range-edge rejection")]
+    [InlineData("nifty", "momentum-expansion")]
     public void OneOpposingCandleCannotRepeatTheNovember13BankNiftyExit(string market, string strategy)
     {
         var entry = new DateTimeOffset(2026, 11, 13, 10, 35, 4, TimeSpan.FromMinutes(330));
@@ -37,7 +38,8 @@ public sealed class FailedSetupExitPolicyTests
             FailedSetupExitPolicy.EvaluateForMarket(code, path, Direction.Buy,
                 635.15m, 607.25m, 63.50m, 635.90m, entry, at, spot, at, cash, 60, 30);
 
-        Assert.True(Evaluate("nifty", "momentum-expansion", bars, observed, 104m).ShouldExit);
+        Assert.True(FailedSetupExitPolicy.Evaluate(Direction.Buy,
+            635.15m, 607.25m, 63.50m, 635.90m, entry, observed, 104m, bars).ShouldExit);
         Assert.False(Evaluate(market, strategy, bars, observed, 104m).ShouldExit);
 
         var next = bars[^1].OpenTimeUtc.AddMinutes(1);

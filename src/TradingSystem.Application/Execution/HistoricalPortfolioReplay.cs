@@ -117,7 +117,7 @@ public interface IHistoricalReplayPortfolioPolicy
 
 public static class HistoricalPortfolioReplay
 {
-    public const string EngineVersion = "portfolio-replay-v12";
+    public const string EngineVersion = "portfolio-replay-v13";
     private static readonly TimeSpan MaximumQuoteAge = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan MaximumBookAge = TimeSpan.FromSeconds(30);
 
@@ -448,7 +448,12 @@ public static class HistoricalPortfolioReplay
                     "A replay policy requested duplicate winner add-ons.");
             foreach (var addOn in addOns)
             {
-                if (pendingAddOns.ContainsKey(addOn.Symbol)) continue;
+                // A policy sees filled quantities, not queued reductions. While a
+                // partial/terminal sell waits for liquidity, never queue a fresh buy
+                // or abort the replay because the filled position is still unchanged.
+                if (pendingAddOns.ContainsKey(addOn.Symbol) || pendingPartials.ContainsKey(addOn.Symbol) ||
+                    openPositions.TryGetValue(addOn.Symbol, out var reducing) && reducing.ExitTriggeredAtUtc is not null)
+                    continue;
                 if (addOn.DecidedAtUtc != atUtc ||
                     string.IsNullOrWhiteSpace(addOn.Reason) ||
                     !openPositions.TryGetValue(addOn.Symbol, out var position) ||

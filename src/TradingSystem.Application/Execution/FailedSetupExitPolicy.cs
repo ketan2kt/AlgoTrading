@@ -13,8 +13,8 @@ public sealed record FailedSetupExitDecision(bool ShouldExit, decimal AdverseR,
 /// </summary>
 public static class FailedSetupExitPolicy
 {
-    // The reclaim test is a fallback for these Nifty paths. For regular Sensex
-    // and Bank Nifty positions it is the only failed-setup confirmation.
+    // Regular index entries require setup-boundary evidence. Nifty additionally
+    // retains a fast exit for a decisive break of its pre-entry micro structure.
     public static bool AllowsEntryReclaim(string market, string strategy)
     {
         if (RequiresConfirmedEntryFailure(market, strategy)) return true;
@@ -27,7 +27,7 @@ public static class FailedSetupExitPolicy
     }
 
     private static bool RequiresConfirmedEntryFailure(string market, string strategy) =>
-        market is "sensex" or "bank-nifty" &&
+        market is "nifty" or "sensex" or "bank-nifty" &&
         !strategy.StartsWith("Hero Zero|", StringComparison.OrdinalIgnoreCase) &&
         !strategy.StartsWith("Expansion Pair|", StringComparison.OrdinalIgnoreCase) &&
         !strategy.StartsWith("PaperOnly|Pyramid|", StringComparison.OrdinalIgnoreCase);
@@ -68,14 +68,32 @@ public static class FailedSetupExitPolicy
         var signal = bars[signalIndex];
         var prior = bars[^2];
         var last = bars[^1];
-        if (prior.OpenTimeUtc < entryAt)
-            return new(false, adverseR, ["Entry-candle reclaim: two fully post-entry candles are required."]);
         var ema9 = bars[0].Close;
         foreach (var bar in bars.Skip(1)) ema9 = bar.Close * .2m + ema9 * .8m;
         var recent = bars.TakeLast(10).ToArray();
         var atr = recent.Skip(1).Select((bar, index) => Math.Max(bar.High - bar.Low,
             Math.Max(Math.Abs(bar.High - recent[index].Close), Math.Abs(bar.Low - recent[index].Close)))).Average();
         var buffer = atr * .10m;
+        if (market == "nifty" && signalIndex >= 2 && last.OpenTimeUtc >= entryAt && atr > 0m &&
+            bars[signalIndex].OpenTimeUtc - bars[signalIndex - 1].OpenTimeUtc == TimeSpan.FromSeconds(intervalSeconds) &&
+            bars[signalIndex - 1].OpenTimeUtc - bars[signalIndex - 2].OpenTimeUtc == TimeSpan.FromSeconds(intervalSeconds))
+        {
+            // Freeze the boundary before entry, rather than using a newly formed
+            // candle close as the failure level. A fresh quote AND a completed
+            // opposing close must decisively break that three-candle structure.
+            var setup = bars.Skip(signalIndex - 2).Take(3).ToArray();
+            var decisiveBuffer = atr * .25m;
+            var boundary = direction == Direction.Sell ? setup.Max(bar => bar.High) : setup.Min(bar => bar.Low);
+            var structuralFailure = direction == Direction.Sell
+                ? last.Close > last.Open && last.Close > prior.Close && last.Close > boundary + decisiveBuffer &&
+                  underlyingPrice > boundary + decisiveBuffer && underlyingPrice > ema9 + buffer
+                : last.Close < last.Open && last.Close < prior.Close && last.Close < boundary - decisiveBuffer &&
+                  underlyingPrice < boundary - decisiveBuffer && underlyingPrice < ema9 - buffer;
+            if (structuralFailure)
+                return new(true, adverseR, ["Failed setup: a completed opposing candle decisively broke the pre-entry three-candle boundary; the fresh quote confirms that break beyond EMA9."]);
+        }
+        if (prior.OpenTimeUtc < entryAt)
+            return new(false, adverseR, ["Entry-candle reclaim: two fully post-entry candles are required."]);
         var reclaimed = atr > 0m && (direction == Direction.Sell
             ? (requireConfirmation || signal.Close < signal.Open) &&
               prior.Close > prior.Open && last.Close > last.Open &&

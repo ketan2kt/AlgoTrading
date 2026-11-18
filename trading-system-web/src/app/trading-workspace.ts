@@ -51,6 +51,8 @@ export interface WorkspaceTradeOverlay {
   strategyPremiumStop?: number | null;
   brokerAcknowledgedStop?: number | null;
   entryEvidence?: string[] | null;
+  grossRealisedPnl?: number | null;
+  realisedCosts?: number | null;
 }
 
 export interface WorkspaceChartEntry {

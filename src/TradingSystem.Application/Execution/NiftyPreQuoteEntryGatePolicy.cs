@@ -21,6 +21,12 @@ public static class NiftyPreQuoteEntryGatePolicy
         int candleIntervalSeconds, decimal atrPoints,
         decimal openingRangeHigh, decimal openingRangeLow, bool relaxedNiftyEntries = false)
     {
+        if (relaxedNiftyEntries)
+        {
+            var countertrend = NiftyCountertrendEntryPolicy.Evaluate(completedSession, direction, timeframes, candleIntervalSeconds);
+            if (!countertrend.Permitted)
+                return new(false, "CountertrendConfirmationRejected", countertrend.Reasons, "", null);
+        }
         var midday = MiddayChopConfirmationPolicy.Evaluate(localTime,
             completedSession, direction, structure, candleIntervalSeconds,
             includeOtherHours: true, relaxedNiftyEntries: relaxedNiftyEntries);

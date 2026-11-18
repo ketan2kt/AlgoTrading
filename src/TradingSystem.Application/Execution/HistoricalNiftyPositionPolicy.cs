@@ -36,7 +36,7 @@ public sealed class HistoricalNiftyPositionPolicy(
     private HistoricalReplayFrame? invalidationFrame;
     private (DateTimeOffset Decision, Direction? Direction, HistoricalReplayQuote? Underlying) invalidationPosition;
     private UnderlyingTrendInvalidationResult? invalidationResult;
-    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v12/" + DifferentiatedRunnerPolicy.Version;
+    public string CodeVersion => entryPolicy.CodeVersion + "/nifty-exit-v13/" + DifferentiatedRunnerPolicy.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest +
         "|niftyExit=" + JsonSerializer.Serialize(settings);
