@@ -1,0 +1,13 @@
+{
+  "name": "@sarthico/picomatch",
+  "version": "4.0.7",
+  "sarthicoSecurityRevision": 1,
+  "private": true,
+  "description": "Maintained picomatch 4.0.7 with GHSA-fc5q-39xc-vjpf security correction",
+  "license": "MIT",
+  "author": "Jon Schlinkert (https://github.com/jonschlinkert)",
+  "main": "index.js",
+  "sideEffects": false,
+  "engines": { "node": ">=12" },
+  "files": ["index.js", "posix.js", "lib", "LICENSE", "SECURITY.md"]
+}
