@@ -12,11 +12,15 @@ using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Infrastructure.MarketData;
 
-// Recorder only. It uses the exact dated Groww contract plan and never touches live quote or order services.
+// Read-only capture on the configured host. Uses the exact dated contract plan; no order services.
 internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, IConfiguration configuration,
     IHistoricalQuoteArchive archive, TimeProvider clock, ILogger<UpstoxReplayBackupCapture> logger,
-    WorkspaceChartCache? chartCache = null, UpstoxPaperQuoteCache? paperQuotes = null)
+    WorkspaceChartCache? chartCache = null, UpstoxPaperQuoteCache? paperQuotes = null) : IDisposable
 {
+    private readonly SemaphoreSlim catalogGate = new(1, 1);
+    private DateOnly? catalogDate;
+    private IReadOnlyDictionary<string, Instrument?> catalog = new Dictionary<string, Instrument?>();
+    public void Dispose() => catalogGate.Dispose();
     internal const string ClientName = "UpstoxReplayBackup";
     internal const string CatalogClientName = "UpstoxReplayCatalog";
     internal static readonly TimeSpan MaximumAge = TimeSpan.FromSeconds(30);
@@ -46,7 +50,7 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         {
             try
             {
-                mapped = await LoadPlanAsync(catalogClient, plan, token);
+                mapped = await LoadPlanAsync(catalogClient, plan, date, token);
                 PublishCoverage(mapped);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
@@ -218,12 +222,46 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         _ => error.GetType().Name
     };
 
-    private async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
-        IReadOnlyList<HistoricalFeedInstrument> plan, CancellationToken token)
+    internal async Task<Dictionary<string, HistoricalFeedInstrument>> LoadPlanAsync(HttpClient client,
+        IReadOnlyList<HistoricalFeedInstrument> plan, DateOnly date, CancellationToken token)
     {
-        var byToken = plan.Where(item => item.Type is InstrumentType.CallOption or InstrumentType.PutOption)
-            .ToDictionary(instrument => instrument.Exchange + "_FO|" + instrument.ExchangeToken, StringComparer.Ordinal);
+        await catalogGate.WaitAsync(token);
+        try
+        {
+            if (catalogDate != date)
+            {
+                // Publish only a completely parsed, dated catalogue. A lease
+                // reacquisition reuses metadata, never old quotes or mappings.
+                var loaded = await LoadCatalogAsync(client, token);
+                catalog = loaded;
+                catalogDate = date;
+            }
+            return MapPlan(plan, catalog);
+        }
+        finally { catalogGate.Release(); }
+    }
+
+    private static Dictionary<string, HistoricalFeedInstrument> MapPlan(
+        IReadOnlyList<HistoricalFeedInstrument> plan, IReadOnlyDictionary<string, Instrument?> metadata)
+    {
         var mapped = new Dictionary<string, HistoricalFeedInstrument>(StringComparer.Ordinal);
+        foreach (var item in plan)
+        {
+            var key = item.Type == InstrumentType.Index ? IndexKey(item.Market) : item.Exchange + "_FO|" + item.ExchangeToken;
+            if (key is null || !metadata.TryGetValue(key, out var row) || row is null || row.Key != key) continue;
+            if (item.Type == InstrumentType.Index
+                ? row.Side == "INDEX" && row.Segment == item.Exchange + "_INDEX"
+                : item.Type is InstrumentType.CallOption or InstrumentType.PutOption &&
+                  row.Strike is { } strike && row.Lot is { } lot && row.Expiry is { } expiry &&
+                  Matches(item, row.Underlying, row.Side, strike, lot, expiry))
+                mapped.Add(key, item);
+        }
+        return mapped;
+    }
+
+    private async Task<IReadOnlyDictionary<string, Instrument?>> LoadCatalogAsync(HttpClient client, CancellationToken token)
+    {
+        var mapped = new Dictionary<string, Instrument?>(StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var timer = Stopwatch.StartNew();
         // Buffer the bounded compressed document before parsing. Streaming tiny
@@ -240,34 +278,29 @@ internal sealed class UpstoxReplayBackupCapture(IHttpClientFactory clients, ICon
         // processing budget without relaxing quote freshness or quote timeouts.
         deadline.CancelAfter(TimeSpan.FromMinutes(2));
         var rows = 0;
-        await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<Instrument>(gzip, cancellationToken: deadline.Token))
+        using var document = await JsonDocument.ParseAsync(gzip, cancellationToken: deadline.Token);
+        foreach (var element in document.RootElement.EnumerateArray())
         {
+            deadline.Token.ThrowIfCancellationRequested();
             rows++;
-            if (row?.Side == "INDEX")
+            if (String(element, "segment") is not ("NSE_FO" or "BSE_FO" or "NSE_INDEX" or "BSE_INDEX")) continue;
+            // Avoid allocating/deserializing the full stock/option universe into
+            // typed rows; only the three supported indexes need validated metadata.
+            var isIndex = String(element, "instrument_type") == "INDEX";
+            var exchangeToken = element.TryGetProperty("exchange_token", out var tokenValue) ? tokenValue.ValueKind switch
             {
-                var match = plan.SingleOrDefault(item => item.Type == InstrumentType.Index && IndexKey(item.Market) == row.Key &&
-                    row.Segment == item.Exchange + "_INDEX");
-                if (match is not null && row.Key is { } indexKey)
-                {
-                    if (!seen.Add(indexKey)) mapped.Remove(indexKey);
-                    else mapped.Add(indexKey, match);
-                }
-                continue;
-            }
-            if (row?.Segment is not ("NSE_FO" or "BSE_FO")) continue;
-            var exchangeToken = row.ExchangeToken.ValueKind switch
-            {
-                JsonValueKind.String => row.ExchangeToken.GetString(),
-                JsonValueKind.Number => row.ExchangeToken.GetRawText(),
+                JsonValueKind.String => tokenValue.GetString(),
+                JsonValueKind.Number => tokenValue.GetRawText(),
                 _ => null
-            };
-            if (exchangeToken is null) continue;
-            var identity = row.Segment + "|" + exchangeToken;
-            if (!byToken.TryGetValue(identity, out var instrument)) continue;
-            if (!seen.Add(identity)) { mapped.Remove(identity); continue; }
-            if (row.Key != identity || row.Strike is not { } strike || row.Lot is not { } lot || row.Expiry is not { } expiry ||
-                !Matches(instrument, row.Underlying, row.Side, strike, lot, expiry)) continue;
-            mapped.Add(identity, instrument);
+            } : null;
+            var identity = isIndex ? String(element, "instrument_key") : exchangeToken is null ? null : String(element, "segment") + "|" + exchangeToken;
+            if (identity is null) continue;
+            if (!seen.Add(identity)) { mapped[identity] = null; continue; }
+            if (isIndex ? String(element, "instrument_key") is not ("NSE_INDEX|Nifty 50" or "NSE_INDEX|Nifty Bank" or "BSE_INDEX|SENSEX")
+                : String(element, "underlying_symbol") is not ("NIFTY" or "SENSEX" or "BANKNIFTY")) continue;
+            var row = element.Deserialize<Instrument>();
+            if (row is null) continue;
+            mapped.Add(identity, row);
         }
         CatalogStage(logger, "mapped", timer.Elapsed.TotalMilliseconds, rows, null);
         return mapped;

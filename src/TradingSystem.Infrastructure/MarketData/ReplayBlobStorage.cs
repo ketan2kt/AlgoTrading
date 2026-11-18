@@ -181,16 +181,27 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         var lease = blob.GetBlobLeaseClient();
         try { await lease.AcquireAsync(TimeSpan.FromSeconds(60), cancellationToken: token); }
         catch (RequestFailedException error) when (error.Status == 409) { return; }
+        BackupOwnership(logger, "acquired", "", 0, null);
         await RunOwnedBackupAsync(capture, async renewalToken => { await lease.RenewAsync(cancellationToken: renewalToken); },
-            async releaseToken => { await lease.ReleaseAsync(cancellationToken: releaseToken); }, clock, token);
+            async releaseToken => { await lease.ReleaseAsync(cancellationToken: releaseToken); }, clock, token,
+            (stage, error, elapsed) => BackupOwnership(logger, stage,
+                error is RequestFailedException azure ? $"HTTP {azure.Status} {azure.ErrorCode}" : error?.GetType().Name ?? "",
+                elapsed.TotalSeconds, null));
     }
 
+    private static readonly Action<ILogger, string, string, double, Exception?> BackupOwnership =
+        LoggerMessage.Define<string, string, double>(LogLevel.Information, new EventId(6765, "ReplayBackupOwnership"),
+            "Replay backup ownership {Stage}: {FailureType}; {SecondsSinceRenewal} seconds since confirmed lease.");
+
     internal static async Task RunOwnedBackupAsync(Func<CancellationToken, Task> capture,
-        Func<CancellationToken, Task> renew, Func<CancellationToken, Task> release, TimeProvider clock, CancellationToken token)
+        Func<CancellationToken, Task> renew, Func<CancellationToken, Task> release, TimeProvider clock, CancellationToken token,
+        Action<string, Exception?, TimeSpan>? report = null)
     {
         using var owner = CancellationTokenSource.CreateLinkedTokenSource(token);
-        var work = capture(owner.Token);
+        var confirmedAt = clock.GetUtcNow();
+        // Start the lease clock before any synchronous capture preparation.
         var renewal = RenewAsync();
+        var work = CaptureAsync();
         try
         {
             var completed = await Task.WhenAny(work, renewal);
@@ -198,6 +209,7 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
         }
         finally
         {
+            report?.Invoke("stopping", null, clock.GetUtcNow() - confirmedAt);
             await owner.CancelAsync();
             try
             {
@@ -212,17 +224,48 @@ public sealed class ReplayBlobStorage : BackgroundService, IReplayArchiveCache
             }
         }
 
+        async Task CaptureAsync() => await capture(owner.Token);
+
         async Task RenewAsync()
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15), clock);
-            while (await timer.WaitForNextTickAsync(owner.Token))
+            var delay = TimeSpan.FromSeconds(15);
+            while (!owner.IsCancellationRequested)
             {
+                await Task.Delay(delay, clock, owner.Token);
+                var elapsed = clock.GetUtcNow() - confirmedAt;
+                var remaining = TimeSpan.FromSeconds(45) - elapsed;
+                if (remaining <= TimeSpan.Zero)
+                    throw new TimeoutException("Backup lease safety deadline exceeded.");
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(owner.Token);
-                deadline.CancelAfter(TimeSpan.FromSeconds(10));
-                await renew(deadline.Token);
+                var budget = remaining < TimeSpan.FromSeconds(5) ? remaining : TimeSpan.FromSeconds(5);
+                try
+                {
+                    await renew(deadline.Token).WaitAsync(budget, clock, owner.Token);
+                    confirmedAt = clock.GetUtcNow();
+                    if (delay != TimeSpan.FromSeconds(15)) report?.Invoke("recovered", null, TimeSpan.Zero);
+                    delay = TimeSpan.FromSeconds(15);
+                }
+                catch (Exception error) when (!owner.IsCancellationRequested && IsTransientBackupLeaseFailure(error))
+                {
+                    elapsed = clock.GetUtcNow() - confirmedAt;
+                    report?.Invoke("renewal-retry", error, elapsed);
+                    // Retry only while the previously acknowledged 60s lease is
+                    // still ours. Stop 15s early; never continue on actual loss.
+                    if (elapsed >= TimeSpan.FromSeconds(43)) throw;
+                    delay = TimeSpan.FromSeconds(2);
+                }
+                catch (Exception error) when (!owner.IsCancellationRequested)
+                {
+                    report?.Invoke("renewal-lost", error, clock.GetUtcNow() - confirmedAt);
+                    throw;
+                }
+                finally { await deadline.CancelAsync(); }
             }
         }
     }
+
+    private static bool IsTransientBackupLeaseFailure(Exception error) => error is TimeoutException or HttpRequestException ||
+        error is RequestFailedException { Status: 0 or 408 or 429 or >= 500 };
 
     private async Task PublishPolicyReceiptAsync(CancellationToken token)
     {

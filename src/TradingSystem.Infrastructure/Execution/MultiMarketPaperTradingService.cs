@@ -888,7 +888,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                 cancellationToken);
             return;
         }
-        var decision = Evaluate(candles);
+        var decision = Evaluate(candles, bankNifty: true);
         if (decision.Direction is null)
         {
             await AuditIfDueAsync(db, market, underlying.Id, latest.OpenTimeUtc,
@@ -1536,9 +1536,10 @@ internal sealed partial class MultiMarketPaperTradingService(
             options.Value.RequiredReversalEvidenceCount);
     }
 
-    private static MarketDecision Evaluate(IReadOnlyList<Candle> candles)
+    private static MarketDecision Evaluate(IReadOnlyList<Candle> candles, bool bankNifty = false)
     {
-        var result = IndexMomentumBreakoutPolicy.Evaluate(candles);
+        var result = bankNifty ? IndexMomentumBreakoutPolicy.EvaluateBankNifty(candles)
+            : IndexMomentumBreakoutPolicy.Evaluate(candles);
         return new(result.Direction, result.Confidence, "Index momentum breakout", result.Reasons);
     }
 

@@ -5,6 +5,17 @@ using TradingSystem.Application.Execution;
 using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 
+if (args.Length == 4 && args[0] == "--bank-session")
+{
+    BankSessionReplayStudy.Run(args[1], args[2], args[3]);
+    return;
+}
+if (args.Length == 4 && args[0] == "--bank-signals")
+{
+    BankSessionReplayStudy.Signals(args[1], args[2], args[3]);
+    return;
+}
+
 // Offline only. This executable can run against the exact pre-change application
 // DLL as well as the proposal. Synthetic behavior checks are NOT historical returns.
 var root = Path.GetFullPath(args[0]);

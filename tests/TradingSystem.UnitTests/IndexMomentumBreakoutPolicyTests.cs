@@ -67,6 +67,33 @@ public sealed class IndexMomentumBreakoutPolicyTests
         Assert.DoesNotContain(result.Reasons, reason => reason.Contains("At least"));
     }
 
+    [Fact]
+    public void BankEmaKeepsEarlierSessionHistoryWhileSensexRemainsUnchanged()
+    {
+        var tail = Trend(140m, .30m, 20).ToList();
+        tail.Add(Bar(146m, 146.8m, 145.9m, 146.7m));
+        var session = Trend(300m, -4m, 40).Concat(tail).ToArray();
+
+        // The 21-bar-only EMA21 is just the tail's arithmetic average.
+        // A recursively warmed EMA must retain the earlier downtrend.
+        Assert.Equal(Direction.Buy, IndexMomentumBreakoutPolicy.Evaluate(session).Direction);
+        Assert.Null(IndexMomentumBreakoutPolicy.EvaluateBankNifty(session).Direction);
+        Assert.Equal(IndexMomentumBreakoutPolicy.Evaluate(tail).Direction,
+            IndexMomentumBreakoutPolicy.Evaluate(session).Direction);
+    }
+
+    [Fact]
+    public void BankOpeningWarmupAndOriginalChopGuardsArePreserved()
+    {
+        var opening = Trend(100m, .25m, 11).ToList();
+        opening.Add(Bar(102.6m, 103.3m, 102.5m, 103.2m));
+        var existing = IndexMomentumBreakoutPolicy.Evaluate(opening);
+        var bank = IndexMomentumBreakoutPolicy.EvaluateBankNifty(opening);
+        Assert.Equal(existing.Direction, bank.Direction);
+        Assert.Equal(existing.Confidence, bank.Confidence);
+        Assert.Equal(existing.Reasons, bank.Reasons);
+    }
+
     private static IEnumerable<Candle> Trend(decimal start, decimal step, int count)
     {
         for (var index = 0; index < count; index++)

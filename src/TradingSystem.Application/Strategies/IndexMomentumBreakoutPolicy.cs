@@ -14,7 +14,11 @@ public sealed record IndexMomentumDecision(
 /// </summary>
 public static class IndexMomentumBreakoutPolicy
 {
-    public static IndexMomentumDecision Evaluate(IReadOnlyList<Candle> candles)
+    public const string BankVersion = "bank-momentum-session-ema-v1";
+    public static IndexMomentumDecision Evaluate(IReadOnlyList<Candle> candles) => EvaluateCore(candles, false);
+    public static IndexMomentumDecision EvaluateBankNifty(IReadOnlyList<Candle> candles) => EvaluateCore(candles, true);
+
+    private static IndexMomentumDecision EvaluateCore(IReadOnlyList<Candle> candles, bool useSessionEma)
     {
         ArgumentNullException.ThrowIfNull(candles);
         if (candles.Count < 12)
@@ -27,7 +31,10 @@ public static class IndexMomentumBreakoutPolicy
         if (atr <= 0 || latest.Close <= 0)
             return new(null, 0m, ["ATR or closing price is unavailable."]);
 
-        var closes = recent.Select(value => value.Close).ToArray();
+        // Bank Nifty receives the complete current session. Seeding EMA21
+        // from only 21 closes would turn it into a rolling SMA21, while EMA9
+        // still receives recursive updates. Keep Sensex's existing path separate.
+        var closes = (useSessionEma ? candles : recent).Select(value => value.Close).ToArray();
         var fast = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
         var slow = TechnicalIndicators.ExponentialMovingAverage(closes, Math.Min(21, closes.Length));
         var body = Math.Abs(latest.Close - latest.Open);

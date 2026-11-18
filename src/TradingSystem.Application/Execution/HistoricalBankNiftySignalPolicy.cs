@@ -17,7 +17,7 @@ public sealed class HistoricalBankNiftySignalPolicy(
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
     public bool ProductionPolicyParityVerified => candleIntervalSeconds is 60 or 300;
     public string CodeVersion => "bank-nifty-deferred-admission-v9/" + BankNiftyEntryStructurePolicy.Version +
-        "/" + OptionRiskBudgetPolicy.Version;
+        "/" + OptionRiskBudgetPolicy.Version + "/" + IndexMomentumBreakoutPolicy.BankVersion;
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         tradingDate, candleIntervalSeconds, entryStart, entryCutoff, lots,
@@ -54,7 +54,7 @@ public sealed class HistoricalBankNiftySignalPolicy(
             underlyingInstrumentId, value.OpenTimeUtc, value.IntervalSeconds,
             value.Open, value.High, value.Low, value.Close, value.Volume,
             "HistoricalReplay", value.OpenInterest)).ToArray();
-        var decision = IndexMomentumBreakoutPolicy.Evaluate(candles);
+        var decision = IndexMomentumBreakoutPolicy.EvaluateBankNifty(candles);
         if (decision.Direction is null) return [];
         var direction = decision.Direction.Value;
         var current = session.Select(ToPriceBar).ToArray();

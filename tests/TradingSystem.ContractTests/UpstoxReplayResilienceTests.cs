@@ -48,6 +48,70 @@ public sealed class UpstoxReplayResilienceTests
     }
 
     [Fact]
+    public async Task TransientLeaseFailureRecoversWithoutRestartingCapture()
+    {
+        var clock = new FastClock();
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var captureStarts = 0;
+        var renewals = 0;
+        var released = false;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await ReplayBlobStorage.RunOwnedBackupAsync(async token =>
+        {
+            captureStarts++;
+            await recovered.Task.WaitAsync(token);
+        }, _ =>
+        {
+            if (++renewals == 1) throw new HttpRequestException("Transient fixture");
+            recovered.TrySetResult();
+            return Task.CompletedTask;
+        }, _ => { released = true; return Task.CompletedTask; }, clock, stop.Token);
+        Assert.Equal(1, captureStarts);
+        Assert.True(renewals >= 2);
+        Assert.True(released);
+        Assert.Contains(TimeSpan.FromSeconds(2), clock.Delays);
+    }
+
+    [Fact]
+    public async Task RepeatedLeaseFailureStopsBeforeOwnershipExpires()
+    {
+        var clock = new FastClock();
+        var stopped = false;
+        var released = false;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<HttpRequestException>(() => ReplayBlobStorage.RunOwnedBackupAsync(async token =>
+        {
+            try { await Task.Delay(Timeout.Infinite, token); }
+            finally { stopped = true; }
+        }, _ =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(15));
+            throw new HttpRequestException("Transient fixture");
+        }, _ => { Assert.True(stopped); released = true; return Task.CompletedTask; }, clock, timeout.Token));
+        Assert.True(released);
+        Assert.True(clock.GetUtcNow() - Start < TimeSpan.FromSeconds(60));
+    }
+
+    [Fact]
+    public async Task CatalogIsReusedButChangedPlansAreRemappedAndNewDatesReload()
+    {
+        var first = Instrument("NIFTY", 1);
+        var second = Instrument("BANKNIFTY", 2);
+        using var api = new Api([first, second], (_, _) => throw new InvalidOperationException("No quote calls expected"));
+        using var client = new HttpClient(api, disposeHandler: false);
+        using var capture = Capture(api, new Archive(), new FastClock());
+        var day = new DateOnly(2026, 11, 18);
+        Assert.Single(await capture.LoadPlanAsync(client, [first], day, CancellationToken.None));
+        var changed = await capture.LoadPlanAsync(client, [second], day, CancellationToken.None);
+        Assert.Single(changed);
+        Assert.Contains(Key(second), changed.Keys);
+        Assert.Equal(1, api.CatalogRequests);
+        Assert.Empty(await capture.LoadPlanAsync(client, [second with { StrikePrice = 56000 }], day, CancellationToken.None));
+        Assert.Single(await capture.LoadPlanAsync(client, [first], day.AddDays(1), CancellationToken.None));
+        Assert.Equal(2, api.CatalogRequests);
+    }
+
+    [Fact]
     public async Task IndependentCollectorPersistsHealthyPrimaryOnAllMarkets()
     {
         foreach (var market in Markets)
@@ -307,9 +371,11 @@ public sealed class UpstoxReplayResilienceTests
     private sealed class Api(IReadOnlyList<HistoricalFeedInstrument> catalog,
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> quotes) : HttpMessageHandler
     {
+        public int CatalogRequests { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri!.Host != "assets.upstox.com") return quotes(request, cancellationToken);
+            CatalogRequests++;
             var rows = catalog.Select(item => new { segment = item.Exchange + "_FO", exchange_token = item.ExchangeToken,
                 instrument_key = Key(item), underlying_symbol = item.Market, instrument_type = "CE", strike_price = item.StrikePrice,
                 lot_size = item.LotSize, expiry = new DateTimeOffset(item.ExpiryDate!.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(5.5)).ToUnixTimeMilliseconds() });
