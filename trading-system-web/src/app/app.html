@@ -739,7 +739,7 @@
                   <article><span>Closed trades</span><strong>{{a.summary.completedTradeCount}}</strong><small>{{a.summary.openTradeCount}} still open</small></article>
                   <article><span>Wins · losses</span><strong>{{a.summary.wins}} · {{a.summary.losses}}</strong><small>of {{a.summary.completedTradeCount}} closed</small></article>
                   <article><span>Gross P&amp;L</span><strong>₹{{a.summary.grossPnl|number:'1.0-0'}}</strong><small>Before charges</small></article>
-                  <article><span>Decision funnel</span><strong>{{a.summary.acceptedDecisionCount}} · {{a.summary.rejectedDecisionCount}}</strong><small>Accepted · rejected</small></article>
+                  <article><span>Entry gate events</span><strong>{{a.summary.acceptedDecisionCount}} · {{a.summary.rejectedDecisionCount}}</strong><small>Passed · blocked (not unique setups)</small><small>{{a.summary.noSetupDecisionCount ?? '—'}} no setup · {{a.summary.informationalDecisionCount ?? '—'}} informational · {{a.summary.mirroredDecisionCount ?? '—'}} mirrored</small></article>
                 </div>
                 <app-daily-capital-summary [summary]="a.capitalSummary" />
                 <app-session-timeline [report]="a" (replay)="openHistoricalReplay($event)" />

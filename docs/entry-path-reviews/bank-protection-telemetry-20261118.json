@@ -1,0 +1,14 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-18T11:40:00Z",
+  "market": "bank-nifty",
+  "from": "2026-11-18",
+  "to": "2026-11-18",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 4,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 4,
+  "sessions": [{"Date": "2026-11-18", "RegularEntries": 4}],
+  "strategyBreakdown": [{"strategy": "Bank index directional breakout", "count": 4, "removed": false}],
+  "limitation": "Existing production-backed Nov18 Daily Analysis: four Bank Nifty regular trades. This release changes only the protection audit payload, not entry/exit decisions, stops, sizing or profit protection. All four entry paths remain unchanged; this is not a profitability claim."
+}

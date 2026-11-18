@@ -17,7 +17,17 @@
     <p class="note">Peak totals sum separate trade observations—not a simultaneous portfolio peak or attainable profit. Giveback = observed gross peak minus realised gross. Charges are separate. Missing or incompatible evidence is excluded, not counted as zero.</p>
     <div class="table-wrap"><table><thead><tr><th>Trade</th><th>Profit retained</th><th>Entry evidence</th><th>After exit</th></tr></thead><tbody>
       @for (row of rows(); track row.review.tradeId) { @if (row.trade; as t) {
-        <tr><td><strong>{{t.market}} · {{t.symbol}}</strong><small>{{t.openedAtUtc|date:'HH:mm:ss':'+0530'}} · {{t.exitReason ?? 'Open'}}</small></td>
+        <tr><td><strong>{{t.market}} · {{t.symbol}}</strong><small>{{t.openedAtUtc|date:'HH:mm:ss':'+0530'}} · {{t.exitReason ?? 'Open'}}</small>
+          <details><summary>Protection receipts</summary>
+            @for(p of t.protectionReceipts ?? []; track $index){
+              <p>{{p.atUtc|date:'HH:mm:ss':'+0530'}} · {{p.policy}} · {{p.stage}}@if(p.triggered){ · EXIT TRIGGERED}
+                @if(p.floorNet !== null){ · Net floor ₹{{p.floorNet|number:'1.2-2'}} }
+                @if(p.stopPrice !== null){ · Stop ₹{{p.stopPrice|number:'1.2-2'}} }
+                @if(p.decisionBid !== null){ · Bid ₹{{p.decisionBid|number:'1.2-2'}} }
+              </p>
+            } @empty {<p>No linked protection receipt. Do not infer that a trail armed from peak profit alone.</p>}
+            <small>Recorded thresholds are not guaranteed fill prices. A zero-net floor is conditional break-even, not the 70% trail.</small>
+          </details></td>
           <td><strong>{{row.review.retainedPercent === null ? '—' : (row.review.retainedPercent|number:'1.1-1')+'% gross retained'}}</strong>
             <small>Giveback {{row.review.grossGiveback === null ? '—' : '₹'+(row.review.grossGiveback|number:'1.2-2')}}</small>
             <details><summary>Peak basis</summary><p>{{row.review.profitEvidence}}</p><p>{{t.excursionCoverage}}</p></details></td>

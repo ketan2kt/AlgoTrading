@@ -321,11 +321,12 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             .OrderByDescending(value => value.Count())
             .ToDictionary(value => value.Key, value => value.Count(), StringComparer.OrdinalIgnoreCase);
         var completed = trades.Where(value => value.ClosedAtUtc is not null).ToArray();
-        var acceptedDecisionCount = decisions.Count(value => IsAccepted(value.Outcome));
+        var decisionKinds = decisions.Select(value => DailyDecisionClassification.Classify(value.Outcome)).ToArray();
+        var acceptedDecisionCount = decisionKinds.Count(value => value == DailyDecisionClassification.Kind.Accepted);
         var summary = new DailyTradingDiagnosticsSummary(
             decisions.Count,
             acceptedDecisionCount,
-            decisions.Count - acceptedDecisionCount,
+            decisionKinds.Count(value => value == DailyDecisionClassification.Kind.Rejected),
             outcomeCounts,
             completed.Length,
             trades.Count - completed.Length,
@@ -336,7 +337,24 @@ internal sealed class EfDailyTradingDiagnosticsReader(
             completed.Sum(value => value.NetRealisedPnl),
             decisions.Count == 0 ? null : decisions[0].CandleTimeUtc,
             decisions.Count == 0 ? null : decisions[^1].CandleTimeUtc,
-            lastCandleAtUtc);
+            lastCandleAtUtc)
+        {
+            InformationalDecisionCount = decisionKinds.Count(value => value == DailyDecisionClassification.Kind.Informational),
+            NoSetupDecisionCount = decisionKinds.Count(value => value == DailyDecisionClassification.Kind.NoSetup),
+            MirroredDecisionCount = decisionKinds.Count(value => value == DailyDecisionClassification.Kind.Mirror)
+        };
+
+        // Read full-day receipts before the latest-500 display cap. Do not lose
+        // morning protection evidence when afternoon research telemetry grows.
+        var protectionReceipts = audits.Select(a => DailyProtectionEvidence.Parse(a.CandleTimeUtc, a.Outcome, a.ReasonsJson))
+            .OfType<DailyProtectionEvidence.Receipt>().ToLookup(r => r.SourceId);
+        trades = trades.Select(t => t with
+        {
+            ProtectionReceipts = protectionReceipts[t.SignalId ?? t.TradeId]
+                .Select(r => r.Evidence).Where(r => r.AtUtc >= t.OpenedAtUtc &&
+                    (!t.ClosedAtUtc.HasValue || r.AtUtc <= t.ClosedAtUtc.Value.AddSeconds(5)))
+                .OrderBy(r => r.AtUtc).ToArray()
+        }).ToList();
 
         var sources = trades.Select(t => t.SignalId ?? t.TradeId).Distinct().ToArray();
         var intents = await db.LiveExecutionIntents.AsNoTracking().Where(i => sources.Contains(i.SourceId))
@@ -615,12 +633,6 @@ internal sealed class EfDailyTradingDiagnosticsReader(
         "ALL" => "ALL",
         _ => throw new ArgumentOutOfRangeException(nameof(market), "Unsupported market.")
     };
-
-    private static bool IsAccepted(string outcome) =>
-        outcome.Contains("Opened", StringComparison.OrdinalIgnoreCase) ||
-        outcome.Contains("Accepted", StringComparison.OrdinalIgnoreCase) ||
-        outcome.Contains("Signal", StringComparison.OrdinalIgnoreCase) &&
-        !outcome.Contains("NoSignal", StringComparison.OrdinalIgnoreCase);
 
     private static string MarketFromSymbol(string symbol) =>
         symbol.Contains("SENSEX", StringComparison.OrdinalIgnoreCase) ? "SENSEX" : "NIFTY";

@@ -111,7 +111,13 @@ public sealed record DailyTradingDiagnosticsSummary(
     decimal NetRealisedPnl,
     DateTimeOffset? FirstDecisionAtUtc,
     DateTimeOffset? LastDecisionAtUtc,
-    DateTimeOffset? LastCandleAtUtc);
+    DateTimeOffset? LastCandleAtUtc)
+{
+    public int InformationalDecisionCount { get; init; }
+    public int NoSetupDecisionCount { get; init; }
+    public int MirroredDecisionCount { get; init; }
+    public string DecisionCountBasis { get; init; } = "Entry gate events, not unique setups or trades.";
+}
 
 public sealed record DailyTradingFeedStatus(
     string Provider,
@@ -156,7 +162,13 @@ public sealed record DailyTradingTrade(
     decimal? MaximumAdverseExcursion,
     DateTimeOffset? MaximumAdverseExcursionAtUtc,
     string ExcursionCoverage = "Unknown",
-    int ExcursionSampleCount = 0);
+    int ExcursionSampleCount = 0)
+{
+    public IReadOnlyList<DailyProtectionReceipt> ProtectionReceipts { get; init; } = [];
+}
+
+public sealed record DailyProtectionReceipt(DateTimeOffset AtUtc, string Policy, string Stage,
+    decimal? FloorNet, decimal? StopPrice, decimal? DecisionBid, bool Triggered, string? Version);
 
 public sealed record DailyTradingSystemEvent(
     DateTimeOffset OccurredAtUtc,

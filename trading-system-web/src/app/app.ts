@@ -520,9 +520,10 @@ export class App implements OnInit, OnDestroy {
     if (!this.dailyAnalysis) return '';
     const p = this.dailyAnalysis;
     return `Review the ${p.tradingDate} IST session using the attached production-backed Daily Analysis. Validate observations against the trade IDs, stop/target outcomes and telemetry. Separate confirmed defects from normal losing trades or missing evidence. Propose narrowly scoped corrections and regression tests; do not edit strategy or deploy until I approve.\n\n`+
-      `Closed legs: ${p.summary.completedTradeCount}; wins ${p.summary.wins}; losses ${p.summary.losses}; gross ₹${p.summary.grossPnl.toFixed(2)}; charges ₹${p.summary.costs.toFixed(2)}; net ₹${p.summary.netRealisedPnl.toFixed(2)}. Decisions ${p.summary.decisionCount} (${p.summary.acceptedDecisionCount} accepted, ${p.summary.rejectedDecisionCount} rejected).\n`+
+      `Closed legs: ${p.summary.completedTradeCount}; wins ${p.summary.wins}; losses ${p.summary.losses}; gross ₹${p.summary.grossPnl.toFixed(2)}; charges ₹${p.summary.costs.toFixed(2)}; net ₹${p.summary.netRealisedPnl.toFixed(2)}. Telemetry ${p.summary.decisionCount}: entry gates ${p.summary.acceptedDecisionCount} passed / ${p.summary.rejectedDecisionCount} blocked; ${p.summary.noSetupDecisionCount ?? 'unknown'} no setup; ${p.summary.informationalDecisionCount ?? 'unknown'} informational; ${p.summary.mirroredDecisionCount ?? 'unknown'} mirrored. These are events, not unique setups or trades.\n`+
       p.trades.map(t => `${t.market} ${t.symbol} ${t.openedAtUtc}→${t.closedAtUtc ?? 'open'}: ${t.exitReason ?? 'open'}, net ₹${t.netRealisedPnl.toFixed(2)}; peak ₹${t.maximumFavourableExcursion ?? 'unavailable'} at ${t.maximumFavourableExcursionAtUtc ?? 'time unavailable'}, adverse ₹${t.maximumAdverseExcursion ?? 'unavailable'} at ${t.maximumAdverseExcursionAtUtc ?? 'time unavailable'}; ${t.excursionCoverage ?? 'coverage unavailable'} (${t.excursionSampleCount ?? 0} observations) [${t.tradeId}]`).join('\n')+
-      `\nDecision outcomes: ${JSON.stringify(p.summary.outcomes)}\n`+
+      `\nProtection receipts: ${JSON.stringify(p.trades.map(t => ({tradeId:t.tradeId,exitReason:t.exitReason,receipts:t.protectionReceipts ?? []})))}\n`+
+      `\nTelemetry outcomes (includes informational records): ${JSON.stringify(p.summary.outcomes)}\n`+
       `\nOutcome attribution (gross peaks are diagnostic; follow-ups are not simulated fills): ${JSON.stringify(p.profitReview ?? null)}\n`+
       `\n\nTelemetry limitations: ${p.telemetryWarnings.join(' | ') || 'none reported'}`;
   }
@@ -532,7 +533,7 @@ export class App implements OnInit, OnDestroy {
     if (a.summary.decisionCount === 0) flags.push('No persisted strategy decisions were found. This can indicate missing decision telemetry or an inactive evaluation loop.');
     if (a.summary.rejectedDecisionCount > 0) {
       const leading = Object.entries(a.summary.outcomes).sort((left, right) => right[1] - left[1]).slice(0, 3);
-      flags.push(`Decision funnel: ${a.summary.acceptedDecisionCount} accepted / ${a.summary.rejectedDecisionCount} rejected. Most common recorded outcomes: ${leading.map(([name, count]) => `${name} (${count})`).join(', ') || 'not available'}.`);
+      flags.push(`Entry gate events: ${a.summary.acceptedDecisionCount} passed / ${a.summary.rejectedDecisionCount} blocked—not unique setups. Most common telemetry outcomes (including informational): ${leading.map(([name, count]) => `${name} (${count})`).join(', ') || 'not available'}.`);
     }
     if (a.summary.costs > 0) flags.push(`Recorded charges were ₹${a.summary.costs.toFixed(2)}; compare gross and net results because costs can erase a small gross edge.`);
     const withMfe = a.trades.filter(t => t.maximumFavourableExcursion !== null);

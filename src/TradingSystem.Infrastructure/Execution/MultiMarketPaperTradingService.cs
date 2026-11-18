@@ -1413,7 +1413,15 @@ internal sealed partial class MultiMarketPaperTradingService(
                 observedAt, $"BankNiftyConfirmedTrail:{position.Id:N}", 0m,
                 JsonSerializer.Serialize(new { positionId = position.Id, bid = book?.Bid, bidSize = book?.Size,
                     quoteSourceAt = book?.SourceAt, previousFloor, floorNet = position.BankNiftyTrailFloorNet,
-                    triggered = result.Exit, policyVersion = BankNiftyConfirmedTrail.Version, position.RemainingQuantity })));
+                    triggered = result.Exit, policyVersion = BankNiftyConfirmedTrail.Version, position.RemainingQuantity,
+                    stage = position.BankNiftyTrailFloorNet > 0m ? "70% net-profit trail" : "Conditional break-even",
+                    initialRisk, entryPrice = position.EntryPrice, hardStop = position.EntryPrice - initialRisk,
+                    effectiveStop = position.StopLoss,
+                    netAtDecision = book is null ? (decimal?)null : position.RealisedPnl +
+                        (book.Bid - position.EntryPrice) * position.RemainingQuantity -
+                        PaperTradingCostModel.CalculateOptionCharges([
+                            new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
+                            new(PaperOptionTransactionSide.Sell, book.Bid, position.RemainingQuantity)]).Total })));
         return result;
 
         Task<BankNiftyTrailSpot?> ReadSpot(DateTimeOffset asOf)

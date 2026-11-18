@@ -77,6 +77,18 @@ public sealed class PostgreSqlPersistenceTests
             db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at.AddMinutes(15), $"PostExit5:{position.Id:N}", 0,
                 System.Text.Json.JsonSerializer.Serialize(new { positionId = position.Id, horizonMinutes = 5,
                     observedPrice = 110, observedAtUtc = at.AddMinutes(15) })));
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at.AddMinutes(5),
+                $"ProfitProtection:{position.Id:N}", 0,
+                System.Text.Json.JsonSerializer.Serialize(new { positionId = position.Id,
+                    effectiveStop = 101m, protectionStage = "ProfitLocked", observedAtUtc = at.AddMinutes(5).AddSeconds(2) })));
+            if (market == "bank-nifty")
+            {
+                // Morning protection must survive the latest-500 display cap.
+                for (var i = 0; i < 501; i++)
+                    db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at.AddMinutes(20).AddSeconds(i), "NoSignal", 0, "{}"));
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at, "EntryTimingRejected", 0, "{}"));
+                db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market, underlying.Id, at, "EntryStage:PaperPositionOpened", 0, "{}"));
+            }
         }
         await db.SaveChangesAsync(CancellationToken.None);
         var before = await db.MarketStrategyAudits.CountAsync();
@@ -89,6 +101,15 @@ public sealed class PostgreSqlPersistenceTests
         Assert.Equal(1530m, report.CapitalSummary.NetRealisedPnl);
         Assert.Equal(5.1m, report.CapitalSummary.ReturnPercent);
         Assert.Null(report.Timeline); // no quote-archive load needed for capital
+        Assert.Equal(3, report.Summary.AcceptedDecisionCount);
+        Assert.Equal(1, report.Summary.RejectedDecisionCount);
+        Assert.Equal(501, report.Summary.NoSetupDecisionCount);
+        Assert.Equal(1, report.Summary.MirroredDecisionCount);
+        Assert.All(report.Trades, t => {
+            var receipt = Assert.Single(t.ProtectionReceipts);
+            Assert.Equal(101m, receipt.StopPrice);
+            Assert.Equal(at.AddMinutes(5).AddSeconds(2), receipt.AtUtc);
+        });
         Assert.Equal(3, report.ProfitReview.Markets.Count);
         Assert.All(report.ProfitReview.Markets, m => { Assert.Equal(510m, m.NetPnl); Assert.Equal(440m, m.GrossGivebackSubtotal); });
         Assert.All(report.ProfitReview.Trades, t => {

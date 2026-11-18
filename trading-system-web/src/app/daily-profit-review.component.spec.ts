@@ -37,4 +37,20 @@ describe('Daily profit review', () => {
     fixture.componentRef.setInput('report', { ...report, profitReview: null }); fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Outcome attribution is unavailable');
   });
+
+  it('distinguishes conditional break-even from a positive trail and shows the exit receipt', async () => {
+    await TestBed.configureTestingModule({ imports: [DailyProfitReviewComponent] }).compileComponents();
+    const fixture = TestBed.createComponent(DailyProfitReviewComponent);
+    fixture.componentRef.setInput('report', { ...report, trades: [{ ...report.trades[0], protectionReceipts: [{
+      atUtc: '2026-11-13T04:15:00Z', policy: 'BankNiftyConfirmedTrail', stage: 'Conditional break-even',
+      floorNet: 0, stopPrice: 90, decisionBid: 95, triggered: true, version: 'v2'
+    }] }] });
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Conditional break-even');
+    expect(text).toContain('EXIT TRIGGERED');
+    expect(text).toContain('Net floor ₹0.00');
+    expect(text).toContain('Stop ₹90.00');
+    expect(text).toContain('not the 70% trail');
+  });
 });
