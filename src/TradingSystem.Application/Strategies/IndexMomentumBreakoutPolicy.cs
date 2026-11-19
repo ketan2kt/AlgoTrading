@@ -1,4 +1,5 @@
 using TradingSystem.Application.MarketData;
+using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
 
 namespace TradingSystem.Application.Strategies;
@@ -14,9 +15,22 @@ public sealed record IndexMomentumDecision(
 /// </summary>
 public static class IndexMomentumBreakoutPolicy
 {
-    public const string BankVersion = "bank-momentum-session-ema-v1";
+    public const string BankVersion = "bank-momentum-session-ema-v3/" + SharedMarketContextPolicy.Version + "/completed-retest-v1";
     public static IndexMomentumDecision Evaluate(IReadOnlyList<Candle> candles) => EvaluateCore(candles, false);
-    public static IndexMomentumDecision EvaluateBankNifty(IReadOnlyList<Candle> candles) => EvaluateCore(candles, true);
+    public static IndexMomentumDecision EvaluateBankNifty(IReadOnlyList<Candle> candles)
+    {
+        var candidate = EvaluateCore(candles, true);
+        if (candidate.Direction is not { } direction) return candidate;
+        var bars = candles.Select(c => new StrategyPriceBar(c.OpenTimeUtc,c.Open,c.High,c.Low,c.Close)).ToArray();
+        var interval = candles[^1].IntervalSeconds;
+        var context = SharedMarketContextPolicy.Analyze(bars, interval);
+        var admission = SharedMarketContextPolicy.Select(context,
+            bars, direction, EntryStrategyFamily.Breakout, interval);
+        var retest = !admission.Permitted && SharedMarketContextPolicy.HasCompletedBreakoutRetest(bars,direction,interval);
+        return candidate with { Direction = admission.Permitted || retest ? direction : null,
+            Reasons = [.. candidate.Reasons, .. retest ? context.Evidence : admission.Reasons,
+                .. retest ? new[] { "A completed five-minute breakout held its level through a retest; two closed one-minute candles confirm resumption. Existing entry and risk gates still apply." } : []] };
+    }
 
     private static IndexMomentumDecision EvaluateCore(IReadOnlyList<Candle> candles, bool useSessionEma)
     {
