@@ -5,6 +5,7 @@ import { RouterOutlet } from '@angular/router';
 import { catchError, finalize, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
+import { TradeExitPriceComponent } from './trade-exit-price.component';
 import { PublicHomeComponent } from './public-home.component';
 import { AdminPanelComponent } from './admin-panel.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
@@ -12,7 +13,7 @@ import { SystemStatusService } from './system-status.service';
 import { mergeChartEntries, mergeWorkspaceSnapshot, OperationalAutomationReport, TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
 import { compactContractName } from './contract-name';
 import { indexChange } from './index-change';
-import { activeTradeCount, deskPortfolio } from './desk-portfolio';
+import { activeTradeCount, CompletedDeskPortfolio } from './desk-portfolio';
 import { marketCodeForSnapshot, tradeAlertTransition, TradeAlertKind, TradingMarketCode } from './trade-alerts';
 import { TradingWorkspaceService } from './trading-workspace.service';
 import { PaperRiskService } from './paper-risk.service';
@@ -37,7 +38,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, TradeExitPriceComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
   styleUrls: ['./app.scss', './trading-desk.scss'],
 })
@@ -46,7 +47,8 @@ export class App implements OnInit, OnDestroy {
   protected readonly deskMarketTabs: {code:TradingMarketCode; label:string}[] = [
     {code:'nifty',label:'Nifty'}, {code:'bank-nifty',label:'Bank Nifty'}, {code:'sensex',label:'Sensex'}
   ];
-  protected portfolioSummary() { return deskPortfolio(this.marketViews); }
+  private readonly completedPortfolio = new CompletedDeskPortfolio();
+  protected portfolioSummary() { return this.completedPortfolio.read(); }
   protected activeMarketTrades(market:TradingMarketCode) { return activeTradeCount(this.marketViews.get(market)); }
   protected marketPositionHint(market:TradingMarketCode):string {
     const view=this.marketViews.get(market);
@@ -801,6 +803,7 @@ export class App implements OnInit, OnDestroy {
     const older=!!prior && Date.parse(snapshot.observedAtUtc)<Date.parse(prior.observedAtUtc);
     const view=older ? prior : mergeWorkspaceSnapshot(prior??null,snapshot);
     this.marketViews.set(market,view);
+    if (!older) this.completedPortfolio.update(market,snapshot);
     if(notify && !older){this.processMarketNarrator(market,view);this.detectTradeAlerts(market,view);}
     if(this.selectedMarket!==market){this.refreshView();return;}
     this.workspace=this.withHistory(view);
@@ -827,6 +830,7 @@ export class App implements OnInit, OnDestroy {
           if (error?.status === 401) {
             this.user = null;
             this.marketViews.clear();
+            this.completedPortfolio.clear();
             this.workspace = null;
             this.cachedPreview = false;
             this.primedMarkets = false;

@@ -62,7 +62,12 @@ public sealed record WorkspaceTradeOverlay(
     decimal? BrokerAcknowledgedStop = null,
     IReadOnlyList<string>? EntryEvidence = null,
     decimal? GrossRealisedPnl = null,
-    decimal? RealisedCosts = null);
+    decimal? RealisedCosts = null,
+    WorkspaceExitBreakdown? ExitBreakdown = null);
+
+public sealed record WorkspaceExitFill(string Kind, int Quantity, decimal Price);
+public sealed record WorkspaceExitBreakdown(decimal? AveragePrice, bool Complete,
+    IReadOnlyList<WorkspaceExitFill> Fills);
 
 public sealed record WorkspaceStrategyEvaluation(
     Guid EvaluationId,
@@ -116,7 +121,10 @@ public sealed record TradingWorkspaceSnapshot(
     WorkspacePreviousClose? PreviousSessionClose = null,
     IReadOnlyList<WorkspaceChartEntry>? HistoricalChartEntries = null,
     WorkspaceChartDisplay? ChartDisplay = null,
-    string PaperMarketDataSource = "Groww");
+    string PaperMarketDataSource = "Groww",
+    WorkspaceCompletedPnl? CompletedTradePnl = null);
+
+public sealed record WorkspaceCompletedPnl(DateOnly TradingDate, decimal NetPnl, int TradeCount);
 
 public sealed record WorkspaceChartDisplay(string Source, bool IsFresh, DateTimeOffset? TimestampUtc, decimal? LastPrice,
     bool? QuoteIsFresh = null, bool? CandlesAreFresh = null, DateTimeOffset? EvaluatedAtUtc = null,

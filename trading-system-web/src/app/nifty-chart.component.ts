@@ -24,6 +24,9 @@ import {
   LineData,
   LineSeries,
   LineStyle,
+  LineType,
+  SeriesMarker,
+  WhitespaceData,
   Time,
 } from 'lightweight-charts';
 import { TradingWorkspaceSnapshot, WorkspaceTradeOverlay } from './trading-workspace';
@@ -37,6 +40,7 @@ import { formatChartTimeIst, formatCrosshairTimeIst } from './chart-time';
 import { chartPriceLineTitles } from './chart-labels';
 import { chartLevels, ema, sessionVwap } from './chart-overlays';
 import { chartEntryFills } from './chart-entry-fills';
+import {chartTrendIndicators, closedIndicatorCandles, TrendPoint} from './chart-trend-indicators';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -65,11 +69,15 @@ import { chartEntryFills } from './chart-entry-fills';
           <button type="button" [class.active]="visibility.openingRange" [attr.aria-pressed]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
           <button type="button" [class.active]="visibility.vwap && !snapshot?.chartDisplay" [attr.aria-pressed]="visibility.vwap && !snapshot?.chartDisplay" [disabled]="!!snapshot?.chartDisplay" (click)="toggle('vwap')">VWAP</button>
           <button type="button" [class.active]="visibility.ema" [attr.aria-pressed]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
+          <button type="button" [class.active]="visibility.structure" [attr.aria-pressed]="visibility.structure" (click)="toggle('structure')" title="2-left/2-right confirmed swings. Labels appear when confirmed, two closed bars after the pivot. Not trade signals.">Structure</button>
+          <button type="button" [class.active]="visibility.adx" [attr.aria-pressed]="visibility.adx" (click)="toggle('adx')" title="Wilder ADX/DMI 14: strength (purple), +DI (green), −DI (red). Completed candles only.">ADX/DMI</button>
+          <button type="button" [class.active]="visibility.chandelier" [attr.aria-pressed]="visibility.chandelier" (click)="toggle('chandelier')" title="Chandelier 22 periods, 3× Wilder ATR: uptrend and downtrend reference lines. Not your actual stop.">Chandelier</button>
+          @if(trendText){<span title="Display-only · completed candles · trading rules unchanged">{{trendText}}</span>}
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
       <div class="chart-stage">
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
-        <div class="volume-label">FUTURES VOLUME</div>
+        <div class="volume-label" [style.bottom.px]="visibility.adx ? 115 : 25">FUTURES VOLUME</div>
         @if (!snapshot?.candles?.length) {
           <div class="chart-empty">
             <strong>Waiting for live {{ snapshot?.instrument || 'market' }} candles</strong>
@@ -153,6 +161,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   private emaFastSeries: ISeriesApi<'Line'> | null = null;
   private emaSlowSeries: ISeriesApi<'Line'> | null = null;
   private vwapSeries: ISeriesApi<'Line'> | null = null;
+  private trendSeries: Partial<Record<keyof TrendPoint, ISeriesApi<'Line'>>> = {};
+  protected trendText = '';
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private priceLines: IPriceLine[] = [];
   private hasFittedContent = false;
@@ -216,6 +226,13 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.emaFastSeries = this.chart.addSeries(LineSeries, { title:'EMA9', color:'#54a86d', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
     this.emaSlowSeries = this.chart.addSeries(LineSeries, { title:'EMA21', color:'#286f46', lineWidth:1, lastValueVisible:true, priceLineVisible:false });
     this.vwapSeries = this.chart.addSeries(LineSeries, { title:'VWAP', color:'#f2c94c', lineWidth:2, lastValueVisible:true, priceLineVisible:false });
+    for (const [key, title, color] of [
+      ['support','Swing low','#287da1'], ['resistance','Swing high','#8c5bb4'],
+      ['chandelierUp','CH up (22,3)','#15806b'], ['chandelierDown','CH down (22,3)','#b66a24']]) {
+      this.trendSeries[key as keyof TrendPoint] = this.chart.addSeries(LineSeries, {
+        title,color,lineWidth:1,lineStyle:LineStyle.Dashed,lineType:LineType.WithSteps,
+        lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false});
+    }
     this.chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
       borderVisible: false,
@@ -283,6 +300,33 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.emaFastSeries?.applyOptions({visible:this.visibility.ema});
     this.emaSlowSeries?.applyOptions({visible:this.visibility.ema});
     this.vwapSeries?.applyOptions({visible:this.visibility.vwap});
+    const trends = chartTrendIndicators(closedIndicatorCandles(this.snapshot.candles, this.timeframeMinutes));
+    if (this.visibility.adx && !this.trendSeries.adx) {
+      for (const [key, title, color] of [['adx','ADX 14','#7952a6'],['plus','+DI','#18804b'],['minus','−DI','#c54750']])
+        this.trendSeries[key as keyof TrendPoint] = this.chart.addSeries(LineSeries, {
+          title,color,lineWidth:1,priceLineVisible:false,priceFormat:{type:'price',precision:1,minMove:.1}},1);
+      this.chart.panes()[1]?.setHeight(90);
+    } else if (!this.visibility.adx && this.trendSeries.adx) {
+      for (const key of ['adx','plus','minus'] as const) {
+        this.chart.removeSeries(this.trendSeries[key]!); delete this.trendSeries[key];
+      }
+    }
+    for (const [key, series] of Object.entries(this.trendSeries)) {
+      const data:(LineData<Time>|WhitespaceData<Time>)[] = trends.points.map(point=>{
+        const value = point[key as keyof TrendPoint];
+        const time = Math.floor(Date.parse(point.openTimeUtc)/1000) as Time;
+        return typeof value === 'number' ? {time,value} : {time};
+      });
+      series.setData(data);
+      series.applyOptions({visible:key === 'support' || key === 'resistance' ? this.visibility.structure :
+        key.startsWith('chandelier') ? this.visibility.chandelier : this.visibility.adx});
+    }
+    const latest = trends.points.at(-1);
+    this.trendText = [this.visibility.structure ? latest?.structure ?? 'Structure warming up' : '',
+      this.visibility.adx ? latest?.adx == null ? 'ADX warming up' : `ADX ${latest.adx.toFixed(1)} · +DI ${latest.plus!.toFixed(1)} / −DI ${latest.minus!.toFixed(1)}` : '',
+      this.visibility.chandelier && latest?.chandelierUp == null ? 'Chandelier warming up' : '',
+      latest ? `Closed ${this.timeIst(new Date(Date.parse(latest.openTimeUtc)+this.timeframeMinutes*60000).toISOString())}` : '']
+      .filter(Boolean).join(' · ');
     this.priceLines.forEach((line) => this.series?.removePriceLine(line));
     this.priceLines = [];
     const levels=chartLevels(this.snapshot.candles);
@@ -330,10 +374,13 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.confirmationSeries?.setData(segment);
     const fills = chartEntryFills(this.snapshot.overlays, displayCandles, this.snapshot.historicalChartEntries ?? []);
     this.fills.set(fills);
-    const markers = fills.map(f=>({time:f.time as Time,
+    const markers:SeriesMarker<Time>[] = fills.map(f=>({time:f.time as Time,
       position:f.side==='CE'?'belowBar' as const:'aboveBar' as const,
       color:f.side==='CE'?'#167143':'#a9363e',shape:f.side==='CE'?'arrowUp' as const:'arrowDown' as const,
       text:f.side}));
+    if (this.visibility.structure) markers.push(...trends.marks.map(m=>({time:Math.floor(Date.parse(m.openTimeUtc)/1000) as Time,
+      position:m.above?'aboveBar' as const:'belowBar' as const, color:'#526b88',shape:'circle' as const,text:m.text})));
+    markers.sort((a,b)=>Number(a.time)-Number(b.time));
     if (this.markerApi) this.markerApi.setMarkers(markers);
     else this.markerApi = createSeriesMarkers(this.series, markers);
     if (candles.length && (
@@ -374,12 +421,12 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   protected toggle(key:keyof ChartOverlayVisibility):void {
     this.visibility={...this.visibility,[key]:!this.visibility[key]};
-    localStorage.setItem('sarthi.chartOverlays',JSON.stringify(this.visibility));
+    try { localStorage.setItem('sarthi.chartOverlays',JSON.stringify(this.visibility)); } catch { /* Keep in-memory controls usable. */ }
     this.render();
   }
 
   private readVisibility():ChartOverlayVisibility {
-    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true};
+    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true,structure:true,adx:true,chandelier:true};
     try{return {...defaults,...JSON.parse(localStorage.getItem('sarthi.chartOverlays')||'{}')};}catch{return defaults;}
   }
 
@@ -397,4 +444,4 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
 }
 
-interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; }
+interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; structure:boolean; adx:boolean; chandelier:boolean; }

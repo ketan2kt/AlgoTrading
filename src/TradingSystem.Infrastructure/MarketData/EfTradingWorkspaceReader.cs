@@ -190,19 +190,27 @@ internal sealed class EfTradingWorkspaceReader(
             .Where(value => signalIds.Contains(value.SignalId))
             .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var entryReferences = signalIds.Select(value => $"{value:N}-ENTRY").ToArray();
+        var displayOrderReferences = signalIds.SelectMany(value => new[]
+            { $"{value:N}-ENTRY", $"{value:N}-PARTIAL", $"{value:N}-EXIT" }).ToArray();
         var brokerEvents = await dbContext.PaperBrokerEvents.AsNoTracking()
-            .Where(value => entryReferences.Contains(value.ClientReference) &&
+            .Where(value => displayOrderReferences.Contains(value.ClientReference) &&
                             (value.EventType == "OrderSubmitted" || value.EventType == "OrderFilled"))
             .OrderByDescending(value => value.Sequence)
             .Select(value => new PaperBrokerEventProjection(
                 value.ClientReference, value.EventType, value.PayloadJson, value.OccurredAtUtc))
             .ToListAsync(cancellationToken);
         var orders = brokerEvents
+            .Where(value => entryReferences.Contains(value.ClientReference))
             .GroupBy(value => value.ClientReference, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
                 group => ParsePaperOrder(group),
                 StringComparer.Ordinal);
+        // One cumulative filled receipt per order; duplicate journal snapshots
+        // must not double-count units. The query is already newest-first.
+        var exitOrders = brokerEvents.Where(value => value.EventType == "OrderFilled")
+            .GroupBy(value => value.ClientReference)
+            .ToDictionary(group => group.Key, group => group.First().PayloadJson);
         var executionInstrumentIds = orders.Values.Where(value => value is not null)
             .Select(value => value!.InstrumentId).Distinct().ToArray();
         var executionInstruments = await dbContext.Instruments.AsNoTracking()
@@ -258,8 +266,8 @@ internal sealed class EfTradingWorkspaceReader(
                 order?.FillPrice is not null ? "Filled" : decision is null
                     ? value.Status.ToString()
                     : decision.Approved ? "RiskApproved" : "RiskRejected",
-                order?.Quantity ?? decision?.ApprovedQuantity,
-                order?.FillPrice,
+                result?.Quantity ?? order?.Quantity ?? decision?.ApprovedQuantity,
+                result?.EntryPrice ?? order?.FillPrice,
                 executionInstrument?.TradingSymbol ?? execution.TradingSymbol,
                 executionInstrument?.Type.ToString() ?? execution.InstrumentType,
                 executionInstrument?.ExpiryDate ?? execution.ExpiryDate,
@@ -288,7 +296,13 @@ internal sealed class EfTradingWorkspaceReader(
                 StrategyPremiumStop: automation.ActiveSignalId == value.Id ? automation.StopLoss : null,
                 EntryEvidence: ReadEvidence(value.ReasonsJson, "supporting"),
                 GrossRealisedPnl: result?.GrossPnl,
-                RealisedCosts: result?.EstimatedCosts);
+                RealisedCosts: result?.EstimatedCosts,
+                ExitBreakdown: result is null ? null : WorkspaceExitBreakdownBuilder.Build(
+                    result.Quantity, result.EntryPrice, result.GrossPnl, value.Direction,
+                    new[] { (Suffix: "PARTIAL", Kind: "Partial"), (Suffix: "EXIT", Kind: "Final") }
+                        .Select(leg => exitOrders.TryGetValue($"{value.Id:N}-{leg.Suffix}", out var payload)
+                            ? WorkspaceExitBreakdownBuilder.FromJournal(leg.Kind, payload) : null)
+                        .OfType<WorkspaceExitFill>()));
         }).ToArray();
         var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
@@ -323,7 +337,8 @@ internal sealed class EfTradingWorkspaceReader(
                     ? Math.Max(0m, -trough) : null,
                 StrategyPremiumStop: isActive ? value.StopLoss : null,
                 GrossRealisedPnl: isActive ? null : value.RealisedPnl + value.CostsPaid,
-                RealisedCosts: isActive ? null : value.CostsPaid);
+                RealisedCosts: isActive ? null : value.CostsPaid,
+                ExitBreakdown: isActive ? null : WorkspaceExitBreakdownBuilder.FromPosition(value));
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>
@@ -513,6 +528,12 @@ internal sealed class EfTradingWorkspaceReader(
         }
         var operationalReports = await operationalReportReader.GetLatestAsync(
             sessionDate, definition.Code, cancellationToken);
+        // Ledger-only header total: never use the live automation total, which
+        // includes realised partials on positions that are still open. Query the
+        // whole day independently of the chart/signal display limit.
+        var dayStart = new DateTimeOffset(localDate, IndiaTimeZone.GetUtcOffset(localDate)).ToUniversalTime();
+        var completedTradePnl = await ReadCompletedPnlAsync(dbContext, market, instrument.Id,
+            sessionDate, dayStart, dayStart.AddDays(1), cancellationToken);
         var loadOlderEntries = candleCount == MaximumWorkspaceRequestCount;
         // Keep older trades out of the session trade list, alerts and totals. Load
         // only small entry receipts with the explicit extended candle request.
@@ -543,7 +564,7 @@ internal sealed class EfTradingWorkspaceReader(
             research,
             operationalReports,
             definition.Code, engineRead, previousSessionClose, chartEntries,
-            PaperMarketDataSource: dataSource);
+            PaperMarketDataSource: dataSource, CompletedTradePnl: completedTradePnl);
         return chartCache?.Apply(snapshot) ?? snapshot;
 
         TradingWorkspaceSnapshot Empty(string status, string detail) => WithChart(new(
@@ -664,6 +685,33 @@ internal sealed class EfTradingWorkspaceReader(
     internal static DateTimeOffset PositionHistoryStartUtc(
         TradingMarketDefinition definition,
         DateTimeOffset sessionStartUtc) => sessionStartUtc;
+
+    internal static async Task<WorkspaceCompletedPnl> ReadCompletedPnlAsync(TradingDbContext db,
+        string market, Guid underlyingId, DateOnly day, DateTimeOffset start, DateTimeOffset end,
+        CancellationToken token)
+    {
+        var positions = CompletedPositionRows(db.MarketPaperPositions.AsNoTracking(), market, start, end);
+        var totals = await positions.GroupBy(_ => 1)
+            .Select(g => new { Net = g.Sum(p => p.RealisedPnl), Count = g.Count() }).SingleOrDefaultAsync(token);
+        var net = totals?.Net ?? 0m;
+        var count = totals?.Count ?? 0;
+        if (market == "nifty")
+        {
+            var regular = await (from result in db.PaperTradeResults.AsNoTracking()
+                join signal in db.Signals.AsNoTracking() on result.SignalId equals signal.Id
+                where signal.InstrumentId == underlyingId && result.ClosedAtUtc >= start && result.ClosedAtUtc < end
+                select result).GroupBy(_ => 1)
+                .Select(g => new { Net = g.Sum(p => p.RealisedPnl), Count = g.Count() }).SingleOrDefaultAsync(token);
+            net += regular?.Net ?? 0m;
+            count += regular?.Count ?? 0;
+        }
+        return new(day, net, count);
+    }
+
+    internal static IQueryable<MarketPaperPosition> CompletedPositionRows(IQueryable<MarketPaperPosition> rows,
+        string market, DateTimeOffset start, DateTimeOffset end) => rows.Where(p => p.Market == market &&
+            p.Status != "Active" && p.ClosedAtUtc >= start && p.ClosedAtUtc < end &&
+            (market != "nifty" || p.Strategy.StartsWith("Hero Zero|") || p.Strategy.StartsWith("Expansion Pair|")));
 
     internal static bool IncludeNiftyMarketPosition(string strategy) =>
         strategy.StartsWith("Hero Zero|", StringComparison.Ordinal) ||

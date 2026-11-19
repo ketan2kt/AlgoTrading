@@ -21,6 +21,11 @@ public sealed record HistoricalReplayOpenPosition(string Symbol, string Strategy
     public decimal HighestDecisionPrice { get; init; }
 }
 
+// Exit-only auditing starts from a known ledger fill, not a fabricated quote.
+// Subsequent marks, partials, stops, liquidity checks and costs use the normal engine.
+public sealed record HistoricalReplayRecordedEntry(HistoricalReplayCandidate Candidate,
+    DateTimeOffset FilledAtUtc, decimal Price);
+
 public sealed record HistoricalReplayPortfolioFrame(HistoricalReplayFrame Market,
     HistoricalReplayOpenPosition? OpenPosition,
     IReadOnlyList<HistoricalReplayFill> ClosedTrades)
@@ -135,12 +140,19 @@ public static class HistoricalPortfolioReplay
         Action<HistoricalReplayEntryEvidence>? entryEvidence = null,
         HistoricalReplayTiming? timing = null,
         bool stopOnExecutionUncertainty = false,
+        HistoricalReplayRecordedEntry? recordedEntry = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sourceBars);
         ArgumentNullException.ThrowIfNull(sourceQuotes);
         ArgumentNullException.ThrowIfNull(policy);
         parameters.Validate();
+        if (recordedEntry is { } seed && (seed.FilledAtUtc < sessionStartUtc || seed.FilledAtUtc >= sessionEndUtc ||
+            seed.Candidate.DecidedAtUtc > seed.FilledAtUtc || seed.Price <= 0m || seed.Candidate.Quantity <= 0 ||
+            seed.Candidate.LotSize is not > 0 || seed.Candidate.Quantity % seed.Candidate.LotSize.Value != 0 ||
+            seed.Candidate.PlannedStopPrice is not > 0m || seed.Candidate.PlannedStopPrice >= seed.Price ||
+            seed.Candidate.PlannedTargetPrice is null || seed.Candidate.PlannedTargetPrice <= seed.Price))
+            throw new ArgumentException("A recorded-entry audit requires a valid original fill and risk plan.", nameof(recordedEntry));
         if (exchangeCode is not ("NSE" or "BSE"))
             throw new ArgumentOutOfRangeException(nameof(exchangeCode));
         if (contractExchanges is not null && contractExchanges.Any(value =>
@@ -198,6 +210,7 @@ public static class HistoricalPortfolioReplay
                 value.AvailableAtUtc <= sessionEndUtc)
             .OrderBy(value => value.AvailableAtUtc).ToArray();
         var times = bars.Select(value => value.AvailableAtUtc)
+            .Concat(recordedEntry is null ? [] : new[] { recordedEntry.FilledAtUtc })
             .Concat(chains.Select(value => value.AvailableAtUtc))
             .Concat(controls.Where(value => value.AvailableAtUtc <= sessionEndUtc).Select(value => value.AvailableAtUtc))
             .Distinct().OrderBy(value => value).ToArray();
@@ -512,6 +525,21 @@ public static class HistoricalPortfolioReplay
                 ? times[timeIndex] : quoteCursor.Current.AvailableAtUtc;
             while (timeIndex < times.Length && times[timeIndex] == time) timeIndex++;
             cancellationToken.ThrowIfCancellationRequested();
+            if (recordedEntry is { } recorded && time == recorded.FilledAtUtc)
+            {
+                var entry = recorded.Candidate;
+                openPositions.Add(entry.Symbol, new Position(entry, time, recorded.Price,
+                    entry.PlannedStopPrice!.Value, entry.PlannedTargetPrice!.Value,
+                    sessionEndUtc, recorded.Price, ExchangeFor(entry.Symbol), "RecordedLedgerEntry"));
+                candidateCount++;
+                lastEntryAt = time;
+                peakEntryCapitalExposure = recorded.Price * entry.Quantity;
+                peakConcurrentPositions = 1;
+                RecordEntry(entry, time, "Recorded entry", modeledPrice: recorded.Price);
+                // Allows stateful exits to capture the underlying observed at entry,
+                // before a later underlying quote arrives. No order is filled here.
+                ApplyStopUpdates(Snapshot(time));
+            }
             if (timing is not null && (++eventIndex & 255) == 0)
                 timing.Progress(time, quoteIndex, openPositions.Count);
             if (stopOnExecutionUncertainty)
@@ -626,7 +654,7 @@ public static class HistoricalPortfolioReplay
                     open.ExitReason = "ObservedBarTarget";
                     pendingAddOns.Remove(symbol);
                 }
-                var decisions = Policy("policy-entry", policy.Evaluate, snapshot).Where(value =>
+                var decisions = (recordedEntry is null ? Policy("policy-entry", policy.Evaluate, snapshot) : []).Where(value =>
                     !controlState.BlocksNiftyEntries || !value.Symbol.StartsWith("NIFTY", StringComparison.Ordinal)).ToArray();
                 if (decisions.Any(value => value.DecidedAtUtc != time))
                     throw new InvalidOperationException(

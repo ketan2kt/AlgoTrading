@@ -8,16 +8,26 @@ export function activeTradeCount(view?: TradingWorkspaceSnapshot): number {
     (t.lifecycleStatus.startsWith('Active') || t.lifecycleStatus === 'Entry filled')).map(t => t.signalId)).size;
 }
 
-export function deskPortfolio(views: ReadonlyMap<string, TradingWorkspaceSnapshot>, now = Date.now()) {
-  const today = sessionKey(new Date(now).toISOString());
-  const current = deskMarkets.map(m => views.get(m)).filter((v): v is TradingWorkspaceSnapshot =>
-    !!v && Number.isFinite(Date.parse(v.observedAtUtc)) && sessionKey(v.observedAtUtc) === today &&
-    Date.parse(v.observedAtUtc) <= now &&
-    Number.isFinite(Date.parse(v.paperAutomation.observedAtUtc)) && sessionKey(v.paperAutomation.observedAtUtc) === today &&
-    Number.isFinite(v.paperAutomation.realisedPnl) && Number.isFinite(v.paperAutomation.unrealisedPnl));
-  const complete = current.length === deskMarkets.length;
-  return { complete, count:current.length,
-    total:complete ? current.reduce((sum,v)=>sum+v.paperAutomation.realisedPnl+v.paperAutomation.unrealisedPnl,0) : null,
-    stale:current.some(v=>!v.isFresh || now-Date.parse(v.observedAtUtc)>15000 ||
-      now-Date.parse(v.paperAutomation.observedAtUtc)>15000) };
+export class CompletedDeskPortfolio {
+  private readonly saved = new Map<string,{day:string;net:number;observed:number}>();
+
+  update(market:string, view:TradingWorkspaceSnapshot):void {
+    if (!(deskMarkets as readonly string[]).includes(market)) return;
+    const total=view.completedTradePnl, observed=Date.parse(view.observedAtUtc);
+    if (!total || !Number.isFinite(observed) || total.tradingDate!==sessionKey(view.observedAtUtc) ||
+        !Number.isFinite(total.netPnl) || !Number.isInteger(total.tradeCount) || total.tradeCount<0) return;
+    const previous=this.saved.get(market);
+    if (previous && observed<previous.observed) return;
+    this.saved.set(market,{day:total.tradingDate,net:total.netPnl,observed});
+  }
+
+  clear():void { this.saved.clear(); }
+
+  read(now=Date.now()) {
+    const today=sessionKey(new Date(now).toISOString());
+    const rows=[...this.saved.values()].filter(v=>v.day===today);
+    const complete=rows.length===deskMarkets.length;
+    return {complete,count:rows.length,total:complete?rows.reduce((sum,v)=>sum+v.net,0):null,
+      stale:rows.some(v=>now-v.observed>120000)};
+  }
 }

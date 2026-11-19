@@ -48,6 +48,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
         var updates = new List<HistoricalReplayStopUpdate>();
         foreach (var position in Positions(frame))
         {
+            ObserveBankEntrySpot(frame, position);
             if (!TryMark(frame, position, out var price)) continue;
             var plan = Plan(position);
             var stop = MarketOptionPositionPolicy.ProtectedStop(Direction.Buy,
@@ -94,16 +95,10 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private bool EvaluateBankTrail(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
     {
         var at = frame.Market.AvailableAtUtc;
-        var key = (position.Symbol, position.EntryAtUtc);
         var spot = frame.Market.LatestQuotes.TryGetValue(underlyingSymbol, out var spotQuote) &&
             spotQuote.SourceAtUtc is { } spotSource
             ? new BankNiftyTrailSpot(spotQuote.LastPrice, spotQuote.AvailableAtUtc, spotSource) : null;
-        if (bankPosition != key)
-        {
-            bankPosition = key;
-            bankTrail = new();
-            bankEntrySpot = spot is not null && spot.ReceivedAt <= position.EntryAtUtc ? spot : null;
-        }
+        ObserveBankEntrySpot(frame, position);
         var quote = frame.Market.LatestQuotes[position.Symbol];
         if (quote.AvailableAtUtc != at) return false;
         // The assisted scenario uses the saved snapshot's observation clock,
@@ -122,6 +117,17 @@ public sealed class HistoricalMarketOptionPositionPolicy(
             position.Quantity, booked, book, bankEntrySpot, spot, Bars(frame, true), settings.CandleIntervalSeconds);
         bankTrail = decision.State;
         return decision.Exit;
+    }
+
+    private void ObserveBankEntrySpot(HistoricalReplayPortfolioFrame frame, HistoricalReplayOpenPosition position)
+    {
+        if (!BankNiftyConfirmedTrail.Applies(market, position.Strategy) ||
+            bankPosition == (position.Symbol, position.EntryAtUtc)) return;
+        bankPosition = (position.Symbol, position.EntryAtUtc);
+        bankTrail = new();
+        bankEntrySpot = frame.Market.LatestQuotes.TryGetValue(underlyingSymbol, out var quote) &&
+            quote.AvailableAtUtc <= position.EntryAtUtc && quote.SourceAtUtc is { } source
+            ? new(quote.LastPrice, quote.AvailableAtUtc, source) : null;
     }
 
     public IReadOnlyList<HistoricalReplayPartialExit> EvaluatePartialExits(HistoricalReplayPortfolioFrame frame) =>

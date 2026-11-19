@@ -9,11 +9,11 @@
       <span class="desk-availability" title="Live execution availability; each market retains its own execution switch.">{{ status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live available' : 'Live unavailable' }}</span>
       <app-research-capture-health class="desk-capture-status" [compact]="true" />
       @if (portfolioSummary(); as portfolio) {
-        <div class="desk-total-pnl" title="Paper strategy P&L: realised plus open P&L across Nifty, Sensex and Bank Nifty. Not broker-account P&L.">
-          <span>All 3 · Paper P&amp;L</span>
+        <div class="desk-total-pnl" title="Today's net paper P&L from fully closed trades across Nifty, Sensex and Bank Nifty, including Hero Zero. Excludes open trades and their partial bookings. Not broker-account P&L.">
+          <span>All 3 · Closed net P&amp;L</span>
           <strong [class.good]="portfolio.total !== null && portfolio.total > 0" [class.bad]="portfolio.total !== null && portfolio.total < 0">{{portfolio.total !== null ? '₹' + (portfolio.total | number:'1.2-2') : '—'}}</strong>
           @if (!portfolio.complete) { <small>{{portfolio.count}}/3 loaded</small> }
-          @else if (portfolio.stale) { <small>Last snapshot</small> }
+          @else if (portfolio.stale) { <small>Last saved total</small> }
         </div>
       }
     </header>
@@ -321,7 +321,10 @@
           </div>
 
           @if (chartHistoryMessage) { <small class="desk-history-message" role="status">{{ chartHistoryMessage }}</small> }
-          <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
+          @defer (on immediate) {
+            <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
+          } @placeholder { <div style="height:clamp(280px,50dvh,440px)">Loading chart…</div> }
+          @error { <p role="alert">Chart could not load. Refresh the page to retry.</p> }
           <p class="chart-attribution">
             Charts by TradingView Lightweight Charts™. Market data source: {{view.chartDisplay?.source || view.paperMarketDataSource || 'Groww'}}{{view.chartDisplay ? ' · display only' : ''}}.
           </p>
@@ -343,7 +346,10 @@
                     <div><span>Side</span><strong [class.good]="overlay.direction === 'Buy'" [class.bad]="overlay.direction === 'Sell'">{{ overlay.direction === 'Sell' ? 'SELL' : 'BUY' }}</strong></div>
                   }
                   <div><span>{{ selectedMarket === 'natural-gas' ? 'Entry price' : 'Entry premium' }}</span><strong>{{ overlay.fillPrice | number: '1.2-2' }}</strong></div>
-                  <div><span>{{ overlay.exitPrice !== null ? (selectedMarket === 'natural-gas' ? 'Exit price' : 'Exit premium') : (selectedMarket === 'natural-gas' ? 'Current price' : 'Current premium') }}</span><strong>{{ overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number: '1.2-2') : 'Awaiting quote' }}</strong></div>
+                  <div>
+                    @if (selectedMarket !== 'natural-gas') { <app-trade-exit-price [trade]="overlay" /> }
+                    @else { <span>{{overlay.exitPrice !== null ? 'Exit price' : 'Current price'}}</span><strong>{{overlay.currentOptionPrice !== null ? (overlay.currentOptionPrice | number:'1.2-2') : 'Awaiting quote'}}</strong> }
+                  </div>
                     <div><span>{{ selectedMarket === 'natural-gas' ? 'Structural SL' : 'Premium SL' }}</span><strong class="bad">{{ overlay.executionStopLoss | number: '1.2-2' }}</strong></div>
                     <div><span>{{ selectedMarket === 'natural-gas' ? 'Objective' : 'Premium target' }}</span><strong class="good">{{ overlay.executionTarget | number: '1.2-2' }}</strong></div>
                   <div><span>Quantity</span><strong>{{ overlay.quantity }} units</strong></div>

@@ -5,6 +5,12 @@ using TradingSystem.Application.Execution;
 using TradingSystem.Application.Strategies;
 using TradingSystem.Domain.Trading;
 
+if (args.Length is 5 or 6 && args[0] is "--recorded-entries" or "--entry-gates")
+{
+    RecordedEntryReplayStudy.Run(args[1], args[2], args[3], args[4], args.Length == 6 ? args[5] : null, args[0] == "--entry-gates");
+    return;
+}
+
 if (args.Length == 4 && args[0] == "--bank-session")
 {
     BankSessionReplayStudy.Run(args[1], args[2], args[3]);

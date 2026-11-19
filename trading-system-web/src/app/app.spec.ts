@@ -11,6 +11,7 @@ import { PaperRiskService } from './paper-risk.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { LiveProtectionMonitorComponent } from './live-protection-monitor.component';
 import { TradingWorkspaceSnapshot } from './trading-workspace';
+import { sessionKey } from './chart-overlays';
 
 @Component({ selector: 'app-nifty-chart', standalone: true, template: '' })
 class MockNiftyChartComponent {
@@ -152,6 +153,7 @@ describe('App', () => {
           instrument: market.toUpperCase(), exchange: market === 'sensex' ? 'BSE' : 'NSE', timeframe: '1m', mode: 'Paper',
           feedStatus: 'Live', isLive: true, isFresh: true,
           lastMarketTimestampUtc: '2026-08-03T08:30:00Z', observedAtUtc: new Date().toISOString(),
+          completedTradePnl:{tradingDate:sessionKey(new Date().toISOString()),netPnl:0,tradeCount:0},
           statusMessage: null, candles: [], overlays: [], evaluations: [{
             evaluationId: 'evaluation-1', candleTimeUtc: '2026-08-03T08:30:00Z',
             strategy: 'opening-range-breakout 1.0.0', outcome: 'NoSignal', currentPrice: 24600,
@@ -241,11 +243,13 @@ describe('App', () => {
     fixture.detectChanges();
     expect(desk.querySelector('.market-tab--positions')?.textContent).toContain('Sensex');
     expect(desk.querySelector('.market-position-count')?.textContent).toContain('1 active');
-    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('1,500.00');
+    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('Closed net P&L₹0.00');
     expect(fixture.componentInstance['selectedMarket']).toBe('nifty');
-    fixture.componentInstance['acceptView']('sensex', {...sensex,observedAtUtc:new Date().toISOString()}, false);
+    fixture.componentInstance['acceptView']('sensex', {...sensex,observedAtUtc:new Date().toISOString(),
+      completedTradePnl:{tradingDate:sessionKey(new Date().toISOString()),netPnl:1200,tradeCount:1}}, false);
     fixture.detectChanges();
     expect(desk.querySelector('.market-tab--positions')).toBeNull();
+    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('1,200.00');
     const nifty = fixture.componentInstance['marketViews'].get('nifty')!;
     fixture.componentInstance['acceptView']('nifty', {...nifty,
       observedAtUtc: new Date().toISOString(),

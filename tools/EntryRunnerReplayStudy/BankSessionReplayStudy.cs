@@ -97,7 +97,8 @@ internal static class BankSessionReplayStudy
         }
     }
 
-    private static HistoricalReplayQuote[] ReadQuotes(string directory,string date,string prefix)
+    internal static HistoricalReplayQuote[] ReadQuotes(string directory,string date,string prefix, string underlying = "BANKNIFTY",
+        IReadOnlySet<string>? selectedSymbols = null)
     {
         var quotes=new List<HistoricalReplayQuote>();
         foreach(var file in Directory.GetFiles(directory,date+"-*.ndjson.gz").Order())
@@ -107,10 +108,12 @@ internal static class BankSessionReplayStudy
             while(reader.ReadLine() is {} line)
             {
                 if(string.IsNullOrWhiteSpace(line))continue;
+                if(selectedSymbols is not null && !selectedSymbols.Any(s=>line.Contains(s,StringComparison.Ordinal)))continue;
                 using var doc=JsonDocument.Parse(line);
                 if(!doc.RootElement.TryGetProperty("Observation",out var o)||o.ValueKind!=JsonValueKind.Object)continue;
                 var symbol=o.GetProperty("Request").GetProperty("TradingSymbol").GetString()!;
-                if(symbol!="BANKNIFTY"&&(!symbol.StartsWith(prefix,StringComparison.Ordinal)||
+                if(selectedSymbols is not null && !selectedSymbols.Contains(symbol))continue;
+                if(symbol!=underlying&&(!symbol.StartsWith(prefix,StringComparison.Ordinal)||
                     !(symbol.EndsWith("CE",StringComparison.Ordinal)||symbol.EndsWith("PE",StringComparison.Ordinal))))continue;
                 var source=o.GetProperty("Source").GetString()!;
                 if(source is not ("GrowwFeedSample" or "UpstoxSnapshot"))continue;

@@ -53,6 +53,11 @@ export interface WorkspaceTradeOverlay {
   entryEvidence?: string[] | null;
   grossRealisedPnl?: number | null;
   realisedCosts?: number | null;
+  exitBreakdown?: {
+    averagePrice: number | null;
+    complete: boolean;
+    fills: { kind: string; quantity: number; price: number }[];
+  } | null;
 }
 
 export interface WorkspaceChartEntry {
@@ -64,6 +69,7 @@ export interface WorkspaceChartEntry {
 }
 
 export interface TradingWorkspaceSnapshot {
+  completedTradePnl?: {tradingDate:string; netPnl:number; tradeCount:number} | null;
   paperMarketDataSource?: string;
   chartDisplay?: { source: string; isFresh: boolean; timestampUtc: string | null; lastPrice: number | null;
     quoteIsFresh?: boolean | null; candlesAreFresh?: boolean | null; evaluatedAtUtc?: string | null;

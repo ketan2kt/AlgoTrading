@@ -1,0 +1,14 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-18T11:40:00Z",
+  "market": "bank-nifty",
+  "from": "2026-11-18",
+  "to": "2026-11-18",
+  "removeStrategies": ["__no_removed_path__"],
+  "historicalRegularEntries": 4,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 4,
+  "sessions": [{"Date": "2026-11-18", "RegularEntries": 4}],
+  "strategyBreakdown": [{"strategy": "Bank index directional breakout", "count": 4, "removed": false}],
+  "limitation": "Reuses unchanged production-backed ledger evidence from bank-protection-telemetry-20261118.json. This batch changes replay-only recorded-entry auditing and entry-spot initialization, not production entry/exit rules. The optional audit seed is unused by ordinary replay callers. No live entry path is removed. This path-use receipt is not strategy profitability or ledger-parity evidence."
+}
