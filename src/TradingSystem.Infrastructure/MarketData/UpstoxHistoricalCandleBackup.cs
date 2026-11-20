@@ -9,7 +9,8 @@ using TradingSystem.Domain.Trading;
 namespace TradingSystem.Infrastructure.MarketData;
 
 // Research-only, missing-minute fallback. Never populates live trading candles.
-internal sealed class UpstoxHistoricalCandleBackup(IHttpClientFactory clients, IConfiguration configuration) : IDisposable
+internal sealed class UpstoxHistoricalCandleBackup(IHttpClientFactory clients, IConfiguration configuration,
+    TimeProvider timeProvider) : IDisposable
 {
     internal const string IndexSource = "UpstoxHistoricalIndexV3";
     internal const string FutureSource = "UpstoxHistoricalFutureV3";
@@ -46,14 +47,26 @@ internal sealed class UpstoxHistoricalCandleBackup(IHttpClientFactory clients, I
             key = Text(matches[0], "instrument_key")!;
         }
         finally { catalogGate.Release(); }
-        var day = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"https://api.upstox.com/v3/historical-candle/{Uri.EscapeDataString(key)}/minutes/1/{day}/{day}");
+            CandleUrl(key, date, timeProvider.GetUtcNow()));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration["ReplayBackup:UpstoxAnalyticsToken"]);
         using var result = await client.SendAsync(request, token);
         result.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await result.Content.ReadAsStreamAsync(token));
         return Parse(json.RootElement, date);
+    }
+
+    internal static string CandleUrl(string key, DateOnly date, DateTimeOffset now)
+    {
+        // Historical candles do not include the current trading date, even after close.
+        // Use the broker's intraday series until the IST date rolls over.
+        var today = DateOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        if (date > today) throw new ArgumentOutOfRangeException(nameof(date), "Future candles are unavailable.");
+        var encoded = Uri.EscapeDataString(key);
+        var day = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return date == today
+            ? $"https://api.upstox.com/v3/historical-candle/intraday/{encoded}/minutes/1"
+            : $"https://api.upstox.com/v3/historical-candle/{encoded}/minutes/1/{day}/{day}";
     }
 
     internal static bool Matches(JsonElement row, Instrument instrument, string market)

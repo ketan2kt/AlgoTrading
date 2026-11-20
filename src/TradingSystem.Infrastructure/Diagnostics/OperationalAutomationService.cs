@@ -106,10 +106,17 @@ internal sealed class OperationalAutomationService(
 
         foreach (var market in new[] { "nifty", "sensex", "bank-nifty" })
         {
-            if (await db.MarketStrategyAudits.AsNoTracking().AnyAsync(value =>
+            var previousRuns = db.MarketStrategyAudits.AsNoTracking().Where(value =>
                     value.Market == market && value.Outcome == outcome &&
-                    value.CandleTimeUtc >= startUtc && value.CandleTimeUtc < endUtc,
-                    cancellationToken)) continue;
+                    value.CandleTimeUtc >= startUtc && value.CandleTimeUtc < endUtc);
+            if (slot.Name == "ReplayInputAudit")
+            {
+                var previous = await previousRuns.OrderByDescending(value => value.CandleTimeUtc)
+                    .Select(value => new { value.CandleTimeUtc, value.Confidence }).Take(3).ToListAsync(cancellationToken);
+                if (!ReplayAuditDue(previous.Count, previous.FirstOrDefault()?.CandleTimeUtc,
+                    previous.FirstOrDefault()?.Confidence == 1m, now)) continue;
+            }
+            else if (await previousRuns.AnyAsync(cancellationToken)) continue;
 
             var underlyingSymbol = market switch
             {
@@ -135,6 +142,11 @@ internal sealed class OperationalAutomationService(
                     var slice = await scope.ServiceProvider.GetRequiredService<IHistoricalReplayArchiveReader>()
                         .ReadAsync(tradingDate, market, cancellationToken);
                     report = BuildReplayInputReport(slice, market, now);
+                    // The primary gate stays strict. Audit the backup separately instead
+                    // of treating a Groww interruption as proof both sources are missing.
+                    var assisted = await scope.ServiceProvider.GetRequiredService<IHistoricalReplayArchiveReader>()
+                        .ReadGapAwareAsync(tradingDate, market, cancellationToken);
+                    report = AddBookCoverage(report, ReplayBookCoverageAudit.Read(assisted, cancellationToken));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -164,6 +176,9 @@ internal sealed class OperationalAutomationService(
 
     // Use the exact website input gate, after hours. This verifies inputs,
     // not hypothetical future fills or profitability, and never starts trading.
+    internal static bool ReplayAuditDue(int attempts, DateTimeOffset? lastRun, bool passed, DateTimeOffset now) =>
+        attempts == 0 || attempts < 3 && !passed && lastRun is { } at && now - at >= TimeSpan.FromMinutes(30);
+
     internal static OperationalAutomationReport BuildReplayInputReport(
         HistoricalReplayArchiveSlice slice, string market, DateTimeOffset now)
     {
@@ -183,6 +198,30 @@ internal sealed class OperationalAutomationService(
             issues.Length == 0 ? "Recorded inputs passed the normal-session replay coverage gate."
                 : "Recorded session has replay input gaps; review the listed evidence.",
             metrics, issues, issues.Length > 0, now);
+    }
+
+    internal static OperationalAutomationReport AddBookCoverage(OperationalAutomationReport report,
+        IReadOnlyList<ReplayContractBookCoverage> coverage)
+    {
+        var missing = coverage.Where(value => value.CombinedMissingSeconds > 0).ToArray();
+        var metrics = new Dictionary<string, string>(report.Metrics)
+        {
+            ["plannedOptionContractsAudited"] = coverage.Count.ToString(CultureInfo.InvariantCulture),
+            ["contractsHelpedByBackup"] = coverage.Count(value => value.PrimaryMissingSeconds > value.CombinedMissingSeconds).ToString(CultureInfo.InvariantCulture),
+            ["backupCoveredContractSeconds"] = coverage.Sum(value => value.PrimaryMissingSeconds - value.CombinedMissingSeconds).ToString("0.###", CultureInfo.InvariantCulture),
+            ["combinedUncoveredContractSeconds"] = coverage.Sum(value => value.CombinedMissingSeconds).ToString("0.###", CultureInfo.InvariantCulture),
+            ["contractsWithBookGaps"] = missing.Length.ToString(CultureInfo.InvariantCulture),
+            ["bookCoverageScope"] = "planned normal-strategy options, full session; per-contract 30-second book freshness, not fill or P&L verification"
+        };
+        var findings = report.Findings.ToList();
+        if (coverage.Count == 0) findings.Add("No planned option contracts were available for the two-source book audit.");
+        foreach (var value in missing.OrderByDescending(value => value.CombinedMissingSeconds).Take(10))
+            findings.Add(FormattableString.Invariant($"{value.Symbol}: {value.CombinedMissingSeconds:0.###} seconds without a fresh sized two-sided book from either source; first {value.FirstUncoveredAtUtc:O}. This can reflect unavailable liquidity, not necessarily transport loss."));
+        if (missing.Length > 10) findings.Add($"Another {missing.Length - 10} contracts have uncovered book intervals; see the saved archive.");
+        var attention = report.ActionRequired || missing.Length > 0 || coverage.Count == 0;
+        return report with { Metrics = metrics, Findings = findings, ActionRequired = attention,
+            Status = attention ? "Attention" : report.Status,
+            Headline = attention ? "Replay inputs need attention; primary and combined-source coverage are reported separately." : report.Headline };
     }
 
     internal static OperationalAutomationReport BuildReport(

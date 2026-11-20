@@ -102,7 +102,9 @@ is separate from `recorder-health.json`; neither heartbeat alone proves depth.
 After-hours candle repair tries Groww first, then Upstox for still-missing index
 and confirmation-futures minutes. Exact catalog identity, expiry and lot checks
 are required. Upstox research candles have separate provenance and never overwrite
-recorded trading candles. Replay prefers Groww repairs and labels backup minutes.
+recorded trading candles. Current-IST-date repair uses Upstox intraday candles,
+including after close; prior dates use its historical endpoint. Replay prefers
+Groww repairs and labels backup minutes.
 Official [historical API](https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/)
 and [read-only Analytics Token](https://upstox.com/developer/api-documentation/analytics-token/).
 
@@ -144,6 +146,13 @@ the key into source control, command history, logs, or chat.
 explanations, 16:00 daily result and 16:05 telemetry audit. `replay` returns the
 existing bounded strategy replay without browser navigation. Operational automation
 is evidence-only: it cannot change strategy settings or place orders.
+
+The 16:20 replay-input audit keeps the primary eligibility gate and separately
+checks per-planned-contract price/book coverage across Groww and Upstox. Metrics
+report backup-covered and remaining uncovered **contract-seconds**, not market
+downtime, fills or P&L. An unavailable executable book can reflect illiquidity,
+not just recording loss. Failed/attention audits retry after 30 minutes, at most
+three runs per market/day; successful audits are not repeated.
 
 For a compact new-chat handover without reading the full history:
 
