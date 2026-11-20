@@ -1224,16 +1224,33 @@ internal sealed partial class MultiMarketPaperTradingService(
                     ? favourableExtreme - position.EntryPrice
                     : position.EntryPrice - favourableExtreme;
                 var favourableR = initialRisk <= 0m ? 0m : Math.Max(0m, peakFavourable / initialRisk);
+                var initialStop = position.Direction == Direction.Buy
+                    ? position.EntryPrice - initialRisk : position.EntryPrice + initialRisk;
+                decimal? netBreakEvenStop = null;
                 var protectionStage = position.StopLoss == previousStop ? "Unchanged"
                     : position.StopLoss == position.EntryPrice ? "BreakEven"
                     : favourableR >= options.Value.BreakEvenTriggerRiskMultiple +
                                       options.Value.TrailingStopRiskMultiple ? "Trailing"
                     : "ProfitLocked";
+                if (market.Code is "sensex" or "bank-nifty")
+                {
+                    var estimatedCosts = PaperTradingCostModel.CalculateOptionCharges([
+                        new(PaperOptionTransactionSide.Buy, position.EntryPrice, position.RemainingQuantity),
+                        new(PaperOptionTransactionSide.Sell, Math.Max(.05m, position.StopLoss), position.RemainingQuantity)
+                    ], market.Exchange).Total;
+                    netBreakEvenStop = PaperProtectiveStopPolicy.ProtectNetProfit(position.Direction,
+                        position.EntryPrice, position.EntryPrice, position.RemainingQuantity, estimatedCosts);
+                    protectionStage = PaperProtectiveStopPolicy.ProtectionStage(position.Direction,
+                        position.EntryPrice, initialStop, position.StopLoss, netBreakEvenStop.Value,
+                        !differentiatedRunner && favourableR >= exitPlan.BreakEvenTriggerR + exitPlan.TrailDistanceR);
+                }
                 db.MarketStrategyAudits.Add(new(Guid.NewGuid(), market.Code,
                     position.UnderlyingInstrumentId, sampleMinute, sampleOutcome, 0m,
                     JsonSerializer.Serialize(new { positionId = position.Id, price,
-                        initialStop = position.Direction == Direction.Buy
-                            ? position.EntryPrice - initialRisk : position.EntryPrice + initialRisk,
+                        initialStop, netBreakEvenStop,
+                        profitLockTriggerR = exitPlan.ProfitLockTriggerR,
+                        profitLockArmed = favourableR >= exitPlan.ProfitLockTriggerR,
+                        stopChanged = position.StopLoss != previousStop,
                         previousStop, stop = position.StopLoss, position.Target,
                         livePnl, favourableR, protectionStage, differentiatedRunner, observedAtUtc = observedAt })));
             }

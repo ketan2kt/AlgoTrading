@@ -5,6 +5,19 @@ namespace TradingSystem.Application.Execution;
 public static class PaperProtectiveStopPolicy
 {
     public const decimal NiftyMinimumPeakGainLockFraction = .70m;
+
+    // Report the protection actually established, not simply whether a stop is
+    // above entry: an above-entry stop may only cover transaction costs.
+    public static string ProtectionStage(Direction direction, decimal entry,
+        decimal initialStop, decimal effectiveStop, decimal netBreakEvenStop,
+        bool distanceTrailActive)
+    {
+        var sign = direction == Direction.Buy ? 1m : -1m;
+        if ((effectiveStop - initialStop) * sign <= 0m) return "InitialRisk";
+        if ((effectiveStop - entry) * sign < 0m) return "RiskReduced";
+        if ((effectiveStop - netBreakEvenStop) * sign <= 0m) return "BreakEven";
+        return distanceTrailActive ? "Trailing" : "ProfitLocked";
+    }
     public static decimal ExecutableTrail(Direction direction, decimal proposed, decimal prior, decimal tick)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tick);

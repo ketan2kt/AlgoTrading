@@ -29,7 +29,7 @@ public sealed class HistoricalMarketOptionPositionPolicy(
     private HistoricalReplayFrame? invalidationFrame;
     private (DateTimeOffset Entry, Direction? Direction, HistoricalReplayQuote? Underlying) invalidationPosition;
     private UnderlyingTrendInvalidationResult? invalidationResult;
-    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v11/" + DifferentiatedRunnerPolicy.Version + "/" + BankNiftyConfirmedTrail.Version;
+    public string CodeVersion => entryPolicy.CodeVersion + "/market-option-exit-v12/" + DifferentiatedRunnerPolicy.Version + "/" + BankNiftyConfirmedTrail.Version;
     public bool ProductionPolicyParityVerified => entryPolicy.ProductionPolicyParityVerified && settings.CandleIntervalSeconds is 60 or 300;
     public string ConfigurationManifest => entryPolicy.ConfigurationManifest + "|marketExit=" +
         JsonSerializer.Serialize(new { market, underlyingSymbol, settings,

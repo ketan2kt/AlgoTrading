@@ -98,17 +98,33 @@ public static class FailedSetupExitPolicy
         }
         if (prior.OpenTimeUtc < entryAt)
             return new(false, adverseR, ["Entry-candle reclaim: two fully post-entry candles are required."]);
+        // The regular Nifty/Sensex entry owns a pre-entry setup, not just its
+        // final candle. The slower branch must not bypass that boundary
+        // merely because a normal pullback crosses the final signal candle.
+        var reclaimLow = signal.Low;
+        var reclaimHigh = signal.High;
+        var useSetupBoundary = requireConfirmation && market is "nifty" or "sensex";
+        if (useSetupBoundary)
+        {
+            if (signalIndex < 2 ||
+                bars[signalIndex].OpenTimeUtc - bars[signalIndex - 1].OpenTimeUtc != TimeSpan.FromSeconds(intervalSeconds) ||
+                bars[signalIndex - 1].OpenTimeUtc - bars[signalIndex - 2].OpenTimeUtc != TimeSpan.FromSeconds(intervalSeconds))
+                return new(false, adverseR, ["Pre-entry setup boundary is unavailable or discontinuous."]);
+            var setup = bars.Skip(signalIndex - 2).Take(3).ToArray();
+            reclaimLow = setup.Min(bar => bar.Low);
+            reclaimHigh = setup.Max(bar => bar.High);
+        }
         var reclaimed = atr > 0m && (direction == Direction.Sell
             ? (requireConfirmation || signal.Close < signal.Open) &&
               prior.Close > prior.Open && last.Close > last.Open &&
-              last.Close > prior.Close && prior.Close > signal.High + buffer && last.Close > signal.High + buffer &&
-              underlyingPrice > signal.High + buffer && underlyingPrice > ema9 + buffer
+              last.Close > prior.Close && prior.Close > reclaimHigh + buffer && last.Close > reclaimHigh + buffer &&
+              underlyingPrice > reclaimHigh + buffer && underlyingPrice > ema9 + buffer
             : (requireConfirmation || signal.Close > signal.Open) &&
               prior.Close < prior.Open && last.Close < last.Open &&
-              last.Close < prior.Close && prior.Close < signal.Low - buffer && last.Close < signal.Low - buffer &&
-              underlyingPrice < signal.Low - buffer && underlyingPrice < ema9 - buffer);
+              last.Close < prior.Close && prior.Close < reclaimLow - buffer && last.Close < reclaimLow - buffer &&
+              underlyingPrice < reclaimLow - buffer && underlyingPrice < ema9 - buffer);
         return reclaimed
-            ? new(true, adverseR, [$"Entry-candle reclaim: option lost {adverseR:F2}R without +0.50R; two completed opposing candles invalidated the signal candle and the fresh quote still holds beyond that boundary and EMA9."])
+            ? new(true, adverseR, [$"Entry-candle reclaim: option lost {adverseR:F2}R without +0.50R; two completed opposing candles invalidated the {(useSetupBoundary ? "pre-entry three-candle setup" : "signal candle")} and the fresh quote still holds beyond that boundary and EMA9."])
             : new(false, adverseR, ["Entry-candle reclaim is not confirmed by two opposing closes and the fresh quote; retain existing stop."]);
     }
 

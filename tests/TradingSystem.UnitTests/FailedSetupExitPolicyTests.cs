@@ -46,9 +46,10 @@ public sealed class FailedSetupExitPolicyTests
         StrategyPriceBar[] pullback = [.. bars, new(next, 108m, 109m, 104m, 105m)];
         Assert.False(Evaluate(market, strategy, pullback, observed.AddMinutes(1), 104m).ShouldExit);
 
-        // Two opposing closes alone are not enough: the first must break the
-        // pre-entry candle's low (106), and the current quote must stay below it.
-        bars[^1] = bars[^1] with { Low = 103m, Close = 104m };
+        // Two opposing closes alone are not enough: both must break the
+        // applicable frozen setup (three candles for Nifty/Sensex), and the
+        // current quote must stay below it.
+        bars[^1] = bars[^1] with { Low = 102m, Close = 103m };
         StrategyPriceBar[] failed = [.. bars, new(next, 104m, 105m, 100m, 101m)];
         Assert.True(Evaluate(market, strategy, failed, observed.AddMinutes(1), 100m).ShouldExit);
         Assert.False(Evaluate(market, strategy, failed, observed.AddMinutes(1), 107m).ShouldExit);

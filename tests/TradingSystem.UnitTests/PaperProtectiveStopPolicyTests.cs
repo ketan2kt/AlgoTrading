@@ -5,6 +5,19 @@ namespace TradingSystem.UnitTests;
 
 public sealed class PaperProtectiveStopPolicyTests
 {
+    [Theory]
+    [InlineData(Direction.Buy, 100, 90, 90, 100.55, false, "InitialRisk")]
+    [InlineData(Direction.Buy, 100, 90, 97, 100.55, false, "RiskReduced")]
+    [InlineData(Direction.Buy, 161.15, 145, 161.70, 161.70, false, "BreakEven")]
+    [InlineData(Direction.Buy, 100, 90, 107, 100.55, false, "ProfitLocked")]
+    [InlineData(Direction.Buy, 100, 90, 120, 100.55, true, "Trailing")]
+    [InlineData(Direction.Sell, 100, 110, 99.45, 99.45, false, "BreakEven")]
+    [InlineData(Direction.Sell, 100, 110, 93, 99.45, false, "ProfitLocked")]
+    public void ProtectionStageSeparatesCostRecoveryFromLockedProfit(Direction direction,
+        decimal entry, decimal initial, decimal stop, decimal netBreakEven, bool trail, string expected) =>
+        Assert.Equal(expected, PaperProtectiveStopPolicy.ProtectionStage(
+            direction, entry, initial, stop, netBreakEven, trail));
+
     [Fact]
     public void ExecutableTrailCannotGiveBackAnAlreadyRecordedStop()
     {

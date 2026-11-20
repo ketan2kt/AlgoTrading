@@ -1369,10 +1369,18 @@ internal sealed partial class AutomatedPaperTradingService(
         var favourableR = initialRisk <= 0m ? 0m : Math.Max(0m,
             (peakPrice - entry) * multiplier / initialRisk);
         var exitPlan = ProfessionalExitPolicy.For(ProfessionalExitPolicy.From(open.Signal.Regime));
-        var stage = effectiveStop == open.StopLoss ? "InitialRisk"
-            : (effectiveStop - entry) * multiplier <= 0m ? "BreakEven"
-            : favourableR >= exitPlan.BreakEvenTriggerR + exitPlan.TrailDistanceR ? "Trailing"
-            : "ProfitLocked";
+        var estimatedCosts = PaperTradingCostModel.CalculateOptionCharges([
+            new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Buy :
+                PaperOptionTransactionSide.Sell, entry, open.TotalQuantity),
+            new(open.Entry.Direction == Direction.Buy ? PaperOptionTransactionSide.Sell :
+                PaperOptionTransactionSide.Buy, Math.Max(.05m, effectiveStop), open.TotalQuantity)
+        ], "NSE").Total;
+        var netBreakEvenStop = PaperProtectiveStopPolicy.ProtectNetProfit(
+            open.Entry.Direction, entry, entry, open.Entry.FilledQuantity, estimatedCosts);
+        var stage = PaperProtectiveStopPolicy.ProtectionStage(open.Entry.Direction,
+            entry, open.StopLoss, effectiveStop, netBreakEvenStop,
+            options.Value.TrailingStopEnabled && !differentiatedRunner &&
+            favourableR >= exitPlan.BreakEvenTriggerR + exitPlan.TrailDistanceR);
         db.MarketStrategyAudits.Add(new(Guid.NewGuid(), "nifty", underlyingInstrumentId,
             minute, outcome, 0m, JsonSerializer.Serialize(new
             {
@@ -1383,6 +1391,10 @@ internal sealed partial class AutomatedPaperTradingService(
                 initialStop = open.StopLoss,
                 effectiveStop,
                 protectionStage = stage,
+                netBreakEvenStop,
+                profitLockTriggerR = exitPlan.ProfitLockTriggerR,
+                profitLockArmed = (options.Value.BreakEvenEnabled || options.Value.TrailingStopEnabled) &&
+                    favourableR >= exitPlan.ProfitLockTriggerR,
                 differentiatedRunner,
                 favourableR,
                 peakPrice,
