@@ -4,6 +4,7 @@
 
 - User confirmed deployment of the Nifty/Sensex setup-boundary and protection-label fixes. Website only; Bank Nifty trading rules, recorder, hard stops, sizing and profit protection unchanged. Offline research/tool changes remain local and are excluded from this release.
 - At16:04:20IST authenticated capture-health reported `Finished`, expectedNow=false, primary/backup buffered0 and no storage failure. Capture is finished; this is rollout-safety evidence, not a full-session replay audit. Read-only entry-impact receipts retain all6Nifty/all7Sensex regular entries; no entry paths removed. Reuse the successful90unit+3contract focused checks below; required CI/package gates still pending.
+- Initial release3fdd5f4 CI44720598530 caught7 older signal-only exit expectations in NormalMarketFailedEntryExitTests/SensexFailedThesisExitTests. Corrected tests preserve recorded candles as hold cases and add explicit synthetic whole-boundary breaks; retain Nifty decisive one-close branch, Bank behavior, hard-stop priority, stale/gapped evidence and prior-winner guards. No production code/replay result changed. All36 affected regression tests now pass; mandatory full CI reruns before dispatch.
 
 ## 20Nov improvements — release scope and evidence
 

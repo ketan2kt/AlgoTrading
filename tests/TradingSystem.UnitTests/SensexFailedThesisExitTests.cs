@@ -30,18 +30,30 @@ public sealed class SensexFailedThesisExitTests
         return values.Select((v, i) => new StrategyPriceBar(Now.AddMinutes(i - 12), v[0], v[1], v[2], v[3])).ToArray();
     }
 
+    // Synthetic continuation beyond the entire setup. Preserve RecordedBars
+    // unchanged so a signal-only reclaim remains an explicit negative fixture.
+    internal static StrategyPriceBar[] ConfirmedBoundaryBreakBars()
+    {
+        var bars = RecordedBars();
+        for (var i = bars.Length - 2; i < bars.Length; i++)
+            bars[i] = bars[i] with { Open = bars[i].Open + 20m, High = bars[i].High + 20m,
+                Low = bars[i].Low + 20m, Close = bars[i].Close + 20m };
+        return bars;
+    }
+
     private static FailedSetupExitDecision Evaluate(IReadOnlyList<StrategyPriceBar>? bars = null,
         string market = "sensex", string strategy = Strategy, decimal option = 670m,
-        decimal peak = 700.20m, decimal spot = 79274.49m, DateTimeOffset? quoteAt = null) =>
+        decimal peak = 700.20m, decimal spot = 79294.49m, DateTimeOffset? quoteAt = null) =>
         FailedSetupExitPolicy.EvaluateForMarket(market, strategy, Direction.Sell,
             696.35m, option, 69.65m, peak, Entry, Now, spot, quoteAt ?? Now,
-            bars ?? RecordedBars(), 60, 5);
+            bars ?? ConfirmedBoundaryBreakBars(), 60, 5);
 
     [Fact]
-    public void RecordedReclaimAllowsExitWithoutDemandingAnotherNewHigh()
+    public void RecordedSignalReclaimWaitsForWholeSetupBreak()
     {
         Assert.False(FailedSetupExitPolicy.Evaluate(Direction.Sell, 696.35m, 670m,
             69.65m, 700.20m, Entry, Now, 79274.49m, RecordedBars()).ShouldExit);
+        Assert.False(Evaluate(RecordedBars(), spot: 79274.49m).ShouldExit);
         var decision = Evaluate();
         Assert.True(decision.ShouldExit);
         Assert.Contains("Entry-candle reclaim", Assert.Single(decision.Reasons));
@@ -56,8 +68,8 @@ public sealed class SensexFailedThesisExitTests
         Assert.False(Evaluate(market: market, strategy: strategy).ShouldExit);
 
     [Theory]
-    [InlineData(690, 700.20, 79274.49)] // Small option pullback.
-    [InlineData(670, 731.175, 79274.49)] // A prior +0.5R winner is protected elsewhere.
+    [InlineData(690, 700.20, 79294.49)] // Small option pullback.
+    [InlineData(670, 731.175, 79294.49)] // A prior +0.5R winner is protected elsewhere.
     [InlineData(670, 700.20, 79265)] // Fresh quote no longer holds reclaimed boundary.
     public void NormalPullbackAndPriorWinnerStayWithExistingProtection(decimal option, decimal peak, decimal spot) =>
         Assert.False(Evaluate(option: option, peak: peak, spot: spot).ShouldExit);
@@ -65,12 +77,12 @@ public sealed class SensexFailedThesisExitTests
     [Fact]
     public void OneCandleWicksAndNonOpposingCandlesCannotConfirmReclaim()
     {
-        var bars = RecordedBars();
+        var bars = ConfirmedBoundaryBreakBars();
         Assert.False(Evaluate(bars[..^1], spot: 79272m).ShouldExit);
         bars[^2] = bars[^2] with { Close = 79265m };
         Assert.False(Evaluate(bars).ShouldExit); // Wick beyond entry high is insufficient.
-        bars = RecordedBars();
-        bars[^1] = bars[^1] with { Open = 79286m };
+        bars = ConfirmedBoundaryBreakBars();
+        bars[^1] = bars[^1] with { Open = bars[^1].High };
         Assert.False(Evaluate(bars).ShouldExit);
     }
 
@@ -79,22 +91,22 @@ public sealed class SensexFailedThesisExitTests
     {
         Assert.False(Evaluate(quoteAt: Now.AddSeconds(-6)).ShouldExit);
         Assert.False(Evaluate(quoteAt: Now.AddSeconds(1)).ShouldExit);
-        var bars = RecordedBars();
+        var bars = ConfirmedBoundaryBreakBars();
         bars[^1] = bars[^1] with { OpenTimeUtc = Now };
         Assert.False(Evaluate(bars).ShouldExit);
-        bars = RecordedBars();
+        bars = ConfirmedBoundaryBreakBars();
         bars[9] = bars[9] with { OpenTimeUtc = bars[9].OpenTimeUtc.AddSeconds(1) };
         Assert.False(Evaluate(bars).ShouldExit);
         Assert.False(Evaluate(RecordedBars()[..8]).ShouldExit);
     }
 
     [Fact]
-    public void CallSideUsesSymmetricSignalLowReclaim()
+    public void CallSideUsesSymmetricSetupLowReclaim()
     {
-        var bars = RecordedBars().Select(b => b with { Open = 160000m - b.Open,
+        var bars = ConfirmedBoundaryBreakBars().Select(b => b with { Open = 160000m - b.Open,
             High = 160000m - b.Low, Low = 160000m - b.High, Close = 160000m - b.Close }).ToArray();
         Assert.True(FailedSetupExitPolicy.EvaluateForMarket("sensex", Strategy, Direction.Buy,
-            696.35m, 670m, 69.65m, 700.20m, Entry, Now, 160000m - 79274.49m, Now,
+            696.35m, 670m, 69.65m, 700.20m, Entry, Now, 160000m - 79294.49m, Now,
             bars, 60, 5).ShouldExit);
     }
 
@@ -105,11 +117,11 @@ public sealed class SensexFailedThesisExitTests
         var position = new HistoricalReplayOpenPosition(symbol, Strategy, Entry, 696.35m, 670m,
             100, 626.70m, 766m) { OriginalQuantity = 100, InitialStopPrice = 626.70m,
                 InitialTargetPrice = 766m, LotSize = 20, UnderlyingDirection = Direction.Sell };
-        var bars = RecordedBars().Select(b => new HistoricalReplayBar(b.OpenTimeUtc, 60,
+        var bars = ConfirmedBoundaryBreakBars().Select(b => new HistoricalReplayBar(b.OpenTimeUtc, 60,
             b.Open, b.High, b.Low, b.Close) { Symbol = "SENSEX" }).ToArray();
         var frame = new HistoricalReplayPortfolioFrame(new(Now, bars,
             new Dictionary<string, HistoricalReplayQuote> { [symbol] = new(symbol, Now, 670m),
-                ["SENSEX"] = new("SENSEX", Now, 79274.49m) }), position, []) { OpenPositions = [position] };
+                ["SENSEX"] = new("SENSEX", Now, 79294.49m) }), position, []) { OpenPositions = [position] };
         var policy = new HistoricalMarketOptionPositionPolicy(new NoEntries(), "sensex", "SENSEX",
             new(new TimeOnly(15, 15), true, true, true, .55m, 3, true, .8m, 5, 5, 60),
             [new(Guid.Empty, symbol, InstrumentType.PutOption, new DateOnly(2026, 11, 12), 79300m, 20, .05m)]);

@@ -40,8 +40,11 @@ public sealed class NormalMarketFailedEntryExitTests
             FailedSetupExitPolicy.EvaluateForMarket(market, strategy, direction,
                 100m, option, 10m, peak, enteredAt ?? Entry, Now, currentSpot ?? spot,
                 quoteAt ?? Now, candles ?? bars, 60, 5);
+        var (signalOnlyBars, signalOnlySpot) = Structure(market, direction, false);
         Assert.False(FailedSetupExitPolicy.Evaluate(direction, 100m, 96m, 10m,
-            100.5m, Entry, Now, spot, bars).ShouldExit);
+            100.5m, Entry, Now, signalOnlySpot, signalOnlyBars).ShouldExit);
+        Assert.Equal(market == "bank-nifty",
+            Evaluate(candles: signalOnlyBars, currentSpot: signalOnlySpot).ShouldExit);
         Assert.True(Evaluate().ShouldExit);
         Assert.False(Evaluate(option: 99m).ShouldExit);
         Assert.False(Evaluate(peak: 105m).ShouldExit);
@@ -51,6 +54,10 @@ public sealed class NormalMarketFailedEntryExitTests
         Assert.False(Evaluate(currentSpot: bars[8].Close).ShouldExit);
         var pullback = bars.ToArray();
         pullback[^2] = pullback[^2] with { Close = bars[8].Close };
+        // Nifty's existing decisive one-close break remains valid even when
+        // the preceding close has not crossed the boundary. Bank still needs two.
+        Assert.Equal(market == "nifty", Evaluate(candles: pullback).ShouldExit);
+        pullback[^1] = pullback[^1] with { Close = bars[8].Close };
         Assert.False(Evaluate(candles: pullback).ShouldExit);
         var incomplete = bars.ToArray();
         incomplete[^1] = incomplete[^1] with { OpenTimeUtc = Now };
@@ -98,19 +105,23 @@ public sealed class NormalMarketFailedEntryExitTests
         Assert.Empty(policy.EvaluateExits(frame));
     }
 
-    private static (StrategyPriceBar[] Bars, decimal Spot) Structure(string market, Direction direction)
+    private static (StrategyPriceBar[] Bars, decimal Spot) Structure(string market, Direction direction,
+        bool breakWholeSetup = true)
     {
         var scale = market == "nifty" ? .3m : .7m;
         var origin = market == "nifty" ? 24000m : 55000m;
         decimal Transform(decimal value) => origin + (value - 79000m) * scale *
             (direction == Direction.Sell ? 1m : -1m);
-        var bars = SensexFailedThesisExitTests.RecordedBars().Select(b => b with
+        var confirmed = market == "nifty" && breakWholeSetup;
+        var source = confirmed ? SensexFailedThesisExitTests.ConfirmedBoundaryBreakBars()
+            : SensexFailedThesisExitTests.RecordedBars();
+        var bars = source.Select(b => b with
         {
             Open = Transform(b.Open), Close = Transform(b.Close),
             High = Transform(direction == Direction.Sell ? b.High : b.Low),
             Low = Transform(direction == Direction.Sell ? b.Low : b.High)
         }).ToArray();
-        return (bars, Transform(79274.49m));
+        return (bars, Transform(confirmed ? 79294.49m : 79274.49m));
     }
 
     private sealed class NoEntries : IHistoricalReplayPortfolioPolicy
