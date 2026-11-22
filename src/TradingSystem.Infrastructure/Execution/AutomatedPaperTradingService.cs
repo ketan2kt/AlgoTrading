@@ -101,6 +101,7 @@ internal sealed partial class AutomatedPaperTradingService(
             EntryTimingVersion = FirstEntryTimingPolicy.Version,
             EntryChainVersion = EntryChainConsistencyPolicy.Version,
             CountertrendEntryVersion = NiftyCountertrendEntryPolicy.Version,
+            SessionMoveVersion = SessionMoveQualityPolicy.Version,
             options.Value.Enabled, options.Value.MinimumSignalCandles,
             options.Value.MinimumFuturesConfirmationCandles,
             options.Value.EntryWindowStart, options.Value.EntryCutoff,

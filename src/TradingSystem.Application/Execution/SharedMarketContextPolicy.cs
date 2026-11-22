@@ -173,7 +173,7 @@ public static class SharedMarketContextPolicy
             sign*(latest.Close-(direction == Domain.Trading.Direction.Buy ? previous.High : previous.Low)) > 0m;
     }
 
-    private static bool AcceptedBreak(IReadOnlyList<StrategyPriceBar> source, Direction direction)
+    internal static bool AcceptedBreak(IReadOnlyList<StrategyPriceBar> source, Direction direction)
     {
         if (source.Count < 12) return false;
         var bars = source.TakeLast(22).ToArray();

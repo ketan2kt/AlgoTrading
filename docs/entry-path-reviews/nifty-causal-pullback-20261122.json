@@ -1,0 +1,31 @@
+{
+  "source": "read-only diagnostics",
+  "generatedAtUtc": "2026-11-22T16:36:58.8752692+00:00",
+  "market": "nifty",
+  "from": "2026-11-19",
+  "to": "2026-11-20",
+  "removeStrategies": [
+    "__no_removed_path__"
+  ],
+  "historicalRegularEntries": 10,
+  "historicallyRemoved": 0,
+  "historicallyRetained": 10,
+  "sessions": [
+    {
+      "Date": "2026-11-19",
+      "RegularEntries": 4
+    },
+    {
+      "Date": "2026-11-20",
+      "RegularEntries": 6
+    }
+  ],
+  "strategyBreakdown": [
+    {
+      "strategy": "NiftyAutomation",
+      "count": 10,
+      "removed": false
+    }
+  ],
+  "limitation": "Historical path use is not proof of future signals, executable fills, or profitability."
+}

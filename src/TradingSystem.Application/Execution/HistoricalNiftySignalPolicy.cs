@@ -32,7 +32,7 @@ public sealed class HistoricalNiftySignalPolicy(
     // quote and risk policies. The discovery-only constructor is not certified.
     public bool ProductionPolicyParityVerified => admissionSettings is not null;
 
-    public string CodeVersion => $"nifty-signal-adapter-v16:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}/{EntryChainConsistencyPolicy.Version}/{NiftyCountertrendEntryPolicy.Version}";
+    public string CodeVersion => $"nifty-signal-adapter-v17:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}/{EntryChainConsistencyPolicy.Version}/{NiftyCountertrendEntryPolicy.Version}/{SessionMoveQualityPolicy.Version}";
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         spotSymbol, futuresSymbol, tradingDate, previousClose,
@@ -40,6 +40,7 @@ public sealed class HistoricalNiftySignalPolicy(
         candleIntervalSeconds, lots, optionSelection, admissionSettings,
         EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
         EntryChainVersion = EntryChainConsistencyPolicy.Version,
+        SessionMoveVersion = SessionMoveQualityPolicy.Version,
         EntryTiming = new
         {
             FirstEntryTimingPolicy.Version,
