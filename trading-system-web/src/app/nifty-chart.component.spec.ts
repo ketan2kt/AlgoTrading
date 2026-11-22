@@ -2,12 +2,13 @@ import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import {NiftyChartComponent} from './nifty-chart.component';
 import {TradingWorkspaceSnapshot} from './trading-workspace';
+import {terminalIndicatorKey} from './chart-indicator-preferences';
 
 const mocks=vi.hoisted(()=>({series:[] as any[],markers:vi.fn(),removed:vi.fn(),destroy:vi.fn(),paneHeight:vi.fn()}));
 // Keep the factory synchronous: Angular's split test bundles can hoist an
 // async helper into a shared chunk before that chunk has been initialized.
 vi.mock('lightweight-charts',()=>({
-  ColorType:{Solid:'solid'},LineStyle:{Dashed:2},LineType:{WithSteps:1},
+  ColorType:{Solid:'solid'},LineStyle:{Dashed:2,Dotted:1},LineType:{WithSteps:1},
   CandlestickSeries:{},HistogramSeries:{},LineSeries:{},
   createChart:()=>({
     addSeries:(_type:unknown,options:any,pane=0)=>{
@@ -76,6 +77,21 @@ describe('shared index chart indicators',()=>{
     fixture.componentRef.setInput('controlsOpen',true);fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.terminal-chart.tools-open')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Chandelier');
+    expect(mocks.series[0].options.lastValueVisible).toBe(true);
+    expect(fixture.nativeElement.querySelector('.indicator-legend')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.axis-captions')).toBeNull();
+    const button=(name:string)=>[...fixture.nativeElement.querySelectorAll('button')].find((b:any)=>b.textContent.trim()===name) as HTMLButtonElement;
+    expect(button('Chandelier').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Structure history').getAttribute('aria-pressed')).toBe('false');
+    button('Chandelier').click();fixture.detectChanges();
+    expect(button('Chandelier').getAttribute('aria-pressed')).toBe('true');
+    expect(JSON.parse(localStorage.getItem(terminalIndicatorKey)!).chandelier).toBe(true);
+    button('Structure history').click();fixture.detectChanges();
+    expect(button('Structure history').getAttribute('aria-pressed')).toBe('true');
+    button('Clean defaults').click();fixture.detectChanges();
+    expect(button('Chandelier').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Structure history').getAttribute('aria-pressed')).toBe('false');
+    expect(mocks.markers.mock.lastCall![0]).toEqual(expect.arrayContaining([expect.objectContaining({text:'CE'})]));
     fixture.destroy();expect(mocks.destroy).toHaveBeenCalled();
   });
 });

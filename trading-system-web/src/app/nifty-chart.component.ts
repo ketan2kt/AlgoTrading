@@ -41,7 +41,7 @@ import { chartPriceLineTitles } from './chart-labels';
 import { chartLevels, ema, sessionVwap } from './chart-overlays';
 import { chartEntryFills } from './chart-entry-fills';
 import {chartTrendIndicators, closedIndicatorCandles, TrendPoint} from './chart-trend-indicators';
-import {arrangeChartLabels, ChartAxisLabel} from './chart-axis-labels';
+import {chartIndicatorDefaults, readChartIndicators, terminalIndicatorKey, ChartOverlayVisibility} from './chart-indicator-preferences';
 
 @Component({
   selector: 'app-nifty-chart',
@@ -71,10 +71,13 @@ import {arrangeChartLabels, ChartAxisLabel} from './chart-axis-labels';
           <button type="button" [class.active]="visibility.openingRange" [attr.aria-pressed]="visibility.openingRange" (click)="toggle('openingRange')">Opening range</button>
           <button type="button" [class.active]="visibility.vwap && !snapshot?.chartDisplay" [attr.aria-pressed]="visibility.vwap && !snapshot?.chartDisplay" [disabled]="!!snapshot?.chartDisplay" (click)="toggle('vwap')">VWAP</button>
           <button type="button" [class.active]="visibility.ema" [attr.aria-pressed]="visibility.ema" (click)="toggle('ema')">EMA 9/21</button>
-          <button type="button" [class.active]="visibility.structure" [attr.aria-pressed]="visibility.structure" (click)="toggle('structure')" title="2-left/2-right confirmed swings. Labels appear when confirmed, two closed bars after the pivot. Not trade signals.">Structure</button>
+          <button type="button" [class.active]="visibility.structure" [attr.aria-pressed]="visibility.structure" (click)="toggle('structure')" title="Latest confirmed swing high/low, shown as current reference levels. Two-left/two-right closed-bar confirmation. Display only.">Swing levels</button>
           <button type="button" [class.active]="visibility.adx" [attr.aria-pressed]="visibility.adx" (click)="toggle('adx')" title="Wilder ADX/DMI 14: strength (purple), +DI (green), −DI (red). Completed candles only.">ADX/DMI</button>
           <button type="button" [class.active]="visibility.chandelier" [attr.aria-pressed]="visibility.chandelier" (click)="toggle('chandelier')" title="Chandelier 22 periods, 3× Wilder ATR: uptrend and downtrend reference lines. Not your actual stop.">Chandelier</button>
-          @if (terminal) { <button type="button" [attr.aria-pressed]="allStructureLabels" (click)="toggleStructureLabels()">{{allStructureLabels ? 'All structure labels' : 'Recent structure labels'}}</button> }
+          @if (terminal) {
+            <button type="button" [class.active]="visibility.structureHistory" [attr.aria-pressed]="visibility.structureHistory" (click)="toggle('structureHistory')" title="Show historical swing lines, dots and HH/HL/LH/LL/break annotations. CE/PE trade markers are always retained.">Structure history</button>
+            <button type="button" (click)="resetIndicators()">Clean defaults</button>
+          }
           @if(trendText){<span title="Display-only · completed candles · trading rules unchanged">{{trendText}}</span>}
           @if (rangeText) { <span>{{rangeText}}</span> }
         </div>
@@ -82,15 +85,16 @@ import {arrangeChartLabels, ChartAxisLabel} from './chart-axis-labels';
       <div class="chart-stage">
         <div #chart class="chart" [attr.aria-label]="'Live ' + snapshot?.instrument + ' candlestick chart'"></div>
         @if (terminal) {
-          <svg class="axis-captions" [style.width.px]="axisWidth()" [style.height.px]="axisHeight()" aria-label="Indicator price levels">
-            @for (label of axisLabels(); track label.title) {
-              <title>{{label.title}} · {{label.price.toFixed(2)}}</title>
-              <path [attr.d]="'M 0 ' + label.sourceY + ' L 18 ' + label.y + ' L 25 ' + label.y" [attr.stroke]="label.color" fill="none" />
-              <rect x="25" [attr.y]="label.y-8" [attr.width]="axisWidth()-27" height="17" rx="2" fill="#fafcfbf2" [attr.stroke]="label.color" stroke-width="0.5" />
-              <text x="29" [attr.y]="label.y+4" [attr.fill]="label.color">{{axisCaption(label.title)}}</text>
-              <text [attr.x]="axisWidth()-5" [attr.y]="label.y+4" text-anchor="end" fill="#263f33">{{label.price.toFixed(2)}}</text>
+          <aside class="indicator-legend" aria-label="Indicator values, separate from price scale">
+            <strong>INDICATOR LEVELS</strong>
+            <small>Latest values · not axis labels</small>
+            @for (label of legendLevels(); track label.title) {
+              <div class="indicator-legend-row" [title]="label.title" [style.border-left-color]="label.color">
+                <span>{{axisCaption(label.title)}}</span><b>{{label.price.toFixed(2)}}</b>
+              </div>
             }
-          </svg>
+            @if (!legendLevels().length) { <small>No enabled levels available.</small> }
+          </aside>
         }
         <div class="volume-label" [style.bottom.px]="visibility.adx ? 115 : 25">FUTURES VOLUME</div>
         @if (!snapshot?.candles?.length) {
@@ -165,7 +169,7 @@ import {arrangeChartLabels, ChartAxisLabel} from './chart-axis-labels';
       :host:has(.terminal-chart) { height:100%; min-height:0; }
       .terminal-chart { height:100%; min-height:0; display:flex; flex-direction:column; align-items:stretch; position:relative; background:#fafcfb; }
       .terminal-chart .chart-stage { flex:1; min-height:0; width:100%; }
-      .terminal-chart .chart { position:absolute; inset:0; height:100%; }
+      .terminal-chart .chart { position:absolute; inset:0 148px 0 0; width:calc(100% - 148px); height:100%; }
       .terminal-chart .chart-tools { display:none; position:absolute; z-index:8; right:8px; top:8px; width:min(500px,calc(100% - 16px)); border:1px solid #afc4b7; border-radius:6px; background:#fff; box-shadow:0 6px 25px #203b3326; overflow:auto; max-height:70%; }
       .terminal-chart.tools-open .chart-tools { display:block; }
       .terminal-chart .overlay-controls { flex-wrap:wrap; background:#fff; overflow:visible; }
@@ -174,7 +178,16 @@ import {arrangeChartLabels, ChartAxisLabel} from './chart-axis-labels';
       .terminal-chart .fill-key { display:none; }
       .terminal-chart.tools-open .fill-key { display:block; position:absolute; bottom:28px; left:8px; right:165px; z-index:8; max-height:30%; overflow:auto; border:1px solid #bacfc0; background:#fff; }
       .terminal-chart .fill-readout { position:absolute; z-index:7; left:8px; right:165px; bottom:125px; max-height:100px; overflow:auto; background:#fffffff2; border:1px solid #b4c9bb; border-radius:4px; }
-      .axis-captions { position:absolute; right:0; top:0; pointer-events:none; z-index:2; font:10px system-ui,sans-serif; font-variant-numeric:tabular-nums; }
+      .indicator-legend { position:absolute; right:0; top:0; bottom:0; width:148px; box-sizing:border-box; padding:12px 7px; border-left:1px solid #d5dfd9; background:#f6f9f7; overflow:auto; color:#3d5748; font:11px system-ui,sans-serif; font-variant-numeric:tabular-nums; }
+      .indicator-legend > strong { display:block; font-size:10px; letter-spacing:.04em; }
+      .indicator-legend > small { display:block; font-size:9px; color:#718277; margin:5px 0 12px; }
+      .indicator-legend-row { display:flex; align-items:center; justify-content:space-between; gap:5px; min-height:29px; padding:4px; border-left:2px solid; border-bottom:1px solid #e2e9e5; }
+      .indicator-legend-row span { font-size:9px; }.indicator-legend-row b { font-size:11px; font-weight:600; }
+      @media(max-width:700px) {
+        .terminal-chart .chart { inset:0; width:100%; }
+        .indicator-legend { display:none; }
+        .terminal-chart.tools-open .indicator-legend { display:block; z-index:8; top:72%; bottom:28px; width:148px; border:1px solid #b4c9bb; border-radius:4px; }
+      }
     `,
   ],
 })
@@ -195,34 +208,14 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   protected trendText = '';
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private priceLines: IPriceLine[] = [];
-  protected readonly axisLabels = signal<ChartAxisLabel[]>([]);
-  protected readonly axisWidth = signal(154);
-  protected readonly axisHeight = signal(0);
+  protected readonly legendLevels = signal<{title:string;price:number;color:string}[]>([]);
   private axisLevels: {title:string;price:number;color:string}[] = [];
-  private resizeObserver?:ResizeObserver;
-  private labelFrame=0;
-  protected allStructureLabels=false;
   protected axisCaption(title:string):string {
     if(title.endsWith('TRIGGER'))return 'TRIGGER';
     if(title.endsWith('INVALIDATION'))return 'INVALID';
     if(title.endsWith('OBJECTIVE'))return 'OBJECTIVE';
     return title;
   }
-  protected toggleStructureLabels():void { this.allStructureLabels=!this.allStructureLabels; this.render(); }
-  private readonly scheduleLabels=():void=>{
-    if (!this.terminal || this.labelFrame) return;
-    this.labelFrame=requestAnimationFrame(()=>{
-      this.labelFrame=0;
-      if (!this.chart || !this.series) return;
-      const height=this.chart.panes()[0]?.getHeight() ?? 0;
-      this.axisHeight.set(height);
-      this.axisWidth.set(this.chart.priceScale('right').width());
-      this.axisLabels.set(arrangeChartLabels(this.axisLevels.flatMap(level=>{
-        const sourceY=this.series!.priceToCoordinate(level.price);
-        return sourceY===null ? [] : [{...level,sourceY,y:sourceY}];
-      }),height));
-    });
-  };
   private hasFittedContent = false;
   private renderedTimeframeMinutes = 0;
   private renderedInstrument = '';
@@ -247,7 +240,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: this.terminal ? '#fafcfb' : '#edf5e8' }, textColor: '#526d5a' },
       grid: { vertLines: { color: this.terminal ? '#edf1ef' : '#dfebd9' }, horzLines: { color: this.terminal ? '#edf1ef' : '#dfebd9' } },
-      rightPriceScale: { borderColor: '#cbd8cf', alignLabels:true, minimumWidth:this.terminal ? 154 : 0 },
+      rightPriceScale: { borderColor: '#cbd8cf', alignLabels:true, minimumWidth:this.terminal ? 72 : 0 },
       localization: { timeFormatter: formatCrosshairTimeIst },
       timeScale: {
         borderColor: '#b7cfba',
@@ -269,9 +262,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       borderVisible: false,
       wickUpColor: '#25834d',
       wickDownColor: '#dc5961',
-      lastValueVisible:!this.terminal,
+      lastValueVisible:true,
     });
-    this.chart.subscribeCrosshairMove(e=>{this.hovered.set(typeof e.time==='number'?e.time:null);this.scheduleLabels();});
+    this.chart.subscribeCrosshairMove(e=>this.hovered.set(typeof e.time==='number'?e.time:null));
     this.chart.subscribeClick(e=>this.pinned.set(typeof e.time==='number' && this.fills().some(f=>f.time===e.time)?e.time:null));
     this.confirmationSeries = this.chart.addSeries(LineSeries,{color:'#895d19',lineStyle:LineStyle.Dashed,
       lineWidth:2,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,pointMarkersVisible:true});
@@ -296,29 +289,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       scaleMargins: { top: 0.82, bottom: 0 },
       borderVisible: false,
     });
-    if(this.terminal){
-      this.chart.timeScale().subscribeVisibleLogicalRangeChange(this.scheduleLabels);
-      this.resizeObserver=new ResizeObserver(this.scheduleLabels);
-      this.resizeObserver.observe(this.chartElement.nativeElement);
-      this.chartElement.nativeElement.addEventListener('pointermove',this.scheduleLabels);
-      this.chartElement.nativeElement.addEventListener('pointerup',this.scheduleLabels);
-      this.chartElement.nativeElement.addEventListener('wheel',this.scheduleLabels,{passive:true});
-    }
     this.render();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['terminal']) this.visibility=this.readVisibility();
     if (changes['timeframeMinutes']) this.hasFittedContent = false;
     if (changes['snapshot']) this.render();
     else if (changes['timeframeMinutes']) this.render();
   }
 
   ngOnDestroy(): void {
-    cancelAnimationFrame(this.labelFrame);
-    this.resizeObserver?.disconnect();
-    this.chartElement.nativeElement.removeEventListener('pointermove',this.scheduleLabels);
-    this.chartElement.nativeElement.removeEventListener('pointerup',this.scheduleLabels);
-    this.chartElement.nativeElement.removeEventListener('wheel',this.scheduleLabels);
     this.chart?.remove();
     this.chart=null;
   }
@@ -393,7 +374,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
         return typeof value === 'number' ? {time,value} : {time};
       });
       series.setData(data);
-      series.applyOptions({visible:key === 'support' || key === 'resistance' ? this.visibility.structure :
+      series.applyOptions({visible:key === 'support' || key === 'resistance' ? this.visibility.structure && (!this.terminal || this.visibility.structureHistory) :
         key.startsWith('chandelier') ? this.visibility.chandelier : this.visibility.adx});
     }
     const latest = trends.points.at(-1);
@@ -406,10 +387,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.priceLines = [];
     this.axisLevels=[];
     const addLabel=(title:string,price:number|null|undefined,color:string)=>{if(price!=null && Number.isFinite(price))this.axisLevels.push({title,price,color});};
-    addLabel('LAST',candles.at(-1)?.close,'#256b4a');
     if(this.visibility.ema){addLabel('EMA9',fast.at(-1)?.value,'#418253');addLabel('EMA21',slow.at(-1)?.value,'#286f46');}
     if(this.visibility.vwap && !this.snapshot.chartDisplay) addLabel('VWAP',vwap.at(-1)?.value,'#95731c');
-    if(this.visibility.structure){addLabel('Swing low',latest?.support,'#287da1');addLabel('Swing high',latest?.resistance,'#8c5bb4');}
+    if(this.visibility.structure && (!this.terminal || this.visibility.structureHistory)){addLabel('Swing low',latest?.support,'#287da1');addLabel('Swing high',latest?.resistance,'#8c5bb4');}
     if(this.visibility.chandelier){addLabel('CH up',latest?.chandelierUp,'#15806b');addLabel('CH down',latest?.chandelierDown,'#b66a24');}
     const levels=chartLevels(this.snapshot.candles);
     this.rangeText=levels ? `Range ${levels.dayRange.toFixed(2)} · ${levels.dayRangePercent.toFixed(2)}%` : '';
@@ -419,7 +399,8 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       addLabel(title,price,color);
       this.priceLines.push(this.series!.createPriceLine({price,color,lineWidth:1,lineStyle:style,title,axisLabelVisible:!this.terminal}));
     };
-    if(levels&&this.visibility.day){levelLine(levels.dayHigh,'DAY HIGH','#2ad18a');levelLine(levels.dayLow,'DAY LOW','#ff7380');}
+    if(this.terminal && this.visibility.structure && !this.visibility.structureHistory){levelLine(latest?.support ?? null,'Swing low','#6b95a780',LineStyle.Dotted);levelLine(latest?.resistance ?? null,'Swing high','#9987ad80',LineStyle.Dotted);}
+    if(levels&&this.visibility.day){levelLine(levels.dayHigh,'DAY HIGH',this.terminal?'#79a18a80':'#2ad18a',this.terminal?LineStyle.Dotted:LineStyle.Dashed);levelLine(levels.dayLow,'DAY LOW',this.terminal?'#ad878780':'#ff7380',this.terminal?LineStyle.Dotted:LineStyle.Dashed);}
     if(levels&&this.visibility.previous){levelLine(levels.previousHigh,'PREV HIGH','#679476');levelLine(levels.previousLow,'PREV LOW','#679476');levelLine(levels.previousClose,'PREV CLOSE','#879c89',LineStyle.Dotted);}
     if(levels&&this.visibility.openingRange){levelLine(levels.openingRangeHigh,'OR HIGH','#ae8b35');levelLine(levels.openingRangeLow,'OR LOW','#ae8b35');}
     const overlay = this.latestOverlay();
@@ -465,9 +446,9 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       position:f.side==='CE'?'belowBar' as const:'aboveBar' as const,
       color:f.side==='CE'?'#167143':'#a9363e',shape:f.side==='CE'?'arrowUp' as const:'arrowDown' as const,
       text:f.side}));
-    if (this.visibility.structure) markers.push(...trends.marks.map((m,i)=>({time:Math.floor(Date.parse(m.openTimeUtc)/1000) as Time,
+    if (this.visibility.structure && (!this.terminal || this.visibility.structureHistory)) markers.push(...trends.marks.map(m=>({time:Math.floor(Date.parse(m.openTimeUtc)/1000) as Time,
       position:m.above?'aboveBar' as const:'belowBar' as const, color:'#526b88',shape:'circle' as const,size:this.terminal ? 0.55 : 1,
-      text:!this.terminal || this.allStructureLabels || i>=trends.marks.length-8 ? m.text : ''})));
+      text:m.text})));
     markers.sort((a,b)=>Number(a.time)-Number(b.time));
     if (this.markerApi) this.markerApi.setMarkers(markers);
     else this.markerApi = createSeriesMarkers(this.series, markers);
@@ -491,7 +472,7 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       this.renderedTimeframeMinutes = this.timeframeMinutes;
       this.renderedSessionDate = latestSessionDate;
     }
-    this.scheduleLabels();
+    this.legendLevels.set([...this.axisLevels].sort((a,b)=>b.price-a.price));
     const started = candles.length ? performance.getEntriesByName(mark, 'mark').at(-1) : undefined;
     if (started) {
       const ready = 'desk:chart-series-ready:' + market;
@@ -510,13 +491,20 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   protected toggle(key:keyof ChartOverlayVisibility):void {
     this.visibility={...this.visibility,[key]:!this.visibility[key]};
-    try { localStorage.setItem('sarthi.chartOverlays',JSON.stringify(this.visibility)); } catch { /* Keep in-memory controls usable. */ }
+    if(key==='structureHistory' && this.visibility.structureHistory)this.visibility.structure=true;
+    this.saveVisibility();
     this.render();
   }
 
+  protected resetIndicators():void {
+    this.visibility=chartIndicatorDefaults(this.terminal);this.saveVisibility();this.render();
+  }
+  private saveVisibility():void {
+    try { localStorage.setItem(this.terminal ? terminalIndicatorKey : 'sarthi.chartOverlays',JSON.stringify(this.visibility)); } catch { /* Keep in-memory controls usable. */ }
+  }
+
   private readVisibility():ChartOverlayVisibility {
-    const defaults:ChartOverlayVisibility={day:true,previous:true,openingRange:true,vwap:true,ema:true,structure:true,adx:true,chandelier:true};
-    try{return {...defaults,...JSON.parse(localStorage.getItem('sarthi.chartOverlays')||'{}')};}catch{return defaults;}
+    try{return readChartIndicators(localStorage.getItem(this.terminal ? terminalIndicatorKey : 'sarthi.chartOverlays'),this.terminal);}catch{return chartIndicatorDefaults(this.terminal);}
   }
 
   private latestOverlay(): WorkspaceTradeOverlay | null {
@@ -532,5 +520,3 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   }
 
 }
-
-interface ChartOverlayVisibility { day:boolean; previous:boolean; openingRange:boolean; vwap:boolean; ema:boolean; structure:boolean; adx:boolean; chandelier:boolean; }
