@@ -3,7 +3,7 @@
 } @else if (selectedMarket === null) {
   <app-public-home />
 } @else if (status$ | async; as status) {
-  @if (user) {
+  @if (user && selectedMarket === 'natural-gas') {
     <header class="mode-banner desk-mode-bar" [class.mode-banner--unavailable]="status.status === 'Unavailable'">
       <strong class="desk-mode-pill">{{ status.mode }}</strong>
       <span class="desk-availability" title="Live execution availability; each market retains its own execution switch.">{{ status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live available' : 'Live unavailable' }}</span>
@@ -19,7 +19,7 @@
     </header>
   }
 
-  <main [class.market-theme--sensex]="selectedMarket === 'sensex'"
+  <main [class.terminal-main]="!!user && selectedMarket !== 'natural-gas'" [class.market-theme--sensex]="selectedMarket === 'sensex'"
     [class.market-theme--gas]="selectedMarket === 'natural-gas'">
     @if (checkingSession) {
       <section class="session-card"><span class="pulse"></span>Checking secure session…</section>
@@ -59,8 +59,11 @@
         </form>
       </section>
     } @else {
-      <div class="workspace-layout desk-refined">
+      <div class="workspace-layout" [class.desk-refined]="selectedMarket === 'natural-gas'" [class.chart-terminal]="selectedMarket !== 'natural-gas'">
       <nav class="market-tabs" aria-label="Switch trading market">
+        @if (selectedMarket !== 'natural-gas') {
+          <button class="terminal-menu-toggle" type="button" aria-label="Workspace menu" aria-controls="workspace-menu" [attr.aria-expanded]="terminalMenuOpen" (click)="terminalMenuOpen=!terminalMenuOpen">☰</button>
+        }
         <div class="workspace-brand" aria-label="Sarthi trading workspace">
           <span class="workspace-brand__mark">S</span>
           <span><strong>Sarthi</strong><small>Trading desk</small></span>
@@ -72,12 +75,34 @@
             [class.market-tab--positions]="activeMarketTrades(market.code) > 0"
             [class.market-tab--alert]="marketTabAlert(market.code)" [title]="marketPositionHint(market.code)"
             (click)="openMarket(market.code)"><span class="market-name">{{market.label}}</span>
+            @if (selectedMarket !== 'natural-gas') {
+              @let net = marketClosedPnl(market.code);
+              <span class="terminal-market-pnl" [class.good]="net !== null && net > 0" [class.bad]="net !== null && net < 0" title="Closed net paper P&L, including Hero Zero">{{net !== null ? '₹' + (net | number:'1.0-0') : '—'}}</span>
+            }
             @if (activeMarketTrades(market.code); as count) { <small class="market-position-count">{{count}} active</small> }
             @if (marketTabAlert(market.code); as alert) { <small>{{alert === 'entry' ? 'ENTRY' : 'EXIT'}}</small> }
           </button>
         }
         </div>
-        <div class="workspace-nav-actions">
+        @if (selectedMarket !== 'natural-gas') {
+          @if (portfolioSummary(); as portfolio) {
+            <div class="terminal-total" title="All three · fully closed net paper P&L, including Hero Zero. Excludes open positions and their partial bookings.">
+              <small>Closed net · all 3</small>
+              <strong [class.good]="portfolio.total !== null && portfolio.total > 0" [class.bad]="portfolio.total !== null && portfolio.total < 0">{{portfolio.total !== null ? '₹' + (portfolio.total | number:'1.2-2') : '—'}}</strong>
+              @if (!portfolio.complete) { <small>{{portfolio.count}}/3 loaded</small> }
+              @else if (portfolio.stale) { <small class="terminal-total-age">Last saved</small> }
+            </div>
+          }
+          <app-research-capture-health class="terminal-health" [compact]="true" [iconOnly]="true" />
+          <button class="terminal-tools-toggle" type="button" [attr.aria-expanded]="chartToolsOpen" (click)="chartToolsOpen=!chartToolsOpen" aria-label="Chart indicators and decision details" title="Indicators and decision details">Indicators</button>
+          <button class="terminal-history-toggle" type="button" (click)="tradeHistoryOpen=!tradeHistoryOpen" [attr.aria-expanded]="tradeHistoryOpen">Trades</button>
+          @if (killSwitchActive || status.status === 'Unavailable') { <button type="button" class="bad" (click)="openControls()">{{killSwitchActive ? 'Paper stopped' : 'System unavailable'}}</button> }
+        }
+        <div id="workspace-menu" class="workspace-nav-actions" [class.terminal-menu-open]="terminalMenuOpen">
+          @if (selectedMarket !== 'natural-gas') {
+            <header class="terminal-drawer-title"><strong>Sarthi · Workspace</strong><button type="button" (click)="terminalMenuOpen=false" aria-label="Close workspace menu">×</button></header>
+            <small class="terminal-mode">{{status.mode}} · {{status.status === 'Unavailable' ? 'System unavailable' : status.liveTradingAvailable ? 'Live available · per-market switches apply' : 'Live unavailable'}}</small>
+          }
           <app-live-protection-monitor />
           <button type="button" class="workspace-nav-actions__primary" (click)="openDailyAnalysis()">Daily Analysis</button>
           @if (selectedMarket === 'nifty' || selectedMarket === 'sensex') { <button class="workspace-nav-actions__primary" type="button" (click)="openHeroZero()">Hero Zero</button> }
@@ -277,7 +302,7 @@
         }
 
         @let openTrades = openDeskTrades(view);
-        @if (openTrades.length) {
+        @if (openTrades.length && selectedMarket === 'natural-gas') {
           <section class="desk-open-trades" aria-label="Open positions">
             <h2>Open positions <span>{{openTrades.length}}</span></h2>
             @for (trade of openTrades; track trade.signalId) {
@@ -317,12 +342,12 @@
               <span>Session P&amp;L <strong [class.good]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl > 0" [class.bad]="view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl < 0">₹{{ view.paperAutomation.realisedPnl + view.paperAutomation.unrealisedPnl | number:'1.0-0' }}</strong></span>
               <span>Updated <time>{{(view.chartDisplay ? view.chartDisplay.timestampUtc : view.lastMarketTimestampUtc) | date:'HH:mm:ss':'Asia/Kolkata'}} IST</time></span>
             </div>
-            <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div>
+            @if (selectedMarket === 'natural-gas') { <div class="desk-safety-tools"><ng-container [ngTemplateOutlet]="paperStop" /></div> }
           </div>
 
           @if (chartHistoryMessage) { <small class="desk-history-message" role="status">{{ chartHistoryMessage }}</small> }
           @defer (on immediate) {
-            <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" />
+            <app-nifty-chart [snapshot]="view" [timeframeMinutes]="chartTimeframeMinutes" [terminal]="selectedMarket !== 'natural-gas'" [controlsOpen]="chartToolsOpen" />
           } @placeholder { <div style="height:clamp(280px,50dvh,440px)">Loading chart…</div> }
           @error { <p role="alert">Chart could not load. Refresh the page to retry.</p> }
           <p class="chart-attribution">
@@ -331,11 +356,33 @@
 
         </section>
 
+        @if (selectedMarket !== 'natural-gas') {
+          <section class="terminal-positions" aria-label="Active trades across all three indexes">
+            @for (market of deskMarketTabs; track market.code) {
+              @let positions = marketOpenPositions(market.code);
+              <div class="terminal-position-market" [class.has-positions]="positions.length > 0">
+                <div class="terminal-position-heading"><button type="button" (click)="openMarket(market.code)">{{market.label}}</button><small>{{positions.length ? positions.length + ' open' : marketSnapshotLabel(market.code)}}</small></div>
+                <div class="terminal-position-list">
+                  @for (trade of positions; track trade.signalId) {
+                    <button type="button" class="terminal-position" (click)="openTerminalTrade(market.code,trade.signalId)" [title]="marketPositionHint(market.code) + ' · Open full trade details'">
+                      <span><b>{{compactOptionName(trade)}}</b><small>{{trade.quantity}} units</small></span>
+                      <span><small>E</small>{{trade.fillPrice | number:'1.2-2'}}</span>
+                      <span><small>LTP</small>{{trade.currentOptionPrice !== null ? (trade.currentOptionPrice | number:'1.2-2') : '—'}}</span>
+                      <span><small>SL</small>{{(trade.strategyPremiumStop ?? trade.executionStopLoss) | number:'1.2-2'}}</span>
+                      <span class="terminal-position-profit" [class.good]="(trade.unrealisedPnl ?? 0) > 0" [class.bad]="(trade.unrealisedPnl ?? 0) < 0"><small>{{marketSnapshotStale(market.code) ? 'Last P&L' : 'Open P&L'}}</small>{{trade.unrealisedPnl !== null ? '₹' + (trade.unrealisedPnl | number:'1.2-2') : '—'}}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+          </section>
+        }
 
-        <section class="detail-grid workspace-priority-events">
+        <section class="detail-grid workspace-priority-events" [class.terminal-history-open]="tradeHistoryOpen" [attr.role]="selectedMarket !== 'natural-gas' ? 'region' : null" aria-label="Positions and outcomes">
           <article class="positions-panel">
             <div class="positions-heading">
               <strong>{{ selectedMarket === 'natural-gas' ? 'Futures positions' : 'Positions & outcomes' }}</strong><span>Paper ledger · {{ preparedMarketName() }}</span>
+              @if (selectedMarket !== 'natural-gas') { <button type="button" (click)="tradeHistoryOpen=false" aria-label="Close trade history">×</button> }
             </div>
             @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
               @for (overlay of executedTrades(view); track overlay.signalId) {

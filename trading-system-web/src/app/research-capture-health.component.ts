@@ -27,14 +27,15 @@ interface CaptureHealth extends CaptureIndicatorHealth {
   .capture-warning--critical{--border:#bc4545;--bg:#fde8e8;--open:#fbd0d0;color:#8b1e1e}
   .capture-warning--idle{--border:#89958d;--bg:#edf1ee;--open:#dce4df;color:#44534a}
   .capture-dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;background:currentColor;margin-inline-end:.35rem}
+  .capture-icon summary{list-style:none;padding:8px;line-height:1}.capture-icon summary::-webkit-details-marker{display:none}.capture-icon .capture-dot{margin:0}.capture-icon .capture-warning__body{left:auto;right:0}
   @media(max-width:560px){.capture-warning{position:static}.capture-warning__body{left:8px;right:8px;top:calc(100% + 4px);width:auto}}
 `], template:`
   @if(compact){
-      <details class="capture-warning" [class.capture-warning--healthy]="indicator().severity === 'healthy'"
+      <details class="capture-warning" [class.capture-icon]="iconOnly" [class.capture-warning--healthy]="indicator().severity === 'healthy'"
         [class.capture-warning--critical]="indicator().severity === 'critical'"
         [class.capture-warning--idle]="indicator().severity === 'idle'"
         #warning (keydown.escape)="warning.open=false">
-        <summary><span role="status"><span class="capture-dot" aria-hidden="true"></span><strong>Replay</strong> · {{indicator().text}}</span></summary>
+        <summary [attr.aria-label]="'Replay recording: ' + indicator().text" [title]="'Replay recording: ' + indicator().text"><span role="status"><span class="capture-dot" aria-hidden="true"></span>@if(!iconOnly){<strong>Replay</strong> · {{indicator().text}}}</span></summary>
         <div class="capture-warning__body">
           @if(snapshot();as s){
           <small>Checked {{s.checkedAt|date:'HH:mm:ss':'+0530'}} IST @if(error()){ · Retrying; last known issues below}</small>
@@ -63,6 +64,7 @@ interface CaptureHealth extends CaptureIndicatorHealth {
   </section>}`})
 export class ResearchCaptureHealthComponent implements OnInit {
   @Input() compact=false;
+  @Input() iconOnly=false;
   private readonly http=inject(HttpClient);
   private readonly destroy=inject(DestroyRef);
   protected readonly markets=['NIFTY','SENSEX','BANKNIFTY'];

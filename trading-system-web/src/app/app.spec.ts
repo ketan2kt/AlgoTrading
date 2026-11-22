@@ -17,6 +17,8 @@ import { sessionKey } from './chart-overlays';
 class MockNiftyChartComponent {
   @Input({ required: true }) snapshot!: TradingWorkspaceSnapshot;
   @Input() timeframeMinutes = 5;
+  @Input() terminal = false;
+  @Input() controlsOpen = false;
 }
 
 @Component({selector:'app-live-protection-monitor',template:''})
@@ -128,7 +130,7 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Trade alerts on');
     expect(fixture.nativeElement.querySelector('.desk-reports button')?.textContent).toContain('Reports');
     expect(fixture.nativeElement.querySelectorAll('app-research-capture-health')).toHaveLength(1);
-    expect(fixture.nativeElement.querySelector('.desk-mode-bar > app-research-capture-health')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.terminal-health')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('Add today’s token');
     http.verify();
   });
@@ -208,20 +210,22 @@ describe('App', () => {
     expect(desk.querySelector('.positions-heading')?.textContent).toContain('Positions & outcomes');
     expect(Array.from(desk.querySelectorAll('.market-tab-group .market-name')).map(item => item.textContent?.trim()))
       .toEqual(['Nifty', 'Bank Nifty', 'Sensex']);
-    expect(desk.querySelector('.desk-mode-bar')?.textContent).toContain('Live unavailable');
+    expect(desk.querySelector('.terminal-mode')?.textContent).toContain('Live unavailable');
     expect(desk.querySelector('.chart-panel--compact .chart-status-rail')).toBeNull();
     expect(desk.querySelector('.desk-chart-toolbar .legend')).toBeNull();
     expect(desk.querySelector('select[aria-label="Chart timeframe"]')).toBeNull();
     expect(desk.querySelector('.desk-session-summary')?.textContent).toContain('Session P&L');
     expect(desk.querySelector('.desk-session-summary')?.textContent).toContain('Updated');
     expect(desk.querySelector('.desk-previous-close')?.textContent).toContain('Prev close');
-    expect(desk.querySelector('.workspace-priority-chart')?.nextElementSibling?.classList.contains('workspace-priority-events')).toBe(true);
-    expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')?.textContent).toContain('Unknown');
+    expect(desk.querySelector('.workspace-priority-chart')?.nextElementSibling?.classList.contains('terminal-positions')).toBe(true);
+    expect(desk.querySelector('.desk-chart-toolbar .desk-paper-stop')).toBeNull();
+    expect(desk.querySelectorAll('.terminal-position-market')).toHaveLength(3);
+    expect(desk.querySelector('.workspace-priority-events')?.classList.contains('terminal-history-open')).toBe(false);
     expect(desk.textContent).not.toContain('SESSION READINESS');
     expect(desk.textContent).not.toContain('Relative futures volume 0.62 is below 0.75.');
     expect([...requests].sort()).toEqual(['bank-nifty', 'nifty', 'sensex']);
     for (const [label, instrument] of [['Sensex','SENSEX'], ['Bank Nifty','BANK-NIFTY'], ['Nifty','NIFTY']]) {
-      const tab = Array.from(desk.querySelectorAll('button')).find(button => button.textContent?.trim() === label);
+      const tab = Array.from(desk.querySelectorAll('.market-tab-group button')).find(button => button.querySelector('.market-name')?.textContent?.trim() === label) as HTMLButtonElement;
       tab!.click();
       expect(fixture.componentInstance['workspace']?.instrument).toBe(instrument);
       fixture.detectChanges();
@@ -243,13 +247,22 @@ describe('App', () => {
     fixture.detectChanges();
     expect(desk.querySelector('.market-tab--positions')?.textContent).toContain('Sensex');
     expect(desk.querySelector('.market-position-count')?.textContent).toContain('1 active');
-    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('Closed net P&L₹0.00');
+    expect(desk.querySelector('.terminal-total')?.textContent).toContain('Closed net · all 3₹0.00');
+    expect(desk.querySelector('.terminal-position-market.has-positions')?.textContent).toContain('Sensex');
+    expect(desk.querySelector('.terminal-position-market.has-positions')?.textContent).toContain('1 open');
     expect(fixture.componentInstance['selectedMarket']).toBe('nifty');
     fixture.componentInstance['acceptView']('sensex', {...sensex,observedAtUtc:new Date().toISOString(),
       completedTradePnl:{tradingDate:sessionKey(new Date().toISOString()),netPnl:1200,tradeCount:1}}, false);
     fixture.detectChanges();
     expect(desk.querySelector('.market-tab--positions')).toBeNull();
-    expect(desk.querySelector('.desk-total-pnl')?.textContent).toContain('1,200.00');
+    expect(desk.querySelector('.terminal-total')?.textContent).toContain('1,200.00');
+    expect(desk.querySelectorAll('.terminal-market-pnl')[2]?.textContent).toContain('1,200');
+    (desk.querySelector('.terminal-tools-toggle') as HTMLButtonElement).click();fixture.detectChanges();
+    expect(fixture.componentInstance['chartToolsOpen']).toBe(true);
+    (desk.querySelector('.terminal-menu-toggle') as HTMLButtonElement).click();fixture.detectChanges();
+    expect(desk.querySelector('#workspace-menu')?.classList.contains('terminal-menu-open')).toBe(true);
+    (desk.querySelector('.terminal-history-toggle') as HTMLButtonElement).click();fixture.detectChanges();
+    expect(desk.querySelector('.workspace-priority-events')?.classList.contains('terminal-history-open')).toBe(true);
     const nifty = fixture.componentInstance['marketViews'].get('nifty')!;
     fixture.componentInstance['acceptView']('nifty', {...nifty,
       observedAtUtc: new Date().toISOString(),

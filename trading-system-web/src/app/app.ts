@@ -1,5 +1,5 @@
 import { AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe } from '@angular/common';
-import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet } from '@angular/router';
 import { catchError, finalize, of, startWith, Subscription } from 'rxjs';
@@ -40,7 +40,7 @@ import {
   selector: 'app-root',
   imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, TradeExitPriceComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
-  styleUrls: ['./app.scss', './trading-desk.scss'],
+  styleUrls: ['./app.scss', './trading-desk.scss', './chart-terminal.scss'],
 })
 export class App implements OnInit, OnDestroy {
   protected readonly indexChange = indexChange;
@@ -49,6 +49,31 @@ export class App implements OnInit, OnDestroy {
   ];
   private readonly completedPortfolio = new CompletedDeskPortfolio();
   protected portfolioSummary() { return this.completedPortfolio.read(); }
+  protected marketClosedPnl(market:TradingMarketCode) { return this.completedPortfolio.readMarket(market); }
+  protected terminalMenuOpen = false;
+  protected chartToolsOpen = false;
+  protected tradeHistoryOpen = false;
+  @HostListener('document:keydown.escape')
+  protected closeTerminalPanels():void {
+    this.terminalMenuOpen=false;this.chartToolsOpen=false;this.tradeHistoryOpen=false;
+  }
+  protected marketOpenPositions(market:TradingMarketCode) {
+    const view=this.marketViews.get(market);
+    return view ? this.openDeskTrades(view) : [];
+  }
+  protected marketSnapshotLabel(market:TradingMarketCode):string {
+    const view=this.marketViews.get(market);
+    if (!view) return 'Loading positions';
+    return this.recentView(view) ? 'No open positions' : 'Last snapshot · no open positions';
+  }
+  protected marketSnapshotStale(market:TradingMarketCode):boolean {
+    const view=this.marketViews.get(market);
+    return !view || !this.recentView(view);
+  }
+  protected openTerminalTrade(market:TradingMarketCode, signalId:string):void {
+    this.openMarket(market);
+    this.showDeskTrade(signalId);
+  }
   protected activeMarketTrades(market:TradingMarketCode) { return activeTradeCount(this.marketViews.get(market)); }
   protected marketPositionHint(market:TradingMarketCode):string {
     const view=this.marketViews.get(market);
@@ -407,6 +432,8 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected showDeskTrade(signalId: string): void {
+    this.tradeHistoryOpen = true;
+    this.changeDetector.detectChanges();
     const row = document.getElementById('position-' + signalId);
     row?.focus({ preventScroll: true });
     row?.scrollIntoView({ block: 'nearest' });

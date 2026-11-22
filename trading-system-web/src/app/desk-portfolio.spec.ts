@@ -10,6 +10,14 @@ const view=(realised:number,open:number):TradingWorkspaceSnapshot=>({
 } as unknown as TradingWorkspaceSnapshot);
 
 describe('three-market desk summary',()=>{
+  it('exposes the same closed totals per market without mixing sessions or open profit',()=>{
+    const desk=new CompletedDeskPortfolio();
+    desk.update('nifty',view(1200,9000));desk.update('sensex',view(-100,500));
+    expect(desk.readMarket('nifty',now)).toBe(1200);
+    expect(desk.readMarket('sensex',now)).toBe(-100);
+    expect(desk.readMarket('bank-nifty',now)).toBeNull();
+    expect(desk.readMarket('nifty',now+86400000)).toBeNull();
+  });
   it('uses only saved completed net, ignoring open profit and partial realised amounts',()=>{
     const desk=new CompletedDeskPortfolio();
     desk.update('nifty',view(1000,200));desk.update('sensex',view(-400,100));desk.update('bank-nifty',view(500,-50));

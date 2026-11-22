@@ -12,12 +12,12 @@ vi.mock('lightweight-charts',()=>({
   createChart:()=>({
     addSeries:(_type:unknown,options:any,pane=0)=>{
       const series={options,pane,setData:vi.fn(),applyOptions:vi.fn(),
-        priceScale:()=>({applyOptions:vi.fn()}),createPriceLine:vi.fn(),removePriceLine:vi.fn()};
+        priceScale:()=>({applyOptions:vi.fn()}),priceToCoordinate:(p:number)=>p%200,createPriceLine:vi.fn(),removePriceLine:vi.fn()};
       mocks.series.push(series);return series;
     },
-    priceScale:()=>({applyOptions:vi.fn()}),panes:()=>[{}, {setHeight:mocks.paneHeight}],
+    priceScale:()=>({applyOptions:vi.fn(),width:()=>154}),panes:()=>[{getHeight:()=>500}, {setHeight:mocks.paneHeight}],
     subscribeClick:vi.fn(),subscribeCrosshairMove:vi.fn(),
-    timeScale:()=>({setVisibleLogicalRange:vi.fn()}),removeSeries:mocks.removed,remove:mocks.destroy
+    timeScale:()=>({setVisibleLogicalRange:vi.fn(),subscribeVisibleLogicalRangeChange:vi.fn()}),removeSeries:mocks.removed,remove:mocks.destroy
   }),
   createSeriesMarkers:(_series:unknown,markers:unknown)=>{mocks.markers(markers);return {setMarkers:mocks.markers};}
 }));
@@ -27,7 +27,7 @@ describe('shared index chart indicators',()=>{
     mocks.series.length=0;vi.clearAllMocks();localStorage.clear();
     TestBed.configureTestingModule({imports:[NiftyChartComponent]});
   });
-  afterEach(()=>{TestBed.resetTestingModule();localStorage.clear();});
+  afterEach(()=>{TestBed.resetTestingModule();localStorage.clear();vi.unstubAllGlobals();});
   const snapshot=(market:string,offset=0)=>({
     marketCode:market,instrument:market.toUpperCase(),exchange:market==='sensex'?'BSE':'NSE',
     overlays:[],futuresVolume:[],historicalChartEntries:[
@@ -61,5 +61,21 @@ describe('shared index chart indicators',()=>{
     fixture.componentRef.setInput('timeframeMinutes',5);fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('ADX warming up');
     expect(mocks.series.find(s=>s.options.title==='ADX 14').setData.mock.lastCall![0].every((p:any)=>p.value==null)).toBe(true);
+  });
+  it.each(['nifty','sensex','bank-nifty'])('retains indicators and historical CE/PE entries in the compact %s terminal',market=>{
+    vi.stubGlobal('ResizeObserver',class {observe(){} disconnect(){}});
+    const fixture=TestBed.createComponent(NiftyChartComponent);
+    fixture.componentRef.setInput('terminal',true);
+    fixture.componentRef.setInput('snapshot',snapshot(market));
+    fixture.componentRef.setInput('timeframeMinutes',1);fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.terminal-chart')).not.toBeNull();
+    expect(mocks.series.find(s=>s.options.color==='#54a86d').options.lastValueVisible).toBe(false);
+    expect(mocks.series.find(s=>s.options.color==='#54a86d').options.title).toBe('');
+    expect(mocks.series.find(s=>s.options.title==='ADX 14').pane).toBe(1);
+    expect(mocks.markers.mock.lastCall![0]).toEqual(expect.arrayContaining([expect.objectContaining({text:'CE'})]));
+    fixture.componentRef.setInput('controlsOpen',true);fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.terminal-chart.tools-open')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Chandelier');
+    fixture.destroy();expect(mocks.destroy).toHaveBeenCalled();
   });
 });

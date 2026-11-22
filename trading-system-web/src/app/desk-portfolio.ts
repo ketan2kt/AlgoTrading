@@ -23,6 +23,11 @@ export class CompletedDeskPortfolio {
 
   clear():void { this.saved.clear(); }
 
+  readMarket(market:string, now=Date.now()):number|null {
+    const row=this.saved.get(market);
+    return row?.day===sessionKey(new Date(now).toISOString()) ? row.net : null;
+  }
+
   read(now=Date.now()) {
     const today=sessionKey(new Date(now).toISOString());
     const rows=[...this.saved.values()].filter(v=>v.day===today);
