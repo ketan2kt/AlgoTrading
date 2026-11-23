@@ -53,6 +53,7 @@ export interface WorkspaceTradeOverlay {
   entryEvidence?: string[] | null;
   grossRealisedPnl?: number | null;
   realisedCosts?: number | null;
+  openPnlEstimate?: {gross:number; costs:number; net:number} | null;
   exitBreakdown?: {
     averagePrice: number | null;
     complete: boolean;

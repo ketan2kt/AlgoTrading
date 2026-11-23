@@ -63,7 +63,10 @@ public sealed record WorkspaceTradeOverlay(
     IReadOnlyList<string>? EntryEvidence = null,
     decimal? GrossRealisedPnl = null,
     decimal? RealisedCosts = null,
-    WorkspaceExitBreakdown? ExitBreakdown = null);
+    WorkspaceExitBreakdown? ExitBreakdown = null,
+    WorkspacePnlEstimate? OpenPnlEstimate = null);
+
+public sealed record WorkspacePnlEstimate(decimal Gross, decimal Costs, decimal Net);
 
 public sealed record WorkspaceExitFill(string Kind, int Quantity, decimal Price);
 public sealed record WorkspaceExitBreakdown(decimal? AveragePrice, bool Complete,

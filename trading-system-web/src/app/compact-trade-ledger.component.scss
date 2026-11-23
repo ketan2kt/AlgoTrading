@@ -1,0 +1,18 @@
+:host{display:block;color:var(--ui-ink);font-size:12px;font-variant-numeric:tabular-nums}
+.session-heading{padding:5px 14px;border-top:1px solid var(--ui-edge);color:var(--ui-muted);font-size:11px}
+.ledger-scroll{overflow:auto;max-width:100%}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--ui-edge)}
+th:not(:last-child),td:not(:last-child){border-right:1px solid var(--ui-edge)}
+th{background:var(--ui-raised);font-size:11px;color:var(--ui-muted);font-weight:600}
+td{height:42px;background:var(--ui-surface)}
+.number{text-align:right}.net{font-weight:700}
+tbody tr:hover td{background:var(--ui-hover)}
+.good{color:var(--ui-positive)}.bad{color:#a32a39}
+button{font:inherit;white-space:nowrap;color:var(--ui-ink);background:var(--ui-button);border:1px solid var(--ui-edge);border-radius:4px;padding:4px 6px;min-height:27px;cursor:pointer}
+button:hover{background:var(--ui-hover)}button:disabled{opacity:.6;cursor:default}
+button:focus-visible,.ledger-scroll:focus-visible{outline:2px solid var(--ui-accent);outline-offset:-2px}
+.status-detail td{white-space:normal;overflow-wrap:anywhere;background:var(--ui-raised)}
+.open-position .status{border-left:3px solid #ab7514}
+p{padding:12px;margin:0}
+@media(pointer:coarse){button{min-height:44px}}

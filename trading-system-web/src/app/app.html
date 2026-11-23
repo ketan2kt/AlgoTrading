@@ -385,6 +385,9 @@
               @if (selectedMarket !== 'natural-gas') { <button type="button" (click)="tradeHistoryOpen=false" aria-label="Close trade history">×</button> }
             </div>
             @if (tradeExitError) { <p class="trade-exit-error" role="alert">{{ tradeExitError }}</p> }
+            @if (selectedMarket !== 'natural-gas') {
+              <app-compact-trade-ledger [trades]="executedTrades(view)" [market]="selectedMarket" [cached]="cachedPreview" [requested]="requestedTradeExits" (exitTrade)="requestTradeExit($event)" />
+            } @else {
               @for (overlay of executedTrades(view); track overlay.signalId) {
                 <div class="signal-row" [id]="'position-' + overlay.signalId" tabindex="-1">
                   <div><span>Status</span><strong [class.good]="overlay.lifecycleStatus === 'Active' || overlay.lifecycleStatus === 'Target hit'" [class.bad]="overlay.lifecycleStatus === 'SL hit'">{{ overlay.lifecycleStatus }}</strong></div>
@@ -419,6 +422,7 @@
                   }
                 </div>
               } @empty { <p class="empty-copy">No trades taken for this market this session.</p> }
+            }
           </article>
         </section>
 

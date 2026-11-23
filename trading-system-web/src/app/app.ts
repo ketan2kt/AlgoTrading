@@ -6,6 +6,7 @@ import { catchError, finalize, of, startWith, Subscription } from 'rxjs';
 import { AuthService, CurrentUser } from './auth.service';
 import { NiftyChartComponent } from './nifty-chart.component';
 import { TradeExitPriceComponent } from './trade-exit-price.component';
+import { CompactTradeLedgerComponent } from './compact-trade-ledger.component';
 import { PublicHomeComponent } from './public-home.component';
 import { AdminPanelComponent } from './admin-panel.component';
 import { GrowwTokenService, GrowwTokenStatus } from './groww-token.service';
@@ -38,7 +39,7 @@ import {
 
 @Component({
   selector: 'app-root',
-  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, TradeExitPriceComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
+  imports: [AsyncPipe, DatePipe, DecimalPipe, NgTemplateOutlet, PercentPipe, FormsModule, NiftyChartComponent, TradeExitPriceComponent, CompactTradeLedgerComponent, PublicHomeComponent, AdminPanelComponent, RouterOutlet, MarketControlsComponent, ReplayPanelComponent, SessionTimelineComponent, DailyProfitReviewComponent, DailyCapitalSummaryComponent, LiveProtectionMonitorComponent, ResearchCaptureHealthComponent],
   templateUrl: './app.html',
   styleUrls: ['./app.scss', './trading-desk.scss', './chart-terminal.scss'],
 })

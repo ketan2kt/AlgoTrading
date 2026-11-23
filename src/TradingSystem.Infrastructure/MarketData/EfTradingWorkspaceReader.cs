@@ -191,7 +191,7 @@ internal sealed class EfTradingWorkspaceReader(
             .ToDictionaryAsync(value => value.SignalId, cancellationToken);
         var entryReferences = signalIds.Select(value => $"{value:N}-ENTRY").ToArray();
         var displayOrderReferences = signalIds.SelectMany(value => new[]
-            { $"{value:N}-ENTRY", $"{value:N}-PARTIAL", $"{value:N}-EXIT" }).ToArray();
+            { $"{value:N}-ENTRY", $"{value:N}-ADDON", $"{value:N}-PARTIAL", $"{value:N}-EXIT" }).ToArray();
         var brokerEvents = await dbContext.PaperBrokerEvents.AsNoTracking()
             .Where(value => displayOrderReferences.Contains(value.ClientReference) &&
                             (value.EventType == "OrderSubmitted" || value.EventType == "OrderFilled"))
@@ -298,11 +298,15 @@ internal sealed class EfTradingWorkspaceReader(
                 GrossRealisedPnl: result?.GrossPnl,
                 RealisedCosts: result?.EstimatedCosts,
                 ExitBreakdown: result is null ? null : WorkspaceExitBreakdownBuilder.Build(
-                    result.Quantity, result.EntryPrice, result.GrossPnl, value.Direction,
+                    result.Quantity, result.EntryPrice, result.GrossPnl, Direction.Buy,
                     new[] { (Suffix: "PARTIAL", Kind: "Partial"), (Suffix: "EXIT", Kind: "Final") }
                         .Select(leg => exitOrders.TryGetValue($"{value.Id:N}-{leg.Suffix}", out var payload)
                             ? WorkspaceExitBreakdownBuilder.FromJournal(leg.Kind, payload) : null)
-                        .OfType<WorkspaceExitFill>()));
+                        .OfType<WorkspaceExitFill>()),
+                OpenPnlEstimate: isActive && positionMark!.QuoteAvailable
+                    // The thesis can be Sell (PE), but Nifty buys both option types.
+                    ? WorkspaceOpenPnl.FromJournal(value.Id, Direction.Buy, positionMark.CurrentPrice, exitOrders)
+                    : null);
         }).ToArray();
         var positionHistoryStartUtc = PositionHistoryStartUtc(definition, sessionStartUtc);
         var marketPositionRows = await dbContext.MarketPaperPositions.AsNoTracking()
@@ -338,7 +342,9 @@ internal sealed class EfTradingWorkspaceReader(
                 StrategyPremiumStop: isActive ? value.StopLoss : null,
                 GrossRealisedPnl: isActive ? null : value.RealisedPnl + value.CostsPaid,
                 RealisedCosts: isActive ? null : value.CostsPaid,
-                ExitBreakdown: isActive ? null : WorkspaceExitBreakdownBuilder.FromPosition(value));
+                ExitBreakdown: isActive ? null : WorkspaceExitBreakdownBuilder.FromPosition(value),
+                OpenPnlEstimate: isActive && definition.InstrumentType == InstrumentType.Index
+                    ? WorkspaceOpenPnl.FromPosition(value, definition.Exchange) : null);
         }).ToArray();
         var overlays = market == "nifty"
             ? legacyOverlays.Concat(marketOverlays.Where(value =>

@@ -274,12 +274,12 @@ describe('App', () => {
       } as TradingWorkspaceSnapshot['overlays'][number]]}, false);
     fixture.detectChanges();
     const ledger = desk.querySelector('.workspace-priority-events')!.textContent!;
-    expect(ledger).toContain('Failed setup exit');
-    expect(ledger).toContain('Net realised P&L');
-    expect(ledger).toContain('-7,179.87');
-    expect(ledger).toContain('Gross P&L · costs');
-    expect(ledger).toContain('354.87');
-    expect(ledger).toContain('Max adverse loss (gross)');
+    expect(ledger).toContain('Setup exit');
+    expect(ledger).toContain('Net P&L');
+    expect(ledger).toContain('−7,179.87');
+    expect(ledger).toContain('Gross');
+    expect(ledger).toContain('355');
+    expect(ledger).toContain('MAE');
   });
 
   it('opens the Sensex workspace while Natural Gas is hidden', async () => {
