@@ -11,8 +11,8 @@ interface CaptureHealth extends CaptureIndicatorHealth {
   feed:{phase:string; instruments:number; subscribedAtUtc:string|null; gapObserved:boolean; lastReceiptByMarket:Record<string,string>; lastFailure?:string|null};
 }
 @Component({selector:'app-research-capture-health', imports:[DatePipe], styles:[`
-  section{border:1px solid #8aae94;border-radius:.55rem;padding:.55rem .7rem;background:#ecf5ea;color:#173e29}
-  button{margin-inline-start:.6rem;border:1px solid #528264;border-radius:.35rem;background:#f5fbf2;color:#16492d;padding:.25rem .55rem;cursor:pointer}
+  section{border:1px solid #8aae94;border-radius:.55rem;padding:.55rem .7rem;background:var(--ui-surface);color:#173e29}
+  button{margin-inline-start:.6rem;border:1px solid #528264;border-radius:.35rem;background:var(--ui-surface);color:#16492d;padding:.25rem .55rem;cursor:pointer}
   p{margin:.35rem 0}small{display:block}
   :host{display:block;min-width:0}
   .capture-warning{--border:#b17d28;--bg:#fff1d2;--open:#ffe7af;position:relative;margin:0;border:1px solid var(--border);border-radius:.35rem;background:var(--bg);color:#5d3905;font-size:.72rem}
@@ -23,9 +23,9 @@ interface CaptureHealth extends CaptureIndicatorHealth {
   .capture-warning__body small{font-size:.7rem}
   .capture-warning ul{margin:.5rem 0 0;padding-inline-start:1.25rem}
   .capture-warning li+li{margin-top:.4rem}
-  .capture-warning--healthy{--border:#43845b;--bg:#e3f4e8;--open:#ccebd5;color:#14532d}
+  .capture-warning--healthy{--border:#43845b;--bg:var(--ui-surface);--open:var(--ui-hover);color:#14532d}
   .capture-warning--critical{--border:#bc4545;--bg:#fde8e8;--open:#fbd0d0;color:#8b1e1e}
-  .capture-warning--idle{--border:#89958d;--bg:#edf1ee;--open:#dce4df;color:#44534a}
+  .capture-warning--idle{--border:#89958d;--bg:var(--ui-surface);--open:var(--ui-hover);color:#44534a}
   .capture-dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;background:currentColor;margin-inline-end:.35rem}
   .capture-icon summary{list-style:none;padding:8px;line-height:1}.capture-icon summary::-webkit-details-marker{display:none}.capture-icon .capture-dot{margin:0}.capture-icon .capture-warning__body{left:auto;right:0}
   @media(max-width:560px){.capture-warning{position:static}.capture-warning__body{left:8px;right:8px;top:calc(100% + 4px);width:auto}}

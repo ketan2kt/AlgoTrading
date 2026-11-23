@@ -19,8 +19,16 @@ public static class NiftyPreQuoteEntryGatePolicy
         Direction direction, MarketStructureQualitySnapshot structure,
         MultiTimeframeDecisionAssessment timeframes,
         int candleIntervalSeconds, decimal atrPoints,
-        decimal openingRangeHigh, decimal openingRangeLow, bool relaxedNiftyEntries = false)
+        decimal openingRangeHigh, decimal openingRangeLow, bool relaxedNiftyEntries = false,
+        bool applyNiftyMorningQuality = false)
     {
+        if (applyNiftyMorningQuality)
+        {
+            var morning = NiftyMorningEntryQualityPolicy.Evaluate(localTime,
+                completedSession, direction, candleIntervalSeconds);
+            if (!morning.Permitted)
+                return new(false, morning.RejectionOutcome, morning.Reasons, "", null);
+        }
         if (relaxedNiftyEntries)
         {
             var countertrend = NiftyCountertrendEntryPolicy.Evaluate(completedSession, direction, timeframes, candleIntervalSeconds);

@@ -102,6 +102,7 @@ internal sealed partial class AutomatedPaperTradingService(
             EntryChainVersion = EntryChainConsistencyPolicy.Version,
             CountertrendEntryVersion = NiftyCountertrendEntryPolicy.Version,
             SessionMoveVersion = SessionMoveQualityPolicy.Version,
+            MorningEntryQualityVersion = NiftyMorningEntryQualityPolicy.Version,
             options.Value.Enabled, options.Value.MinimumSignalCandles,
             options.Value.MinimumFuturesConfirmationCandles,
             options.Value.EntryWindowStart, options.Value.EntryCutoff,
@@ -572,7 +573,8 @@ internal sealed partial class AutomatedPaperTradingService(
             signal.Direction, shadowStructure, multiTimeframeV2,
             marketOptions.Value.CandleIntervalSeconds,
             strategyContext.CurrentPrice * strategyContext.AtrPercent / 100m,
-            strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow, relaxedNiftyEntries: true);
+            strategyContext.OpeningRangeHigh, strategyContext.OpeningRangeLow, relaxedNiftyEntries: true,
+            applyNiftyMorningQuality: true);
         if (!preQuoteGate.Permitted)
         {
             await PersistStrategyEvaluationAsync(db, strategy, instrument.Id, candleDecisionTime,

@@ -3,14 +3,15 @@ import {vi} from 'vitest';
 import {NiftyChartComponent} from './nifty-chart.component';
 import {TradingWorkspaceSnapshot} from './trading-workspace';
 import {terminalIndicatorKey} from './chart-indicator-preferences';
+import {chartPalette} from './chart-palette';
 
-const mocks=vi.hoisted(()=>({series:[] as any[],markers:vi.fn(),removed:vi.fn(),destroy:vi.fn(),paneHeight:vi.fn()}));
+const mocks=vi.hoisted(()=>({series:[] as any[],chartOptions:vi.fn(),markers:vi.fn(),removed:vi.fn(),destroy:vi.fn(),paneHeight:vi.fn()}));
 // Keep the factory synchronous: Angular's split test bundles can hoist an
 // async helper into a shared chunk before that chunk has been initialized.
 vi.mock('lightweight-charts',()=>({
   ColorType:{Solid:'solid'},LineStyle:{Dashed:2,Dotted:1},LineType:{WithSteps:1},
   CandlestickSeries:{},HistogramSeries:{},LineSeries:{},
-  createChart:()=>({
+  createChart:(_element:unknown,options:unknown)=>(mocks.chartOptions(options),{
     addSeries:(_type:unknown,options:any,pane=0)=>{
       const series={options,pane,setData:vi.fn(),applyOptions:vi.fn(),
         priceScale:()=>({applyOptions:vi.fn()}),priceToCoordinate:(p:number)=>p%200,createPriceLine:vi.fn(),removePriceLine:vi.fn()};
@@ -70,6 +71,12 @@ describe('shared index chart indicators',()=>{
     fixture.componentRef.setInput('snapshot',snapshot(market));
     fixture.componentRef.setInput('timeframeMinutes',1);fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.terminal-chart')).not.toBeNull();
+    expect(mocks.chartOptions).toHaveBeenLastCalledWith(expect.objectContaining({
+      layout: {background: {type:'solid',color:chartPalette.background},textColor:chartPalette.text},
+      grid: {vertLines:{color:chartPalette.grid},horzLines:{color:chartPalette.grid}},
+    }));
+    expect(mocks.series[0].options.upColor).toBe(chartPalette.up);
+    expect(mocks.series[0].options.downColor).toBe(chartPalette.down);
     expect(mocks.series.find(s=>s.options.color==='#54a86d').options.lastValueVisible).toBe(false);
     expect(mocks.series.find(s=>s.options.color==='#54a86d').options.title).toBe('');
     expect(mocks.series.find(s=>s.options.title==='ADX 14').pane).toBe(1);

@@ -1,3 +1,4 @@
+import { chartPalette } from './chart-palette';
 import {
   AfterViewInit,
   Component,
@@ -120,7 +121,7 @@ import {chartIndicatorDefaults, readChartIndicators, terminalIndicatorKey, Chart
         display: block;
         min-width: 0;
       }
-      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:#edf5e8; }
+      .chart-shell { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; background:var(--ui-surface); }
       .chart-stage { position:relative; min-width:0; min-height:clamp(280px,50dvh,440px); }
       .chart {
         width: 100%;
@@ -133,29 +134,29 @@ import {chartIndicatorDefaults, readChartIndicators, terminalIndicatorKey, Chart
         place-content: center;
         gap: 0.5rem;
         text-align: center;
-        color: #557460;
+        color: var(--ui-muted);
         pointer-events: none;
       }
       .chart-empty strong {
-        color: #173f2d;
+        color: var(--ui-ink);
         font-size: 1.05rem;
       }
       .volume-label {
         position: absolute;
         left: 10px;
         bottom: 25px;
-        color: #557460;
+        color: var(--ui-muted);
         font-size: 0.62rem;
         letter-spacing: 0.08em;
         pointer-events: none;
       }
-      .overlay-controls { display:flex; align-items:center; gap:5px; padding:6px 10px; overflow-x:auto; border-bottom:1px solid #c1d7be; background:#e6f0e0; }
-      .overlay-controls button { flex-shrink:0; min-height:28px; padding:4px 8px; border:1px solid #a2bea8; border-radius:5px; background:#f2f7ee; color:#42604a; font:inherit; font-size:.68rem; cursor:pointer; white-space:nowrap; }
-      .overlay-controls button.active { border-color:#6d987b; color:#205b39; background:#d7e8d1; }
-      .overlay-controls button:hover { background:#c9dfc3; }
+      .overlay-controls { display:flex; align-items:center; gap:5px; padding:6px 10px; overflow-x:auto; border-bottom:1px solid var(--ui-edge); background:var(--ui-surface); }
+      .overlay-controls button { flex-shrink:0; min-height:28px; padding:4px 8px; border:1px solid var(--ui-edge); border-radius:5px; background:var(--ui-surface); color:#42604a; font:inherit; font-size:.68rem; cursor:pointer; white-space:nowrap; }
+      .overlay-controls button.active { border-color:#6d987b; color:#205b39; background:var(--ui-raised); }
+      .overlay-controls button:hover { background:var(--ui-raised); }
       .overlay-controls button:focus-visible,.engine-read summary:focus-visible { outline:2px solid #176c3c; outline-offset:2px; }
-      .overlay-controls span { margin-left:auto; padding-left:8px; color:#526d5a; font-size:.68rem; white-space:nowrap; }
-      .engine-read,.fill-key,.fill-readout { margin:0; padding:4px 9px; border-bottom:1px solid #aac5ac; background:#edf6eb; color:#254c37; font-size:.75rem; }
+      .overlay-controls span { margin-left:auto; padding-left:8px; color:var(--ui-muted); font-size:.68rem; white-space:nowrap; }
+      .engine-read,.fill-key,.fill-readout { margin:0; padding:4px 9px; border-bottom:1px solid var(--ui-edge); background:var(--ui-surface); color:#254c37; font-size:.75rem; }
       .engine-read { padding:0; min-width:0; }
       .engine-read summary { display:flex; align-items:center; gap:8px; min-height:24px; padding:2px 9px; box-sizing:border-box; list-style:none; cursor:pointer; font-size:.72rem; }
       .engine-read summary::-webkit-details-marker { display:none; }
@@ -163,30 +164,30 @@ import {chartIndicatorDefaults, readChartIndicators, terminalIndicatorKey, Chart
       .decision-preview { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
       .decision-expand { margin-left:auto; }
       .engine-read[open] .decision-expand { transform:rotate(180deg); }
-      .decision-details { display:grid; gap:3px; padding:5px 9px; border-top:1px solid #c6dac5; overflow-wrap:anywhere; }
+      .decision-details { display:grid; gap:3px; padding:5px 9px; border-top:1px solid var(--ui-edge); overflow-wrap:anywhere; }
       @media(max-width:560px) { .engine-read summary { min-height:30px; } .decision-preview { display:none; } }
       .fill-key summary { cursor:pointer; } .fill-key p { margin:3px 0; }
       :host:has(.terminal-chart) { height:100%; min-height:0; }
-      .terminal-chart { height:100%; min-height:0; display:flex; flex-direction:column; align-items:stretch; position:relative; background:#fafcfb; }
+      .terminal-chart { height:100%; min-height:0; display:flex; flex-direction:column; align-items:stretch; position:relative; background:var(--ui-surface); }
       .terminal-chart .chart-stage { flex:1; min-height:0; width:100%; }
       .terminal-chart .chart { position:absolute; inset:0 148px 0 0; width:calc(100% - 148px); height:100%; }
-      .terminal-chart .chart-tools { display:none; position:absolute; z-index:8; right:8px; top:8px; width:min(500px,calc(100% - 16px)); border:1px solid #afc4b7; border-radius:6px; background:#fff; box-shadow:0 6px 25px #203b3326; overflow:auto; max-height:70%; }
+      .terminal-chart .chart-tools { display:none; position:absolute; z-index:8; right:8px; top:8px; width:min(500px,calc(100% - 16px)); border:1px solid var(--ui-edge); border-radius:6px; background:var(--ui-surface); box-shadow:0 6px 25px #203b3326; overflow:auto; max-height:70%; }
       .terminal-chart.tools-open .chart-tools { display:block; }
-      .terminal-chart .overlay-controls { flex-wrap:wrap; background:#fff; overflow:visible; }
+      .terminal-chart .overlay-controls { flex-wrap:wrap; background:var(--ui-surface); overflow:visible; }
       .terminal-chart .overlay-controls span { white-space:normal; width:100%; margin:0; padding:2px 0; }
-      .terminal-chart .engine-read { background:#f8fbf9; }
+      .terminal-chart .engine-read { background:var(--ui-surface); }
       .terminal-chart .fill-key { display:none; }
-      .terminal-chart.tools-open .fill-key { display:block; position:absolute; bottom:28px; left:8px; right:165px; z-index:8; max-height:30%; overflow:auto; border:1px solid #bacfc0; background:#fff; }
-      .terminal-chart .fill-readout { position:absolute; z-index:7; left:8px; right:165px; bottom:125px; max-height:100px; overflow:auto; background:#fffffff2; border:1px solid #b4c9bb; border-radius:4px; }
-      .indicator-legend { position:absolute; right:0; top:0; bottom:0; width:148px; box-sizing:border-box; padding:12px 7px; border-left:1px solid #d5dfd9; background:#f6f9f7; overflow:auto; color:#3d5748; font:11px system-ui,sans-serif; font-variant-numeric:tabular-nums; }
+      .terminal-chart.tools-open .fill-key { display:block; position:absolute; bottom:28px; left:8px; right:165px; z-index:8; max-height:30%; overflow:auto; border:1px solid var(--ui-edge); background:var(--ui-surface); }
+      .terminal-chart .fill-readout { position:absolute; z-index:7; left:8px; right:165px; bottom:125px; max-height:100px; overflow:auto; background:#b9d4b2f2; border:1px solid var(--ui-edge); border-radius:4px; }
+      .indicator-legend { position:absolute; right:0; top:0; bottom:0; width:148px; box-sizing:border-box; padding:12px 7px; border-left:1px solid var(--ui-edge); background:var(--ui-surface); overflow:auto; color:#3d5748; font:11px system-ui,sans-serif; font-variant-numeric:tabular-nums; }
       .indicator-legend > strong { display:block; font-size:10px; letter-spacing:.04em; }
       .indicator-legend > small { display:block; font-size:9px; color:#718277; margin:5px 0 12px; }
-      .indicator-legend-row { display:flex; align-items:center; justify-content:space-between; gap:5px; min-height:29px; padding:4px; border-left:2px solid; border-bottom:1px solid #e2e9e5; }
+      .indicator-legend-row { display:flex; align-items:center; justify-content:space-between; gap:5px; min-height:29px; padding:4px; border-left:2px solid; border-bottom:1px solid var(--ui-edge); }
       .indicator-legend-row span { font-size:9px; }.indicator-legend-row b { font-size:11px; font-weight:600; }
       @media(max-width:700px) {
         .terminal-chart .chart { inset:0; width:100%; }
         .indicator-legend { display:none; }
-        .terminal-chart.tools-open .indicator-legend { display:block; z-index:8; top:72%; bottom:28px; width:148px; border:1px solid #b4c9bb; border-radius:4px; }
+        .terminal-chart.tools-open .indicator-legend { display:block; z-index:8; top:72%; bottom:28px; width:148px; border:1px solid var(--ui-edge); border-radius:4px; }
       }
     `,
   ],
@@ -238,17 +239,17 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
   ngAfterViewInit(): void {
     this.chart = createChart(this.chartElement.nativeElement, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: this.terminal ? '#fafcfb' : '#edf5e8' }, textColor: '#526d5a' },
-      grid: { vertLines: { color: this.terminal ? '#edf1ef' : '#dfebd9' }, horzLines: { color: this.terminal ? '#edf1ef' : '#dfebd9' } },
-      rightPriceScale: { borderColor: '#cbd8cf', alignLabels:true, minimumWidth:this.terminal ? 72 : 0 },
+      layout: { background: { type: ColorType.Solid, color: chartPalette.background }, textColor: chartPalette.text },
+      grid: { vertLines: { color: chartPalette.grid }, horzLines: { color: chartPalette.grid } },
+      rightPriceScale: { borderColor: chartPalette.edge, alignLabels:true, minimumWidth:this.terminal ? 72 : 0 },
       localization: { timeFormatter: formatCrosshairTimeIst },
       timeScale: {
-        borderColor: '#b7cfba',
+        borderColor: chartPalette.edge,
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: formatChartTimeIst,
       },
-      crosshair: { vertLine: { color: '#66876d' }, horzLine: { color: '#66876d' } },
+      crosshair: { vertLine: { color: chartPalette.crosshair }, horzLine: { color: chartPalette.crosshair } },
       handleScroll: {
         mouseWheel: false,
         pressedMouseMove: true,
@@ -257,11 +258,11 @@ export class NiftyChartComponent implements AfterViewInit, OnChanges, OnDestroy 
       },
     });
     this.series = this.chart.addSeries(CandlestickSeries, {
-      upColor: '#25834d',
-      downColor: '#dc5961',
+      upColor: chartPalette.up,
+      downColor: chartPalette.down,
       borderVisible: false,
-      wickUpColor: '#25834d',
-      wickDownColor: '#dc5961',
+      wickUpColor: chartPalette.up,
+      wickDownColor: chartPalette.down,
       lastValueVisible:true,
     });
     this.chart.subscribeCrosshairMove(e=>this.hovered.set(typeof e.time==='number'?e.time:null));

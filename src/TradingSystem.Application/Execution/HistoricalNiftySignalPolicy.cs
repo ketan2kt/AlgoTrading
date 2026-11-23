@@ -32,7 +32,7 @@ public sealed class HistoricalNiftySignalPolicy(
     // quote and risk policies. The discovery-only constructor is not certified.
     public bool ProductionPolicyParityVerified => admissionSettings is not null;
 
-    public string CodeVersion => $"nifty-signal-adapter-v17:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}/{EntryChainConsistencyPolicy.Version}/{NiftyCountertrendEntryPolicy.Version}/{SessionMoveQualityPolicy.Version}";
+    public string CodeVersion => $"nifty-signal-adapter-v18:{strategy.StrategyId}:{strategy.Version}/{OptionRiskBudgetPolicy.Version}/{FirstEntryTimingPolicy.Version}/{NiftyEntryTrialProfile.Version}/{EntryChainConsistencyPolicy.Version}/{NiftyCountertrendEntryPolicy.Version}/{SessionMoveQualityPolicy.Version}/{NiftyMorningEntryQualityPolicy.Version}";
     public string ConfigurationManifest => System.Text.Json.JsonSerializer.Serialize(new
     {
         spotSymbol, futuresSymbol, tradingDate, previousClose,
@@ -41,6 +41,7 @@ public sealed class HistoricalNiftySignalPolicy(
         EntrySelectivityProfile = NiftyEntryTrialProfile.Version,
         EntryChainVersion = EntryChainConsistencyPolicy.Version,
         SessionMoveVersion = SessionMoveQualityPolicy.Version,
+        MorningEntryQualityVersion = NiftyMorningEntryQualityPolicy.Version,
         EntryTiming = new
         {
             FirstEntryTimingPolicy.Version,
@@ -174,7 +175,8 @@ public sealed class HistoricalNiftySignalPolicy(
                 sessionBars, previousBars, signal.Direction, structure,
                 multiTimeframe, candleIntervalSeconds,
                 context.CurrentPrice * atr / 100m,
-                openingHigh, openingLow, relaxedNiftyEntries: true).Permitted) return [];
+                openingHigh, openingLow, relaxedNiftyEntries: true,
+                applyNiftyMorningQuality: true).Permitted) return [];
         var underlyingRiskDistance = Math.Abs(signal.ProposedEntry -
             signal.ProposedStopLoss);
         if (underlyingRiskDistance <= 0m)
