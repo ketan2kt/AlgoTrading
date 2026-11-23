@@ -23,12 +23,12 @@ import {TradeExitPriceComponent} from './trade-exit-price.component';
                 <td class="number"><app-trade-exit-price [trade]="t" [compact]="true" /></td>
                 <td class="number">{{t.executionStopLoss | number:'1.2-2'}}</td>
                 <td class="number">{{t.executionTarget | number:'1.2-2'}}</td>
-                <td class="number">{{t.quantity}}</td><td>{{t.executionExpiry | date:'dd MMM':'Asia/Kolkata'}}</td>
+                <td class="number">{{t.quantity}}</td><td>{{t.executionExpiry | date:'dd MMM':'+0530'}}</td>
                 <td class="number" [class.good]="(gross(t) ?? 0)>0" [class.bad]="(gross(t) ?? 0)<0">{{signed(gross(t),0)}}</td>
                 <td class="number">{{costs(t)==null ? '—' : (costs(t) | number:'1.0-0')}}</td>
                 <td class="number good">{{t.maximumFavourablePnl==null ? '—' : (t.maximumFavourablePnl | number:'1.0-0')}}</td>
                 <td class="number bad">{{t.maximumAdverseLoss==null ? '—' : (t.maximumAdverseLoss | number:'1.0-0')}}</td>
-                <td>{{t.entryTimeUtc | date:'HH:mm:ss':'Asia/Kolkata'}}</td><td>{{t.exitTimeUtc ? (t.exitTimeUtc | date:'HH:mm:ss':'Asia/Kolkata') : 'Open'}}</td>
+                <td>{{t.entryTimeUtc | date:'HH:mm:ss':'+0530'}}</td><td>{{t.exitTimeUtc ? (t.exitTimeUtc | date:'HH:mm:ss':'+0530') : 'Open'}}</td>
                 @if (hasActive) { <td>@if (t.lifecycleStatus.startsWith('Active')) { <button type="button" (click)="exitTrade.emit(t)" [disabled]="cached || requested.has(market+':'+t.signalId)">{{requested.has(market+':'+t.signalId) ? 'Requested' : 'Exit trade'}}</button> }</td> }
               </tr>
               @if (expandedStatus===t.signalId) { <tr class="status-detail"><td [attr.colspan]="hasActive?16:15">{{contract(t)}} · {{t.lifecycleStatus}}</td></tr> }
