@@ -2,12 +2,13 @@ using System.Text.Json;
 using TradingSystem.Application.Diagnostics;
 using TradingSystem.Application.Execution;
 using TradingSystem.Domain.Trading;
+using TradingSystem.Application.Broker;
 
 namespace TradingSystem.Infrastructure.Diagnostics;
 
 internal static class LiveFillPnl
 {
-    internal enum Leg { Entry, AddOn, Partial, Final }
+    internal enum Leg { Entry, AddOn, Partial, Final, External }
     internal sealed record Observation(Guid Source, Leg Role, string? Order, int? Qty, decimal? Price, int? Priced);
     internal sealed record PaperLeg(int Qty, decimal Price);
 
@@ -60,6 +61,18 @@ internal static class LiveFillPnl
         static LivePnlComparison Gap(string why) => new("Incomplete",why);
         if (intent is null) return new("No live intent","Paper result only; see the entry-routing evidence.");
         var observed=observations.Where(x=>x.Source==intent.SourceId).Distinct().ToArray();
+        if (intent.ExternalExitQuantity > 0)
+        {
+            try
+            {
+                var external = JsonSerializer.Deserialize<ExternalExitFill[]>(intent.ExternalExitEvidenceJson ?? "null");
+                if (external is null || external.Sum(x => x.Quantity) != intent.ExternalExitQuantity)
+                    return Gap("External exit evidence does not balance.");
+                observed = observed.Concat(external.Select(x => new Observation(intent.SourceId, Leg.External,
+                    x.OrderId, x.Quantity, x.AveragePrice, x.Quantity))).ToArray();
+            }
+            catch (JsonException) { return Gap("External exit evidence is invalid."); }
+        }
         if (intent.Status=="Rejected" && intent.FilledQuantity==0 && !observed.Any(x=>x.Qty>0))
             return new("Not filled","Rejected without a recorded fill.");
         if (intent.Status!="Closed") return new(intent.Status=="Protected" ? "Open" : "Incomplete",
@@ -77,16 +90,17 @@ internal static class LiveFillPnl
         int Size(Leg role) => orders.Where(x=>x.Role==role).Sum(x=>x.Qty!.Value);
         var units=Size(Leg.Entry)+Size(Leg.AddOn);
         if (Size(Leg.AddOn)!=intent.MirroredAddOnQuantity || Size(Leg.Partial)!=intent.MirroredPartialExitQuantity ||
-            Size(Leg.Final)==0 || Size(Leg.Final)+Size(Leg.Partial)!=units)
+            Size(Leg.Final)+Size(Leg.External)==0 || Size(Leg.Final)+Size(Leg.Partial)+Size(Leg.External)!=units)
             return Gap("Entry, scaling and closing quantities do not reconcile.");
         static bool Buy(Leg leg) => leg is Leg.Entry or Leg.AddOn;
         var gross=orders.Sum(x=>(Buy(x.Role)?-1:1)*x.Price!.Value*x.Qty!.Value);
         var charges=PaperTradingCostModel.CalculateOptionCharges(orders.Select(x=>new PaperOptionTransaction(
             Buy(x.Role)?PaperOptionTransactionSide.Buy:PaperOptionTransactionSide.Sell,x.Price!.Value,x.Qty!.Value)),
             intent.Market=="SENSEX"?"BSE":"NSE").Total;
-        var comparable=orders.All(x=>paper.TryGetValue(x.Role,out var leg) && leg.Price>0 && Size(x.Role)<=leg.Qty);
+        var comparable=intent.ExternalExitQuantity == 0 && orders.All(x=>paper.TryGetValue(x.Role,out var leg) && leg.Price>0 && Size(x.Role)<=leg.Qty);
         decimal? matched=comparable ? orders.Sum(x=>(Buy(x.Role)?-1:1)*paper[x.Role].Price*x.Qty!.Value) : null;
-        var reason=!comparable?"Live fills balance; paper actions do not match these units." :
+        var reason=intent.ExternalExitQuantity > 0 ? "Exited in Groww (external intervention); actual live fills, not a strategy replay result. Costs are estimated." :
+            !comparable?"Live fills balance; paper actions do not match these units." :
             gross==matched?"No gross execution difference on matched units." :
             gross<matched?"Broker fills earned less than paper on matched units." :
             "Broker fills earned more than paper on matched units.";

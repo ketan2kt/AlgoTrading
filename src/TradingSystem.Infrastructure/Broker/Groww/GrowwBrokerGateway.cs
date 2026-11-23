@@ -17,7 +17,7 @@ namespace TradingSystem.Infrastructure.Broker.Groww;
 /// create response is ambiguous, the client reference is queried before the
 /// caller receives an unknown-outcome result.
 /// </summary>
-public sealed class GrowwBrokerGateway(
+public sealed partial class GrowwBrokerGateway(
     IHttpClientFactory httpClientFactory,
     IGrowwAccessTokenProvider accessTokenProvider,
     IServiceScopeFactory scopeFactory,

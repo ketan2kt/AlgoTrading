@@ -153,6 +153,7 @@ public static class DependencyInjection
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddSingleton<LiveExecutionWakeSignal>();
         services.AddHostedService<AutomaticLiveExecutionService>();
+        services.AddHostedService<GrowwLiveAccountNotifications>();
         services.AddHostedService<LiveRoutingBaselineService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>
         {

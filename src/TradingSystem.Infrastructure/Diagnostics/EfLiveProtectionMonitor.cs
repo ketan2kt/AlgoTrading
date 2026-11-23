@@ -122,7 +122,8 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
             .OrderByDescending(p=>p.At).GroupBy(p=>p.At).FirstOrDefault();
         var ack=latest?.First();
         string finding;
-        if(i.Status=="ReconciliationRequired")finding="Reconciliation required";
+        if(i.ExternalReconciliationPending)finding="External exit needs reconciliation";
+        else if(i.Status=="ReconciliationRequired")finding="Reconciliation required";
         else if(i.Status=="ResidualProtected" || i.Status=="ProtectedScaleMismatch")finding="Live remainder differs from paper";
         else if(i.Status!="Protected")finding=i.FilledQuantity==0?"Entry outcome pending":"Protection or exit pending";
         else if(!string.IsNullOrWhiteSpace(i.LastError))finding="Execution discrepancy recorded";
@@ -131,16 +132,16 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
         else if(ack.At>now || latest!.Select(p=>(p.Price,p.Qty)).Distinct().Count()!=1 ||
             records.Any(p=>p.At>=ack.At && (p.Type==StopComparison.Kind.Uncertain ||
                 (p.Type==StopComparison.Kind.Fill && p.Order==ack.Order))))finding="Stop confirmation uncertain";
-        else if(ack.Qty!=i.FilledQuantity || (units.HasValue && units!=i.FilledQuantity))finding="Quantity mismatch";
+        else if(ack.Qty!=i.FilledQuantity || (i.ExternalExitQuantity==0 && units.HasValue && units!=i.FilledQuantity))finding="Quantity mismatch";
         else if(stop.HasValue && ack.Price!=stop)finding="Stop price mismatch";
         else if(stop is not >0 || units is not >0)finding="Paper stop or size unknown";
         else if(revision>ack.At)finding="Newer strategy revision pending";
         else if(ack.At.ToOffset(TimeSpan.FromHours(5.5)).Date!=now.ToOffset(TimeSpan.FromHours(5.5)).Date)
             finding="Prior-session confirmation only";
-        else finding="Last confirmed match";
+        else finding=i.ExternalExitQuantity>0?"Externally reduced; stop confirmed":"Last confirmed match";
         var offset=TimeSpan.FromHours(5.5);
         var row=new ProtectionMonitorRow(i.Id,i.Market,symbol,i.Status,units,i.FilledQuantity>0?i.FilledQuantity:null,stop,i.ProtectionId,
-            ack?.Qty,ack?.Price,ack?.At,finding,finding!="Last confirmed match")
+            ack?.Qty,ack?.Price,ack?.At,finding,finding is not ("Last confirmed match" or "Externally reduced; stop confirmed"))
             {SessionDate=DateOnly.FromDateTime(i.CreatedAtUtc.ToOffset(offset).Date)};
         if(!row.NeedsAttention || row.SessionDate>=DateOnly.FromDateTime(now.ToOffset(offset).Date))return row;
         // A review acknowledges only these facts. New revisions, receipts or lifecycle changes reopen the reminder.

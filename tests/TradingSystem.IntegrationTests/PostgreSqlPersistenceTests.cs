@@ -14,6 +14,38 @@ namespace TradingSystem.IntegrationTests;
 public sealed class PostgreSqlPersistenceTests
 {
     [DockerFact]
+    public async Task ExternalLiveExitJournalSurvivesRestartWithoutChangingPaperOrReplay()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        var options = new DbContextOptionsBuilder<TradingDbContext>().UseNpgsql(container.GetConnectionString()).Options;
+        var at = new DateTimeOffset(2026,11,23,4,0,0,TimeSpan.Zero);
+        var intent = new LiveExecutionIntent(Guid.NewGuid(),"NIFTY",Guid.NewGuid(),"NIFTY",Guid.NewGuid(),
+            Direction.Buy,100,100,90,120,"LE-test",at);
+        intent.Submitted("entry",at); intent.Filled(100,100); intent.Protected("stop",at);
+        await using (var db = new TradingDbContext(options,TimeProvider.System))
+        {
+            await db.Database.MigrateAsync();
+            db.LiveExecutionIntents.Add(intent); await db.SaveChangesAsync();
+            intent.BeginExternalReconciliation(); await db.SaveChangesAsync();
+        }
+        var evidence = System.Text.Json.JsonSerializer.Serialize(new[] { new ExternalExitFill("manual",40,125,at.AddMinutes(1)) });
+        await using (var db = new TradingDbContext(options,TimeProvider.System))
+        {
+            var restored = await db.LiveExecutionIntents.SingleAsync();
+            Assert.True(restored.ExternalReconciliationPending); Assert.Equal(100,restored.FilledQuantity);
+            restored.CompleteExternalReconciliation(40,60,evidence,at.AddMinutes(1)); await db.SaveChangesAsync();
+        }
+        await using (var db = new TradingDbContext(options,TimeProvider.System))
+        {
+            var restored = await db.LiveExecutionIntents.SingleAsync();
+            Assert.False(restored.ExternalReconciliationPending); Assert.Equal(60,restored.FilledQuantity);
+            Assert.Equal(evidence,restored.ExternalExitEvidenceJson); Assert.Equal(40,restored.ExternalExitQuantity);
+            Assert.Empty(await db.MarketPaperPositions.ToArrayAsync()); Assert.Empty(await db.PaperBrokerEvents.ToArrayAsync());
+        }
+    }
+
+    [DockerFact]
     public async Task GrowwTokenRenewalCoordinatesHostsAndRetainsBackoffAfterRestart()
     {
         await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();

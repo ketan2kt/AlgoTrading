@@ -9,6 +9,56 @@ namespace TradingSystem.ContractTests;
 public sealed class GrowwExecutionContractTests
 {
     [Fact]
+    public async Task AccountSnapshotPagesAllOrdersAndKeepsProductExchangeAndSignedExposure()
+    {
+        var paths = new List<string>();
+        var gateway = CreateGateway(request =>
+        {
+            paths.Add(request.RequestUri!.PathAndQuery);
+            var orders = Enumerable.Range(0, request.RequestUri.Query.Contains("page=0&") ? 100 : 1)
+                .Select(n => new { groww_order_id = request.RequestUri.Query + n, order_reference_id = "",
+                    trading_symbol = "OPT", exchange = "BSE", product = "NRML", transaction_type = "SELL",
+                    quantity = 100, filled_quantity = 40, order_status = "CANCELLED", created_at = "2026-11-23T10:00:00",
+                    trigger_price = (decimal?)null });
+            return Task.FromResult(Json(HttpStatusCode.OK, request.RequestUri.AbsolutePath.Contains("positions")
+                ? """{"status":"SUCCESS","payload":{"positions":[{"trading_symbol":"OPT","exchange":"BSE","product":"NRML","quantity":-40}]}}"""
+                : System.Text.Json.JsonSerializer.Serialize(new { status = "SUCCESS", payload = new { order_list = orders } })));
+        });
+        var result = await gateway.ReadAccountAsync(CancellationToken.None);
+        Assert.Equal(101, result.Orders.Count); Assert.Equal(3, paths.Count);
+        Assert.Equal(-40, Assert.Single(result.Positions).Quantity);
+        Assert.All(result.Orders, o => { Assert.Equal("BSE", o.Exchange); Assert.Equal("NRML", o.Product);
+            Assert.Equal(new DateTimeOffset(2026,11,23,4,30,0,TimeSpan.Zero), o.CreatedAt); });
+    }
+
+    [Fact]
+    public async Task ExternalFillReaderPaginatesAndWeightsActualExecutions()
+    {
+        var calls = 0;
+        var gateway = CreateGateway(request =>
+        {
+            calls++;
+            var rows = Enumerable.Range(0, calls == 1 ? 50 : 1).Select(n => new {
+                groww_order_id = "manual", groww_trade_id = "t" + calls + "-" + n,
+                transaction_type = "SELL", quantity = 2, price = calls == 1 ? 100m : 151m });
+            return Task.FromResult(Json(HttpStatusCode.OK, System.Text.Json.JsonSerializer.Serialize(
+                new { status = "SUCCESS", payload = new { trade_list = rows } })));
+        });
+        var fill = await gateway.ReadExternalFillAsync("manual", 102, CancellationToken.None);
+        Assert.Equal(2, calls); Assert.Equal(101m, fill.AveragePrice); Assert.Equal(102, fill.Quantity);
+    }
+
+    [Fact]
+    public async Task MissingAccountArrayIsNotAFlatPositionAndMismatchedFillIsNotPnl()
+    {
+        var gateway = CreateGateway(_ => Task.FromResult(Json(HttpStatusCode.OK, """{"status":"SUCCESS","payload":{}}""")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => gateway.ReadAccountAsync(CancellationToken.None));
+        gateway = CreateGateway(_ => Task.FromResult(Json(HttpStatusCode.OK,
+            """{"status":"SUCCESS","payload":{"trade_list":[{"groww_order_id":"other","groww_trade_id":"t","transaction_type":"SELL","quantity":10,"price":100}]}}""")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => gateway.ReadExternalFillAsync("manual", 10, CancellationToken.None));
+    }
+
+    [Fact]
     public void OneRupeeExpansionLegHasAValidLowerBrokerLimit()
     {
         Assert.Equal(.95m, GrowwBrokerGateway.ProtectiveLimit(1m));

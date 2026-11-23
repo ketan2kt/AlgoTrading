@@ -760,6 +760,14 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.LiveExecutionIntent", b =>
                 {
+                    b.Property<int>("ExternalExitQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ExternalExitEvidenceJson")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("ExternalReconciliationPending")
+                        .HasColumnType("boolean");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");

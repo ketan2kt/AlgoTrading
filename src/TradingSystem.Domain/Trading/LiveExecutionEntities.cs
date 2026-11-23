@@ -42,6 +42,9 @@ public sealed class LiveExecutionIntent : MutableEntity
     public int FilledQuantity { get; private set; }
     public int MirroredAddOnQuantity { get; private set; }
     public int MirroredPartialExitQuantity { get; private set; }
+    public int ExternalExitQuantity { get; private set; }
+    public string? ExternalExitEvidenceJson { get; private set; }
+    public bool ExternalReconciliationPending { get; private set; }
     public decimal? AverageFillPrice { get; private set; }
     public string? LastError { get; private set; }
     public DateTimeOffset? SubmittedAtUtc { get; private set; }
@@ -52,6 +55,28 @@ public sealed class LiveExecutionIntent : MutableEntity
         if (Status != "Pending")
             throw new InvalidOperationException("Only a pending live intent can begin broker submission.");
         Status = "EntrySubmitting";
+    }
+
+    public void BeginExternalReconciliation()
+    {
+        ExternalReconciliationPending = true;
+        LastError = "Broker-side intervention is being reconciled; automated actions are held.";
+    }
+
+    public void CompleteExternalReconciliation(int totalExternalQuantity, int remaining,
+        string evidenceJson, DateTimeOffset atUtc)
+    {
+        if (!ExternalReconciliationPending || totalExternalQuantity < ExternalExitQuantity || remaining < 0 ||
+            FilledQuantity - (totalExternalQuantity - ExternalExitQuantity) != remaining ||
+            string.IsNullOrWhiteSpace(evidenceJson))
+            throw new InvalidOperationException("External exit does not balance managed exposure.");
+        ExternalExitQuantity = totalExternalQuantity;
+        ExternalExitEvidenceJson = evidenceJson;
+        ExternalReconciliationPending = false;
+        FilledQuantity = remaining;
+        Status = remaining == 0 ? "Closed" : "Protected";
+        LastError = null;
+        MarkUpdated(atUtc.ToUniversalTime());
     }
 
     public void Submitted(string brokerOrderId, DateTimeOffset atUtc)

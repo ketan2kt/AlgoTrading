@@ -5,6 +5,17 @@ namespace TradingSystem.ContractTests;
 
 public class LiveProtectionMonitorTests
 {
+    [Fact]
+    public void ExternallyReducedSizeRequiresNewActualStopConfirmationNotPaperSize()
+    {
+        var i = Open(); i.BeginExternalReconciliation();
+        Assert.True(EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[],Now).NeedsAttention);
+        i.CompleteExternalReconciliation(50,100,"[]",Now);
+        var ack = new StopComparison.Point(i.SourceId,Now,StopComparison.Kind.Ack,90,100,"stop");
+        var row = EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[ack],Now);
+        Assert.False(row.NeedsAttention); Assert.Equal("Externally reduced; stop confirmed",row.Finding);
+        Assert.True(EfLiveProtectionMonitor.Assess(i,"X",90,150,null,[ack with {Qty=150}],Now).NeedsAttention);
+    }
     private static readonly DateTimeOffset Now=new(2026,11,5,6,0,0,TimeSpan.Zero);
     private static LiveExecutionIntent Open(){
         var i=new LiveExecutionIntent(Guid.NewGuid(),"MARKET_POSITION",Guid.NewGuid(),"BANK-NIFTY",Guid.NewGuid(),
