@@ -53,7 +53,7 @@ public sealed class UpstoxExecutionController(IUpstoxExecutionAuthorization auth
             return BadRequest("Upstox authorization does not match this administrator session.");
         Response.Cookies.Delete(StateCookie, new CookieOptions { Secure = true, HttpOnly = true, Path = "/" });
         try { await authorization.CompleteAsync(code, User.Identity!.Name!, token); }
-        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or InvalidDataException)
         { return BadRequest("Upstox trading authorization could not be verified. No live switches were changed. Reconnect from Controls."); }
         return Redirect("/nifty?executionConnected=Upstox");
     }

@@ -52,6 +52,19 @@ internal sealed class UpstoxExecutionAuthorization(TradingDbContext db, IDataPro
         var products = root.GetProperty("products").EnumerateArray().Select(x => x.GetString()!).ToArray();
         if (!products.Contains("D") || !exchanges.Any(x => x is "NFO" or "BFO"))
             throw new InvalidOperationException("Upstox derivatives product is not enabled.");
+        // Prove the configured execution relay can read this authorized account
+        // before declaring the connection ready. This never submits an order.
+        foreach (var path in new[] { "v2/order/retrieve-all", "v2/portfolio/short-term-positions" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, path);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
+            using var check = await clients.CreateClient(UpstoxExecutionHttp.ClientName).SendAsync(request, token);
+            if (!check.IsSuccessStatusCode) throw new InvalidOperationException("Upstox execution relay account verification failed.");
+            using var result = await JsonDocument.ParseAsync(await check.Content.ReadAsStreamAsync(token), cancellationToken: token);
+            if (!result.RootElement.TryGetProperty("status", out var status) || status.GetString() != "success" ||
+                !result.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Upstox account verification response was incomplete.");
+        }
         var now = clock.GetUtcNow(); var expiry = NextExpiry(now);
         var value = protector.Protect(JsonSerializer.Serialize(new Credential(access, Options.AccountId, exchanges, Options.Sandbox)));
         var existing = await db.BrokerAccessTokenSecrets.SingleOrDefaultAsync(x => x.Provider == Provider, token);
@@ -84,7 +97,7 @@ internal sealed class UpstoxExecutionAuthorization(TradingDbContext db, IDataPro
         {
             var value = await ReadAsync(token);
             return new(Configured, true, Options.StaticIpVerified, Options.Sandbox, secret?.ExpiresAtUtc, value.Exchanges,
-                Options.StaticIpVerified ? "Trading authorization present; broker acceptance still requires verification." : "Execution static IP needs verification.");
+                Options.StaticIpVerified ? "Trading authorization connected; relay order-book and position reads verified at connection." : "Execution static IP needs verification.");
         }
         catch (InvalidOperationException)
         { return new(Configured, false, Options.StaticIpVerified, Options.Sandbox, secret?.ExpiresAtUtc, [], "Connect Upstox trading authorization before enabling new entries."); }

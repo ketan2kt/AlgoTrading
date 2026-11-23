@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,7 @@ namespace TradingSystem.Infrastructure.Broker.Upstox;
 internal sealed class UpstoxBrokerGateway(UpstoxExecutionHttp http, UpstoxPaperDataClient contracts,
     IServiceScopeFactory scopes, IOptions<UpstoxExecutionOptions> options, TimeProvider clock) : ILiveExecutionBrokerGateway
 {
+    private readonly ConcurrentDictionary<string, (Direction Side, int Quantity, decimal Price, DateTimeOffset At)> pricedFills = new(StringComparer.Ordinal);
     public string Broker => "Upstox";
     public string Account => options.Value.AccountId;
     public TradingMode Mode => TradingMode.Live;
@@ -65,7 +67,7 @@ internal sealed class UpstoxBrokerGateway(UpstoxExecutionHttp http, UpstoxPaperD
         await RequireOwnedReferenceAsync(reference, instrument.Id, token);
         RequireOrderIdentity(row, reference, instrument);
         var qty = Integer(row, "quantity"); var filled = Integer(row, "filled_quantity");
-        var fills = await FillsAsync(Text(row, "order_id"), Side(row), token);
+        var fills = await FillsAsync(Text(row, "order_id"), Side(row), filled, token);
         if (fills.Quantity > filled) throw new InvalidDataException("Upstox fills exceed order status; retry read reconciliation.");
         return new(reference, Text(row, "order_id"), instrument.Id, Side(row), qty, filled,
             fills.Quantity == filled && filled > 0 ? fills.Average : null,
@@ -199,14 +201,18 @@ internal sealed class UpstoxBrokerGateway(UpstoxExecutionHttp http, UpstoxPaperD
 
     public async Task<ExternalExitFill> ReadExternalFillAsync(string id, int expectedQuantity, CancellationToken token)
     {
-        var fills = await FillsAsync(id, Direction.Sell, token);
+        var fills = await FillsAsync(id, Direction.Sell, expectedQuantity, token);
         if (fills.Quantity != expectedQuantity || fills.Quantity <= 0 || fills.Average is null)
             throw new InvalidDataException("Upstox external fills do not cover confirmed units.");
         return new(id, fills.Quantity, fills.Average.Value, clock.GetUtcNow());
     }
 
-    private async Task<(int Quantity, decimal? Average)> FillsAsync(string id, Direction side, CancellationToken token)
+    private async Task<(int Quantity, decimal? Average)> FillsAsync(string id, Direction side, int expectedQuantity, CancellationToken token)
     {
+        // Immutable priced fills can be reused while the broker's cumulative filled
+        // quantity is identical. Missing prices or additional fills always reread.
+        if (pricedFills.TryGetValue(id, out var saved) && saved.Side == side && saved.Quantity == expectedQuantity &&
+            clock.GetUtcNow() - saved.At < TimeSpan.FromMinutes(2)) return (saved.Quantity, saved.Price);
         var rows = Array(await http.SendAsync(HttpMethod.Get, "v2/order/trades?order_id=" + Uri.EscapeDataString(id), null, token));
         var fills = new Dictionary<string, (int Quantity, decimal Price)>(StringComparer.Ordinal);
         foreach (var row in rows)
@@ -219,7 +225,13 @@ internal sealed class UpstoxBrokerGateway(UpstoxExecutionHttp http, UpstoxPaperD
             fills[trade] = value;
         }
         var quantity = fills.Values.Sum(x => x.Quantity);
-        return (quantity, quantity == 0 ? null : fills.Values.Sum(x => x.Quantity * x.Price) / quantity);
+        decimal? average = quantity == 0 ? null : fills.Values.Sum(x => x.Quantity * x.Price) / quantity;
+        if (quantity > 0 && quantity == expectedQuantity && average.HasValue)
+        {
+            if (pricedFills.Count >= 256) pricedFills.Clear();
+            pricedFills[id] = (side, quantity, average.Value, clock.GetUtcNow());
+        }
+        return (quantity, average);
     }
 
     private async Task<Instrument> InstrumentAsync(Guid id, CancellationToken token)

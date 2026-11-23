@@ -8,6 +8,7 @@ Status: not deployed or operationally verified. No market has been armed and no 
 - Every durable live intent owns its broker and account permanently. Existing rows migrate to Groww/primary. Source/client-reference uniqueness remains global: the same paper trade cannot be submitted to both brokers.
 - Existing live lifecycle manages broker-confirmed entry fills, protective SL, partial exits, trailing amendments, external exits and restart reconciliation. Broker acknowledgement alone is not SL confirmation. Unknown writes are never automatically resubmitted.
 - Upstox has a separate worker so its outage cannot delay Groww position management. Unresolved exposure still blocks new entries across brokers. Paper strategy, sizing, stops, profit protection and recorder ownership are unchanged.
+- Repeated account reads share at most one second of evidence. Every mutation invalidates that cache before sending, and a late pre-mutation response cannot restore it. Priced fills are reused for at most two minutes only while broker cumulative filled quantity is unchanged; additional/missing fills are fetched again. This avoids multiplying order-book/fill traffic by every open trade.
 - The existing backup-data-session block on NEW live orders remains intact for both brokers. This release is broker selection, not automatic execution failover. Existing positions remain with their entry broker.
 
 ## Authentication and network prerequisites

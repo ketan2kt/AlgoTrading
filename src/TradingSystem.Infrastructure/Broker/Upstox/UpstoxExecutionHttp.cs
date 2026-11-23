@@ -13,6 +13,9 @@ internal sealed class UpstoxExecutionHttp(IHttpClientFactory clients, IServiceSc
     private readonly SemaphoreSlim budget = new(1, 1);
     private readonly Queue<DateTimeOffset> writes = new();
     private DateTimeOffset retryAfter;
+    private readonly object readLock = new();
+    private readonly Dictionary<string, (DateTimeOffset At, JsonElement Data)> reads = new(StringComparer.Ordinal);
+    private long mutationVersion;
 
     public void Dispose() => budget.Dispose();
 
@@ -23,7 +26,18 @@ internal sealed class UpstoxExecutionHttp(IHttpClientFactory clients, IServiceSc
         await using var scope = scopes.CreateAsyncScope();
         var credential = await scope.ServiceProvider.GetRequiredService<IUpstoxExecutionCredentialProvider>().ReadAsync(token);
         if (clock.GetUtcNow() < retryAfter) throw new InvalidOperationException("Upstox execution is backing off after a rate limit; no request retried.");
-        if (method != HttpMethod.Get) await ReserveWriteAsync(token);
+        long readVersion;
+        if (method != HttpMethod.Get)
+        {
+            await ReserveWriteAsync(token);
+            lock (readLock) { reads.Clear(); mutationVersion++; }
+        }
+        lock (readLock)
+        {
+            readVersion = mutationVersion;
+            if (method == HttpMethod.Get && reads.TryGetValue(path, out var saved) &&
+                clock.GetUtcNow() - saved.At < TimeSpan.FromSeconds(1)) return saved.Data;
+        }
         using var request = new HttpRequestMessage(method, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AccessToken);
         request.Headers.Accept.Add(new("application/json"));
@@ -41,7 +55,21 @@ internal sealed class UpstoxExecutionHttp(IHttpClientFactory clients, IServiceSc
         if (!root.TryGetProperty("status", out var status) || status.GetString() != "success" ||
             !root.TryGetProperty("data", out var data) || data.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             throw new InvalidDataException("Upstox execution response is incomplete; reconcile before another action.");
-        return data.Clone();
+        var result = data.Clone();
+        if (method == HttpMethod.Get)
+        {
+            lock (readLock)
+            {
+                // Reuse bulk evidence within a short polling burst, never across a
+                // mutation. A pre-write read completing late cannot restore stale data.
+                if (readVersion == mutationVersion)
+                {
+                    if (reads.Count >= 256) reads.Clear();
+                    reads[path] = (clock.GetUtcNow(), result);
+                }
+            }
+        }
+        return result;
     }
 
     private async Task ReserveWriteAsync(CancellationToken token)

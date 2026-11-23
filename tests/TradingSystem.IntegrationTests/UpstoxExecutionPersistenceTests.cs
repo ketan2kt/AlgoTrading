@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,30 @@ namespace TradingSystem.IntegrationTests;
 
 public sealed class UpstoxExecutionPersistenceTests
 {
+    [DockerFact]
+    public async Task AuthorizationRequiresRelayReadProofAndNeverArmsTrading()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+        await container.StartAsync(CancellationToken.None);
+        await using var db = new TradingDbContext(new DbContextOptionsBuilder<TradingDbContext>()
+            .UseNpgsql(container.GetConnectionString()).Options, new Clock());
+        await db.Database.MigrateAsync();
+        using var handler = new AuthorizationHandler();
+        var auth = new UpstoxExecutionAuthorization(db, new EphemeralDataProtectionProvider(),
+            Options.Create(new UpstoxExecutionOptions { Enabled = true, StaticIpVerified = true,
+                AccountId = "test-account", ClientId = "fixture-app", ClientSecret = "fixture-secret" }),
+            new Factory(handler), new Clock());
+        handler.RefuseReads = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => auth.CompleteAsync("fixture-code", "tester", default));
+        Assert.Empty(await db.BrokerAccessTokenSecrets.ToArrayAsync());
+        handler.RefuseReads = false;
+        await auth.CompleteAsync("new-fixture-code", "tester", default);
+        Assert.True((await auth.GetStatusAsync(default)).Authorized);
+        Assert.Equal(2, handler.VerifiedReads);
+        Assert.Empty(await db.ApplicationSettings.ToArrayAsync());
+        Assert.Empty(await db.LiveExecutionIntents.ToArrayAsync());
+    }
+
     [DockerFact]
     public async Task PersistedOwnershipPartialFillsAndStopCancelRacesRemainSafeAfterRestart()
     {
@@ -84,6 +109,27 @@ public sealed class UpstoxExecutionPersistenceTests
     }
     private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory
     { public HttpClient CreateClient(string name) => new(handler, false) { BaseAddress = new("https://fixture.invalid/") }; }
+    private sealed class AuthorizationHandler : HttpMessageHandler
+    {
+        private static readonly string[] ReadPaths = ["/v2/order/retrieve-all", "/v2/portfolio/short-term-positions"];
+        public bool RefuseReads { get; set; }
+        public int VerifiedReads { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                Assert.Equal("https://api.upstox.com/v2/login/authorization/token", request.RequestUri!.AbsoluteUri);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                    "{\"user_id\":\"test-account\",\"is_active\":true,\"access_token\":\"fixture-token\",\"exchanges\":[\"NFO\",\"BFO\"],\"products\":[\"D\"]}") });
+            }
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("fixture-token", request.Headers.Authorization?.Parameter);
+            Assert.Contains(request.RequestUri!.AbsolutePath, ReadPaths);
+            if (RefuseReads) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+            VerifiedReads++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"success\",\"data\":[]}") });
+        }
+    }
     private sealed class BrokerHandler(LiveExecutionIntent intent) : HttpMessageHandler
     {
         public bool CancelFillsRemaining { get; set; }

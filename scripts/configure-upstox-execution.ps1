@@ -61,16 +61,20 @@ if (-not (Test-Path -LiteralPath $store)) { throw 'Approved encrypted execution 
 if (-not $PSCmdlet.ShouldProcess('Sarthico website only', 'Configure Upstox execution credentials; no arming, recorder change or order')) { return }
 $subscription = '8f1fb990-d44b-4dd2-b8f4-4208cc40c340'
 $address = "https://management.azure.com/subscriptions/$subscription/resourceGroups/rg-sarthi-trading-centralindia/providers/Microsoft.Web/sites/sarthitradingweb5amvyarepxaci/config/appsettings"
+$setupStage = 'decrypt approved local credentials'
 try {
     $encrypted = ConvertTo-SecureString ([IO.File]::ReadAllText($store))
     $app = ([Net.NetworkCredential]::new('', $encrypted).Password | ConvertFrom-Json)
+    $setupStage = 'obtain Azure authorization'
     $azureToken = az account get-access-token --subscription $subscription --resource https://management.azure.com/ --query accessToken -o tsv
     if ($LASTEXITCODE -ne 0 -or -not $azureToken) { throw 'Azure sign-in required.' }
     $headers = @{ Authorization = "Bearer $azureToken" }
+    $setupStage = 'verify checked website assembly'
     $package = Invoke-WebRequest -Uri 'https://sarthitradingweb5amvyarepxaci.scm.azurewebsites.net/api/vfs/site/wwwroot/TradingSystem.Infrastructure.dll' -Headers $headers -TimeoutSec 30
     if ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([byte[]]$package.Content)) -ne $ExpectedInfrastructureHash) {
         throw 'Website is not running the checked execution package.'
     }
+    $setupStage = 'read current website settings'
     $current = Invoke-RestMethod -Method Post -Uri "$address/list?api-version=2024-11-01" -Headers $headers -TimeoutSec 30
     if ($current.properties.ApplicationRole -eq 'ReplayRecorder') { throw 'Wrong host role.' }
     $values = @{}; foreach ($p in $current.properties.PSObject.Properties) { $values[$p.Name] = $p.Value }
@@ -82,11 +86,13 @@ try {
     $values['UpstoxExecution__VerifiedEgressIp'] = $VerifiedEgressIp
     $values['UpstoxExecution__ApiBaseUrl'] = 'https://relay.174-138-120-226.nip.io/upstox/'
     $values['UpstoxExecution__RedirectUri'] = 'https://sarthico.com/api/upstox-execution/callback'
+    $setupStage = 'save website-only execution settings'
     Invoke-RestMethod -Method Put -Uri "${address}?api-version=2024-11-01" -Headers $headers -ContentType 'application/json' -Body (@{ properties = $values } | ConvertTo-Json -Compress -Depth 4) | Out-Null
+    $setupStage = 'verify saved execution settings'
     $saved = Invoke-RestMethod -Method Post -Uri "$address/list?api-version=2024-11-01" -Headers $headers
     foreach ($key in $values.Keys | Where-Object { $_ -like 'UpstoxExecution__*' }) {
         if ($saved.properties.$key -cne $values[$key]) { throw 'Saved setup differs.' }
     }
     Write-Host 'Upstox execution app configured on website. Trading authorization and controlled order verification remain separate; markets were not armed.'
-} catch { throw 'Upstox execution setup could not be confirmed. Credentials and response bodies withheld.' }
+} catch { throw "Upstox execution setup failed during: $setupStage. Error type: $($_.Exception.GetType().Name). Credentials and response bodies withheld." }
 finally { if ($encrypted) { $encrypted.Dispose() }; $app=$null; $azureToken=$null; $headers=$null; $values=$null; $current=$null; $saved=$null }

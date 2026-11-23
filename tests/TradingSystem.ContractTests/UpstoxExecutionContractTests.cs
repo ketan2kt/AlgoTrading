@@ -66,6 +66,46 @@ public sealed class UpstoxExecutionContractTests
     }
 
     [Fact]
+    public async Task ReadCacheExpiresAndLatePreMutationReadCannotReplaceNewEvidence()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readCount = 0;
+        using var handler = new Handler(async (request, _) => {
+            if (request.Method == HttpMethod.Get && Interlocked.Increment(ref readCount) == 1)
+            { started.SetResult(); await release.Task; }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"success\",\"data\":[]}") };
+        });
+        using var services = Services();
+        var clock = new Clock();
+        using var http = new UpstoxExecutionHttp(new Factory(handler), services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new UpstoxExecutionOptions { Enabled = true, StaticIpVerified = true }), clock);
+        var oldRead = http.SendAsync(HttpMethod.Get, "v2/order/retrieve-all", null, default);
+        await started.Task;
+        await http.SendAsync(HttpMethod.Put, "v3/order/modify", new { quantity = 50 }, default);
+        release.SetResult(); await oldRead;
+        await http.SendAsync(HttpMethod.Get, "v2/order/retrieve-all", null, default);
+        Assert.Equal(2, readCount);
+        clock.Now = clock.Now.AddSeconds(1);
+        await http.SendAsync(HttpMethod.Get, "v2/order/retrieve-all", null, default);
+        Assert.Equal(3, readCount);
+    }
+
+    [Fact]
+    public async Task ReadBurstUsesOneSnapshotButMutationForcesNewBrokerEvidence()
+    {
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
+            Content = new StringContent("{\"status\":\"success\",\"data\":[]}") }));
+        using var services = Services();
+        using var http = Client(handler, services);
+        for (var i = 0; i < 10; i++) await http.SendAsync(HttpMethod.Get, "v2/order/retrieve-all", null, default);
+        Assert.Equal(1, handler.Calls);
+        await http.SendAsync(HttpMethod.Put, "v3/order/modify", new { quantity = 50 }, default);
+        await http.SendAsync(HttpMethod.Get, "v2/order/retrieve-all", null, default);
+        Assert.Equal(3, handler.Calls);
+    }
+
+    [Fact]
     public async Task SandboxFlagCannotRouteToProductionOrBypassStaticIpVerification()
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("Must never send"));
@@ -122,7 +162,10 @@ public sealed class UpstoxExecutionContractTests
         new(new Factory(handler), services.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new UpstoxExecutionOptions { Enabled=true, StaticIpVerified=true }), new Clock());
     private static DateTimeOffset At(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture);
-    private sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => At("2026-11-23T04:00:00Z"); }
+    private sealed class Clock : TimeProvider {
+        public DateTimeOffset Now { get; set; } = At("2026-11-23T04:00:00Z");
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
     private sealed class Credentials : IUpstoxExecutionCredentialProvider {
         public Task<UpstoxExecutionAuthorization.Credential> ReadAsync(CancellationToken token) =>
             Task.FromResult(new UpstoxExecutionAuthorization.Credential("test-execution-only", "test-account", ["NFO", "BFO"], false));
