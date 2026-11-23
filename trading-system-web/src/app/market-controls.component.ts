@@ -2,7 +2,7 @@ import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angula
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
-import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
+import { LiveExecutionService, LiveExecutionStatus, UpstoxExecutionReadiness } from './live-execution.service';
 import { TradingLotsService, TradingLotConfiguration } from './trading-lots.service';
 
 @Component({ selector: 'app-market-controls', imports: [FormsModule, DatePipe], templateUrl: './market-controls.component.html' })
@@ -20,6 +20,8 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
   changing = '';
   lotMessage = '';
   liveMessage = '';
+  upstox: UpstoxExecutionReadiness | null = null;
+  connecting = false;
   ngOnInit():void { this.loadLots(); this.loadLive(); }
   ngOnDestroy():void { this.requests.unsubscribe(); }
   loadLots():void {
@@ -37,9 +39,37 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
       next:v=>{this.status=v; this.loadingLive=false; this.view.markForCheck();},
       error:()=>{this.loadingLive=false; this.liveMessage='Live status unavailable.'; this.view.markForCheck();}
     }));
+    this.requests.add(this.live.getUpstoxStatus().subscribe({
+      next:v=>{this.upstox=v;this.view.markForCheck();},
+      error:()=>{this.upstox=null;this.view.markForCheck();}
+    }));
+  }
+  broker(key:string):'Groww'|'Upstox' {return this.status?.markets.find(m=>m.market===key)?.executionBroker ?? 'Groww';}
+  selectBroker(key:string, value:string):void {
+    if(!this.status || this.armed(key)!==false || this.changing || (value!=='Groww' && value!=='Upstox')) return;
+    this.changing=key; this.liveMessage='';
+    this.requests.add(this.live.selectBroker(key,value).subscribe({
+      next:v=>{this.status=v;this.changing='';this.liveMessage=key+' broker saved. Existing trades stay with their original broker; new entries remain OFF.';this.view.markForCheck();},
+      error:()=>{this.status=null;this.changing='';this.liveMessage='Broker selection not confirmed. Reload live status.';this.view.markForCheck();}
+    }));
+  }
+  connectUpstox():void {
+    if(this.connecting || !this.upstox?.configured) return;
+    this.connecting=true;
+    this.requests.add(this.live.connectUpstox().subscribe({
+      next:({url})=>{
+        const target=new URL(url);
+        if(target.origin==='https://api.upstox.com' && target.pathname==='/v2/login/authorization/dialog') window.location.assign(target.href);
+        else {this.connecting=false;this.liveMessage='Unexpected authorization destination blocked.';this.view.markForCheck();}
+      },
+      error:()=>{this.connecting=false;this.liveMessage='Could not start Upstox authorization. Reload live status.';this.view.markForCheck();}
+    }));
   }
   armed(key:string): boolean | null {return this.status?.markets?.find(m=>m.market===key)?.armed ?? null;}
-  canSwitch(key:string):boolean {return !!this.status?.buildEnabled && this.status.allowedMarkets.includes(key) && this.armed(key)!==null && !this.changing;}
+  canSwitch(key:string):boolean {
+    const ready=this.broker(key)==='Groww' || (!!this.upstox?.authorized && this.upstox.staticIpVerified && !this.upstox.sandbox && this.upstox.exchanges.includes(key==='SENSEX'?'BFO':'NFO'));
+    return !!this.status?.buildEnabled && this.status.allowedMarkets.includes(key) && this.armed(key)!==null && !this.changing && (this.armed(key)===true || ready);
+  }
   switch(key:string):void {
     if(!this.canSwitch(key)) return;
     this.changing=key; this.liveMessage='';

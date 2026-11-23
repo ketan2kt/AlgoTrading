@@ -4,11 +4,15 @@
   @for (row of rows; track row.key) {
     <article class="execution-market">
       <h4>{{row.name}}</h4>
+      <label>Execution broker <select [attr.aria-label]="row.name + ' execution broker'" [ngModel]="broker(row.key)" (ngModelChange)="selectBroker(row.key,$event)" [disabled]="!status || armed(row.key)!==false || !!changing"><option value="Groww">Groww</option><option value="Upstox">Upstox</option></select></label>
       <label>Maximum lots @if (lots; as draft) { <input type="number" [attr.aria-label]="row.name + ' lots'" min="1" max="50" step="1" [(ngModel)]="draft[row.field]" [disabled]="saving" /> } @else { <small>{{loadingLots?'Loading…':'Unavailable'}}</small> }</label>
       <button type="button" class="market-live-toggle" [class.is-on]="armed(row.key)===true" [attr.aria-label]="row.name + ' new live entries'" [attr.aria-pressed]="armed(row.key)" [disabled]="!canSwitch(row.key)" (click)="switch(row.key)">{{changing===row.key?'Updating…':loadingLive?'Loading…':armed(row.key)===null?'Status unavailable':armed(row.key)?'New live entries ON':'New live entries OFF'}}</button>
     </article>
   }
   </div>
+  <p class="execution-help">Broker selection applies only to new live entries. Turn entries OFF to switch; existing trades, stops and exits stay with their original broker. Paper trading and market-data feeds are unchanged.</p>
+  <div class="execution-actions"><span>Upstox: {{upstox?.authorized?'Authorized':upstox?.configured?'Sign-in required':'Not configured'}}</span><button type="button" [disabled]="!upstox?.configured || connecting" (click)="connectUpstox()">{{connecting?'Connecting…':'Connect Upstox trading'}}</button></div>
+  @if(upstox){<small>{{upstox.message}} @if(upstox.expiresAtUtc){ Authorization expiry: {{upstox.expiresAtUtc | date:'dd MMM HH:mm':'+0530'}} IST.}</small>}
   <p class="execution-help">Normal-trade risk scales with your lots, premium and stop distance, plus estimated fees—there is no fixed ₹5,000 per-trade cap. Portfolio safeguards still apply; gaps and slippage can increase losses. Specialty trades retain their separate sizing. Live switches apply immediately and stay set. OFF blocks new live entries but keeps existing positions managed.</p>
   <div class="execution-actions">
   <button type="button" class="execution-save" [disabled]="!lots || saving" (click)="save()">{{saving?'Saving…':'Save lot sizes'}}</button>

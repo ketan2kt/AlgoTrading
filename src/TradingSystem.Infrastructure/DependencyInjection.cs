@@ -13,6 +13,7 @@ using TradingSystem.Infrastructure.Broker;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TradingSystem.Infrastructure.Broker.Groww;
+using TradingSystem.Infrastructure.Broker.Upstox;
 using TradingSystem.Application.MarketData;
 using TradingSystem.Infrastructure.MarketData;
 using TradingSystem.Application.Regime;
@@ -139,6 +140,28 @@ public static class DependencyInjection
                 ConfigureExecutionRelay(client, groww);
             });
         services.AddSingleton<GrowwBrokerGateway>();
+        services.AddSingleton<ILiveExecutionBrokerGateway>(p => p.GetRequiredService<GrowwBrokerGateway>());
+        services.AddOptions<UpstoxExecutionOptions>().Bind(configuration.GetSection(UpstoxExecutionOptions.SectionName))
+            .Validate(x => !x.Enabled || (Uri.TryCreate(x.ApiBaseUrl, UriKind.Absolute, out var uri) && uri.Scheme == "https" &&
+                uri.Host == "relay.174-138-120-226.nip.io" && uri.AbsolutePath == "/upstox/" &&
+                x.RedirectUri == "https://sarthico.com/api/upstox-execution/callback" &&
+                !string.IsNullOrWhiteSpace(x.AccountId)), "Upstox execution requires a pinned account and approved HTTPS relay/callback.")
+            .ValidateOnStart();
+        services.AddScoped<UpstoxExecutionAuthorization>();
+        services.AddScoped<IUpstoxExecutionCredentialProvider>(p => p.GetRequiredService<UpstoxExecutionAuthorization>());
+        services.AddScoped<IUpstoxExecutionAuthorization>(p => p.GetRequiredService<UpstoxExecutionAuthorization>());
+        services.AddSingleton<UpstoxExecutionHttp>();
+        services.AddSingleton<UpstoxBrokerGateway>();
+        services.AddHttpClient(UpstoxExecutionAuthorization.AuthClient, c => c.Timeout = TimeSpan.FromSeconds(15))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddHttpClient(UpstoxExecutionHttp.ClientName, (p, c) =>
+        {
+            c.BaseAddress = new Uri(p.GetRequiredService<IOptions<UpstoxExecutionOptions>>().Value.ApiBaseUrl);
+            c.Timeout = TimeSpan.FromSeconds(15);
+            var key = Environment.GetEnvironmentVariable("GROWW_EXECUTION_RELAY_KEY");
+            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Execution relay credential is missing.");
+            c.DefaultRequestHeaders.Add("X-Sarthi-Relay-Key", key);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddOptions<LiveExecutionOptions>()
             .Bind(configuration.GetSection(LiveExecutionOptions.SectionName))
             .Validate(value => value.PaperParityMode == "PaperFillAndLifecycle",
@@ -153,6 +176,7 @@ public static class DependencyInjection
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddSingleton<LiveExecutionWakeSignal>();
         services.AddHostedService<AutomaticLiveExecutionService>();
+        services.AddHostedService<UpstoxAutomaticLiveExecutionService>();
         services.AddHostedService<GrowwLiveAccountNotifications>();
         services.AddHostedService<LiveRoutingBaselineService>();
         services.AddHttpClient(GrowwReadOnlyGateway.InstrumentClientName, (provider, client) =>

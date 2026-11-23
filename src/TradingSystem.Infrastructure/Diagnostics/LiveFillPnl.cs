@@ -99,7 +99,7 @@ internal static class LiveFillPnl
             intent.Market=="SENSEX"?"BSE":"NSE").Total;
         var comparable=intent.ExternalExitQuantity == 0 && orders.All(x=>paper.TryGetValue(x.Role,out var leg) && leg.Price>0 && Size(x.Role)<=leg.Qty);
         decimal? matched=comparable ? orders.Sum(x=>(Buy(x.Role)?-1:1)*paper[x.Role].Price*x.Qty!.Value) : null;
-        var reason=intent.ExternalExitQuantity > 0 ? "Exited in Groww (external intervention); actual live fills, not a strategy replay result. Costs are estimated." :
+        var reason=intent.ExternalExitQuantity > 0 ? $"Exited in {intent.ExecutionBroker} (external intervention); actual live fills, not a strategy replay result. Costs are estimated." :
             !comparable?"Live fills balance; paper actions do not match these units." :
             gross==matched?"No gross execution difference on matched units." :
             gross<matched?"Broker fills earned less than paper on matched units." :

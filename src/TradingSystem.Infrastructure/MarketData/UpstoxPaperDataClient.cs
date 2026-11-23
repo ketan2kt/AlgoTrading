@@ -184,6 +184,18 @@ internal sealed class UpstoxPaperDataClient(IHttpClientFactory clients, IConfigu
         return key;
     }
 
+    // Reuse the exact dated contract identity for execution; no market subscription or quote mutation.
+    internal async Task<(string Key, int FreezeQuantity)> ExecutionContractAsync(Instrument instrument, CancellationToken token)
+    {
+        if (instrument.Type is not (InstrumentType.CallOption or InstrumentType.PutOption))
+            throw new InvalidDataException("Only mapped index options are eligible for this execution adapter.");
+        var key = await KeyAsync(instrument, token);
+        var freeze = Number(catalog[key], "freeze_quantity");
+        if (freeze <= 0 || freeze > int.MaxValue || freeze != decimal.Truncate(freeze))
+            throw new InvalidDataException("Upstox contract freeze quantity is unavailable.");
+        return (key, (int)freeze);
+    }
+
     internal static bool Matches(JsonElement row, Instrument instrument)
     {
         if (instrument.Type == InstrumentType.Index) return UpstoxHistoricalCandleBackup.Matches(row, instrument, instrument.TradingSymbol);

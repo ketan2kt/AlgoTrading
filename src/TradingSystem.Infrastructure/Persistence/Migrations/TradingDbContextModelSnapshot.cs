@@ -760,14 +760,6 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("TradingSystem.Domain.Trading.LiveExecutionIntent", b =>
                 {
-                    b.Property<int>("ExternalExitQuantity")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ExternalExitEvidenceJson")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("ExternalReconciliationPending")
-                        .HasColumnType("boolean");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
@@ -794,6 +786,29 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Direction")
                         .HasColumnType("integer");
+
+                    b.Property<string>("ExecutionAccount")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasDefaultValue("primary");
+
+                    b.Property<string>("ExecutionBroker")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Groww");
+
+                    b.Property<string>("ExternalExitEvidenceJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ExternalExitQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ExternalReconciliationPending")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("FilledQuantity")
                         .HasColumnType("integer");
@@ -905,13 +920,13 @@ namespace TradingSystem.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
-                    b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<int>("ExcursionBasisVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<DateTimeOffset?>("ExcursionObservedFromUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("ExcursionSampleCount")
                         .HasColumnType("integer");

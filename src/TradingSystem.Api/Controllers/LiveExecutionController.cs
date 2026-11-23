@@ -36,14 +36,27 @@ public sealed class LiveExecutionController(
 
     [EnableRateLimiting("authentication")]
     [ValidateAntiForgeryToken]
+    [HttpPut("markets/{market}/broker")]
+    public async Task<ActionResult<LiveTradingArmStatus>> SelectBroker(string market, SelectExecutionBrokerRequest request,
+        CancellationToken cancellationToken)
+    {
+        try { return Ok(await armService.SelectBrokerAsync(market, request.Broker,
+            User.Identity?.Name ?? "administrator", cancellationToken)); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
+    }
+
+    [EnableRateLimiting("authentication")]
+    [ValidateAntiForgeryToken]
     [HttpPut("markets/{market}/arm")]
     public async Task<ActionResult<LiveTradingArmStatus>> Arm(string market, ArmLiveExecutionRequest request,
         CancellationToken cancellationToken)
     {
         if (!(await armService.GetAsync(cancellationToken)).AllowedMarkets.Contains(market,
             StringComparer.Ordinal)) return BadRequest("Unknown live market.");
-        return Ok(await armService.SetAsync(market, request.Armed,
-            User.Identity?.Name ?? "administrator", cancellationToken));
+        try { return Ok(await armService.SetAsync(market, request.Armed,
+            User.Identity?.Name ?? "administrator", cancellationToken)); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
     }
 }
 
@@ -53,3 +66,4 @@ public sealed class ArmLiveExecutionRequest
 }
 
 public sealed record ProtectionReminderReview(string Version);
+public sealed record SelectExecutionBrokerRequest(string Broker);

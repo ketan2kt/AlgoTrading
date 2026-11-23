@@ -16,6 +16,32 @@ relay.174-138-120-226.nip.io {
 			header_up -X-Sarthi-Relay-Key
 		}
 
+		@upstox_reads {
+			header X-Sarthi-Relay-Key {$GROWW_EXECUTION_RELAY_KEY}
+			method GET
+			path /upstox/v2/order/retrieve-all /upstox/v2/order/details /upstox/v2/order/trades /upstox/v2/portfolio/short-term-positions
+		}
+		handle @upstox_reads {
+			uri strip_prefix /upstox
+			reverse_proxy https://api.upstox.com {
+				header_up Host api.upstox.com
+				header_up -X-Sarthi-Relay-Key
+			}
+		}
+
+		@upstox_orders {
+			header X-Sarthi-Relay-Key {$GROWW_EXECUTION_RELAY_KEY}
+			method POST PUT DELETE
+			path /upstox/v3/order/place /upstox/v3/order/modify /upstox/v3/order/cancel
+		}
+		handle @upstox_orders {
+			uri strip_prefix /upstox
+			reverse_proxy https://api-hft.upstox.com {
+				header_up Host api-hft.upstox.com
+				header_up -X-Sarthi-Relay-Key
+			}
+		}
+
 		respond "not found" 404
 	}
 }

@@ -3,7 +3,7 @@ import {HttpClient} from '@angular/common/http';
 import {Component,HostListener,inject,OnDestroy,OnInit,signal} from '@angular/core';
 import {Subscription,switchMap} from 'rxjs';
 
-interface Row {id:string;market:string;symbol:string;lifecycle:string;paperUnits:number|null;liveUnits:number|null;
+interface Row {id:string;market:string;symbol:string;lifecycle:string;executionBroker?:string;paperUnits:number|null;liveUnits:number|null;
   desiredStop:number|null;stopOrderId:string|null;confirmedUnits:number|null;confirmedStop:number|null;
   confirmedAt:string|null;finding:string;needsAttention:boolean;sessionDate:string;reviewVersion:string|null;reviewedAt:string|null}
 interface Snapshot {readAt:string;attention:number;rows:Row[]}

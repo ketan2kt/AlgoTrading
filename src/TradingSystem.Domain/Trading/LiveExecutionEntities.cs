@@ -6,13 +6,15 @@ public sealed class LiveExecutionIntent : MutableEntity
 {
     public LiveExecutionIntent(Guid id, string sourceType, Guid sourceId, string market,
         Guid instrumentId, Direction direction, int quantity, decimal requestedEntry,
-        decimal stopLoss, decimal target, string clientReference, DateTimeOffset createdAtUtc)
+        decimal stopLoss, decimal target, string clientReference, DateTimeOffset createdAtUtc,
+        string executionBroker = "Groww", string executionAccount = "primary")
         : base(id, createdAtUtc)
     {
         if (string.IsNullOrWhiteSpace(sourceType) || sourceId == Guid.Empty ||
             string.IsNullOrWhiteSpace(market) || instrumentId == Guid.Empty || quantity <= 0 ||
             requestedEntry <= 0 || stopLoss <= 0 || target <= 0 ||
-            string.IsNullOrWhiteSpace(clientReference))
+            string.IsNullOrWhiteSpace(clientReference) || executionBroker is not ("Groww" or "Upstox") ||
+            string.IsNullOrWhiteSpace(executionAccount) || executionAccount.Length > 100)
             throw new ArgumentException("Live execution intent values are invalid.");
         SourceType = sourceType;
         SourceId = sourceId;
@@ -24,9 +26,13 @@ public sealed class LiveExecutionIntent : MutableEntity
         StopLoss = stopLoss;
         Target = target;
         ClientReference = clientReference;
+        ExecutionBroker = executionBroker;
+        ExecutionAccount = executionAccount;
     }
 
     public string SourceType { get; private init; }
+    public string ExecutionBroker { get; private init; } = "Groww";
+    public string ExecutionAccount { get; private init; } = "primary";
     public Guid SourceId { get; private init; }
     public string Market { get; private init; }
     public Guid InstrumentId { get; private init; }

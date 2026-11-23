@@ -7,7 +7,7 @@ internal sealed partial class AutomaticLiveExecutionService
 {
     private async Task ReconcileExternalExitsAsync(TradingDbContext db, CancellationToken token)
     {
-        var all = await db.LiveExecutionIntents.Where(i => i.Status != "Rejected" &&
+        var all = await OwnIntents(db).Where(i => i.Status != "Rejected" &&
             (i.Status != "Closed" || i.CreatedAtUtc >= timeProvider.GetUtcNow().AddDays(-1))).ToListAsync(token);
         var candidates = all.Where(i => i.Status is "Protected" or "ProtectedScaleMismatch" or "FinalExitPending").ToArray();
         if (candidates.Length == 0) return;
@@ -31,7 +31,7 @@ internal sealed partial class AutomaticLiveExecutionService
                     (verifiedStop, ct) => TryRecordLiveEventAsync(db, intent, "ExternalExitReconciled",
                         new { intent.ExternalExitQuantity, remaining = intent.FilledQuantity,
                             verifiedStop,
-                            reason = "Exited in Groww; paper simulation unchanged.",
+                            reason = $"Exited in {broker.Broker}; paper simulation unchanged.",
                             scaling = "Further automatic scaling held; remaining SL and final exit stay managed." }, ct));
                 if (!okay && intent.LastError != previousError)
                     await TryRecordLiveEventAsync(db, intent, "ExternalExitNeedsReconciliation",

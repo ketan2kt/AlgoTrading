@@ -14,7 +14,8 @@ internal sealed class EfLiveTradingArmService(
     IAuditWriter auditWriter,
     IOptions<LiveExecutionOptions> options,
     LiveExecutionWakeSignal wakeSignal,
-    TimeProvider timeProvider) : ILiveTradingArmService
+    TimeProvider timeProvider,
+    TradingSystem.Application.Broker.IUpstoxExecutionAuthorization? upstox = null) : ILiveTradingArmService
 {
     internal const string KeyPrefix = "LiveExecutionArm:";
 
@@ -29,7 +30,7 @@ internal sealed class EfLiveTradingArmService(
         {
             var value = Parse(settings.FirstOrDefault(item => item.Key == KeyPrefix + market)?.ValueJson);
             return new LiveMarketArmStatus(market, value?.Armed == true,
-                value?.ChangedAtUtc, value?.ChangedBy);
+                value?.ChangedAtUtc, value?.ChangedBy, value?.ExecutionBroker ?? "Groww");
         }).ToArray();
         var tested = await db.ApplicationSettings.AsNoTracking().AnyAsync(item =>
             item.Mode == TradingMode.Live && item.Key == AutomaticLiveExecutionService.ControlledTestKey &&
@@ -49,12 +50,20 @@ internal sealed class EfLiveTradingArmService(
         if (armed && !options.Value.BuildEnabled)
             throw new InvalidOperationException("Live execution is disabled by server configuration.");
         var now = timeProvider.GetUtcNow();
-        var value = new ArmValue(armed, now, actor);
-        var json = JsonSerializer.Serialize(value);
         var key = KeyPrefix + market;
         var setting = await db.ApplicationSettings.SingleOrDefaultAsync(item =>
             item.Mode == TradingMode.Live && item.Key == key, cancellationToken);
         var before = setting?.ValueJson;
+        var selectedBroker = Parse(before)?.ExecutionBroker ?? "Groww";
+        if (armed && selectedBroker == "Upstox")
+        {
+            var readiness = upstox is null ? null : await upstox.GetStatusAsync(cancellationToken);
+            var segment = market == "SENSEX" ? "BFO" : "NFO";
+            if (readiness is not { Configured: true, Authorized: true, StaticIpVerified: true, Sandbox: false } ||
+                !readiness.Exchanges.Contains(segment, StringComparer.Ordinal))
+                throw new InvalidOperationException("Upstox trading authorization, account segment or static-IP readiness is incomplete.");
+        }
+        var json = JsonSerializer.Serialize(new ArmValue(armed, now, actor, selectedBroker));
         if (setting is null)
             db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live, key, json, now));
         else
@@ -82,5 +91,30 @@ internal sealed class EfLiveTradingArmService(
         catch (JsonException) { return null; }
     }
 
-    private sealed record ArmValue(bool Armed, DateTimeOffset ChangedAtUtc, string ChangedBy);
+    public async Task<LiveTradingArmStatus> SelectBrokerAsync(string market, string broker, string actor,
+        CancellationToken cancellationToken)
+    {
+        if (broker is not ("Groww" or "Upstox") || market is not ("NIFTY" or "SENSEX" or "BANK-NIFTY") ||
+            !options.Value.AllowedMarkets.Contains(market, StringComparer.Ordinal))
+            throw new ArgumentException("Unsupported market or execution broker.");
+        var key = KeyPrefix + market;
+        var setting = await db.ApplicationSettings.SingleOrDefaultAsync(x => x.Mode == TradingMode.Live && x.Key == key,
+            cancellationToken);
+        var before = setting?.ValueJson;
+        var current = Parse(before);
+        if (current?.Armed == true)
+            throw new InvalidOperationException("Turn new live entries OFF before changing execution broker. Existing trades stay managed.");
+        var now = timeProvider.GetUtcNow();
+        var json = JsonSerializer.Serialize(new ArmValue(false, now, actor, broker));
+        if (setting is null) db.ApplicationSettings.Add(new(Guid.NewGuid(), TradingMode.Live, key, json, now));
+        else setting.ChangeValue(json, now);
+        await auditWriter.WriteAsync(new AuditEntry(actor, "LiveExecutionBrokerSelected", nameof(ApplicationSetting),
+            key, $"{market} new entries routed to {broker}; existing positions unchanged.", before ?? "null", json,
+            Guid.NewGuid().ToString("N"), now), cancellationToken);
+        wakeSignal.Notify();
+        return await GetAsync(cancellationToken);
+    }
+
+    private sealed record ArmValue(bool Armed, DateTimeOffset ChangedAtUtc, string ChangedBy,
+        string ExecutionBroker = "Groww");
 }

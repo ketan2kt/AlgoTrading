@@ -21,12 +21,15 @@ public sealed partial class GrowwBrokerGateway(
     IHttpClientFactory httpClientFactory,
     IGrowwAccessTokenProvider accessTokenProvider,
     IServiceScopeFactory scopeFactory,
-    TimeProvider timeProvider) : IBrokerGateway, ILiveBrokerProtectionGateway
+    TimeProvider timeProvider) : ILiveExecutionBrokerGateway
 {
     internal const string ApiClientName = "GrowwExecutionApi";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public TradingMode Mode => TradingMode.Live;
+    public string Broker => "Groww";
+    public string Account => "primary";
+    public decimal ProtectionLimit(decimal stopLoss) => ProtectiveLimit(stopLoss);
 
     public async Task<BrokerOrderSnapshot> SubmitAsync(BrokerOrderRequest request,
         CancellationToken cancellationToken)
@@ -163,7 +166,7 @@ public sealed partial class GrowwBrokerGateway(
         return await ConfirmProtectionAsync(brokerProtectionId, quantity, stopLoss, cancellationToken);
     }
 
-    internal async Task<BrokerProtectionSnapshot> ConfirmProtectionAsync(string id, int quantity,
+    public async Task<BrokerProtectionSnapshot> ConfirmProtectionAsync(string id, int quantity,
         decimal stopLoss, CancellationToken cancellationToken)
     {
         // Modify/create acknowledgement can mean MODIFICATION_REQUESTED; verify the actual

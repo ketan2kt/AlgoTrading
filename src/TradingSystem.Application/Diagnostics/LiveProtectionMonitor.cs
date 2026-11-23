@@ -5,6 +5,7 @@ public sealed record ProtectionMonitorRow(Guid Id,string Market,string Symbol,st
     decimal? ConfirmedStop,DateTimeOffset? ConfirmedAt,string Finding,bool NeedsAttention)
 {
     public DateOnly SessionDate { get; init; }
+    public string ExecutionBroker { get; init; } = "Groww";
     public string? ReviewVersion { get; init; }
     public DateTimeOffset? ReviewedAt { get; init; }
 }

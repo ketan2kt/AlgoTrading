@@ -17,13 +17,16 @@ namespace TradingSystem.Infrastructure.Execution;
 
 internal sealed partial class AutomaticLiveExecutionService(
     IServiceScopeFactory scopeFactory,
-    GrowwBrokerGateway broker,
+    ILiveExecutionBrokerGateway broker,
     LiveExecutionWakeSignal wakeSignal,
     IOptions<LiveExecutionOptions> options,
     TimeProvider timeProvider,
     ILogger<AutomaticLiveExecutionService> logger) : BackgroundService
 {
     internal const string ControlledTestKey = "LiveControlledBrokerTestCompleted";
+
+    private IQueryable<LiveExecutionIntent> OwnIntents(TradingDbContext db) =>
+        db.LiveExecutionIntents.Where(x => x.ExecutionBroker == broker.Broker && x.ExecutionAccount == broker.Account);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -38,12 +41,15 @@ internal sealed partial class AutomaticLiveExecutionService(
         }
     }
 
-    private async Task RunCycleAsync(CancellationToken cancellationToken)
+    internal async Task RunCycleAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var armService = scope.ServiceProvider.GetRequiredService<ILiveTradingArmService>();
         var arm = await armService.GetAsync(cancellationToken);
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
+        arm = arm with { Markets = arm.Markets.Where(x => x.ExecutionBroker == broker.Broker).ToArray() };
+        if (broker.Broker == "Upstox" && !arm.Markets.Any(x => x.Armed) &&
+            !await OwnIntents(db).AnyAsync(x => x.Status != "Closed" && x.Status != "Rejected", cancellationToken)) return;
 
         // Disarming prevents new entries, not the management of positions already
         // opened while armed. Paper exits and protection changes still have to flow.
@@ -70,7 +76,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             return;
         }
 
-        var blockers = await db.LiveExecutionIntents.Where(value =>
+        var blockers = await OwnIntents(db).Where(value =>
                 value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" ||
                 value.Status == "ResidualStopSubmitting" || value.Status == "ResidualProtected" ||
                 value.Status == "PartialProtectionResizing" || value.Status == "PartialSubmitting" || value.Status == "AddOnSubmitting" || value.Status == "ProtectedScaleMismatch" ||
@@ -89,7 +95,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             await NoteDeferredEntriesAsync(db, arm, "Live discovery deferred: an unresolved managed order blocked new entries.", cancellationToken);
             return;
         }
-        var inFlight = await db.LiveExecutionIntents.FirstOrDefaultAsync(value =>
+        var inFlight = await OwnIntents(db).FirstOrDefaultAsync(value =>
             value.Status == "Submitted" || value.Status == "PartiallyFilled" ||
             value.Status == "FilledUnprotected", cancellationToken);
         if (inFlight is not null)
@@ -100,6 +106,19 @@ internal sealed partial class AutomaticLiveExecutionService(
         var armedMarkets = arm.Markets.Where(value => value.Armed && value.ChangedAtUtc is not null)
             .Select(value => value.Market).ToArray();
         if (armedMarkets.Length == 0) return;
+        // Account-specific management above stays independent, but switching brokers
+        // must not bypass the existing unresolved-exposure block on NEW entries.
+        if (await db.LiveExecutionIntents.AsNoTracking().AnyAsync(value =>
+                (value.ExecutionBroker != broker.Broker || value.ExecutionAccount != broker.Account) &&
+                value.Status != "Closed" && value.Status != "Rejected" &&
+                ((value.Status != "Protected" && value.Status != "Pending") ||
+                 value.ExternalReconciliationPending || value.LastError != null ||
+                 value.ExecutionBroker == broker.Broker), cancellationToken))
+        {
+            await NoteDeferredEntriesAsync(db, arm,
+                "Live discovery deferred: another execution account has unresolved managed exposure.", cancellationToken);
+            return;
+        }
         // Existing live orders were recovered/managed above. New backup-data
         // paper signals are deliberately not mirrored to live execution.
         var fallbackDay = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
@@ -107,10 +126,10 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
                 x.Key == PaperDataSource.SettingKey && x.ValueJson == fallbackDay, cancellationToken))
         {
-            await NoteDeferredEntriesAsync(db, arm, "Paper is using backup data; new live entries remain Groww-only.", cancellationToken);
+            await NoteDeferredEntriesAsync(db, arm, "Backup-data session is not authorized for new live entries; existing positions stay managed.", cancellationToken);
             return;
         }
-        var pending = await db.LiveExecutionIntents.Where(value =>
+        var pending = await OwnIntents(db).Where(value =>
             value.Status == "Pending" && armedMarkets.Contains(value.Market))
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
         var recoverable = pending.FirstOrDefault(value =>
@@ -118,7 +137,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         if (recoverable is not null)
         {
             var current = await armService.GetAsync(cancellationToken);
-            if (current.ForMarket(recoverable.Market)?.Armed == true)
+            if (current.ForMarket(recoverable.Market) is { Armed: true } route && route.ExecutionBroker == broker.Broker)
                 await SubmitAndProtectAsync(db, recoverable, cancellationToken);
             else await NoteEntryAsync(recoverable.Market.ToLowerInvariant(), recoverable.SourceId, recoverable.InstrumentId,
                 "Live switch was OFF at the pre-submission recheck.", cancellationToken);
@@ -146,7 +165,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             db.LiveExecutionIntents.Add(intent);
             await db.SaveChangesAsync(cancellationToken); // durable idempotency boundary before broker I/O
             var current = await armService.GetAsync(cancellationToken);
-            if (current.ForMarket(intent.Market)?.Armed != true)
+            if (current.ForMarket(intent.Market) is not { Armed: true } route || route.ExecutionBroker != broker.Broker)
             {
                 await NoteEntryAsync(intent.Market.ToLowerInvariant(), intent.SourceId, intent.InstrumentId,
                     "Live switch was OFF at the pre-submission recheck.", cancellationToken);
@@ -226,7 +245,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         }
     }
 
-    private static async Task QuarantineUncertainPairAsync(TradingDbContext db,
+    private async Task QuarantineUncertainPairAsync(TradingDbContext db,
         LiveExecutionIntent uncertain, CancellationToken cancellationToken)
     {
         if (uncertain.SourceType != "MARKET_POSITION") return;
@@ -238,7 +257,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 value.OpenedAtUtc == source.OpenedAtUtc)
             .Select(value => value.Id).FirstOrDefaultAsync(cancellationToken);
         if (otherId == Guid.Empty) return;
-        var openLeg = await db.LiveExecutionIntents.SingleOrDefaultAsync(value =>
+        var openLeg = await OwnIntents(db).SingleOrDefaultAsync(value =>
             value.SourceType == "MARKET_POSITION" && value.SourceId == otherId &&
             value.Status == "Protected", cancellationToken);
         if (openLeg is null) return;
@@ -257,7 +276,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             value.Market == source.Market && value.Strategy == otherStrategy &&
             value.OpenedAtUtc == source.OpenedAtUtc, cancellationToken);
         if (other is null) return;
-        var openLeg = await db.LiveExecutionIntents.SingleOrDefaultAsync(value =>
+        var openLeg = await OwnIntents(db).SingleOrDefaultAsync(value =>
             value.SourceType == "MARKET_POSITION" && value.SourceId == other.Id &&
             value.Status == "Protected", cancellationToken);
         if (openLeg is null) return;
@@ -276,7 +295,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task SyncProtectedPositionsAsync(TradingDbContext db,
         CancellationToken cancellationToken)
     {
-        var managed = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch" ||
+        var managed = await OwnIntents(db).Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch" ||
             value.Status == "FinalExitPending" || value.Status == "FinalSellSubmitting" || value.Status == "ResidualStopSubmitting" ||
             value.Status == "ResidualProtected" || value.Status == "AddOnSubmitting" || value.Status == "PartialProtectionResizing" || value.Status == "PartialSubmitting")
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
@@ -337,7 +356,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task RecoverSubmittedProtectionAsync(TradingDbContext db,
         CancellationToken cancellationToken)
     {
-        var pending = await db.LiveExecutionIntents.Where(value =>
+        var pending = await OwnIntents(db).Where(value =>
                 value.Status == "ProtectionSubmitting")
             .ToListAsync(cancellationToken);
         foreach (var intent in pending)
@@ -378,7 +397,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task RecoverSubmittedEntryAsync(TradingDbContext db,
         CancellationToken cancellationToken)
     {
-        var pending = await db.LiveExecutionIntents.Where(value =>
+        var pending = await OwnIntents(db).Where(value =>
                 value.Status == "EntrySubmitting")
             .ToListAsync(cancellationToken);
         foreach (var intent in pending)
@@ -711,7 +730,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         await db.SaveChangesAsync(cancellationToken);
         await TryRecordLiveEventAsync(db, intent, "StopModified",
             new { priorStop, requestedStop = paperStop,
-                requestedLimit = GrowwBrokerGateway.ProtectiveLimit(paperStop),
+                requestedLimit = broker.ProtectionLimit(paperStop),
                 protection.BrokerProtectionId, protection.Status, protection.UpdatedAtUtc, protectionCallStartedAt, verifiedStop = protection },
             cancellationToken);
     }
@@ -862,7 +881,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         var positions = await broker.GetPositionsAsync(cancellationToken);
         var actual = positions.Where(value => value.InstrumentId == intent.InstrumentId &&
             value.Direction == intent.Direction).Sum(value => value.Quantity);
-        var other = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
+        var other = await OwnIntents(db).AsNoTracking().Where(value =>
                 value.Id != intent.Id && value.FilledQuantity > 0 &&
                 value.Status != "Closed" && value.Status != "Rejected" &&
                 value.InstrumentId == intent.InstrumentId && value.Direction == intent.Direction)
@@ -898,7 +917,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             order.State is (OrderState.BrokerAcknowledged or OrderState.PartiallyFilled))
         {
             var cancelled = await broker.CancelAsync(clientReference, cancellationToken);
-            if (cancelled.State != OrderState.Cancelled)
+            if (cancelled.State is not (OrderState.Cancelled or OrderState.Filled))
                 throw new BrokerOrderOutcomeUnknownException(clientReference);
             order = await broker.GetOrderAsync(clientReference, cancellationToken)
                 ?? throw new BrokerOrderOutcomeUnknownException(clientReference);
@@ -919,14 +938,14 @@ internal sealed partial class AutomaticLiveExecutionService(
 
     private async Task<bool> ReconcileAsync(TradingDbContext db, CancellationToken cancellationToken)
     {
-        var active = await db.LiveExecutionIntents.Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch")
+        var active = await OwnIntents(db).Where(value => value.Status == "Protected" || value.Status == "ProtectedScaleMismatch")
             .ToListAsync(cancellationToken);
         var actual = await broker.GetPositionsAsync(cancellationToken);
-        var recentlyClosed = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
+        var recentlyClosed = await OwnIntents(db).AsNoTracking().Where(value =>
                 value.Status == "Closed" &&
                 value.CreatedAtUtc >= timeProvider.GetUtcNow().AddDays(-1))
             .Select(value => value.InstrumentId).Distinct().ToListAsync(cancellationToken);
-        var unsettled = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
+        var unsettled = await OwnIntents(db).AsNoTracking().Where(value =>
                 value.Status != "Closed" && value.Status != "Rejected" &&
                 value.Status != "Protected" && value.Status != "ProtectedScaleMismatch")
             .Select(value => value.InstrumentId).Distinct().ToListAsync(cancellationToken);
@@ -1088,7 +1107,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                     await NoteEntryAsync(market,source.Id,source.UnderlyingInstrumentId,"Paired counterpart was not active and protectable.", cancellationToken);
                     continue;
                 }
-                var otherLiveStatus = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
+                var otherLiveStatus = await OwnIntents(db).AsNoTracking().Where(value =>
                         value.SourceType == "MARKET_POSITION" && value.SourceId == other.Id)
                     .Select(value => value.Status).FirstOrDefaultAsync(cancellationToken);
                 if (otherLiveStatus is "Rejected" or "Closed" or "ReconciliationRequired")
@@ -1119,7 +1138,7 @@ internal sealed partial class AutomaticLiveExecutionService(
     {
         var id = Guid.NewGuid();
         return new LiveExecutionIntent(id, sourceType, sourceId, market, instrument.Id, Direction.Buy,
-            quantity, entry, stop, target, LiveClientReference(sourceId), timeProvider.GetUtcNow());
+            quantity, entry, stop, target, LiveClientReference(sourceId), timeProvider.GetUtcNow(), broker.Broker, broker.Account);
     }
 
     internal static string LiveClientReference(Guid sourceId) => Reference("LE", sourceId);
@@ -1157,6 +1176,8 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task SubmitAndProtectAsync(TradingDbContext db, LiveExecutionIntent intent,
         CancellationToken cancellationToken)
     {
+        if (intent.ExecutionBroker != broker.Broker || intent.ExecutionAccount != broker.Account)
+            throw new InvalidOperationException("Execution account differs from immutable trade ownership.");
         var instrument = await db.Instruments.AsNoTracking().SingleAsync(value =>
             value.Id == intent.InstrumentId, cancellationToken);
         try
@@ -1166,6 +1187,14 @@ internal sealed partial class AutomaticLiveExecutionService(
             BrokerOrderSnapshot order;
             if (intent.Status == "Pending")
             {
+                await using var routeScope = scopeFactory.CreateAsyncScope();
+                var currentRoute = await routeScope.ServiceProvider.GetRequiredService<ILiveTradingArmService>().GetAsync(cancellationToken);
+                if (currentRoute.ForMarket(intent.Market) is not { Armed: true } selected || selected.ExecutionBroker != broker.Broker)
+                {
+                    intent.Reject("Execution selection changed before submission.", timeProvider.GetUtcNow());
+                    await db.SaveChangesAsync(cancellationToken);
+                    return;
+                }
                 var backupSession = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
                     .ToOffset(TimeSpan.FromHours(5.5)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                 if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
@@ -1199,7 +1228,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                     return;
                 }
                 var sameContract = await broker.GetPositionsAsync(cancellationToken);
-                var managed = await db.LiveExecutionIntents.AsNoTracking().Where(value =>
+                var managed = await OwnIntents(db).AsNoTracking().Where(value =>
                         value.Id != intent.Id && value.InstrumentId == intent.InstrumentId &&
                         value.Status == "Protected")
                     .Select(value => new { value.Direction, value.FilledQuantity })
@@ -1244,21 +1273,31 @@ internal sealed partial class AutomaticLiveExecutionService(
                 if (order.State is OrderState.BrokerAcknowledged or OrderState.PartiallyFilled)
                 {
                     var cancelled = await broker.CancelAsync(intent.ClientReference, cancellationToken);
-                    if (cancelled.State != OrderState.Cancelled)
+                    if (cancelled.State is not (OrderState.Cancelled or OrderState.Filled))
                         throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
-                    intent.Reject("Entry limit order was not filled before its timeout.", timeProvider.GetUtcNow());
-                    await db.SaveChangesAsync(cancellationToken);
-                    return;
+                    // Cancellation acknowledgement can race a fill. Never treat its
+                    // pre-cancel snapshot as proof that no position exists.
+                    order = await broker.GetOrderAsync(intent.ClientReference, cancellationToken)
+                        ?? throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
+                    if (order.State is not (OrderState.Cancelled or OrderState.Filled))
+                        throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
+                    if (order.FilledQuantity == 0)
+                    {
+                        intent.Reject("Entry limit order was not filled before its timeout.", timeProvider.GetUtcNow());
+                        await db.SaveChangesAsync(cancellationToken);
+                        return;
+                    }
                 }
-                throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
+                if (order.FilledQuantity <= 0) throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
             }
             if (order.FilledQuantity < order.RequestedQuantity)
             {
                 var cancelled = await broker.CancelAsync(intent.ClientReference, cancellationToken);
-                if (cancelled.State != OrderState.Cancelled)
+                if (cancelled.State is not (OrderState.Cancelled or OrderState.Filled))
                     throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
-                order = await broker.GetOrderAsync(intent.ClientReference, cancellationToken) ?? cancelled;
-                if (order.State != OrderState.Cancelled || order.FilledQuantity <= 0)
+                order = await broker.GetOrderAsync(intent.ClientReference, cancellationToken)
+                    ?? throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
+                if (order.State is not (OrderState.Cancelled or OrderState.Filled) || order.FilledQuantity <= 0)
                     throw new BrokerOrderOutcomeUnknownException(intent.ClientReference);
             }
             var fillPriceMissing = order.AverageFillPrice is null;
@@ -1286,7 +1325,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 new { order.BrokerOrderId, order.FilledQuantity,
                     order.AverageFillPrice, order.PricedQuantity, entryObservedAtUtc = order.UpdatedAtUtc,
                     protection.BrokerProtectionId, protection.StopLoss,
-                    protectiveLimit = GrowwBrokerGateway.ProtectiveLimit(protection.StopLoss),
+                    protectiveLimit = broker.ProtectionLimit(protection.StopLoss),
                     protectionObservedAtUtc = protection.UpdatedAtUtc, protectionCallStartedAt, verifiedStop = protection }, cancellationToken);
             // The paper source may have closed while Groww filled and protected
             // the entry. Recheck its durable lifecycle without another poll delay.
@@ -1310,10 +1349,11 @@ internal sealed partial class AutomaticLiveExecutionService(
     private async Task MarkControlledTestCompleteAsync(TradingDbContext db,
         CancellationToken cancellationToken)
     {
+        var testKey = broker.Broker == "Groww" ? ControlledTestKey : $"{ControlledTestKey}:{broker.Broker}:{broker.Account}";
         if (await db.ApplicationSettings.AnyAsync(value => value.Mode == TradingMode.Live &&
-                value.Key == ControlledTestKey, cancellationToken)) return;
+                value.Key == testKey, cancellationToken)) return;
         db.ApplicationSettings.Add(new ApplicationSetting(Guid.NewGuid(), TradingMode.Live,
-            ControlledTestKey, "true", timeProvider.GetUtcNow()));
+            testKey, "true", timeProvider.GetUtcNow()));
     }
 
     private async Task TryRecordLiveEventAsync(TradingDbContext db,
@@ -1325,7 +1365,7 @@ internal sealed partial class AutomaticLiveExecutionService(
             intent.InstrumentId, atUtc, "LiveExecution:" + eventName, 0m,
             JsonSerializer.Serialize(new
             {
-                version = 1,
+                version = 2, intent.ExecutionBroker, intent.ExecutionAccount,
                 sourceIdCompact = intent.SourceId.ToString("N"),
                 intentId = intent.Id,
                 intent.SourceType,

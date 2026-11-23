@@ -18,7 +18,7 @@
     @else if(snapshot();as s){
       @for(r of s.rows;track r.id){
         @if(!r.reviewedAt){
-        <article><div class="identity"><div><small>{{r.market}} · {{r.sessionDate}}</small><strong>{{r.symbol}}</strong></div><span class="finding" [class.warn]="r.needsAttention">{{r.finding}}</span></div>
+        <article><div class="identity"><div><small>{{r.market}} · {{r.executionBroker??'Groww'}} · {{r.sessionDate}}</small><strong>{{r.symbol}}</strong></div><span class="finding" [class.warn]="r.needsAttention">{{r.finding}}</span></div>
           <dl><div><dt>Paper stop</dt><dd>{{r.desiredStop===null?'Unknown':'₹'+(r.desiredStop|number:'1.2-2')}}</dd></div>
             <div><dt>Confirmed stop</dt><dd>{{r.confirmedStop===null?'Unknown':'₹'+(r.confirmedStop|number:'1.2-2')}}</dd></div>
             <div><dt>Units · paper / live / stop</dt><dd>{{r.paperUnits??'—'}} / {{r.liveUnits??'—'}} / {{r.confirmedUnits??'—'}}</dd></div></dl>
@@ -26,7 +26,7 @@
           @if(r.reviewVersion){
             <div class="review">
               @if(confirming()===r.reviewVersion){
-                <p>Checked this record against Groww? This clears the reminder, not the position or its stop.</p>
+                <p>Checked this record against {{r.executionBroker??'Groww'}}? This clears the reminder, not the position or its stop.</p>
                 <button type="button" (click)="markReviewed(r)" [disabled]="saving()">Confirm review</button>
                 <button type="button" (click)="confirming.set(null)" [disabled]="saving()">Cancel</button>
               }@else{<button type="button" (click)="confirming.set(r.reviewVersion)" [disabled]="saving()">Mark reviewed</button>}

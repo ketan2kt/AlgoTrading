@@ -454,6 +454,8 @@ public sealed class TradingDbContext(
         builder.Entity<LiveExecutionIntent>(entity =>
         {
             ConfigureMutable(entity, "live_execution_intents");
+            entity.Property(value => value.ExecutionBroker).HasMaxLength(20).HasDefaultValue("Groww");
+            entity.Property(value => value.ExecutionAccount).HasMaxLength(100).HasDefaultValue("primary");
             entity.Property(value => value.SourceType).HasMaxLength(40);
             entity.Property(value => value.Market).HasMaxLength(20);
             entity.Property(value => value.ClientReference).HasMaxLength(20);

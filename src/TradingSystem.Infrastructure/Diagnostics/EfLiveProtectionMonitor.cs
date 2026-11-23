@@ -142,7 +142,7 @@ internal sealed class EfLiveProtectionMonitor(TradingDbContext db,TimeProvider c
         var offset=TimeSpan.FromHours(5.5);
         var row=new ProtectionMonitorRow(i.Id,i.Market,symbol,i.Status,units,i.FilledQuantity>0?i.FilledQuantity:null,stop,i.ProtectionId,
             ack?.Qty,ack?.Price,ack?.At,finding,finding is not ("Last confirmed match" or "Externally reduced; stop confirmed"))
-            {SessionDate=DateOnly.FromDateTime(i.CreatedAtUtc.ToOffset(offset).Date)};
+            {SessionDate=DateOnly.FromDateTime(i.CreatedAtUtc.ToOffset(offset).Date),ExecutionBroker=i.ExecutionBroker};
         if(!row.NeedsAttention || row.SessionDate>=DateOnly.FromDateTime(now.ToOffset(offset).Date))return row;
         // A review acknowledges only these facts. New revisions, receipts or lifecycle changes reopen the reminder.
         var latestReceipt=records.Select(p=>(DateTimeOffset?)p.At).Max();
