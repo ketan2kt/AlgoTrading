@@ -4,7 +4,7 @@ import { Observable, switchMap } from 'rxjs';
 
 export interface LiveExecutionStatus {
   buildEnabled: boolean;
-  markets: { market: string; armed: boolean; changedAtUtc: string | null; changedBy: string | null; executionBroker?: 'Groww' | 'Upstox' }[];
+  markets: { market: string; armed: boolean; changedAtUtc: string | null; changedBy: string | null; executionBroker?: 'Groww' | 'Upstox'; entryStatus?: 'Unknown'|'Off'|'Blocked'|'Monitoring'; entryStatusReason?: string; entryCheckedAtUtc?: string|null }[];
   mirrorsPaperQuantity: boolean;
   controlledBrokerTestCompleted: boolean;
   allowedMarkets: string[];

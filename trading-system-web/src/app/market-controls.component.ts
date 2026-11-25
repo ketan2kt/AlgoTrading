@@ -1,7 +1,7 @@
 import { ChangeDetectorRef, Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { Subscription, interval } from 'rxjs';
 import { LiveExecutionService, LiveExecutionStatus, UpstoxExecutionReadiness } from './live-execution.service';
 import { TradingLotsService, TradingLotConfiguration } from './trading-lots.service';
 
@@ -22,7 +22,7 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
   liveMessage = '';
   upstox: UpstoxExecutionReadiness | null = null;
   connecting = false;
-  ngOnInit():void { this.loadLots(); this.loadLive(); }
+  ngOnInit():void { this.loadLots(); this.loadLive(); this.requests.add(interval(5000).subscribe(()=>this.loadLive(true))); }
   ngOnDestroy():void { this.requests.unsubscribe(); }
   loadLots():void {
     if(this.loadingLots || this.saving) return;
@@ -32,12 +32,13 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
       error:()=>{this.loadingLots=false; this.lotMessage='Saved lot sizes unavailable.'; this.view.markForCheck();}
     }));
   }
-  loadLive():void {
+  loadLive(background=false):void {
     if(this.loadingLive || this.changing) return;
-    this.status=null; this.loadingLive=true; this.liveMessage='';
+    if(!background) this.status=null;
+    this.loadingLive=true; if(!background) this.liveMessage='';
     this.requests.add(this.live.getStatus().subscribe({
       next:v=>{this.status=v; this.loadingLive=false; this.view.markForCheck();},
-      error:()=>{this.loadingLive=false; this.liveMessage='Live status unavailable.'; this.view.markForCheck();}
+      error:()=>{this.status=null; this.loadingLive=false; this.liveMessage='Live status unavailable.'; this.view.markForCheck();}
     }));
     this.requests.add(this.live.getUpstoxStatus().subscribe({
       next:v=>{this.upstox=v;this.view.markForCheck();},
@@ -45,8 +46,10 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
     }));
   }
   broker(key:string):'Groww'|'Upstox' {return this.status?.markets.find(m=>m.market===key)?.executionBroker ?? 'Groww';}
+  entryStatus(key:string):string {return this.status?.markets.find(m=>m.market===key)?.entryStatus ?? 'Unknown';}
+  entryReason(key:string):string {return this.status?.markets.find(m=>m.market===key)?.entryStatusReason ?? 'Live entry readiness unavailable.';}
   selectBroker(key:string, value:string):void {
-    if(!this.status || this.armed(key)!==false || this.changing || (value!=='Groww' && value!=='Upstox')) return;
+    if(!this.status || this.loadingLive || this.armed(key)!==false || this.changing || (value!=='Groww' && value!=='Upstox')) return;
     this.changing=key; this.liveMessage='';
     this.requests.add(this.live.selectBroker(key,value).subscribe({
       next:v=>{this.status=v;this.changing='';this.liveMessage=key+' broker saved. Existing trades stay with their original broker; new entries remain OFF.';this.view.markForCheck();},
@@ -68,7 +71,7 @@ export class MarketControlsComponent implements OnInit, OnDestroy {
   armed(key:string): boolean | null {return this.status?.markets?.find(m=>m.market===key)?.armed ?? null;}
   canSwitch(key:string):boolean {
     const ready=this.broker(key)==='Groww' || (!!this.upstox?.authorized && this.upstox.staticIpVerified && !this.upstox.sandbox && this.upstox.exchanges.includes(key==='SENSEX'?'BFO':'NFO'));
-    return !!this.status?.buildEnabled && this.status.allowedMarkets.includes(key) && this.armed(key)!==null && !this.changing && (this.armed(key)===true || ready);
+    return !!this.status?.buildEnabled && this.status.allowedMarkets.includes(key) && this.armed(key)!==null && !this.loadingLive && !this.changing && (this.armed(key)===true || ready);
   }
   switch(key:string):void {
     if(!this.canSwitch(key)) return;

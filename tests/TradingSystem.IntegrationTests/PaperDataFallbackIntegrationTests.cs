@@ -145,9 +145,7 @@ public sealed class PaperDataFallbackIntegrationTests
         await using (var scope = provider.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
-            var durable = await db.ApplicationSettings.SingleAsync(x => x.Key == PaperDataSource.SettingKey);
-            Assert.Equal(TradingMode.Paper, durable.Mode);
-            Assert.Equal("\"2026-11-16\"", durable.ValueJson); // Failback does not arm deferred backup signals for live execution.
+            Assert.False(await db.ApplicationSettings.AnyAsync(x => x.Key == PaperDataSource.SettingKey));
             Assert.Empty(await db.LiveExecutionIntents.ToArrayAsync());
             Assert.Empty(await db.BrokerAccessTokenSecrets.ToArrayAsync());
         }

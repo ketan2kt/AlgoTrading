@@ -10,7 +10,12 @@ public interface ILiveTradingArmService
 }
 
 public sealed record LiveMarketArmStatus(string Market, bool Armed, DateTimeOffset? ChangedAtUtc,
-    string? ChangedBy, string ExecutionBroker = "Groww");
+    string? ChangedBy, string ExecutionBroker = "Groww")
+{
+    public string EntryStatus { get; init; } = "Unknown";
+    public string EntryStatusReason { get; init; } = "Live entry readiness unavailable.";
+    public DateTimeOffset? EntryCheckedAtUtc { get; init; }
+}
 
 public sealed record LiveTradingArmStatus(
     bool BuildEnabled,

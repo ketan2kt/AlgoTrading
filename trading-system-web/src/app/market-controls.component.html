@@ -4,9 +4,13 @@
   @for (row of rows; track row.key) {
     <article class="execution-market">
       <h4>{{row.name}}</h4>
-      <label>Execution broker <select [attr.aria-label]="row.name + ' execution broker'" [ngModel]="broker(row.key)" (ngModelChange)="selectBroker(row.key,$event)" [disabled]="!status || armed(row.key)!==false || !!changing"><option value="Groww">Groww</option><option value="Upstox">Upstox</option></select></label>
+      <label>Execution broker <select [attr.aria-label]="row.name + ' execution broker'" [ngModel]="broker(row.key)" (ngModelChange)="selectBroker(row.key,$event)" [disabled]="!status || loadingLive || armed(row.key)!==false || !!changing"><option value="Groww">Groww</option><option value="Upstox">Upstox</option></select></label>
       <label>Maximum lots @if (lots; as draft) { <input type="number" [attr.aria-label]="row.name + ' lots'" min="1" max="50" step="1" [(ngModel)]="draft[row.field]" [disabled]="saving" /> } @else { <small>{{loadingLots?'Loading…':'Unavailable'}}</small> }</label>
-      <button type="button" class="market-live-toggle" [class.is-on]="armed(row.key)===true" [attr.aria-label]="row.name + ' new live entries'" [attr.aria-pressed]="armed(row.key)" [disabled]="!canSwitch(row.key)" (click)="switch(row.key)">{{changing===row.key?'Updating…':loadingLive?'Loading…':armed(row.key)===null?'Status unavailable':armed(row.key)?'New live entries ON':'New live entries OFF'}}</button>
+      <div class="market-live-state">
+        <button type="button" class="market-live-toggle" [class.is-on]="armed(row.key)===true && entryStatus(row.key)==='Monitoring'" [attr.aria-label]="row.name + ' new live entries'" [attr.aria-pressed]="armed(row.key)" [disabled]="!canSwitch(row.key)" (click)="switch(row.key)">{{changing===row.key?'Updating…':armed(row.key)===null?'Status unavailable':armed(row.key)?'New live entries ON':'New live entries OFF'}}</button>
+        <span class="market-entry-status" [class.is-blocked]="entryStatus(row.key)==='Blocked'" role="status" [attr.title]="entryReason(row.key)">{{entryStatus(row.key)==='Blocked'?'Blocked':entryStatus(row.key)==='Monitoring'?'Monitoring':entryStatus(row.key)==='Off'?'OFF':'Unverified'}}</span>
+      </div>
+      <small class="market-entry-reason">{{entryReason(row.key)}}</small>
     </article>
   }
   </div>

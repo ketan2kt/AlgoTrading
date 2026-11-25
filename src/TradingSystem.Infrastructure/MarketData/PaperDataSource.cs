@@ -65,7 +65,6 @@ internal sealed class PaperDataSource(IServiceScopeFactory scopes, TimeProvider 
             var updated = session == Today ? new Dictionary<string, string>(sources, StringComparer.Ordinal) : new(StringComparer.Ordinal);
             updated[market] = source;
             await Save(RoutingKey, System.Text.Json.JsonSerializer.Serialize(new Routing(Today, updated)));
-            if (source == "Upstox") await Save(SettingKey, System.Text.Json.JsonSerializer.Serialize(Today));
             await db.SaveChangesAsync(token); // Must be durable before any backup signal is exposed.
             session = Today;
             Volatile.Write(ref sources, updated);

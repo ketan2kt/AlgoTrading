@@ -12,6 +12,13 @@ namespace TradingSystem.Infrastructure.Execution;
 
 internal sealed partial class AutomaticLiveExecutionService
 {
+    private void ReportEntryReadiness(LiveTradingArmStatus arm, string status, string reason)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var readiness = scope.ServiceProvider.GetService<LiveEntryReadiness>();
+        foreach (var market in arm.Markets.Where(x => x.Armed))
+            readiness?.Report(market.Market, broker.Broker, status, reason, timeProvider.GetUtcNow());
+    }
     // Best effort, own DbContext: a telemetry failure cannot flush/change order state.
     private readonly HashSet<Guid> recordedEntryReasons = [];
     private DateOnly entryReasonDate;
@@ -30,6 +37,13 @@ internal sealed partial class AutomaticLiveExecutionService
         CancellationToken token)
     {
         var now = timeProvider.GetUtcNow();
+        // Refresh the display receipt even when the durable audit is deduplicated.
+        if (reason != ExpiredObservation)
+        {
+            using var statusScope = scopeFactory.CreateScope();
+            statusScope.ServiceProvider.GetService<LiveEntryReadiness>()?.Report(market, broker.Broker,
+                "Blocked", reason, now);
+        }
         var date = DateOnly.FromDateTime(now.UtcDateTime);
         if (date != entryReasonDate) { recordedEntryReasons.Clear(); entryReasonDate = date; }
         var id = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"entry-evidence:v1:{market}:{source:N}:{reason}")).AsSpan(0,16));
@@ -96,6 +110,7 @@ internal sealed partial class AutomaticLiveExecutionService
     private async Task NoteDeferredEntriesAsync(TradingDbContext db, LiveTradingArmStatus arm, string reason,
         CancellationToken token)
     {
+        ReportEntryReadiness(arm, "Blocked", reason);
         var now = timeProvider.GetUtcNow();
         var spacing = TimeSpan.FromSeconds(Math.Clamp(options.Value.SignalMaximumAgeSeconds / 2, 1, 5));
         if (lastDeferredScan.TryGetValue(reason,out var last) && now - last < spacing) return;

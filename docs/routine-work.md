@@ -34,10 +34,24 @@ option contracts, including Nifty's original paper ledger. Source changes retain
 order IDs, partial fills, position/risk state and entry idempotency. Both feeds
 unavailable means fail closed, not stale simulated fills.
 
-Backup-derived paper signals must not become live orders: a durable fallback-day
-marker blocks new live entries for the rest of that day, even after failback or
-restart. Existing live-position protection/recovery continues via Groww. This is
-intentionally conservative; no Upstox live-order route or arming is added.
+Market data and live execution are independent. A fresh valid Groww OR Upstox
+option quote can support an armed live entry at the selected execution broker.
+The old global backup-day marker is ignored and no longer written. Before
+submission, verify the exact option's price and positive uncrossed bid/ask depth
+within 30 seconds; recheck paper-entry age/open state and selected arm/broker
+after the bounded quote request. Never revive old paper trades or retry an
+uncertain broker submission blindly. Existing-position protection, reconciliation,
+sizing and broker ownership remain unchanged. Controls show ON/OFF separately
+from per-market/per-broker Blocked/Monitoring/Unverified receipts and reasons,
+refreshed every five seconds while open. Display receipts are not risk permissions.
+
+Chart previous-close lookup excludes exchange-confirmed holidays through the
+cached public Upstox market-holidays calendar, independently of the active feed.
+No broker credentials are needed. It retains the strict completed closing-minute
+requirement on real trading dates; it never labels an arbitrary intraday price
+as a close. Cached verified holidays survive refresh failures in-process; unknown
+days do not get silently skipped. This display-only calendar does not gate trading
+or recording. Calendar reference: https://upstox.com/developer/api-documentation/get-market-holidays/
 
 With `ReplayBackup:Host=Website`, the website continuously records read-only
 Upstox snapshots independently from the Groww recorder. It uses the shared

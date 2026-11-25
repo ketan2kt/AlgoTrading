@@ -175,6 +175,7 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddScoped<ILiveTradingArmService, EfLiveTradingArmService>();
         services.AddSingleton<LiveExecutionWakeSignal>();
+        services.AddSingleton<LiveEntryReadiness>();
         services.AddHostedService<AutomaticLiveExecutionService>();
         services.AddHostedService<UpstoxAutomaticLiveExecutionService>();
         services.AddHostedService<GrowwLiveAccountNotifications>();
@@ -275,6 +276,8 @@ public static class DependencyInjection
         services.AddSingleton<GrowwQuoteNormalizer>();
         services.AddSingleton<LiveNiftyFeedState>();
         services.AddSingleton<WorkspaceChartCache>();
+        services.AddHttpClient(WorkspaceHolidayCalendar.ClientName, client => client.Timeout = TimeSpan.FromSeconds(3));
+        services.AddSingleton<WorkspaceHolidayCalendar>();
         services.AddHostedService<UpstoxChartDisplay>();
         services.AddSingleton<MultiMarketFeedState>();
         services.AddSingleton<MarketWorkspaceRefreshQueue>();

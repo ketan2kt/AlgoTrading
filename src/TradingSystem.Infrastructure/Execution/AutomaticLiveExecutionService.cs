@@ -35,7 +35,13 @@ internal sealed partial class AutomaticLiveExecutionService(
         {
             try { await RunCycleAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-            catch (Exception exception) { LogCycleFailed(logger, exception); }
+            catch (Exception exception)
+            {
+                using var failureScope = scopeFactory.CreateScope();
+                failureScope.ServiceProvider.GetService<LiveEntryReadiness>()?.BlockBroker(broker.Broker,
+                    "Broker verification or execution cycle failed; reconciliation is required before new orders.", timeProvider.GetUtcNow());
+                LogCycleFailed(logger, exception);
+            }
             await wakeSignal.WaitAsync(TimeSpan.FromSeconds(options.Value.PollIntervalSeconds),
                 stoppingToken);
         }
@@ -48,6 +54,12 @@ internal sealed partial class AutomaticLiveExecutionService(
         var arm = await armService.GetAsync(cancellationToken);
         var db = scope.ServiceProvider.GetRequiredService<TradingDbContext>();
         arm = arm with { Markets = arm.Markets.Where(x => x.ExecutionBroker == broker.Broker).ToArray() };
+        foreach (var market in arm.Markets.Where(x => x.Armed))
+        {
+            var readiness = scope.ServiceProvider.GetService<LiveEntryReadiness>();
+            if (readiness?.Read(market.Market, broker.Broker, timeProvider.GetUtcNow()).Status == "Unknown")
+                readiness.Report(market.Market, broker.Broker, "Unknown", "Checking broker readiness and managed exposure.", timeProvider.GetUtcNow());
+        }
         if (broker.Broker == "Upstox" && !arm.Markets.Any(x => x.Armed) &&
             !await OwnIntents(db).AnyAsync(x => x.Status != "Closed" && x.Status != "Rejected", cancellationToken)) return;
 
@@ -119,16 +131,7 @@ internal sealed partial class AutomaticLiveExecutionService(
                 "Live discovery deferred: another execution account has unresolved managed exposure.", cancellationToken);
             return;
         }
-        // Existing live orders were recovered/managed above. New backup-data
-        // paper signals are deliberately not mirrored to live execution.
-        var fallbackDay = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
-            .ToOffset(TimeSpan.FromHours(5.5)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-        if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
-                x.Key == PaperDataSource.SettingKey && x.ValueJson == fallbackDay, cancellationToken))
-        {
-            await NoteDeferredEntriesAsync(db, arm, "Backup-data session is not authorized for new live entries; existing positions stay managed.", cancellationToken);
-            return;
-        }
+        ReportEntryReadiness(arm, "Monitoring", "Waiting for a valid setup; fresh Groww or Upstox data is accepted. Broker and risk checks still apply.");
         var pending = await OwnIntents(db).Where(value =>
             value.Status == "Pending" && armedMarkets.Contains(value.Market))
             .OrderBy(value => value.CreatedAtUtc).ToListAsync(cancellationToken);
@@ -1173,7 +1176,7 @@ internal sealed partial class AutomaticLiveExecutionService(
         return true;
     }
 
-    private async Task SubmitAndProtectAsync(TradingDbContext db, LiveExecutionIntent intent,
+    internal async Task SubmitAndProtectAsync(TradingDbContext db, LiveExecutionIntent intent,
         CancellationToken cancellationToken)
     {
         if (intent.ExecutionBroker != broker.Broker || intent.ExecutionAccount != broker.Account)
@@ -1192,15 +1195,6 @@ internal sealed partial class AutomaticLiveExecutionService(
                 if (currentRoute.ForMarket(intent.Market) is not { Armed: true } selected || selected.ExecutionBroker != broker.Broker)
                 {
                     intent.Reject("Execution selection changed before submission.", timeProvider.GetUtcNow());
-                    await db.SaveChangesAsync(cancellationToken);
-                    return;
-                }
-                var backupSession = System.Text.Json.JsonSerializer.Serialize(timeProvider.GetUtcNow()
-                    .ToOffset(TimeSpan.FromHours(5.5)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-                if (await db.ApplicationSettings.AsNoTracking().AnyAsync(x => x.Mode == TradingMode.Paper &&
-                    x.Key == PaperDataSource.SettingKey && x.ValueJson == backupSession, cancellationToken))
-                {
-                    intent.Reject("Backup-data paper signal is not authorized for live entry.", timeProvider.GetUtcNow());
                     await db.SaveChangesAsync(cancellationToken);
                     return;
                 }
@@ -1238,6 +1232,45 @@ internal sealed partial class AutomaticLiveExecutionService(
                             value.Direction, value.FilledQuantity)).ToArray(), sameContract))
                     throw new InvalidOperationException(
                         "Broker contract has unmanaged exposure; reconcile before opening a live entry.");
+                // Market data and execution routing are independent. This adapter
+                // may provide Groww or Upstox data; broker remains the immutable
+                // execution broker/account chosen when the live intent was created.
+                var check = await LiveEntryQuoteVerifier.CheckAsync(
+                    PaperMarketDataGateway.Resolve(routeScope.ServiceProvider),
+                    new(instrument.Exchange, "FNO", instrument.TradingSymbol), timeProvider, cancellationToken);
+                if (!check.Allowed)
+                {
+                    intent.Reject(check.Reason, timeProvider.GetUtcNow());
+                    await db.SaveChangesAsync(cancellationToken);
+                    await NoteEntryAsync(intent.Market.ToLowerInvariant(), intent.SourceId, intent.InstrumentId,
+                        check.Reason, cancellationToken);
+                    return;
+                }
+                // The quote request can take time: never revive an aged paper entry.
+                var entryRef = $"{intent.SourceId:N}-ENTRY";
+                var exitRef = $"{intent.SourceId:N}-EXIT";
+                var sourceAt = intent.SourceType == "NIFTY"
+                    ? await db.PaperBrokerEvents.AsNoTracking().Where(x => x.ClientReference == entryRef && x.EventType == "OrderFilled" &&
+                        !db.PaperBrokerEvents.Any(e => e.ClientReference == exitRef && e.EventType == "OrderFilled"))
+                        .OrderBy(x => x.OccurredAtUtc).Select(x => (DateTimeOffset?)x.OccurredAtUtc).FirstOrDefaultAsync(cancellationToken)
+                    : await db.MarketPaperPositions.AsNoTracking().Where(x => x.Id == intent.SourceId && x.Status == "Active" && x.RemainingQuantity > 0)
+                        .Select(x => (DateTimeOffset?)x.OpenedAtUtc).SingleOrDefaultAsync(cancellationToken);
+                var checkedAt = timeProvider.GetUtcNow();
+                if (sourceAt is null || sourceAt > checkedAt || checkedAt - sourceAt > TimeSpan.FromSeconds(options.Value.SignalMaximumAgeSeconds))
+                {
+                    intent.Reject("Paper entry expired or closed before live submission.", checkedAt);
+                    await db.SaveChangesAsync(cancellationToken);
+                    return;
+                }
+                var latestRoute = await routeScope.ServiceProvider.GetRequiredService<ILiveTradingArmService>().GetAsync(cancellationToken);
+                if (latestRoute.ForMarket(intent.Market) is not { Armed: true } latest || latest.ExecutionBroker != broker.Broker)
+                {
+                    intent.Reject("Live selection changed during data verification; no order submitted.", checkedAt);
+                    await db.SaveChangesAsync(cancellationToken);
+                    return;
+                }
+                await TryRecordLiveEventAsync(db, intent, "EntryDataVerified", new
+                { dataSource = check.Source, check.ObservedAtUtc, executionBroker = broker.Broker }, cancellationToken);
                 intent.BeginEntrySubmission();
                 await db.SaveChangesAsync(cancellationToken);
                 order = await broker.SubmitAsync(new BrokerOrderRequest(intent.ClientReference,

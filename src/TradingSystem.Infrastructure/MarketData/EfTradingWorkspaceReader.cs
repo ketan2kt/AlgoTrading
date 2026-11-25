@@ -24,7 +24,8 @@ internal sealed class EfTradingWorkspaceReader(
     IPaperAutomationReader paperAutomation,
     IOperationalAutomationReportReader operationalReportReader,
     TimeProvider timeProvider, WorkspaceChartCache? chartCache = null,
-    PaperDataSource? paperDataSource = null) : ITradingWorkspaceReader
+    PaperDataSource? paperDataSource = null,
+    WorkspaceHolidayCalendar? holidayCalendar = null) : ITradingWorkspaceReader
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private const int MaximumWorkspaceRequestCount = 7_000;
@@ -91,11 +92,16 @@ internal sealed class EfTradingWorkspaceReader(
                 value.OpenTimeUtc, value.IntervalSeconds, value.Open, value.High, value.Low,
                 value.Close, value.Volume, true))
             .ToListAsync(cancellationToken);
+        var holidays = definition.InstrumentType == InstrumentType.Index && holidayCalendar is not null
+            ? await holidayCalendar.ClosedDatesAsync(definition.Exchange.ToString(), sessionDate.AddDays(-14),
+                sessionDate, cancellationToken)
+            : [];
         closed = closed
             .Where(value => IsTradableSessionTimestamp(
-                value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd))
+                value.OpenTimeUtc, definition.SessionStart, definition.SessionEnd) &&
+                !holidays.Contains(DateOnly.FromDateTime(value.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).DateTime)))
             .ToList();
-        var previousSessionClose = WorkspacePreviousClosePolicy.Read(closed, sessionDate, definition.SessionEnd);
+        var previousSessionClose = WorkspacePreviousClosePolicy.Read(closed, sessionDate, definition.SessionEnd, holidays);
         closed = closed.TakeLast(candleCount).ToList();
         var displayedSessionDates = closed
             .Select(value => DateOnly.FromDateTime(

@@ -6,6 +6,7 @@ using TradingSystem.Application.Risk;
 using TradingSystem.Domain;
 using TradingSystem.Domain.Trading;
 using TradingSystem.Infrastructure.Persistence;
+using TradingSystem.Infrastructure.MarketData;
 
 namespace TradingSystem.Infrastructure.Execution;
 
@@ -15,7 +16,8 @@ internal sealed class EfLiveTradingArmService(
     IOptions<LiveExecutionOptions> options,
     LiveExecutionWakeSignal wakeSignal,
     TimeProvider timeProvider,
-    TradingSystem.Application.Broker.IUpstoxExecutionAuthorization? upstox = null) : ILiveTradingArmService
+    TradingSystem.Application.Broker.IUpstoxExecutionAuthorization? upstox = null,
+    LiveEntryReadiness? readiness = null) : ILiveTradingArmService
 {
     internal const string KeyPrefix = "LiveExecutionArm:";
 
@@ -37,6 +39,27 @@ internal sealed class EfLiveTradingArmService(
             item.ValueJson == "true", cancellationToken);
         var latestIntent = await db.LiveExecutionIntents.AsNoTracking()
             .OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        var unresolved = await db.LiveExecutionIntents.AsNoTracking().AnyAsync(x =>
+            x.Status != "Closed" && x.Status != "Rejected" && x.Status != "Pending" &&
+            (x.Status != "Protected" || x.ExternalReconciliationPending || x.LastError != null), cancellationToken);
+        for (var i = 0; i < markets.Length; i++)
+        {
+            var row = markets[i];
+            var receipt = readiness?.Read(row.Market, row.ExecutionBroker, timeProvider.GetUtcNow());
+            var status = !row.Armed ? "Off" : !options.Value.BuildEnabled || unresolved ? "Blocked" : receipt?.Status ?? "Unknown";
+            var reason = !row.Armed ? "New entries OFF; existing positions remain managed."
+                : !options.Value.BuildEnabled ? "Live execution disabled by server configuration."
+                : unresolved ? "Managed broker exposure is unresolved; entry reconciliation required."
+                : receipt?.Reason ?? "Awaiting a current execution-worker check.";
+            if (row.Armed && row.ExecutionBroker == "Upstox")
+            {
+                var authorization = upstox is null ? null : await upstox.GetStatusAsync(cancellationToken);
+                if (authorization is not { Configured: true, Authorized: true, StaticIpVerified: true, Sandbox: false } ||
+                    !authorization.Exchanges.Contains(row.Market == "SENSEX" ? "BFO" : "NFO", StringComparer.Ordinal))
+                { status = "Blocked"; reason = "Upstox execution authorization or segment/IP readiness is incomplete."; }
+            }
+            markets[i] = row with { EntryStatus = status, EntryStatusReason = reason, EntryCheckedAtUtc = receipt?.AtUtc };
+        }
         return ToStatus(markets,
             tested, latestIntent);
     }

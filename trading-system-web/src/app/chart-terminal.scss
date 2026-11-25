@@ -73,7 +73,7 @@ main.terminal-main { width:100%; max-width:none; margin:0; padding:0; background
   .logs-backdrop,.narrator-backdrop { z-index:30; }
 }
 @media(max-width:1100px) {
-  .chart-terminal { .terminal-total-age { display:none; } .market-position-count { font-size:9px; } .terminal-position { gap:6px; font-size:11px; } .desk-previous-close { display:none; } }
+  .chart-terminal { .terminal-total-age { display:none; } .market-position-count { font-size:9px; } .terminal-position { gap:6px; font-size:11px; } }
 }
 @media(max-width:800px) {
   .workspace-layout.chart-terminal {

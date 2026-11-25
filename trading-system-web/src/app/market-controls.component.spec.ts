@@ -5,6 +5,33 @@ import { TradingLotsService, TradingLotConfiguration } from './trading-lots.serv
 import { LiveExecutionService, LiveExecutionStatus } from './live-execution.service';
 
 describe('market controls',()=>{
+  it('shows independent blocked reasons next to armed switches and updates after recovery without arming',()=>{
+    const live=new Subject<LiveExecutionStatus>();
+    TestBed.configureTestingModule({imports:[MarketControlsComponent],providers:[
+      {provide:TradingLotsService,useValue:{get:()=>of(null)}},
+      {provide:LiveExecutionService,useValue:{getStatus:()=>live,getUpstoxStatus:()=>of(null)}}]});
+    const fixture=TestBed.createComponent(MarketControlsComponent);fixture.detectChanges();
+    const status:LiveExecutionStatus={buildEnabled:true,markets:['NIFTY','SENSEX','BANK-NIFTY'].map(market=>({
+      market,armed:true,changedAtUtc:null,changedBy:null,executionBroker:'Groww' as const,
+      entryStatus:market==='SENSEX'?'Blocked' as const:'Monitoring' as const,
+      entryStatusReason:market==='SENSEX'?'Broker exposure did not reconcile.':'Fresh Groww or Upstox data accepted; broker and risk checks apply.'})),
+      allowedMarkets:['NIFTY','SENSEX','BANK-NIFTY'],mirrorsPaperQuantity:true,controlledBrokerTestCompleted:false,
+      latestIntentMarket:null,latestIntentStatus:null,latestIntentError:null,latestIntentAtUtc:null};
+    live.next(status);fixture.detectChanges();
+    const root=fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('.market-entry-status.is-blocked').length).toBe(1);
+    expect(root.querySelectorAll('.market-live-toggle.is-on').length).toBe(2);
+    expect(root.querySelectorAll('.market-live-toggle')[1].textContent).toContain('ON');
+    expect(root.textContent).toContain('Broker exposure did not reconcile');
+    status.markets[1]={...status.markets[1],entryStatus:'Monitoring',entryStatusReason:'Broker reconciled; waiting for a valid setup.'};
+    live.next(status);fixture.detectChanges();
+    expect(root.querySelectorAll('.market-entry-status.is-blocked').length).toBe(0);
+    expect(root.querySelectorAll('.market-live-toggle.is-on').length).toBe(3);
+    live.error(new Error('offline'));fixture.detectChanges();
+    expect(root.querySelectorAll('.market-live-toggle.is-on').length).toBe(0);
+    expect(root.textContent).toContain('Unverified');
+    fixture.destroy();
+  });
   it('never presents missing server state as OFF or allows saving fallback lots',()=>{
     const lots=new Subject<TradingLotConfiguration>(), live=new Subject<LiveExecutionStatus>();
     TestBed.configureTestingModule({imports:[MarketControlsComponent],providers:[

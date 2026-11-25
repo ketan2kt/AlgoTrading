@@ -33,7 +33,6 @@ internal sealed partial class PaperDataContinuityService(UpstoxPaperDataClient b
                 using var prepare = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 prepare.CancelAfter(TimeSpan.FromMinutes(2));
                 await source.InitializeAsync(prepare.Token);
-                await backup.PrepareAsync(prepare.Token);
                 var now = clock.GetUtcNow().ToOffset(TimeSpan.FromHours(5.5));
                 if (now.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) &&
                     now.TimeOfDay >= new TimeSpan(9, 0, 0) && now.TimeOfDay <= new TimeSpan(15, 30, 0))
@@ -64,6 +63,7 @@ internal sealed partial class PaperDataContinuityService(UpstoxPaperDataClient b
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(12));
+            if (useBackup) await backup.PrepareAsync(timeout.Token);
             await WarmAsync(market, useBackup, timeout.Token);
             return true;
         }

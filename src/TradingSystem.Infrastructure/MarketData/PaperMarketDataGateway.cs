@@ -4,8 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace TradingSystem.Infrastructure.MarketData;
 
-// Only paper engines and their input workers receive this adapter. Recorder,
-// account/profile queries and Groww live order execution retain the raw gateway.
+// Paper engines and pre-entry live quote verification use this data adapter.
+// Recorder, account/profile queries and broker order execution remain separate.
 internal sealed class PaperMarketDataGateway(IGrowwReadOnlyGateway primary,
     UpstoxPaperDataClient backup, PaperDataSource state, TimeProvider clock) : IGrowwReadOnlyGateway
 {

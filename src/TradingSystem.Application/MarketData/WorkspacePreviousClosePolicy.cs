@@ -5,10 +5,11 @@ public static class WorkspacePreviousClosePolicy
     // Use the last completed regular-session candle, never an arbitrary earlier
     // intraday price. Run before trimming the chart's visible history window.
     public static WorkspacePreviousClose? Read(IEnumerable<WorkspaceCandle> candles,
-        DateOnly today, TimeOnly sessionEnd)
+        DateOnly today, TimeOnly sessionEnd, IReadOnlySet<DateOnly>? closedDates = null)
     {
         var previous = candles.Where(c => c.IsClosed && c.IntervalSeconds > 0 && c.Close > 0 &&
                 DateOnly.FromDateTime(c.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).DateTime) < today &&
+                closedDates?.Contains(DateOnly.FromDateTime(c.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).DateTime)) != true &&
                 TimeOnly.FromDateTime(c.OpenTimeUtc.ToOffset(TimeSpan.FromHours(5.5)).DateTime) < sessionEnd)
             .OrderByDescending(c => c.OpenTimeUtc).FirstOrDefault();
         if (previous is null) return null;
