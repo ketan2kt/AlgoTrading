@@ -121,6 +121,77 @@ public sealed class BankNiftyConfirmedTrailTests
             new(2026, 11, 17, 9, 47, 3, entry.Offset), Direction.Buy, 61884.65m, 60));
     }
 
+    [Theory]
+    [InlineData(Direction.Buy)]
+    [InlineData(Direction.Sell)]
+    public void EarlierPositiveFloorRequiresClosedContinuationAfterTheProfitLock(Direction direction)
+    {
+        var at = OpenedAt.AddMinutes(3).AddSeconds(2);
+        var lockAt = OpenedAt.AddMinutes(2).AddSeconds(2);
+        StrategyPriceBar Bar(int minute, decimal open, decimal high, decimal low, decimal close) =>
+            direction == Direction.Buy
+                ? new(OpenedAt.AddMinutes(minute), open, high, low, close)
+                : new(OpenedAt.AddMinutes(minute), 200 - open, 200 - low, 200 - high, 200 - close);
+        StrategyPriceBar[] bars = [Bar(1, 100, 110, 99, 109), Bar(2, 109, 110, 103, 104)];
+        BankNiftyTrailDecision Step(BankNiftyTrailState state, DateTimeOffset now, decimal bid,
+            IReadOnlyList<StrategyPriceBar>? supplied = null) => BankNiftyConfirmedTrail.Evaluate(
+                state, OpenedAt, now, direction, 100, 10, 30, 150, 0,
+                new(bid, bid + .05m, 150, now, now), completedBars: supplied);
+        var first = Step(new(), lockAt.AddSeconds(-2), 105.2m);
+        var locked = Step(first.State, lockAt, 105.3m);
+        Assert.Equal(lockAt, locked.State.ProfitLockAt);
+        Assert.Equal(0m, locked.State.Floor);
+        Assert.True(locked.NeedsStructure);
+        var pullback = Step(locked.State, at, 105.4m, bars);
+        Assert.Equal(0m, pullback.State.Floor);
+        Assert.Null(pullback.State.ContinuationAt);
+        Assert.False(pullback.NeedsStructure);
+
+        bars = [.. bars, Bar(3, 104, 112, 103, 111)];
+        var beforeClose = Step(pullback.State, OpenedAt.AddMinutes(4).AddSeconds(-1), 106, bars);
+        Assert.Null(beforeClose.State.ContinuationAt);
+        var resumed = Step(beforeClose.State, OpenedAt.AddMinutes(4).AddSeconds(1), 106.1m, bars);
+        Assert.NotNull(resumed.State.ContinuationAt);
+        Assert.True(resumed.State.Floor > 0);
+        Assert.False(resumed.Exit);
+        Assert.True(Step(resumed.State, OpenedAt.AddMinutes(4).AddSeconds(3), 103).Exit);
+    }
+
+    [Fact]
+    public void ContinuationCannotUseAnEntryMinuteAFutureBarOrAGap()
+    {
+        var lockAt = OpenedAt.AddMinutes(2).AddSeconds(2);
+        StrategyPriceBar[] valid = [
+            new(OpenedAt.AddMinutes(1), 100, 110, 99, 109),
+            new(OpenedAt.AddMinutes(2), 109, 110, 103, 104),
+            new(OpenedAt.AddMinutes(3), 104, 112, 103, 111)];
+        bool Resumed(StrategyPriceBar[] bars, DateTimeOffset now, DateTimeOffset? entry = null) =>
+            BankNiftyConfirmedTrail.HasResumedAfterProfitLock(bars, entry ?? OpenedAt,
+                lockAt, now, Direction.Buy, 60);
+        Assert.True(Resumed(valid, OpenedAt.AddMinutes(4)));
+        Assert.False(Resumed(valid, OpenedAt.AddMinutes(4).AddTicks(-1)));
+        Assert.False(Resumed([valid[0], valid[2]], OpenedAt.AddMinutes(4)));
+        Assert.False(Resumed(valid, OpenedAt.AddMinutes(4), OpenedAt.AddMinutes(1).AddSeconds(1)));
+        Assert.False(Resumed([valid[0], valid[1], valid[2] with { Close = 110m }], OpenedAt.AddMinutes(4)));
+        Assert.False(Resumed([valid[0], valid[1], valid[2] with { OpenTimeUtc = OpenedAt.AddMinutes(4) }],
+            OpenedAt.AddMinutes(5)));
+    }
+
+    [Fact]
+    public void ConfirmedContextSurvivesSerializationButCannotInventTheNextQuotePair()
+    {
+        var state = new BankNiftyTrailState(ProfitLockAt: OpenedAt.AddMinutes(1),
+            ContinuationAt: OpenedAt.AddMinutes(3), Floor: 300m);
+        var restored = System.Text.Json.JsonSerializer.Deserialize<BankNiftyTrailState>(
+            System.Text.Json.JsonSerializer.Serialize(state))!;
+        var first = Evaluate(restored, 100, 106m);
+        Assert.Equal(300m, first.State.Floor);
+        Assert.Null(restored.Previous);
+        var second = Evaluate(first.State, 102, 106.1m);
+        Assert.True(second.State.Floor > 300m);
+        Assert.Equal(restored.ContinuationAt, second.State.ContinuationAt);
+    }
+
     private static BankNiftyTrailDecision Evaluate(BankNiftyTrailState state, int second, decimal bid,
         Direction direction = Direction.Buy, decimal? spot = null, int? sourceSecond = null, long size = 150)
     {

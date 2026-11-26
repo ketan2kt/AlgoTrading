@@ -1,6 +1,6 @@
 # Upstox execution integration
 
-Status: website deployment45196340472 succeeded for d438285 on23November2026, after all required CI checks passed. Recorder job skipped. Account/profile segments and relay routing verified. An observed401 on the broker return exposed a SameSite=Strict cookie integration issue; the same-site callback bridge correction below is checked locally and awaits its own rollout. Final execution authorization is not yet verified. No market has been armed and no order placed during setup.
+Status: website deployment45204899531 succeeded for ada301f on23November2026 after required CI45204086818 passed. Recorder skipped. The SameSite=Strict callback correction is deployed. Production Controls verifies Upstox Authorized, including successful real relay order-book/position reads; authorization expires24Nov03:30IST. All three markets remain Groww with live entries OFF; no order placed. The resolved30Oct Groww intent was deleted on explicit user instruction with its original row retained in an audit; post-commit verification confirms zero unresolved execution intents. First real order/protective-stop lifecycle verification remains a user-controlled test.
 
 ## Routing and isolation
 
@@ -23,7 +23,8 @@ Status: website deployment45196340472 succeeded for d438285 on23November2026, af
 
 ## Verification still required before live readiness
 
-- India-only FATCA declaration saved with explicit factual confirmation and submission approval; NSEFO/BSEFO segments verified in account profile. Complete execution OAuth after user PIN entry. Deployed callback must verify account/product/segments plus real read-only order-book and position access through the execution relay before saving authorization. Preserve all existing live switches.
+- India-only FATCA declaration saved with explicit factual confirmation and submission approval; NSEFO/BSEFO segments verified. Execution OAuth completed and real read-only order-book/position access through the relay verified. Preserve all existing live switches. Renew execution authorization after its03:30IST expiry before next-session use.
+- Legacy30Oct Groww blocker removed by explicit user-authorized administrative deletion, not invented historical fills: target e40511dd-f968-49b9-829d-ef3d69f3e452 absent; audit679e0c04-278a-4cbd-9d88-328210317890 retains its complete original row. Seven other intents remain (sixRejected/oneClosed). Broker orders and global unresolved-exposure safety guard unchanged.
 - Broker-payload/database fixtures cover weighted duplicate-deduplicated partial fills, cancel/fill races, confirmed stop and stop-fill cancellation race, restarted ownership, wrong-account rejection and global source uniqueness. Required PostgreSQL CI passed, including authorization relay success/failure checks. HTTP timeout/no-retry,429backoff,combined write budget,expiry and cache invalidation checks passed.
 - Sandbox execution is unsupported and rejected before network access; it cannot bypass static-IP verification or send to production. Never use real orders as an unattended test.
 - Full required CI and authorized website deployment passed. User-controlled broker order test remains separate; no real order was submitted by this task.

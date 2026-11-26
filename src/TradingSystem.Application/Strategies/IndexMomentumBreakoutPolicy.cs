@@ -15,6 +15,7 @@ public sealed record IndexMomentumDecision(
 /// </summary>
 public static class IndexMomentumBreakoutPolicy
 {
+    public const decimal MinimumImpulseAtr = .45m;
     public const string BankVersion = "bank-momentum-session-ema-v3/" + SharedMarketContextPolicy.Version + "/completed-retest-v1";
     public static IndexMomentumDecision Evaluate(IReadOnlyList<Candle> candles) => EvaluateCore(candles, false);
     public static IndexMomentumDecision EvaluateBankNifty(IReadOnlyList<Candle> candles)
@@ -70,7 +71,7 @@ public static class IndexMomentumBreakoutPolicy
         var decisiveBullishBreak = latest.Close > sessionPrior.Max(value => value.High) + atr * 0.10m;
         var decisiveBearishBreak = latest.Close < sessionPrior.Min(value => value.Low) - atr * 0.10m;
 
-        var impulseIsQualified = impulseRatio is >= 0.45m and <= 1.80m;
+        var impulseIsQualified = impulseRatio is >= MinimumImpulseAtr and <= 1.80m;
         var bullish = fast > slow && latest.Close > prior.Max(value => value.High) &&
                       latest.Close > latest.Open && closesNearHigh && recentBullishCloses >= 2 &&
                       impulseIsQualified && (!rangeLike || decisiveBullishBreak);

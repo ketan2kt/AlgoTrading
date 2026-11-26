@@ -16,7 +16,7 @@ public sealed record SensexEntrySelection(SensexEntryCandidate Candidate,
 
 public static class SensexEntrySelectionPolicy
 {
-    public const string Version = "sensex-entry-selection-v2";
+    public const string Version = "sensex-entry-selection-v3";
     public const decimal MaximumPersistentEntryExtensionAtr = 1.50m;
     public static SensexEntrySelection Evaluate(
         SensexEntryCandidate primary,
@@ -109,6 +109,13 @@ public static class SensexEntrySelectionPolicy
                 supplemental = true;
             }
         }
+        if (candidate.Strategy == "Sensex controlled early pullback" &&
+            candidate.Direction is { } earlyDirection &&
+            SensexFailedBreakoutEntryPolicy.Rejection(bars, earlyDirection, marketState) is { } rejection)
+            candidate = candidate with { Direction = null, Reasons = [.. candidate.Reasons, rejection] };
+        if (candidate.Strategy == "Sensex range-edge rejection" && candidate.Direction is { } rangeDirection &&
+            SensexFailedBreakoutEntryPolicy.OppositeRangeRejection(bars, rangeDirection, marketState) is { } rangeRejection)
+            candidate = candidate with { Direction = null, Reasons = [.. candidate.Reasons, rangeRejection] };
         if (candidate.Strategy == DirectionalParticipationPolicy.SensexStrategy &&
             candidate.Direction is { } participationDirection)
         {

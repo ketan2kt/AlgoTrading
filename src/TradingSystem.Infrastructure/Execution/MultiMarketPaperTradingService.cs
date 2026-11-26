@@ -1099,6 +1099,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             !value.Strategy.StartsWith(IntradayExpansionPairService.StrategyPrefix))
             .ToListAsync(cancellationToken);
         var wakeForTrailExit = false;
+        BankNiftyTrailState? pendingBankTrail = null;
         foreach (var position in active)
         {
             var instrument = await db.Instruments.AsNoTracking().FirstOrDefaultAsync(value =>
@@ -1331,6 +1332,7 @@ internal sealed partial class MultiMarketPaperTradingService(
             {
                 var trail = await EvaluateBankNiftyTrailAsync(db, position, quote, observedAt, initialRisk,
                     instrument.LotSize, expectedUnderlyingDirection, cancellationToken);
+                pendingBankTrail = trail.State with { Floor = null };
                 if (trail.Exit)
                 {
                     // Keep the existing protective order in place until the live
@@ -1381,6 +1383,10 @@ internal sealed partial class MultiMarketPaperTradingService(
             }
         }
         if (active.Count > 0) await db.SaveChangesAsync(cancellationToken);
+        // Context and floor must commit before the in-memory confirmation moves
+        // forward. A failed save must retry the context receipt, not lose it on restart.
+        if (pendingBankTrail is not null && active.Any(value => value.Status == "Active"))
+            bankTrailSamples[positionId] = pendingBankTrail;
         if (wakeForTrailExit) liveWakeSignal.Notify();
     }
 
@@ -1388,8 +1394,19 @@ internal sealed partial class MultiMarketPaperTradingService(
         MarketPaperPosition position, GrowwQuote quote, DateTimeOffset observedAt, decimal initialRisk,
         int lot, Direction direction, CancellationToken token)
     {
-        var state = (bankTrailSamples.GetValueOrDefault(position.Id) ?? new BankNiftyTrailState()) with
-            { Floor = position.BankNiftyTrailFloorNet };
+        var state = bankTrailSamples.GetValueOrDefault(position.Id);
+        if (state is null)
+        {
+            // Recover confirmed context once per open position, independently of
+            // transient quote pairs. Never infer a confirmation across a restart.
+            var outcome = $"BankNiftyTrailContext:{position.Id:N}";
+            var saved = await db.MarketStrategyAudits.AsNoTracking()
+                .Where(value => value.Market == position.Market && value.Outcome == outcome)
+                .OrderByDescending(value => value.CandleTimeUtc).Select(value => value.ReasonsJson)
+                .FirstOrDefaultAsync(token);
+            state = saved is null ? new() : JsonSerializer.Deserialize<BankNiftyTrailState>(saved) ?? new();
+        }
+        state = state with { Floor = position.BankNiftyTrailFloorNet };
         var book = quote.BidPrice is { } bid && quote.OfferPrice is { } ask && quote.OfferQuantity > 0 &&
             GrowwQuoteTimestamp.ToUtc(quote.LastTradeTimeEpochMilliseconds) is { } sourceAt
             ? new BankNiftyTrailBook(bid, ask, quote.BidQuantity ?? 0, observedAt, sourceAt) : null;
@@ -1400,6 +1417,23 @@ internal sealed partial class MultiMarketPaperTradingService(
                 bars, marketOptions.Value.CandleIntervalSeconds);
 
         var result = Evaluate();
+        if (result.NeedsStructure && result.State.Floor is not > 0m && result.State.ProfitLockAt is { } lockAt)
+        {
+            var interval = marketOptions.Value.CandleIntervalSeconds;
+            var from = lockAt.AddSeconds(-2 * interval);
+            var completedBefore = observedAt.AddSeconds(-interval);
+            // Only before a positive floor is armed. After processing a fresh
+            // native candle, wait for the next close; never query extra history
+            // to enforce an already-armed floor. Keep providers separate.
+            var bars = await db.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == position.UnderlyingInstrumentId && value.IsValid &&
+                    value.Source == PaperDataSource.Of(gateway, position.Market) && value.IntervalSeconds == interval &&
+                    value.OpenTimeUtc >= from && value.OpenTimeUtc <= completedBefore)
+                .OrderBy(value => value.OpenTimeUtc)
+                .Select(value => new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close))
+                .ToArrayAsync(token);
+            result = Evaluate(bars: bars);
+        }
         if (result.NeedsSpot)
         {
             var entry = await ReadSpot(position.OpenedAtUtc);
@@ -1421,7 +1455,11 @@ internal sealed partial class MultiMarketPaperTradingService(
                 .ToArrayAsync(token);
             result = Evaluate(entry, current, bars);
         }
-        bankTrailSamples[position.Id] = result.State with { Floor = null };
+        if (result.State.ProfitLockAt != state.ProfitLockAt || result.State.ContinuationAt != state.ContinuationAt)
+            db.MarketStrategyAudits.Add(new(Guid.NewGuid(), position.Market, position.UnderlyingInstrumentId,
+                observedAt, $"BankNiftyTrailContext:{position.Id:N}", 0m,
+                JsonSerializer.Serialize(new BankNiftyTrailState(ProfitLockAt: result.State.ProfitLockAt,
+                    ContinuationAt: result.State.ContinuationAt))));
         var previousFloor = position.BankNiftyTrailFloorNet;
         if (result.State.Floor is { } floor && floor != previousFloor)
             position.RatchetBankNiftyTrailFloor(floor);
@@ -1433,6 +1471,7 @@ internal sealed partial class MultiMarketPaperTradingService(
                     triggered = result.Exit, policyVersion = BankNiftyConfirmedTrail.Version, position.RemainingQuantity,
                     stage = position.BankNiftyTrailFloorNet > 0m ? "70% net-profit trail" : "Conditional break-even",
                     initialRisk, entryPrice = position.EntryPrice, hardStop = position.EntryPrice - initialRisk,
+                    profitLockAt = result.State.ProfitLockAt, continuationAt = result.State.ContinuationAt,
                     effectiveStop = position.StopLoss,
                     netAtDecision = book is null ? (decimal?)null : position.RealisedPnl +
                         (book.Bid - position.EntryPrice) * position.RemainingQuantity -

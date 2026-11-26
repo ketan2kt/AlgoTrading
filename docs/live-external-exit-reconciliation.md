@@ -1,6 +1,6 @@
 # Groww manual-exit reconciliation
 
-Implementation, 23 November 2026. Website-only release authorized; required CI/deployment pending. Not broker-validated.
+Implementation, 23 November 2026. Required CI45154721420 passed for1cea8ed. [Website-only deployment dispatched](https://github.com/ketan2kt/AlgoTrading/actions/runs/45155310246); completion unverified. Recorder untouched. Not broker-validated.
 
 ## Behaviour
 
