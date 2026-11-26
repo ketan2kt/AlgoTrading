@@ -8,6 +8,7 @@ public sealed class HistoricalSensexSignalPolicyTests
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 4, 4, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Date = new(2026, 11, 4);
+    private static readonly int[] RepeatedAndBackwardMinutes = [31, 16, 30, 31, 12, 31];
     private static readonly NiftyOptionContractCandidate Contract = new(Guid.Empty,
         "SENSEX73000CE", InstrumentType.CallOption, Date.AddDays(8), 73000m, 20, .05m);
 
@@ -75,6 +76,56 @@ public sealed class HistoricalSensexSignalPolicyTests
             new Dictionary<string, HistoricalReplayQuote>()), null, []);
         Assert.Empty(Policy().Evaluate(frame));
     }
+
+    [Fact]
+    public void IncrementalRepeatedAndBackwardFramesMatchFreshReconstruction()
+    {
+        var policy = Policy();
+        var bars = Session();
+        foreach (var minute in Enumerable.Range(12, 20).Concat(RepeatedAndBackwardMinutes))
+            AssertSameDecision(Policy().EvaluateDetailed(Frame(bars, minute)), policy.EvaluateDetailed(Frame(bars, minute)));
+    }
+
+    [Theory]
+    [InlineData("spot")]
+    [InlineData("volume")]
+    [InlineData("removed-spot")]
+    [InlineData("late-volume")]
+    public void CorrectedOrLateHistoricalInputsInvalidateThesisPrefix(string correction)
+    {
+        var policy = Policy();
+        var original = Session();
+        var changed = original.Select(bar => correction switch
+        {
+            "spot" when bar.Symbol == "SENSEX" && bar.OpenTimeUtc == Start.AddMinutes(15) =>
+                bar with { High = bar.High + 25m, Close = bar.Close + 20m },
+            "volume" when bar.Symbol == "SENSEX-FUT" && bar.OpenTimeUtc == Start.AddMinutes(15) =>
+                bar with { Volume = 100_000 },
+            _ => bar
+        }).Where(bar => correction != "removed-spot" || bar.Symbol != "SENSEX" ||
+            bar.OpenTimeUtc != Start.AddMinutes(15)).ToArray();
+        var initial = correction == "late-volume"
+            ? original.Where(bar => bar.Symbol != "SENSEX-FUT" || bar.OpenTimeUtc != Start.AddMinutes(15)).ToArray()
+            : original;
+        policy.EvaluateDetailed(Frame(initial, 30));
+        AssertSameDecision(Policy().EvaluateDetailed(Frame(changed, 31)), policy.EvaluateDetailed(Frame(changed, 31)));
+        AssertSameDecision(Policy().EvaluateDetailed(Frame(original, 31)), policy.EvaluateDetailed(Frame(original, 31)));
+    }
+
+    [Fact]
+    public void ConcurrentFramesDoNotShareAnUnqualifiedThesis()
+    {
+        var policy = Policy();
+        var bars = Session();
+        Parallel.For(12, 32, minute =>
+            AssertSameDecision(Policy().EvaluateDetailed(Frame(bars, minute)), policy.EvaluateDetailed(Frame(bars, minute))));
+    }
+
+    private static HistoricalReplayPortfolioFrame Frame(HistoricalReplayBar[] bars, int minute) =>
+        new(new(Start.AddMinutes(minute), bars, new Dictionary<string, HistoricalReplayQuote>()), null, []);
+
+    private static void AssertSameDecision(HistoricalSensexSignalDecision expected, HistoricalSensexSignalDecision actual) =>
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(expected), System.Text.Json.JsonSerializer.Serialize(actual));
 
     private static HistoricalSensexSignalPolicy Policy() => new(Guid.NewGuid(), Date,
         "SENSEX-FUT", new(new TimeOnly(9, 15), new TimeOnly(15, 0), new TimeOnly(15, 15),

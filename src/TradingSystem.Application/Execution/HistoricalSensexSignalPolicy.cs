@@ -22,6 +22,10 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
     PersistentDirectionalThesisV1? priorSessionThesis = null) : IHistoricalReplayPortfolioPolicy
 {
     private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
+    private readonly object thesisCacheGate = new();
+    private StrategyPriceBar[] cachedThesisBars = [];
+    private SensexFutureVolumeBar[] cachedThesisVolumes = [];
+    private PersistentDirectionalThesisV1? cachedThesis;
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
     public string CodeVersion => "sensex-normal-entry-v8/" + SensexStalledTrendEntryPolicy.Version +
         "/" + SensexWeakRetryEntryPolicy.Version + "/" + SensexMaturePullbackConfirmationPolicy.Version +
@@ -63,17 +67,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
             new Candle(CandleId(value.OpenTimeUtc), underlyingInstrumentId, value.OpenTimeUtc,
                 value.IntervalSeconds, value.Open, value.High, value.Low, value.Close,
                 value.Volume, "HistoricalReplay", value.OpenInterest)).ToArray());
-        // Reconstruct from prior completed frames rather than holding mutable
-        // state on the policy instance, which would leak across comparison runs.
-        var thesis = priorSessionThesis;
-        for (var count = 12; count <= session.Length; count++)
-        {
-            var prefix = session.Take(count).ToArray();
-            var opening = prefix.Take(3).ToArray();
-            thesis = PersistentDirectionalThesisAnalyzerV1.Analyze(prefix.Select(ToBar).ToArray(),
-                Confirmation(prefix, futures).Vwap, opening.Max(value => value.High),
-                opening.Min(value => value.Low), thesis);
-        }
+        var thesis = ReconstructThesis(bars, futures);
         var selection = SensexEntrySelectionPolicy.Evaluate(new(momentum.Direction,
             momentum.Confidence, "Index momentum breakout", momentum.Reasons), bars,
             lifecycle, thesis, state, confirmation.Vwap, fast, slow, frame.OpenPositions.Count > 0);
@@ -182,6 +176,39 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
             PlannedTargetPrice = admission.Target, RequiresDeferredQuoteAdmission = false,
             DeferredSensexProfessionalContext = null
         };
+    }
+
+    // Memoize only an identical causal prefix, never an unqualified "last state".
+    // Backward clocks, corrected candles and late/revised futures volumes rebuild
+    // from the original prior thesis. Portfolio state is deliberately not cached.
+    private PersistentDirectionalThesisV1? ReconstructThesis(StrategyPriceBar[] bars,
+        HistoricalReplayBar[] futures)
+    {
+        var volumes = futures.Where(value => value.OpenTimeUtc <= bars[^1].OpenTimeUtc)
+            .Select(value => new SensexFutureVolumeBar(value.OpenTimeUtc, value.Volume)).ToArray();
+        lock (thesisCacheGate)
+        {
+            var canExtend = cachedThesisBars.Length >= 12 && bars.Length >= cachedThesisBars.Length &&
+                bars.Take(cachedThesisBars.Length).SequenceEqual(cachedThesisBars) &&
+                volumes.TakeWhile(value => value.OpenTimeUtc <= cachedThesisBars[^1].OpenTimeUtc)
+                    .SequenceEqual(cachedThesisVolumes);
+            var thesis = canExtend ? cachedThesis : priorSessionThesis;
+            var first = canExtend ? cachedThesisBars.Length + 1 : 12;
+            var opening = bars.Take(3).ToArray();
+            for (var count = first; count <= bars.Length; count++)
+            {
+                var prefix = bars.Take(count).ToArray();
+                var confirmation = SensexFutureConfirmationPolicy.Evaluate(prefix,
+                    volumes.TakeWhile(value => value.OpenTimeUtc <= prefix[^1].OpenTimeUtc).TakeLast(40).ToArray(),
+                    settings.IntervalSeconds);
+                thesis = PersistentDirectionalThesisAnalyzerV1.Analyze(prefix, confirmation.Vwap,
+                    opening.Max(value => value.High), opening.Min(value => value.Low), thesis);
+            }
+            cachedThesisBars = bars.ToArray();
+            cachedThesisVolumes = volumes;
+            cachedThesis = thesis;
+            return thesis;
+        }
     }
 
     private SensexFutureConfirmation Confirmation(HistoricalReplayBar[] session,
