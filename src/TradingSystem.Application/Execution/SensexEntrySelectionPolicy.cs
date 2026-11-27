@@ -119,6 +119,9 @@ public static class SensexEntrySelectionPolicy
         if (candidate.Strategy == DirectionalParticipationPolicy.SensexStrategy &&
             candidate.Direction is { } participationDirection)
         {
+            if (SensexMaturePullbackConfirmationPolicy.ExtendedBaseRejection(
+                    bars, participationDirection, fastEma) is { } baseRejection)
+                candidate = candidate with { Direction = null, Reasons = [.. candidate.Reasons, baseRejection] };
             var confirmation = SensexMaturePullbackConfirmationPolicy.Evaluate(
                 bars, participationDirection, marketState.MoveMaturityAtr);
             candidate = candidate with

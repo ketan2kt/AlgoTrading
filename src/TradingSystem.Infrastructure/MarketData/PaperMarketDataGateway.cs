@@ -61,7 +61,30 @@ internal sealed class PaperMarketDataGateway(IGrowwReadOnlyGateway primary,
         return quote;
     }, () => backup.GetQuoteAsync(request, token), token);
     public Task<GrowwHistoricalCandles> GetHistoricalCandlesAsync(GrowwHistoricalCandleRequest request, CancellationToken token) =>
-        ReadAsync(Market(request.GrowwSymbol), primaryToken => primary.GetHistoricalCandlesAsync(request, primaryToken), () => backup.GetHistoryAsync(request, token), token);
+        ReadAsync(Market(request.GrowwSymbol), async primaryToken =>
+            ValidateCurrentHistory(request, await primary.GetHistoricalCandlesAsync(request, primaryToken), clock.GetUtcNow()),
+            async () => ValidateCurrentHistory(request, await backup.GetHistoryAsync(request, token), clock.GetUtcNow()), token);
+
+    internal static GrowwHistoricalCandles ValidateCurrentHistory(GrowwHistoricalCandleRequest request,
+        GrowwHistoricalCandles history, DateTimeOffset now)
+    {
+        var local = now.ToOffset(TimeSpan.FromHours(5.5));
+        // Historical research and pre/post-session imports are not live-feed
+        // checks. During capture, an HTTP 200 with old candles is still an
+        // unavailable current stream and must exercise the existing fallback.
+        if (Market(request.GrowwSymbol) is null || request.CandleInterval != "1minute" ||
+            request.EndUtc < now.AddMinutes(-2) || request.StartUtc >= now ||
+            local.TimeOfDay < new TimeSpan(9, 17, 0) || local.TimeOfDay > new TimeSpan(15, 30, 0) ||
+            local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            return history;
+        if (history.IntervalInMinutes != 1 || !history.Candles.Any(bar =>
+                GrowwHistoricalCandleImporter.ParseIndiaTimestamp(bar.SourceTimestamp).AddMinutes(1) is var closed &&
+                closed <= request.EndUtc && closed <= now && now - closed <= TimeSpan.FromSeconds(90)))
+            throw new GrowwApiException("Current native minute history is missing or stale.", "STALE_HISTORY");
+        // A provider-confirmed zero-volume candle is valid history, not a
+        // fabricated participation signal. The entry volume gate still applies.
+        return history;
+    }
     public Task<GrowwOptionChain> GetOptionChainAsync(GrowwOptionChainRequest request, CancellationToken token) =>
         ReadAsync(Market(request.Underlying), primaryToken => primary.GetOptionChainAsync(request, primaryToken), () => backup.GetChainAsync(request, token), token);
     internal static string? Market(string symbol) => symbol.Contains("BANKNIFTY", StringComparison.Ordinal) ? "BANKNIFTY" :

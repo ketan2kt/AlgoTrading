@@ -185,6 +185,35 @@ public sealed class PaperDataFallbackIntegrationTests
         var position = Assert.Single(await restoredBroker.GetPositionsAsync(CancellationToken.None));
         Assert.Equal(20, position.Quantity);
         Assert.Equal(100m, position.AverageEntryPrice);
+        primary.Available = true;
+        primary.StaleHistory = true;
+        foreach (var market in new[] { "NIFTY", "BANKNIFTY", "SENSEX" })
+        {
+            await restarted.UsePrimaryAsync(market, CancellationToken.None);
+            var future = instruments.Single(x => x.Type == InstrumentType.Future &&
+                x.TradingSymbol.StartsWith(market, StringComparison.Ordinal));
+            var history = await freshGateway.GetHistoricalCandlesAsync(new(future.Exchange, "FNO", future.GrowwSymbol!,
+                clock.Now.AddMinutes(-2), clock.Now, "1minute"), CancellationToken.None);
+            Assert.Equal("Upstox", history.Source);
+            Assert.Equal("Upstox", restarted.GetSource(market));
+        }
+        handler.StaleHistory = true;
+        clock.Now = clock.Now.AddSeconds(16); // Expire the native-history cache.
+        foreach (var market in new[] { "NIFTY", "BANKNIFTY", "SENSEX" })
+        {
+            var future = instruments.Single(x => x.Type == InstrumentType.Future &&
+                x.TradingSymbol.StartsWith(market, StringComparison.Ordinal));
+            var request = new GrowwHistoricalCandleRequest(future.Exchange, "FNO", future.GrowwSymbol!,
+                clock.Now.AddMinutes(-2), clock.Now, "1minute");
+            await Assert.ThrowsAsync<GrowwApiException>(() => freshGateway.GetHistoricalCandlesAsync(request, CancellationToken.None));
+            Assert.Equal("Upstox", restarted.GetSource(market));
+            primary.StaleHistory = false;
+            restarted.RecordReady(market, "Groww");
+            Assert.Equal("Groww", (await freshGateway.GetHistoricalCandlesAsync(request, CancellationToken.None)).Source);
+            Assert.Equal("Groww", restarted.GetSource(market));
+            primary.StaleHistory = true;
+        }
+        Assert.Equal(partialEntry, await restoredBroker.GetOrderAsync(orderRequest.ClientReference, CancellationToken.None));
         primary.Available = false;
         await Assert.ThrowsAsync<GrowwApiException>(() => freshGateway.GetUserProfileAsync(CancellationToken.None));
         clock.Now = clock.Now.AddDays(1);
@@ -204,6 +233,7 @@ public sealed class PaperDataFallbackIntegrationTests
     {
         public int QuoteCalls;
         public bool QuoteFailure;
+        public bool StaleHistory;
         public List<HttpMethod> Methods { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -221,7 +251,8 @@ public sealed class PaperDataFallbackIntegrationTests
             object payload;
             if (uri.AbsolutePath.StartsWith("/v3/historical-candle/", StringComparison.Ordinal))
                 payload = new { status = "success", data = new { candles = new object[][] {
-                    [clock.Now.AddMinutes(-1).ToOffset(TimeSpan.FromHours(5.5)).ToString("O", CultureInfo.InvariantCulture), 100, 110, 90, 105, 200, 100] } } };
+                    [DateTimeOffset.FromUnixTimeSeconds(clock.Now.ToUnixTimeSeconds() / 60 * 60).AddMinutes(StaleHistory ? -10 : -1)
+                        .ToOffset(TimeSpan.FromHours(5.5)).ToString("O", CultureInfo.InvariantCulture), 100, 110, 90, 105, 200, 100] } } };
             else if (uri.AbsolutePath == "/v2/option/chain")
             {
                 var query = Uri.UnescapeDataString(uri.Query);
@@ -254,6 +285,7 @@ public sealed class PaperDataFallbackIntegrationTests
         public int QuoteCalls;
         public bool Available;
         public bool MissingDepth;
+        public bool StaleHistory;
         public List<string> QuotedSymbols { get; } = [];
         private static GrowwApiException Outage() => new("Primary authentication unavailable", "AUTH", 429);
         public Task<GrowwQuote> GetQuoteAsync(GrowwQuoteRequest request, CancellationToken token)
@@ -266,7 +298,7 @@ public sealed class PaperDataFallbackIntegrationTests
         public Task<GrowwHistoricalCandles> GetHistoricalCandlesAsync(GrowwHistoricalCandleRequest request, CancellationToken token)
         {
             if (!Available) throw Outage();
-            return Task.FromResult(new GrowwHistoricalCandles([new(clock.Now.AddMinutes(-1).ToOffset(TimeSpan.FromHours(5.5))
+            return Task.FromResult(new GrowwHistoricalCandles([new(clock.Now.AddMinutes(StaleHistory ? -10 : -1).ToOffset(TimeSpan.FromHours(5.5))
                 .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture), 100, 110, 90, 105, 200, 100)], 105, 1));
         }
         public Task<GrowwOptionChain> GetOptionChainAsync(GrowwOptionChainRequest request, CancellationToken token)

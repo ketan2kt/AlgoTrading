@@ -4,7 +4,11 @@ using TradingSystem.Domain.Trading;
 namespace TradingSystem.Application.Execution;
 
 public sealed record MiddayChopConfirmationDecision(bool Applies, bool Permitted,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons)
+{
+    public decimal? ConfirmationLevel { get; init; }
+    public DateTimeOffset? ConfirmedAtUtc { get; init; }
+}
 
 /// <summary>
 /// Requires completed-five-minute confirmation for chop. Legacy callers may
@@ -49,7 +53,11 @@ public static class MiddayChopConfirmationPolicy
         IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds) =>
         Confirm(completedBars, direction, sourceIntervalSeconds);
 
-    private static bool IsRangeLike(IReadOnlyList<StrategyPriceBar> source)
+    internal static MiddayChopConfirmationDecision ConfirmRangeEscape(
+        IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds) =>
+        Confirm(completedBars, direction, sourceIntervalSeconds, requireRangeBreak: true);
+
+    internal static bool IsRangeLike(IReadOnlyList<StrategyPriceBar> source)
     {
         if (source.Count < 12) return false;
         var bars = source.TakeLast(20).ToArray();
@@ -65,7 +73,7 @@ public static class MiddayChopConfirmationPolicy
 
     private static MiddayChopConfirmationDecision Confirm(
         IReadOnlyList<StrategyPriceBar> completedBars, Direction direction, int sourceIntervalSeconds,
-        bool relaxedNiftyEntries = false)
+        bool relaxedNiftyEntries = false, bool requireRangeBreak = false)
     {
         var fiveMinuteBars = AggregateFiveMinuteBars(completedBars, sourceIntervalSeconds);
         if (fiveMinuteBars.Length < 3)
@@ -85,21 +93,24 @@ public static class MiddayChopConfirmationPolicy
         var alignedClose = direction == Direction.Buy
             ? last.Close > last.Open && last.Close > previous.Close
             : last.Close < last.Open && last.Close < previous.Close;
-        var structureBreak = direction == Direction.Buy
-            ? last.Close > (relaxedNiftyEntries ? previous.High : Math.Max(previous.High, prior.High))
-            : last.Close < (relaxedNiftyEntries ? previous.Low : Math.Min(previous.Low, prior.Low));
+        var breakLevel = direction == Direction.Buy
+            ? relaxedNiftyEntries ? previous.High : Math.Max(previous.High, prior.High)
+            : relaxedNiftyEntries ? previous.Low : Math.Min(previous.Low, prior.Low);
+        var structureBreak = direction == Direction.Buy ? last.Close > breakLevel : last.Close < breakLevel;
         var pullbackResume = direction == Direction.Buy
             ? (previous.Close <= previous.Open || previous.Close < prior.Close) &&
               last.Close > previous.High && last.Close > last.Open
             : (previous.Close >= previous.Open || previous.Close > prior.Close) &&
               last.Close < previous.Low && last.Close < last.Open;
 
-        var permitted = alignedClose && (structureBreak || pullbackResume);
+        var permitted = alignedClose && (structureBreak || !requireRangeBreak && pullbackResume);
         return permitted
             ? new(true, true,
                 [relaxedNiftyEntries
                     ? "Trial completed five-minute direction-aligned close broke the previous bar or resumed a pullback."
                     : "A completed five-minute direction-aligned close confirmed a structure break or pullback resumption."])
+                { ConfirmationLevel = structureBreak ? breakLevel : direction == Direction.Buy ? previous.High : previous.Low,
+                    ConfirmedAtUtc = last.OpenTimeUtc.AddMinutes(5) }
             : new(true, false,
                 ["Choppy structure is active; waiting for a completed five-minute direction-aligned structure break or pullback resumption."]);
     }

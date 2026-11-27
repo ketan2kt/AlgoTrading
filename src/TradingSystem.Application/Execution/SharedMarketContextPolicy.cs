@@ -21,7 +21,7 @@ public sealed record MarketContextAdmission(bool Permitted, int Priority, IReadO
 /// </summary>
 public static class SharedMarketContextPolicy
 {
-    public const string Version = "shared-market-context-v1";
+    public const string Version = "shared-market-context-v2-confirmation-held";
 
     public static SharedMarketContext Analyze(IReadOnlyList<StrategyPriceBar> source,
         int intervalSeconds = 60)
@@ -116,10 +116,20 @@ public static class SharedMarketContextPolicy
         {
             var confirmed = MiddayChopConfirmationPolicy.ConfirmCompletedStructure(bars, direction, intervalSeconds);
             var accepted = AcceptedBreak(bars, direction);
-            return new(confirmed.Permitted || accepted, 0,
-                [.. context.Evidence, confirmed.Permitted || accepted
-                    ? "Opposing entry has an accepted range break or completed five-minute structure confirmation."
-                    : "Retain the established direction; opposing entry lacks accepted structural reversal."]);
+            var sign = direction == Domain.Trading.Direction.Buy ? 1m : -1m;
+            // A completed five-minute break is not a reusable permission after
+            // a later completed close loses its actual breakout/retest level.
+            // Wick-only tests are allowed. A fresh accepted break can qualify again.
+            var held = confirmed.Permitted && confirmed.ConfirmationLevel is { } level &&
+                confirmed.ConfirmedAtUtc is { } closedAt &&
+                bars.Where(b => b.OpenTimeUtc >= closedAt).All(b => sign * (b.Close - level) >= 0m);
+            var permitted = accepted || held;
+            return new(permitted, 0,
+                [.. context.Evidence, permitted
+                    ? "Opposing entry has an accepted range break or completed five-minute confirmation whose level remains intact."
+                    : confirmed.Permitted
+                        ? "The five-minute confirmation lost its level on a later completed close; wait for a fresh accepted break or confirmation."
+                        : "Retain the established direction; opposing entry lacks accepted structural reversal."]);
         }
         if (context.Regime is SharedMarketRegime.NoisyChop or SharedMarketRegime.BalancedRange)
         {
@@ -187,7 +197,7 @@ public static class SharedMarketContextPolicy
 
     private static decimal Atr(StrategyPriceBar[] bars) => bars.Length < 2 ? 0m :
         bars.Skip(1).Select((b,i) => Math.Max(b.High-b.Low, Math.Max(Math.Abs(b.High-bars[i].Close),Math.Abs(b.Low-bars[i].Close)))).Average();
-    private static StrategyPriceBar[] CompletedTail(IReadOnlyList<StrategyPriceBar> source, int intervalSeconds)
+    internal static StrategyPriceBar[] CompletedTail(IReadOnlyList<StrategyPriceBar> source, int intervalSeconds)
     {
         var ordered = source.OrderBy(b => b.OpenTimeUtc).ToArray();
         if (ordered.Length == 0) return ordered;

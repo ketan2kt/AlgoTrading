@@ -12,7 +12,32 @@ public sealed record SensexPullbackConfirmation(bool Permitted, bool Applies,
 // neither threshold was fitted to the November 5 losing trade.
 public static class SensexMaturePullbackConfirmationPolicy
 {
-    public const string Version = "sensex-mature-pullback-v2";
+    public const string Version = "sensex-mature-pullback-v3-base-impulse";
+
+    // Selected participation entries beyond the ordinary pullback budget are
+    // eligible only through the existing compact-base exception. A tiny close
+    // outside that base must not borrow the larger breakout extension budget.
+    public static string? ExtendedBaseRejection(IReadOnlyList<StrategyPriceBar> bars,
+        Direction direction, decimal fastEma)
+    {
+        ArgumentNullException.ThrowIfNull(bars);
+        if (direction is not (Direction.Buy or Direction.Sell))
+            throw new ArgumentOutOfRangeException(nameof(direction));
+        if (bars.Count < 15 || fastEma <= 0m) return null;
+        var recent = bars.TakeLast(15).ToArray();
+        var atr = recent.Skip(1).Select((bar, index) => Math.Max(bar.High - bar.Low,
+            Math.Max(Math.Abs(bar.High - recent[index].Close),
+                Math.Abs(bar.Low - recent[index].Close)))).Average();
+        if (atr <= 0m) return null;
+        var last = recent[^1];
+        var sign = direction == Direction.Buy ? 1m : -1m;
+        var extension = sign * (last.Close - fastEma) / atr;
+        var impulse = sign * (last.Close - last.Open) / atr;
+        return extension > DirectionalParticipationPolicy.MaximumPullbackExtensionAtr &&
+            impulse < IndexMomentumBreakoutPolicy.MinimumImpulseAtr
+            ? "The extended compact-base entry lacks a directional breakout impulse; wait for a confirmed continuation or a fresh pullback within the ordinary extension budget."
+            : null;
+    }
 
     public static SensexPullbackConfirmation Evaluate(
         IReadOnlyList<StrategyPriceBar> bars, Direction direction, decimal moveMaturityAtr)

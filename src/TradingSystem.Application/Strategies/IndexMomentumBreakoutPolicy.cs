@@ -16,7 +16,8 @@ public sealed record IndexMomentumDecision(
 public static class IndexMomentumBreakoutPolicy
 {
     public const decimal MinimumImpulseAtr = .45m;
-    public const string BankVersion = "bank-momentum-session-ema-v3/" + SharedMarketContextPolicy.Version + "/completed-retest-v1";
+    public const string BankVersion = "bank-momentum-session-ema-v3/" + SharedMarketContextPolicy.Version +
+        "/completed-retest-v1/" + BankNiftyFailedAuctionPolicy.Version;
     public static IndexMomentumDecision Evaluate(IReadOnlyList<Candle> candles) => EvaluateCore(candles, false);
     public static IndexMomentumDecision EvaluateBankNifty(IReadOnlyList<Candle> candles)
     {
@@ -24,6 +25,8 @@ public static class IndexMomentumBreakoutPolicy
         if (candidate.Direction is not { } direction) return candidate;
         var bars = candles.Select(c => new StrategyPriceBar(c.OpenTimeUtc,c.Open,c.High,c.Low,c.Close)).ToArray();
         var interval = candles[^1].IntervalSeconds;
+        if (BankNiftyFailedAuctionPolicy.Rejection(bars, direction, interval) is { } rejection)
+            return candidate with { Direction = null, Reasons = [.. candidate.Reasons, rejection] };
         var context = SharedMarketContextPolicy.Analyze(bars, interval);
         var admission = SharedMarketContextPolicy.Select(context,
             bars, direction, EntryStrategyFamily.Breakout, interval);

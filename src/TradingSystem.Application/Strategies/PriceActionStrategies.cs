@@ -1,4 +1,5 @@
 using TradingSystem.Domain.Trading;
+using TradingSystem.Application.Execution;
 
 namespace TradingSystem.Application.Strategies;
 
@@ -17,7 +18,7 @@ public abstract class PriceActionStrategyBase(PriceActionStrategyOptions options
 {
     protected PriceActionStrategyOptions Options { get; } = options;
     public abstract string StrategyId { get; }
-    public string Version => "1.0.0";
+    public virtual string Version => "1.0.0";
     public string ConfigurationManifest =>
         System.Text.Json.JsonSerializer.Serialize(Options);
 
@@ -199,7 +200,9 @@ public sealed class EmaPullbackContinuationStrategy(PriceActionStrategyOptions o
 public sealed class RangeBreakoutRetestStrategy(PriceActionStrategyOptions options)
     : PriceActionStrategyBase(options)
 {
+    public const string ChoppyEntryVersion = "nifty-range-escape-v1";
     public override string StrategyId => "intraday-range-breakout-retest";
+    public override string Version => "2.0.0";
 
     public override StrategyEvaluationResult EvaluateDetailed(StrategyEvaluationContext context)
     {
@@ -221,6 +224,11 @@ public sealed class RangeBreakoutRetestStrategy(PriceActionStrategyOptions optio
         if (!bullish && !bearish)
             return new(null, ["No intraday consolidation breakout, retest and continuation sequence."]);
         var direction = bullish ? Direction.Buy : Direction.Sell;
+        // A short shelf can break while still inside a rotating larger range.
+        // Tighten this setup only, not independently confirmed trend pullbacks.
+        if (context.RelaxedNiftyEntries && MiddayChopConfirmationPolicy.IsRangeLike(bars) &&
+            !MiddayChopConfirmationPolicy.ConfirmRangeEscape(bars, direction, context.CandleIntervalSeconds).Permitted)
+            return new(null, ["The short range break remains inside rotating five-minute structure; wait for a completed range escape."]);
         if (!NiftyEntryTrialProfile.RegimeMatches(context, direction))
             return new(null, ["Range breakout direction lacks matching regime bias."]);
         var trendAligned = direction == Direction.Buy

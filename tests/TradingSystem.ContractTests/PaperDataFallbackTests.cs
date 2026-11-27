@@ -10,6 +10,30 @@ public sealed class PaperDataFallbackTests
 {
     private static readonly DateTimeOffset At = new(2026, 11, 16, 5, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData("NIFTY")]
+    [InlineData("BANKNIFTY")]
+    [InlineData("SENSEX")]
+    public void SuccessfulButStaleHistoryTriggersFallbackForEveryIndex(string symbol)
+    {
+        var request = new GrowwHistoricalCandleRequest("NSE", "FNO", symbol + "26NOVFUT", At.AddHours(-1), At, "1minute");
+        var stale = new GrowwHistoricalCandles([new("2026-11-16T10:25:00", 100, 101, 99, 100, 20, null)], 100, 1);
+        Assert.Throws<GrowwApiException>(() => PaperMarketDataGateway.ValidateCurrentHistory(request, stale, At));
+        Assert.Throws<GrowwApiException>(() => PaperMarketDataGateway.ValidateCurrentHistory(request, stale with { Candles = [] }, At));
+        var current = stale with { Candles = [new("2026-11-16T10:29:00", 100, 101, 99, 100, 0, null)] };
+        Assert.Same(current, PaperMarketDataGateway.ValidateCurrentHistory(request, current, At));
+        Assert.Same(stale, PaperMarketDataGateway.ValidateCurrentHistory(request with { EndUtc = At.AddDays(-1), StartUtc = At.AddDays(-2) }, stale, At));
+    }
+
+    [Fact]
+    public void UnclosedCandlesCannotProveCurrentHistoryReady()
+    {
+        var request = new GrowwHistoricalCandleRequest("BSE", "FNO", "SENSEX26NOVFUT", At.AddHours(-1), At, "1minute");
+        var unclosed = new GrowwHistoricalCandles([new("2026-11-16T10:30:00", 100, 101, 99, 100, 20, null)], 100, 1);
+        Assert.Throws<GrowwApiException>(() => PaperMarketDataGateway.ValidateCurrentHistory(request, unclosed, At));
+        Assert.Same(unclosed, PaperMarketDataGateway.ValidateCurrentHistory(request with { EndUtc = At.AddHours(6) }, unclosed, At.AddHours(6)));
+    }
+
     [Fact]
     public void FailbackRequiresSustainedRecoveryUnlessBackupIsUnavailable()
     {

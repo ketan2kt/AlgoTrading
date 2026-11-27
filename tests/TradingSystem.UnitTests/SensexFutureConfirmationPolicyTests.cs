@@ -91,6 +91,43 @@ public sealed class SensexFutureConfirmationPolicyTests
             [new(At, 100), new(At.AddMinutes(1), 200)]).Ready);
     }
 
+    [Fact]
+    public void FreshZeroVolumeIsParticipationFailureNotMissingData()
+    {
+        var result = SensexFutureConfirmationPolicy.Evaluate(
+            [Bar(0, 100), Bar(1, 101), Bar(2, 102)],
+            [new(At, 100), new(At.AddMinutes(1), 200), new(At.AddMinutes(2), 0)]);
+        Assert.False(result.Ready);
+        Assert.Equal("NoRecentParticipation", result.Status);
+        Assert.Equal(At.AddMinutes(2), result.LatestFutureAtUtc);
+        Assert.Equal(0m, result.RelativeVolume);
+    }
+
+    [Fact]
+    public void LateConfirmationCanMakeSameDecisionCandleReadyWithoutUsingFutureBars()
+    {
+        var index = new[] { Bar(0, 100), Bar(1, 101), Bar(2, 102), Bar(3, 103) };
+        var delayed = SensexFutureConfirmationPolicy.Evaluate(index,
+            [new(At, 100), new(At.AddMinutes(1), 200)]);
+        Assert.False(delayed.Ready);
+        Assert.Equal("StaleCandles", delayed.Status);
+        var arrived = SensexFutureConfirmationPolicy.Evaluate(index,
+            [new(At, 100), new(At.AddMinutes(1), 200), new(At.AddMinutes(3), 150)]);
+        Assert.True(arrived.Ready);
+        Assert.Equal("Ready", arrived.Status);
+        Assert.Equal(1m, arrived.RelativeVolume);
+    }
+
+    [Theory]
+    [InlineData(59, false)]
+    [InlineData(60, true)]
+    [InlineData(119, true)]
+    [InlineData(120, false)]
+    public void RetryNeverRevivesAnUnclosedOrExpiredIndexDecision(int seconds, bool expected)
+    {
+        Assert.Equal(expected, SensexFutureConfirmationPolicy.IsCurrentDecisionCandle(At, 60, At.AddSeconds(seconds)));
+    }
+
     private static StrategyPriceBar Bar(int minutes, decimal close) =>
         new(At.AddMinutes(minutes), close, close, close, close);
 }

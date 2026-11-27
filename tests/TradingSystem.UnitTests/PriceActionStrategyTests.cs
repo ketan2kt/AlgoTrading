@@ -240,6 +240,35 @@ public sealed class PriceActionStrategyTests
         Assert.NotNull(new RangeBreakoutRetestStrategy(new()).Evaluate(context));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NiftyRotatingRangeNeedsEscapeButOtherMarketsKeepExistingPattern(bool sell)
+    {
+        var start = Now.AddMinutes(-20);
+        var bars = Enumerable.Range(0, 18).Select(i => new StrategyPriceBar(start.AddMinutes(i),
+            i % 2 == 0 ? 100m : 101m, i == 5 ? 105m : 102m, 99.5m,
+            i % 2 == 0 ? 101m : 100m)).Concat([
+                new(start.AddMinutes(18), 102.3m, 102.4m, 101.95m, 102.2m),
+                new StrategyPriceBar(start.AddMinutes(19), 102.2m, 102.8m, 102.1m, 102.7m)]).ToArray();
+        if (sell) bars = bars.Select(b => b with { Open = 200m-b.Open, High = 200m-b.Low,
+            Low = 200m-b.High, Close = 200m-b.Close }).ToArray();
+        var context = Context() with { RecentCandles = bars, CurrentPrice = bars[^1].Close,
+            RegimeBias = sell ? Direction.Sell : Direction.Buy,
+            Regime = sell ? MarketRegime.WeakBearishTrend : MarketRegime.WeakBullishTrend,
+            Vwap = 100m, FastEma = sell ? 99m : 101m, SlowEma = 100m };
+        var strategy = new RangeBreakoutRetestStrategy(new());
+        Assert.NotNull(strategy.Evaluate(context)); // Sensex/non-Nifty route is unchanged.
+        var blocked = strategy.EvaluateDetailed(context with { RelaxedNiftyEntries = true });
+        Assert.Null(blocked.Signal);
+        Assert.Contains(blocked.FailedConditions, reason => reason.Contains("rotating five-minute", StringComparison.Ordinal));
+        var breakout = sell ? 94.5m : 105.5m;
+        bars[^1] = bars[^1] with { Close = breakout, High = sell ? bars[^1].High : breakout,
+            Low = sell ? breakout : bars[^1].Low };
+        Assert.NotNull(strategy.Evaluate(context with { RelaxedNiftyEntries = true,
+            RecentCandles = bars, CurrentPrice = breakout }));
+    }
+
     [Fact]
     public void VwapRejectionSignalsAfterConfirmedReclaim()
     {

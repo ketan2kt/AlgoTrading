@@ -27,7 +27,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
     private SensexFutureVolumeBar[] cachedThesisVolumes = [];
     private PersistentDirectionalThesisV1? cachedThesis;
     public bool ProductionPolicyParityVerified => settings.IntervalSeconds is 60 or 300;
-    public string CodeVersion => "sensex-normal-entry-v8/" + SensexStalledTrendEntryPolicy.Version +
+    public string CodeVersion => "sensex-normal-entry-v9-confirmation-ready/" + SensexStalledTrendEntryPolicy.Version +
         "/" + SensexWeakRetryEntryPolicy.Version + "/" + SensexMaturePullbackConfirmationPolicy.Version +
         "/" + OptionRiskBudgetPolicy.Version + "/" + SensexEntrySelectionPolicy.Version;
     public string ConfigurationManifest => JsonSerializer.Serialize(new
@@ -201,6 +201,7 @@ public sealed class HistoricalSensexSignalPolicy(Guid underlyingInstrumentId,
                 var confirmation = SensexFutureConfirmationPolicy.Evaluate(prefix,
                     volumes.TakeWhile(value => value.OpenTimeUtc <= prefix[^1].OpenTimeUtc).TakeLast(40).ToArray(),
                     settings.IntervalSeconds);
+                if (!confirmation.Ready) continue;
                 thesis = PersistentDirectionalThesisAnalyzerV1.Analyze(prefix, confirmation.Vwap,
                     opening.Max(value => value.High), opening.Min(value => value.Low), thesis);
             }

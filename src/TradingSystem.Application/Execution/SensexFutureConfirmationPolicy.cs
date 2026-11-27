@@ -8,12 +8,22 @@ public sealed record SensexFutureConfirmation(decimal Vwap,
     decimal RelativeVolume)
 {
     public bool Ready => Vwap > 0m && RelativeVolume > 0m;
+    public string Status { get; init; } = "Ready";
+    public DateTimeOffset? LatestFutureAtUtc { get; init; }
 }
 
 // Shared pre-entry calculation. Only data available at the completed index
 // candle may be passed; the caller remains responsible for that as-of gate.
 public static class SensexFutureConfirmationPolicy
 {
+    public static bool IsCurrentDecisionCandle(DateTimeOffset candleOpenUtc, int intervalSeconds,
+        DateTimeOffset nowUtc)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(intervalSeconds);
+        var closedAt = candleOpenUtc.AddSeconds(intervalSeconds);
+        return closedAt <= nowUtc && nowUtc < closedAt.AddSeconds(intervalSeconds);
+    }
+
     public static SensexFutureConfirmation Evaluate(
         IReadOnlyList<StrategyPriceBar> indexBars,
         IReadOnlyList<SensexFutureVolumeBar> futureBars,
@@ -23,7 +33,7 @@ public static class SensexFutureConfirmationPolicy
         ArgumentNullException.ThrowIfNull(futureBars);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(intervalSeconds);
         if (futureBars.Count == 0 || indexBars.Count == 0)
-            return new(0m, 0m);
+            return new(0m, 0m) { Status = "MissingCandles" };
         if (indexBars.Zip(indexBars.Skip(1)).Any(pair =>
                 pair.First.OpenTimeUtc >= pair.Second.OpenTimeUtc) ||
             futureBars.Zip(futureBars.Skip(1)).Any(pair =>
@@ -52,6 +62,11 @@ public static class SensexFutureConfirmationPolicy
         var vwap = totalVolume <= 0m ? 0m : aligned.Sum(value =>
             ((value.High + value.Low + value.Close) / 3m) *
             volumeByTime[value.OpenTimeUtc]) / totalVolume;
-        return new(vwap, relativeVolume);
+        return new(vwap, relativeVolume)
+        {
+            LatestFutureAtUtc = latestFuture.OpenTimeUtc,
+            Status = !timely ? "StaleCandles" : latestFuture.Volume <= 0 ? "NoRecentParticipation" :
+                averageVolume <= 0m ? "MissingVolumeBaseline" : vwap <= 0m ? "MissingAlignedVolume" : "Ready"
+        };
     }
 }

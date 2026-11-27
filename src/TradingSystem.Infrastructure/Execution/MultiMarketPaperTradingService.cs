@@ -28,6 +28,7 @@ internal sealed partial class MultiMarketPaperTradingService(
 {
     private static readonly TimeZoneInfo IndiaTimeZone = FindIndiaTimeZone();
     private readonly Dictionary<string, DateTimeOffset> lastEvaluated = new(StringComparer.OrdinalIgnoreCase);
+    private (DateTimeOffset Candle, string Status, DateTimeOffset? Future)? lastSensexConfirmationWait;
     private readonly ConcurrentDictionary<Guid, decimal> favourablePriceByPosition = new();
     private readonly ConcurrentDictionary<Guid, BankNiftyTrailState> bankTrailSamples = new();
     private readonly ConcurrentDictionary<string, bool> degradedManagement = new();
@@ -217,8 +218,11 @@ internal sealed partial class MultiMarketPaperTradingService(
         entryPhases[market.Code] = "CompletedCandles";
         var interval = marketOptions.Value.CandleIntervalSeconds;
         var sessionStartUtc = new DateTimeOffset(india.Date, india.Offset).ToUniversalTime();
+        // One evaluation must use a coherent provider, even if recovery switches
+        // the preferred source between the index and futures database reads.
+        var candleSource = PaperDataSource.Of(gateway, market.Code);
         var candles = await db.Candles.AsNoTracking().Where(value => value.InstrumentId == underlying.Id &&
-                value.IntervalSeconds == interval && value.Source == PaperDataSource.Of(gateway, market.Code) &&
+                value.IntervalSeconds == interval && value.Source == candleSource &&
                 (market.InstrumentType != InstrumentType.Index || value.OpenTimeUtc >= sessionStartUtc))
             .OrderByDescending(value => value.OpenTimeUtc).Take(market.InstrumentType == InstrumentType.Index ? 600 : 90)
             .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
@@ -237,6 +241,42 @@ internal sealed partial class MultiMarketPaperTradingService(
                 "This completed candle was already evaluated.", now,
                 new { latest.OpenTimeUtc, interval, count = candles.Count }, cancellationToken);
             return;
+        }
+        SensexFutureConfirmation? preparedConfirmation = null;
+        if (market == TradingMarketCatalog.Sensex)
+        {
+            var future = await db.Instruments.AsNoTracking().Where(value => value.Exchange == "BSE" &&
+                    value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith("SENSEX") &&
+                    value.ExpiryDate >= today && value.IsActive)
+                .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
+                .FirstOrDefaultAsync(cancellationToken);
+            var futureCandles = future is null ? [] : await db.Candles.AsNoTracking()
+                .Where(value => value.InstrumentId == future.Id && value.IntervalSeconds == interval &&
+                    value.Source == candleSource && value.OpenTimeUtc >= sessionStartUtc &&
+                    value.OpenTimeUtc <= latest.OpenTimeUtc)
+                .OrderByDescending(value => value.OpenTimeUtc).Take(40)
+                .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
+            preparedConfirmation = SensexFutureConfirmationPolicy.Evaluate(candles.Select(value =>
+                    new StrategyPriceBar(value.OpenTimeUtc, value.Open, value.High, value.Low, value.Close)).ToArray(),
+                futureCandles.Select(value => new SensexFutureVolumeBar(value.OpenTimeUtc, value.Volume)).ToArray(), interval);
+            if (!SensexFutureConfirmationPolicy.IsCurrentDecisionCandle(latest.OpenTimeUtc, interval, timeProvider.GetUtcNow()))
+                preparedConfirmation = preparedConfirmation with { Vwap = 0m, RelativeVolume = 0m, Status = "StaleIndexCandle" };
+            if (!preparedConfirmation.Ready)
+            {
+                var wait = (latest.OpenTimeUtc, preparedConfirmation.Status, preparedConfirmation.LatestFutureAtUtc);
+                if (lastSensexConfirmationWait != wait)
+                {
+                    await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
+                        preparedConfirmation.Status == "NoRecentParticipation" ? "FuturesParticipationUnavailable" : "DataIncomplete", 0m,
+                        [$"Sensex futures confirmation: {preparedConfirmation.Status}; provider {candleSource}; latest futures candle {preparedConfirmation.LatestFutureAtUtc:O}. Entry remains blocked; late confirmation will be retried while this index candle is current."],
+                        cancellationToken);
+                    lastSensexConfirmationWait = wait;
+                }
+                // Do not consume the candle or advance a directional thesis on
+                // incomplete confirmation. The next loop can see a late import.
+                return;
+            }
+            lastSensexConfirmationWait = null;
         }
         await evidenceRecorder.RecordAsync(market.Code, "regular", "CompletedCandles", "Evaluating",
             "Evaluating a new completed candle.", now,
@@ -269,7 +309,6 @@ internal sealed partial class MultiMarketPaperTradingService(
             : Evaluate(candles);
         MarketStateAssessmentV2? marketStateV2 = null;
         DecisionFeatureSnapshotV2? decisionSnapshotV2 = null;
-        var sensexConfirmationReady = market != TradingMarketCatalog.Sensex;
         var sensexVwap = 0m;
         var sensexFast = 0m;
         var sensexSlow = 0m;
@@ -281,27 +320,13 @@ internal sealed partial class MultiMarketPaperTradingService(
             var fastV2 = TechnicalIndicators.ExponentialMovingAverage(closes, 9);
             var slowV2 = TechnicalIndicators.ExponentialMovingAverage(closes,
                 Math.Min(21, closes.Length));
-            var future = await db.Instruments.AsNoTracking().Where(value => value.Exchange == "BSE" &&
-                    value.Type == InstrumentType.Future && value.TradingSymbol.StartsWith("SENSEX") &&
-                    value.ExpiryDate >= today && value.IsActive)
-                .OrderBy(value => value.ExpiryDate).ThenBy(value => value.TradingSymbol)
-                .FirstOrDefaultAsync(cancellationToken);
-            var futureCandles = future is null ? [] : await db.Candles.AsNoTracking()
-                .Where(value => value.InstrumentId == future.Id && value.IntervalSeconds == interval &&
-                                value.Source == PaperDataSource.Of(gateway, market.Code) && value.OpenTimeUtc >= sessionStartUtc &&
-                                value.OpenTimeUtc <= latest.OpenTimeUtc)
-                .OrderByDescending(value => value.OpenTimeUtc).Take(40)
-                .OrderBy(value => value.OpenTimeUtc).ToListAsync(cancellationToken);
-            var confirmation = SensexFutureConfirmationPolicy.Evaluate(priceBars,
-                futureCandles.Select(value => new SensexFutureVolumeBar(
-                    value.OpenTimeUtc, value.Volume)).ToArray(), interval);
+            var confirmation = preparedConfirmation!;
             var vwapV2 = confirmation.Vwap;
             var relativeVolumeV2 = confirmation.RelativeVolume;
             sensexVwap = vwapV2;
             sensexFast = fastV2;
             sensexSlow = slowV2;
             sensexRelativeVolume = relativeVolumeV2;
-            sensexConfirmationReady = confirmation.Ready;
             var stateV2 = MarketStateRouterV2.Analyze(priceBars, vwapV2, fastV2, slowV2);
             marketStateV2 = stateV2;
             var openingV2 = candles.Take(Math.Min(3, candles.Count)).ToArray();
@@ -337,14 +362,6 @@ internal sealed partial class MultiMarketPaperTradingService(
         }
         var supplementalSensexEntry = false;
         var persistentDirectionalEntry = false;
-        if (market == TradingMarketCatalog.Sensex && !sensexConfirmationReady)
-        {
-            await AddAuditAsync(db, market, underlying.Id, latest.OpenTimeUtc,
-                "DataIncomplete", 0m,
-                ["Fresh Sensex futures volume/VWAP confirmation is unavailable; entries fail closed."],
-                cancellationToken);
-            return;
-        }
         if (market == TradingMarketCatalog.Sensex)
         {
             var hasActivePosition = await db.MarketPaperPositions.AsNoTracking()

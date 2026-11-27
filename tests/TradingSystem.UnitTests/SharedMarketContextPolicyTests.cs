@@ -23,6 +23,41 @@ public sealed class SharedMarketContextPolicyTests
         Assert.False(SharedMarketContextPolicy.Select(context,bars,Direction.Sell,EntryStrategyFamily.Breakout).Permitted);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OpposingConfirmationSurvivesWicksButNotAClosedLevelFailure(bool sell)
+    {
+        StrategyPriceBar[] five = [new(Start, 100m, 110m, 99m, 109m),
+            new(Start.AddMinutes(5), 109m, 110m, 101m, 102m),
+            new(Start.AddMinutes(10), 102m, 112m, 102m, 111m)];
+        var bars = five.SelectMany(b => Enumerable.Range(0, 5).Select(i =>
+            new StrategyPriceBar(b.OpenTimeUtc.AddMinutes(i), b.Open, b.High, b.Low,
+                i == 4 ? b.Close : b.Open))).ToArray();
+        StrategyPriceBar Mirror(StrategyPriceBar b) => sell
+            ? b with { Open = 200m-b.Open, High = 200m-b.Low, Low = 200m-b.High, Close = 200m-b.Close } : b;
+        bars = bars.Select(Mirror).ToArray();
+        var direction = sell ? Direction.Sell : Direction.Buy;
+        var context = new SharedMarketContext(SharedMarketContextPolicy.Version, Start.AddMinutes(15),
+            SharedMarketRegime.Directional, sell ? Direction.Buy : Direction.Sell,
+            MarketVolatilityState.Normal, .17m, .50m, null, Start.AddMinutes(15), []);
+        Assert.True(SharedMarketContextPolicy.Select(context, bars, direction, EntryStrategyFamily.Breakout).Permitted);
+        bars = [.. bars, Mirror(new(Start.AddMinutes(15), 111m, 113m, 109m, 112m))];
+        context = context with { AsOf = Start.AddMinutes(16) };
+        Assert.True(SharedMarketContextPolicy.Select(context, bars, direction, EntryStrategyFamily.Breakout).Permitted);
+        bars = [.. bars, Mirror(new(Start.AddMinutes(16), 112m, 112m, 108m, 109m)),
+            Mirror(new(Start.AddMinutes(17), 109m, 113m, 109m, 113m))];
+        context = context with { AsOf = Start.AddMinutes(18) };
+        Assert.True(MiddayChopConfirmationPolicy.ConfirmCompletedStructure(bars, direction, 60).Permitted);
+        Assert.False(SharedMarketContextPolicy.Select(context, bars, direction, EntryStrategyFamily.Breakout).Permitted);
+        Assert.True(SharedMarketContextPolicy.Select(context with { Direction = direction }, bars,
+            direction, EntryStrategyFamily.Breakout).Permitted);
+        bars = [.. bars, Mirror(new(Start.AddMinutes(18), 113m, 115m, 113m, 114m)),
+            Mirror(new(Start.AddMinutes(19), 114m, 116m, 114m, 115m))];
+        context = context with { AsOf = Start.AddMinutes(20) };
+        Assert.True(SharedMarketContextPolicy.Select(context, bars, direction, EntryStrategyFamily.Breakout).Permitted);
+    }
+
     [Fact]
     public void OrdinaryPullbackRetainsEstablishedDirection()
     {

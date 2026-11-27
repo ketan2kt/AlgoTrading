@@ -201,6 +201,7 @@ public static class WinnerAddOnPolicy
 
 public static class DirectionalParticipationPolicy
 {
+    public const decimal MaximumPullbackExtensionAtr = 1.25m;
     public const string NiftyStrategy = "PaperResearch|nifty-directional-pullback";
     public const string SensexStrategy = "Sensex directional pullback participation";
     public const string Version = "1.0.0";
@@ -244,7 +245,7 @@ public static class DirectionalParticipationPolicy
         var extensionFromFast = Math.Abs(latest.Close - fastEma) / atr;
         if ((!pullbackSeen || !resumed) && !continuationBase)
             return Reject("Waiting for either a completed pullback resumption or a compact continuation-base break.");
-        var maximumExtension = continuationBase ? 1.75m : 1.25m;
+        var maximumExtension = continuationBase ? 1.75m : MaximumPullbackExtensionAtr;
         if (extensionFromFast > maximumExtension)
             return Reject($"Continuation is {extensionFromFast:F2} ATR from EMA 9 and would be a chase.");
 
